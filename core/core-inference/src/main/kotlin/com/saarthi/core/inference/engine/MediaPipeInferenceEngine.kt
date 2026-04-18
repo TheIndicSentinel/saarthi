@@ -14,7 +14,6 @@ import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 @Singleton
 class MediaPipeInferenceEngine @Inject constructor(
@@ -32,9 +31,6 @@ class MediaPipeInferenceEngine @Inject constructor(
             .setTemperature(config.temperature)
             .setTopK(config.topK)
             .setMaxTokens(config.maxTokens)
-            .apply {
-                config.loraAdapterPath?.let { setLoraPath(it) }
-            }
             .build()
 
         llmInference = LlmInference.createFromOptions(context, options)
