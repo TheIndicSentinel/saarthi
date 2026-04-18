@@ -10,7 +10,7 @@ import kotlinx.coroutines.withContext
 abstract class UseCase<in P, R>(private val dispatcher: CoroutineDispatcher) {
     suspend operator fun invoke(params: P): Result<R> = withContext(dispatcher) {
         runCatching { execute(params) }
-            .fold(Result.Success::invoke, Result::Error)
+            .fold({ Result.Success(it) }, { Result.Error(it) })
     }
 
     protected abstract suspend fun execute(params: P): R
@@ -30,7 +30,7 @@ abstract class FlowUseCase<in P, R>(private val dispatcher: CoroutineDispatcher)
 abstract class NoParamUseCase<R>(private val dispatcher: CoroutineDispatcher) {
     suspend operator fun invoke(): Result<R> = withContext(dispatcher) {
         runCatching { execute() }
-            .fold(Result.Success::invoke, Result::Error)
+            .fold({ Result.Success(it) }, { Result.Error(it) })
     }
 
     protected abstract suspend fun execute(): R
