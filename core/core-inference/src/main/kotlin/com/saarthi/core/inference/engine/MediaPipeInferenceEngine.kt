@@ -5,14 +5,13 @@ import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.coroutines.resume
 
 @Singleton
 class MediaPipeInferenceEngine @Inject constructor(
@@ -36,24 +35,15 @@ class MediaPipeInferenceEngine @Inject constructor(
         Timber.d("MediaPipe engine ready")
     }
 
-    override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow {
-        val engine = requireEngine()
-        engine.generateResponseAsync(prompt) { partialResult, done ->
-            trySend(partialResult)
-            if (done) close()
-        }
-        awaitClose()
+    // generateResponse() is the synchronous API stable across MediaPipe 0.10.x versions.
+    // Runs on IO dispatcher to avoid blocking the main thread.
+    override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
+        val result = withContext(Dispatchers.IO) { requireEngine().generateResponse(prompt) }
+        emit(result)
     }
 
     override suspend fun generate(prompt: String, packType: PackType): String =
-        suspendCancellableCoroutine { continuation ->
-            val engine = requireEngine()
-            val response = StringBuilder()
-            engine.generateResponseAsync(prompt) { partial, done ->
-                response.append(partial)
-                if (done) continuation.resume(response.toString())
-            }
-        }
+        withContext(Dispatchers.IO) { requireEngine().generateResponse(prompt) }
 
     override fun release() {
         llmInference?.close()
