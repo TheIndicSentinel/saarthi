@@ -19,6 +19,8 @@ class AndroidFeatureConventionPlugin : Plugin<Project> {
                 add("implementation", libs.findLibrary("hilt-navigation-compose").get())
                 add("implementation", libs.findLibrary("lifecycle-viewmodel-compose").get())
                 add("implementation", libs.findLibrary("lifecycle-runtime-compose").get())
+                add("implementation", libs.findLibrary("compose-material-icons").get())
+                add("implementation", libs.findLibrary("timber").get())
                 add("implementation", project(":core:core-common"))
                 add("implementation", project(":core:core-ui"))
                 add("implementation", project(":core:core-memory"))
