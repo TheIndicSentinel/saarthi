@@ -21,32 +21,28 @@ class MediaPipeInferenceEngine @Inject constructor(
 ) : InferenceEngine {
 
     private var llmInference: LlmInference? = null
+    private var inferenceConfig: InferenceConfig? = null
     override var isReady: Boolean = false
         private set
 
     override suspend fun initialize(config: InferenceConfig) {
         Timber.d("Initializing MediaPipe engine: ${config.modelPath}")
+        // LlmInferenceOptions only accepts model path and token budget.
+        // Temperature, topK, and LoRA are per-session options.
         val options = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(config.modelPath)
-            .setTemperature(config.temperature)
-            .setTopK(config.topK)
             .setMaxTokens(config.maxTokens)
             .build()
 
         llmInference = LlmInference.createFromOptions(context, options)
+        inferenceConfig = config
         isReady = true
         Timber.d("MediaPipe engine ready")
     }
 
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow {
         val engine = requireEngine()
-        val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-            .apply {
-                packType.loraFileName?.let { /* apply LoRA via session config when supported */ }
-            }
-            .build()
-
-        val session = LlmInferenceSession.createFromOptions(engine, sessionOptions)
+        val session = LlmInferenceSession.createFromOptions(engine, buildSessionOptions(packType))
         session.addQueryChunk(prompt)
 
         session.generateResponseAsync { partialResult, done ->
@@ -62,17 +58,14 @@ class MediaPipeInferenceEngine @Inject constructor(
     override suspend fun generate(prompt: String, packType: PackType): String =
         suspendCancellableCoroutine { continuation ->
             val engine = requireEngine()
-            val builder = StringBuilder()
-            val session = LlmInferenceSession.createFromOptions(
-                engine,
-                LlmInferenceSession.LlmInferenceSessionOptions.builder().build()
-            )
+            val response = StringBuilder()
+            val session = LlmInferenceSession.createFromOptions(engine, buildSessionOptions(packType))
             session.addQueryChunk(prompt)
             session.generateResponseAsync { partial, done ->
-                builder.append(partial)
+                response.append(partial)
                 if (done) {
                     session.close()
-                    continuation.resume(builder.toString())
+                    continuation.resume(response.toString())
                 }
             }
             continuation.invokeOnCancellation { session.close() }
@@ -81,7 +74,21 @@ class MediaPipeInferenceEngine @Inject constructor(
     override fun release() {
         llmInference?.close()
         llmInference = null
+        inferenceConfig = null
         isReady = false
+    }
+
+    private fun buildSessionOptions(packType: PackType): LlmInferenceSession.LlmInferenceSessionOptions {
+        val cfg = inferenceConfig
+        return LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            .apply {
+                if (cfg != null) {
+                    setTopK(cfg.topK)
+                    setTemperature(cfg.temperature)
+                }
+                packType.loraFileName?.let { setLoraPath(it) }
+            }
+            .build()
     }
 
     private fun requireEngine(): LlmInference =
