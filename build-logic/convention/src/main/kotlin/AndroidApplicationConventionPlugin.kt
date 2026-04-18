@@ -16,6 +16,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     minSdk = 26
                     targetSdk = 35
                 }
+                buildFeatures { buildConfig = true }
                 compileOptions {
                     sourceCompatibility = org.gradle.api.JavaVersion.VERSION_17
                     targetCompatibility = org.gradle.api.JavaVersion.VERSION_17
