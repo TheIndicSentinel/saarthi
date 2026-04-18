@@ -155,7 +155,7 @@ fun MessageBubble(
 
             // Timestamp + token count
             Row(
-                modifier = Modifier.padding(top = 3.dp, horizontal = 4.dp),
+                modifier = Modifier.padding(top = 3.dp, start = 4.dp, end = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
