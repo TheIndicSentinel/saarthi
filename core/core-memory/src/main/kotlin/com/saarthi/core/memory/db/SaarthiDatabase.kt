@@ -6,7 +6,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [MemoryEntity::class],
     version = 1,
-    exportSchema = true,
+    exportSchema = false,
 )
 abstract class SaarthiDatabase : RoomDatabase() {
     abstract fun memoryDao(): MemoryDao
