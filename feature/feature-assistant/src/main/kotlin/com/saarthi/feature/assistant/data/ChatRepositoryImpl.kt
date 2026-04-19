@@ -190,12 +190,9 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     private fun buildSystemPrompt(memoryContext: String): String = buildString {
-        appendLine("You are Saarthi (सारथी), an intelligent personal AI assistant designed for India.")
-        appendLine("You run completely offline on the user's device — no internet, full privacy.")
-        appendLine("Be helpful, concise, and accurate. Support Hindi and English naturally.")
-        appendLine("For analysis tasks, be structured: use bullet points or numbered steps.")
-        appendLine("If you don't know something, say so clearly rather than guessing.")
+        append(PackType.BASE.systemPrompt)
         if (memoryContext.isNotEmpty()) {
+            appendLine()
             appendLine()
             append(memoryContext)
         }

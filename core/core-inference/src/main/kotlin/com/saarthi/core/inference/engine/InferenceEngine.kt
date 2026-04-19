@@ -4,18 +4,29 @@ import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import kotlinx.coroutines.flow.Flow
 
-// Single Responsibility: only responsible for text generation
-// Open/Closed: new backends (llama.cpp, etc.) implement this without modifying callers
 interface InferenceEngine {
     val isReady: Boolean
 
     suspend fun initialize(config: InferenceConfig)
 
-    // Streams partial tokens as they are generated
+    /** Streams partial tokens as they are generated. */
     fun generateStream(prompt: String, packType: PackType = PackType.BASE): Flow<String>
 
-    // One-shot generation (waits for full response)
+    /** One-shot generation — waits for the full response. */
     suspend fun generate(prompt: String, packType: PackType = PackType.BASE): String
+
+    /**
+     * Load a LoRA adapter on top of the current base model.
+     * Engines that don't support LoRA (e.g. MediaPipe) silently ignore this call.
+     * [scale] controls blending strength — 1.0 = full adapter, 0.5 = half-blended.
+     */
+    suspend fun loadLoraAdapter(adapterPath: String, scale: Float = 1.0f) {}
+
+    /**
+     * Remove the active LoRA adapter and revert to base-model behaviour.
+     * No-op on engines that don't support LoRA.
+     */
+    fun clearLoraAdapter() {}
 
     fun release()
 }

@@ -15,12 +15,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.DeviceProfiler
+import com.saarthi.core.inference.ModelCatalog
+import com.saarthi.core.inference.ModelDownloadManager
+import com.saarthi.core.inference.PackAdapterManager
 import com.saarthi.core.inference.engine.InferenceEngine
+import com.saarthi.core.inference.model.DeviceProfile
+import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.InferenceConfig
+import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +41,11 @@ import javax.inject.Inject
 data class OnboardingUiState(
     val step: OnboardingStep = OnboardingStep.WELCOME,
     val selectedLanguage: SupportedLanguage = SupportedLanguage.ENGLISH,
+    // Device & catalog
+    val deviceProfile: DeviceProfile? = null,
+    val catalogModels: List<ModelEntry> = emptyList(),
+    val downloadProgress: Map<String, DownloadProgress> = emptyMap(),
+    // Local file scanning
     val modelCandidates: List<String> = emptyList(),
     val selectedModelPath: String? = null,
     val isScanning: Boolean = false,
@@ -40,9 +53,6 @@ data class OnboardingUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val manualPathInput: String = "",
-    val testInput: String = "",
-    val testResponse: String? = null,
-    val isTestLoading: Boolean = false,
     val needsAllFilesPermission: Boolean = false,
 )
 
@@ -54,9 +64,12 @@ class OnboardingViewModel @Inject constructor(
     private val languageManager: LanguageManager,
     private val inferenceEngine: InferenceEngine,
     private val repository: OnboardingRepository,
+    private val deviceProfiler: DeviceProfiler,
+    private val modelCatalog: ModelCatalog,
+    private val downloadManager: ModelDownloadManager,
+    private val packAdapterManager: PackAdapterManager,
 ) : ViewModel() {
 
-    // When launched from the "Change Model" route, skip straight to model picker
     private val isModelChangeMode: Boolean =
         savedStateHandle.get<Boolean>("modelChange") ?: false
 
@@ -67,7 +80,14 @@ class OnboardingViewModel @Inject constructor(
     )
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
 
+    private var modelPfd: ParcelFileDescriptor? = null
+    private val downloadJobs = mutableMapOf<String, Job>()
+
     init {
+        val profile = deviceProfiler.profile()
+        val catalog = modelCatalog.recommendedFor(profile)
+        _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
+
         if (isModelChangeMode) {
             viewModelScope.launch {
                 _uiState.update { it.copy(isScanning = true) }
@@ -76,10 +96,6 @@ class OnboardingViewModel @Inject constructor(
             }
         }
     }
-
-    // Keeps the ParcelFileDescriptor alive while the model is loading when we
-    // can't resolve a direct file path from a content:// URI.
-    private var modelPfd: ParcelFileDescriptor? = null
 
     fun selectLanguage(language: SupportedLanguage) =
         _uiState.update { it.copy(selectedLanguage = language) }
@@ -99,7 +115,8 @@ class OnboardingViewModel @Inject constructor(
     fun selectModel(path: String) =
         _uiState.update { it.copy(selectedModelPath = path, error = null) }
 
-    fun onManualPathChange(text: String) = _uiState.update { it.copy(manualPathInput = text, error = null) }
+    fun onManualPathChange(text: String) =
+        _uiState.update { it.copy(manualPathInput = text, error = null) }
 
     fun selectModelByManualPath() {
         val path = _uiState.value.manualPathInput.trim().ifEmpty {
@@ -143,7 +160,6 @@ class OnboardingViewModel @Inject constructor(
                 }
                 context.startActivity(intent)
             }.onFailure {
-                // Some ROMs don't support per-app intent; fall back to global page
                 context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
             }
         }
@@ -158,14 +174,12 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun onModelUriPicked(context: Context, uri: Uri) {
-        // Try to take persistable permission (no-op if not supported, safe to ignore)
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         }
 
-        // 1. Try to get a real file-system path first
         val realPath = resolveRealPath(context, uri)
         if (realPath != null && File(realPath).exists()) {
             _uiState.update {
@@ -178,7 +192,6 @@ class OnboardingViewModel @Inject constructor(
             return
         }
 
-        // 2. Fall back to /proc/self/fd/<n> — keeps the FD open until model is loaded
         var openError = "openFileDescriptor returned null"
         val pfd = try {
             context.contentResolver.openFileDescriptor(uri, "r")
@@ -206,45 +219,92 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    fun confirmModelAndInit() {
-        val path = _uiState.value.selectedModelPath
-            ?: _uiState.value.modelCandidates.firstOrNull()
-            ?: run {
-                _uiState.update { it.copy(error = "Please select a model file first.") }
-                return
-            }
-        _uiState.update { it.copy(step = OnboardingStep.MODEL_INIT, isLoading = true, error = null) }
-        viewModelScope.launch {
-            runCatching {
-                inferenceEngine.initialize(InferenceConfig(modelPath = path))
-            }.onSuccess {
-                // Close PFD now — model is loaded into memory
-                modelPfd?.close()
-                modelPfd = null
-                // Save only real file paths (not ephemeral /proc/self/fd paths)
-                if (!path.startsWith("/proc/self/fd/")) {
-                    repository.saveModelPath(path)
+    // ── Catalog download ──────────────────────────────────────────────────────
+
+    fun downloadModel(model: ModelEntry) {
+        if (downloadJobs[model.id]?.isActive == true) return
+
+        val job = viewModelScope.launch {
+            downloadManager.download(model).collect { progress ->
+                _uiState.update {
+                    it.copy(downloadProgress = it.downloadProgress + (model.id to progress))
                 }
-                _uiState.update { it.copy(isLoading = false, isModelReady = true, step = OnboardingStep.CHAT_TEST) }
-            }.onFailure { e ->
-                _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isLoading = false, error = "Model load failed: ${e.message}") }
+                if (progress is DownloadProgress.Completed) {
+                    val path = progress.filePath
+                    _uiState.update {
+                        it.copy(
+                            selectedModelPath = path,
+                            modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
+                        )
+                    }
+                }
+            }
+        }
+        downloadJobs[model.id] = job
+    }
+
+    fun cancelDownload(model: ModelEntry) {
+        downloadJobs[model.id]?.cancel()
+        downloadJobs.remove(model.id)
+        downloadManager.cancelDownload(model)
+        _uiState.update {
+            it.copy(downloadProgress = it.downloadProgress - model.id)
+        }
+    }
+
+    fun selectDownloadedModel(model: ModelEntry) {
+        val path = downloadManager.localPathFor(model).absolutePath
+        if (File(path).exists()) {
+            _uiState.update {
+                it.copy(
+                    selectedModelPath = path,
+                    modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
+                    error = null,
+                )
             }
         }
     }
 
-    // ── Chat test ─────────────────────────────────────────────────────────────
+    // ── Model init ────────────────────────────────────────────────────────────
 
-    fun onTestInputChange(text: String) = _uiState.update { it.copy(testInput = text) }
+    fun confirmModelAndInit() {
+        val path = _uiState.value.selectedModelPath
+            ?: _uiState.value.modelCandidates.firstOrNull()
+            ?: run {
+                _uiState.update { it.copy(error = "Please select or download a model first.") }
+                return
+            }
 
-    fun sendTestMessage() {
-        val msg = _uiState.value.testInput.trim().ifEmpty { return }
-        _uiState.update { it.copy(isTestLoading = true, testResponse = null) }
+        val profile = _uiState.value.deviceProfile
+        val catalogEntry = modelCatalog.allModels.find {
+            downloadManager.localPathFor(it).absolutePath == path || it.fileName == path.substringAfterLast("/")
+        }
+
+        val config = InferenceConfig(
+            modelPath   = path,
+            maxTokens   = 1024,
+            nCtx        = catalogEntry?.contextLength ?: 2048,
+            nThreads    = (profile?.cpuCores?.coerceAtMost(6)) ?: 4,
+            nGpuLayers  = if (profile?.hasVulkan == true) catalogEntry?.nGpuLayers ?: 0 else 0,
+        )
+
+        _uiState.update { it.copy(step = OnboardingStep.MODEL_INIT, isLoading = true, error = null) }
         viewModelScope.launch {
-            val prompt = "You are Saarthi, a helpful AI assistant. Answer briefly.\nUser: $msg\nAssistant:"
-            val response = runCatching {
-                inferenceEngine.generate(prompt, PackType.BASE)
-            }.getOrElse { "Error: ${it.message}" }
-            _uiState.update { it.copy(isTestLoading = false, testResponse = response) }
+            runCatching {
+                inferenceEngine.initialize(config)
+            }.onSuccess {
+                modelPfd?.close()
+                modelPfd = null
+                if (!path.startsWith("/proc/self/fd/")) {
+                    repository.saveModelPath(path)
+                }
+                // Register the active model family so PackAdapterManager can match LoRA adapters
+                val family = catalogEntry?.modelFamily ?: "unknown"
+                packAdapterManager.setActiveModelFamily(family)
+                _uiState.update { it.copy(isLoading = false, isModelReady = true, step = OnboardingStep.CHAT_TEST) }
+            }.onFailure { e ->
+                _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isLoading = false, error = "Model load failed: ${e.message}") }
+            }
         }
     }
 
@@ -255,22 +315,18 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    // Legacy entry point
     fun proceedToModelInit() = confirmModelAndInit()
 
     // ── URI → real path ───────────────────────────────────────────────────────
 
     private fun resolveRealPath(context: Context, uri: Uri): String? {
         if (uri.scheme == "file") return uri.path
-
         if (uri.scheme != "content") return null
 
-        // DocumentsContract-based resolution
         if (DocumentsContract.isDocumentUri(context, uri)) {
             val docId = DocumentsContract.getDocumentId(uri)
             when (uri.authority) {
                 "com.android.externalstorage.documents" -> {
-                    // primary:Download/file.bin
                     val parts = docId.split(":")
                     if (parts.size >= 2 && parts[0].equals("primary", ignoreCase = true)) {
                         return "${Environment.getExternalStorageDirectory()}/${parts[1]}"
@@ -279,7 +335,6 @@ class OnboardingViewModel @Inject constructor(
                 "com.android.providers.downloads.documents" -> {
                     if (docId.startsWith("raw:")) return docId.removePrefix("raw:")
                     if (docId.startsWith("/")) return docId
-                    // msf:<id> or plain numeric id
                     val numId = docId.removePrefix("msf:").toLongOrNull()
                     if (numId != null) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -290,8 +345,7 @@ class OnboardingViewModel @Inject constructor(
                                 arrayOf(numId.toString()),
                             )?.let { return it }
                         }
-                        // Fallback: public downloads provider
-                        val altUri = android.content.ContentUris.withAppendedId(
+                        val altUri = ContentUris.withAppendedId(
                             Uri.parse("content://downloads/public_downloads"), numId
                         )
                         queryDataColumn(context, altUri)?.let { return it }
@@ -300,7 +354,6 @@ class OnboardingViewModel @Inject constructor(
             }
         }
 
-        // Generic MediaStore DATA column
         return queryDataColumn(context, uri)
     }
 

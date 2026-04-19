@@ -1,9 +1,61 @@
+import java.util.Properties
+import java.io.File
+
 plugins {
     id("saarthi.android.library")
     id("saarthi.hilt")
 }
 
-android { namespace = "com.saarthi.core.inference" }
+// Check whether the NDK is installed before enabling the native build.
+// Without NDK the app still compiles — LlamaCppBridge.tryLoad() returns false
+// and the InferenceEngineSelector falls back to MediaPipe automatically.
+val localProps = Properties().also { props ->
+    rootProject.file("local.properties")
+        .takeIf { it.exists() }
+        ?.inputStream()?.use { props.load(it) }
+}
+// Prefer local.properties; fall back to ANDROID_HOME env var (set by GHA android-runner)
+val sdkDir = localProps.getProperty("sdk.dir")
+    ?: System.getenv("ANDROID_HOME")
+    ?: ""
+val ndkExists = sdkDir.isNotEmpty() &&
+    (File(sdkDir).resolve("ndk").exists() ||
+     File(sdkDir).resolve("ndk-bundle").exists())
+
+android {
+    namespace  = "com.saarthi.core.inference"
+
+    if (ndkExists) {
+        ndkVersion = "27.0.12077973"
+    }
+
+    defaultConfig {
+        if (ndkExists) {
+            externalNativeBuild {
+                cmake {
+                    cppFlags += "-std=c++17"
+                    arguments(
+                        "-DANDROID_STL=c++_shared",
+                        "-DANDROID_ARM_NEON=TRUE",
+                        "-DCMAKE_BUILD_TYPE=Release",
+                    )
+                }
+            }
+            ndk {
+                abiFilters += listOf("arm64-v8a", "x86_64")
+            }
+        }
+    }
+
+    if (ndkExists) {
+        externalNativeBuild {
+            cmake {
+                path    = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
+        }
+    }
+}
 
 dependencies {
     implementation(libs.mediapipe.tasks.genai)

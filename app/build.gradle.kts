@@ -11,6 +11,13 @@ android {
         versionCode = 1
         versionName = "1.0.0"
     }
+    // libc++_shared.so must be packaged when using c++_shared STL with JNI
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+            keepDebugSymbols += "**/*.so"
+        }
+    }
 }
 
 dependencies {

@@ -2,6 +2,8 @@ package com.saarthi.app
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saarthi.core.inference.ModelCatalog
+import com.saarthi.core.inference.PackAdapterManager
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
@@ -24,6 +26,8 @@ sealed class AppStartState {
 class MainViewModel @Inject constructor(
     private val onboardingRepository: OnboardingRepository,
     private val inferenceEngine: InferenceEngine,
+    private val modelCatalog: ModelCatalog,
+    private val packAdapterManager: PackAdapterManager,
 ) : ViewModel() {
 
     private val _startState = MutableStateFlow<AppStartState>(AppStartState.Loading)
@@ -39,18 +43,28 @@ class MainViewModel @Inject constructor(
 
             val modelPath = onboardingRepository.getModelPath()
             if (modelPath == null) {
-                // Onboarding complete but model missing — re-run model pick
                 _startState.value = AppStartState.GoToOnboarding
                 return@launch
             }
 
             if (inferenceEngine.isReady) {
+                restoreModelFamily(modelPath)
                 _startState.value = AppStartState.GoToHome
                 return@launch
             }
 
+            val catalogEntry = modelCatalog.allModels.find {
+                modelPath.endsWith(it.fileName)
+            }
+            val config = InferenceConfig(
+                modelPath  = modelPath,
+                nCtx       = catalogEntry?.contextLength ?: 2048,
+                nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
+            )
+
             runCatching {
-                inferenceEngine.initialize(InferenceConfig(modelPath = modelPath))
+                inferenceEngine.initialize(config)
+                restoreModelFamily(modelPath)
                 _startState.value = AppStartState.GoToHome
             }.onFailure { e ->
                 _startState.value = AppStartState.ModelError(
@@ -58,6 +72,13 @@ class MainViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    private fun restoreModelFamily(modelPath: String) {
+        val family = modelCatalog.allModels
+            .find { modelPath.endsWith(it.fileName) }
+            ?.modelFamily ?: "unknown"
+        packAdapterManager.setActiveModelFamily(family)
     }
 
     fun retryWithNewModel() {
