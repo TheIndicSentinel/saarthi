@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Model downloads + any future network calls -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Money Mentor: on-device SMS analysis -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <!-- Voice input (SpeechRecognizer / Whisper.cpp) -->
