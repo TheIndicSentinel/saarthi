@@ -14,11 +14,10 @@ import kotlin.math.sqrt
 // For production, load the sqlite-vss extension (.so) from assets.
 class SqliteVectorStore @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val dbName: String = "vectors.db",
 ) : VectorStore {
 
     private val db: SQLiteDatabase by lazy {
-        val dbFile = File(context.filesDir, dbName)
+        val dbFile = File(context.filesDir, "vectors.db")
         SQLiteDatabase.openOrCreateDatabase(dbFile, null).also { initSchema(it) }
     }
 

@@ -1,7 +1,6 @@
 package com.saarthi.core.rag.embedding
 
 import com.saarthi.core.inference.engine.InferenceEngine
-import com.saarthi.core.inference.model.PackType
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.sqrt
