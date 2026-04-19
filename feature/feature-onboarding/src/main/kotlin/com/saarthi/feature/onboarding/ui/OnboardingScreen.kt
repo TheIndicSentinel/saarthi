@@ -91,9 +91,16 @@ fun OnboardingScreen(
                     selectedPath = state.selectedModelPath,
                     isScanning = state.isScanning,
                     error = state.error,
+                    manualPathInput = state.manualPathInput,
+                    needsAllFilesPermission = state.needsAllFilesPermission,
                     onSelect = viewModel::selectModel,
                     onBrowse = { filePicker.launch(arrayOf("*/*")) },
                     onConfirm = viewModel::confirmModelAndInit,
+                    onManualPathChange = viewModel::onManualPathChange,
+                    onSelectManualPath = viewModel::selectModelByManualPath,
+                    onGrantAllFiles = { viewModel.openAllFilesAccessSettings(context) },
+                    onRescan = viewModel::rescanAfterPermissionGrant,
+                    onCheckPermission = { viewModel.checkAndRequestAllFilesAccess(context) },
                 )
                 OnboardingStep.MODEL_INIT -> ModelInitStep(
                     isLoading = state.isLoading,
@@ -176,37 +183,47 @@ private fun ModelPickStep(
     selectedPath: String?,
     isScanning: Boolean,
     error: String?,
+    manualPathInput: String,
+    needsAllFilesPermission: Boolean,
     onSelect: (String) -> Unit,
     onBrowse: () -> Unit,
     onConfirm: () -> Unit,
+    onManualPathChange: (String) -> Unit,
+    onSelectManualPath: () -> Unit,
+    onGrantAllFiles: () -> Unit,
+    onRescan: () -> Unit,
+    onCheckPermission: () -> Boolean,
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(48.dp))
         Text("Select AI Model", style = MaterialTheme.typography.headlineMedium, color = SaarthiColors.Gold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Place your Gemma .bin file anywhere on the device.\nWe'll find it automatically, or browse to select it.",
+            "Select your Gemma .bin model file from Downloads or any folder.",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             color = SaarthiColors.TextMuted,
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
 
+        // Auto-scan results
         if (isScanning) {
             CircularProgressIndicator(color = SaarthiColors.Gold, modifier = Modifier.size(32.dp))
             Spacer(Modifier.height(8.dp))
             Text("Scanning device…", color = SaarthiColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
         } else if (candidates.isEmpty()) {
-            Text("No model files detected automatically.", color = SaarthiColors.TextMuted, style = MaterialTheme.typography.bodySmall)
+            Text("No model files found automatically.", color = SaarthiColors.TextMuted, style = MaterialTheme.typography.bodySmall)
         }
 
-        Spacer(Modifier.height(12.dp))
-
-        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(candidates) { path ->
+        if (!isScanning && candidates.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            candidates.forEach { path ->
                 val isSelected = path == selectedPath
                 GlassmorphicCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -232,15 +249,63 @@ private fun ModelPickStep(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                Spacer(Modifier.height(8.dp))
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
 
+        // Browse via SAF picker
         OutlinedButton(onClick = onBrowse, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.size(8.dp))
             Text("Browse for model file", color = SaarthiColors.TextPrimary)
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Grant All Files Access + rescan
+        OutlinedButton(
+            onClick = {
+                onGrantAllFiles()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Grant All Files Access (then rescan)", color = SaarthiColors.TextPrimary)
+        }
+        OutlinedButton(onClick = onRescan, modifier = Modifier.fillMaxWidth()) {
+            Text("Rescan after granting access", color = SaarthiColors.TextPrimary)
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Manual path entry fallback
+        Text("Or enter the full path manually:", style = MaterialTheme.typography.labelMedium, color = SaarthiColors.TextMuted)
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = manualPathInput,
+                onValueChange = onManualPathChange,
+                modifier = Modifier.weight(1f),
+                placeholder = {
+                    Text("/storage/emulated/0/Download/model.bin", color = SaarthiColors.TextMuted,
+                        style = MaterialTheme.typography.labelSmall)
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = SaarthiColors.Gold,
+                    unfocusedBorderColor = SaarthiColors.GlassBorder,
+                    focusedTextColor = SaarthiColors.TextPrimary,
+                    unfocusedTextColor = SaarthiColors.TextPrimary,
+                ),
+                singleLine = true,
+            )
+            OutlinedButton(onClick = onSelectManualPath) {
+                Text("Use", color = SaarthiColors.Gold)
+            }
         }
 
         if (error != null) {
@@ -250,10 +315,11 @@ private fun ModelPickStep(
 
         Spacer(Modifier.height(12.dp))
         SaarthiPrimaryButton(
-            text = if (selectedPath != null || candidates.isNotEmpty()) "Load Model" else "Select a model to continue",
+            text = if (selectedPath != null) "Load Model" else "Select a model to continue",
             onClick = onConfirm,
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(Modifier.height(24.dp))
     }
 }
 

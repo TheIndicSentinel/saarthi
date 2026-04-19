@@ -1,12 +1,15 @@
 package com.saarthi.feature.onboarding.viewmodel
 
+import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.LanguageManager
@@ -35,9 +38,11 @@ data class OnboardingUiState(
     val isModelReady: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
+    val manualPathInput: String = "",
     val testInput: String = "",
     val testResponse: String? = null,
     val isTestLoading: Boolean = false,
+    val needsAllFilesPermission: Boolean = false,
 )
 
 enum class OnboardingStep { WELCOME, LANGUAGE_SELECT, MODEL_PICK, MODEL_INIT, CHAT_TEST, DONE }
@@ -74,8 +79,73 @@ class OnboardingViewModel @Inject constructor(
     fun selectModel(path: String) =
         _uiState.update { it.copy(selectedModelPath = path, error = null) }
 
+    fun onManualPathChange(text: String) = _uiState.update { it.copy(manualPathInput = text, error = null) }
+
+    fun selectModelByManualPath() {
+        val path = _uiState.value.manualPathInput.trim().ifEmpty {
+            _uiState.update { it.copy(error = "Enter a file path first.") }
+            return
+        }
+        val file = File(path)
+        if (!file.exists()) {
+            _uiState.update { it.copy(error = "File not found at: $path") }
+            return
+        }
+        if (!file.canRead()) {
+            _uiState.update { it.copy(error = "Cannot read file at: $path — try granting All Files Access.") }
+            return
+        }
+        _uiState.update {
+            it.copy(
+                selectedModelPath = path,
+                modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
+                error = null,
+            )
+        }
+    }
+
+    fun checkAndRequestAllFilesAccess(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                _uiState.update { it.copy(needsAllFilesPermission = true) }
+                return false
+            }
+        }
+        _uiState.update { it.copy(needsAllFilesPermission = false) }
+        return true
+    }
+
+    fun openAllFilesAccessSettings(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            }.onFailure {
+                // Some ROMs don't support per-app intent; fall back to global page
+                context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            }
+        }
+    }
+
+    fun rescanAfterPermissionGrant() {
+        _uiState.update { it.copy(isScanning = true, needsAllFilesPermission = false) }
+        viewModelScope.launch {
+            val found = withContext(Dispatchers.IO) { repository.scanForModels() }
+            _uiState.update { it.copy(isScanning = false, modelCandidates = found) }
+        }
+    }
+
     fun onModelUriPicked(context: Context, uri: Uri) {
-        // 1. Try to get a real file-system path
+        // Try to take persistable permission (no-op if not supported, safe to ignore)
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+
+        // 1. Try to get a real file-system path first
         val realPath = resolveRealPath(context, uri)
         if (realPath != null && File(realPath).exists()) {
             _uiState.update {
@@ -89,9 +159,13 @@ class OnboardingViewModel @Inject constructor(
         }
 
         // 2. Fall back to /proc/self/fd/<n> — keeps the FD open until model is loaded
-        val pfd = runCatching {
+        var openError = "openFileDescriptor returned null"
+        val pfd = try {
             context.contentResolver.openFileDescriptor(uri, "r")
-        }.getOrNull()
+        } catch (e: Exception) {
+            openError = "${e.javaClass.simpleName}: ${e.message}"
+            null
+        }
 
         if (pfd != null) {
             modelPfd?.close()
@@ -108,7 +182,7 @@ class OnboardingViewModel @Inject constructor(
         }
 
         _uiState.update {
-            it.copy(error = "Cannot read this file. Make sure it is stored on device storage (not cloud-only) and try again.")
+            it.copy(error = "Could not open file ($openError). Try using 'Enter path manually' below, or grant All Files Access and rescan.")
         }
     }
 
