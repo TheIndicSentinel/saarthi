@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,13 +30,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -43,7 +38,6 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -53,7 +47,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -70,9 +63,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -86,6 +84,9 @@ import com.saarthi.feature.assistant.ui.components.MessageBubble
 import com.saarthi.feature.assistant.ui.components.ModelStatusChip
 import com.saarthi.feature.assistant.viewmodel.AssistantViewModel
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
@@ -99,20 +100,29 @@ fun AssistantScreen(
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val attachmentSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val density = LocalDensity.current
 
-    // Scroll to latest message
+    // Scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
         }
     }
 
-    // Show error in snackbar
+    // Scroll to bottom when keyboard opens so input stays visible
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    LaunchedEffect(imeVisible) {
+        if (imeVisible && messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    // Show errors
     LaunchedEffect(uiState.error) {
         uiState.error?.let { scope.launch { snackbarHost.showSnackbar(it) } }
     }
 
-    // File picker — multi-select, any type
+    // File picker
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris -> viewModel.onAttachmentsPicked(uris) }
@@ -123,6 +133,7 @@ fun AssistantScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHost) },
         containerColor = SaarthiColors.DeepSpace,
+        contentWindowInsets = WindowInsets(0),
     ) { innerPadding ->
 
         Column(
@@ -141,19 +152,20 @@ fun AssistantScreen(
                 onClearChat = viewModel::showClearDialog,
             )
 
-            // ── Empty state ───────────────────────────────────────────────────
+            // ── Message list or empty state ──────────────────────────────────
             if (messages.isEmpty()) {
                 EmptyState(
                     modifier = Modifier.weight(1f),
                     onSuggestionTap = { text -> viewModel.onInputChange(text) },
                 )
             } else {
-                // ── Messages ──────────────────────────────────────────────────
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(messages, key = { it.id }) { msg ->
                         MessageBubble(
@@ -161,10 +173,12 @@ fun AssistantScreen(
                             onDelete = { viewModel.deleteMessage(msg.id) },
                         )
                     }
+                    // Extra bottom padding so last message isn't flush against input
+                    item { Spacer(Modifier.height(8.dp)) }
                 }
             }
 
-            // ── Input Bar ─────────────────────────────────────────────────────
+            // ── Input Bar ────────────────────────────────────────────────────
             ChatInputBar(
                 inputText = uiState.inputText,
                 onInputChange = viewModel::onInputChange,
@@ -189,12 +203,10 @@ fun AssistantScreen(
         }
     }
 
-    // ── Attachment Bottom Sheet ───────────────────────────────────────────────
+    // ── Attachment Sheet ─────────────────────────────────────────────────────
     if (uiState.showAttachmentSheet || attachmentSheetState.isVisible) {
         ModalBottomSheet(
-            onDismissRequest = {
-                scope.launch { attachmentSheetState.hide() }
-            },
+            onDismissRequest = { scope.launch { attachmentSheetState.hide() } },
             sheetState = attachmentSheetState,
             containerColor = SaarthiColors.NavyMid,
             dragHandle = { BottomSheetDefaults.DragHandle(color = SaarthiColors.GlassBorder) },
@@ -207,7 +219,7 @@ fun AssistantScreen(
         }
     }
 
-    // ── Clear Chat Dialog ─────────────────────────────────────────────────────
+    // ── Clear Dialog ─────────────────────────────────────────────────────────
     if (uiState.showClearDialog) {
         AlertDialog(
             onDismissRequest = viewModel::dismissClearDialog,
@@ -247,7 +259,7 @@ private fun ChatTopBar(
                     colors = listOf(SaarthiColors.NavyDark, SaarthiColors.DeepSpace.copy(alpha = 0f))
                 )
             )
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
@@ -255,20 +267,44 @@ private fun ChatTopBar(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = SaarthiColors.TextSecondary)
             }
         } else {
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(12.dp))
         }
 
-        // Brand mark
-        Icon(
-            Icons.Default.AutoAwesome,
-            contentDescription = null,
-            tint = SaarthiColors.Gold,
-            modifier = Modifier.size(22.dp),
-        )
-        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.linearGradient(
+                        listOf(SaarthiColors.Gold.copy(0.2f), SaarthiColors.CyberTeal.copy(0.1f))
+                    )
+                )
+                .border(1.dp, SaarthiColors.Gold.copy(0.4f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "स",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                ),
+                color = SaarthiColors.Gold,
+            )
+        }
+
+        Spacer(Modifier.width(10.dp))
+
         Column(modifier = Modifier.weight(1f)) {
-            Text("Saarthi", style = MaterialTheme.typography.titleMedium, color = SaarthiColors.Gold)
-            Text("आपका सहायक · Offline", style = MaterialTheme.typography.labelMedium, color = SaarthiColors.TextMuted)
+            Text(
+                "Saarthi",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = SaarthiColors.Gold,
+            )
+            Text(
+                if (isStreaming) "Thinking…" else "आपका सहायक · Offline",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isStreaming) SaarthiColors.CyberTeal else SaarthiColors.TextMuted,
+            )
         }
 
         ModelStatusChip(
@@ -287,7 +323,9 @@ private fun ChatTopBar(
             ) {
                 DropdownMenuItem(
                     text = { Text("Clear chat", color = SaarthiColors.Error) },
-                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.Error) },
+                    leadingIcon = {
+                        Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.Error)
+                    },
                     onClick = { onClearChat(); showMenu = false },
                 )
             }
@@ -307,7 +345,6 @@ private fun EmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // Sacred geometry + brand mark
         Box(modifier = Modifier.size(160.dp), contentAlignment = Alignment.Center) {
             MandalaCanvas(modifier = Modifier.fillMaxSize())
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -345,7 +382,6 @@ private fun EmptyState(
 
         Spacer(Modifier.height(12.dp))
 
-        // Feature badges
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FeatureBadge("🔒", "Private")
             FeatureBadge("📴", "Offline")
@@ -420,7 +456,10 @@ private fun SuggestionChips(onSuggestionTap: (String) -> Unit = {}) {
     )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         suggestions.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 row.forEach { suggestion ->
                     Box(
                         modifier = Modifier
@@ -429,7 +468,7 @@ private fun SuggestionChips(onSuggestionTap: (String) -> Unit = {}) {
                             .background(SaarthiColors.NavyLight)
                             .border(1.dp, SaarthiColors.GlassBorder, RoundedCornerShape(14.dp))
                             .clickable { onSuggestionTap(suggestion) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
                     ) {
                         Text(
                             text = suggestion,

@@ -20,15 +20,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -47,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -71,27 +69,38 @@ fun ChatInputBar(
 ) {
     val micPulse = rememberInfiniteTransition(label = "mic_pulse")
     val micAlpha by micPulse.animateFloat(
-        initialValue = 1f, targetValue = 0.4f,
-        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
         label = "mic_alpha",
     )
 
     val borderColor by animateColorAsState(
         targetValue = when {
             isListening -> SaarthiColors.Error
-            isStreaming -> SaarthiColors.CyberTeal.copy(alpha = 0.6f)
+            isStreaming -> SaarthiColors.CyberTeal.copy(alpha = 0.7f)
             else -> SaarthiColors.GlassBorder
         },
         label = "border",
     )
 
+    val canSend = (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isStreaming
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(SaarthiColors.DeepSpace)
-            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        SaarthiColors.DeepSpace.copy(alpha = 0f),
+                        SaarthiColors.DeepSpace,
+                    )
+                )
+            )
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)
+            .navigationBarsPadding(),
     ) {
-        // Pending attachments strip
+        // Pending attachments
         AnimatedVisibility(
             visible = pendingAttachments.isNotEmpty(),
             enter = fadeIn() + expandVertically(),
@@ -108,7 +117,7 @@ fun ChatInputBar(
             }
         }
 
-        // Floating pill input row
+        // Pill input row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -119,7 +128,7 @@ fun ChatInputBar(
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // Attach button
+            // Attach
             IconButton(
                 onClick = onAttachClick,
                 modifier = Modifier
@@ -127,10 +136,15 @@ fun ChatInputBar(
                     .clip(CircleShape)
                     .background(SaarthiColors.GlassSurface),
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Attach", tint = SaarthiColors.TextSecondary, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "Attach",
+                    tint = SaarthiColors.TextSecondary,
+                    modifier = Modifier.size(20.dp),
+                )
             }
 
-            // Text input
+            // Text field
             TextField(
                 value = inputText,
                 onValueChange = onInputChange,
@@ -159,7 +173,7 @@ fun ChatInputBar(
                 maxLines = 6,
             )
 
-            // Voice / Stop
+            // Voice or Stop
             if (isStreaming) {
                 IconButton(
                     onClick = onStopStreaming,
@@ -168,7 +182,12 @@ fun ChatInputBar(
                         .clip(CircleShape)
                         .background(SaarthiColors.Error.copy(alpha = 0.15f)),
                 ) {
-                    Icon(Icons.Default.Stop, contentDescription = "Stop", tint = SaarthiColors.Error, modifier = Modifier.size(20.dp))
+                    Icon(
+                        Icons.Default.Stop,
+                        contentDescription = "Stop",
+                        tint = SaarthiColors.Error,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             } else {
                 IconButton(
@@ -190,15 +209,24 @@ fun ChatInputBar(
                 }
             }
 
-            // Send — prominent gold circle
-            val canSend = (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isStreaming
+            // Send button
             IconButton(
                 onClick = onSend,
                 enabled = canSend,
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(if (canSend) SaarthiColors.Gold else SaarthiColors.GlassSurface),
+                    .background(
+                        if (canSend) {
+                            Brush.linearGradient(
+                                listOf(SaarthiColors.Gold, SaarthiColors.GoldDim)
+                            )
+                        } else {
+                            Brush.linearGradient(
+                                listOf(SaarthiColors.GlassSurface, SaarthiColors.GlassSurface)
+                            )
+                        }
+                    ),
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
