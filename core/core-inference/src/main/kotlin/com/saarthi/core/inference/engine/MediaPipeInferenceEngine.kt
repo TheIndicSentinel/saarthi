@@ -32,22 +32,17 @@ class MediaPipeInferenceEngine @Inject constructor(
 
         llmInference = try {
             LlmInference.createFromOptions(context, builder.build())
-        } catch (gpuEx: Exception) {
-            if (isGpuError(gpuEx)) {
-                Timber.w("GPU init failed (${gpuEx.message}), retrying with CPU backend")
-                trySetCpuBackend(builder)
-                try {
-                    LlmInference.createFromOptions(context, builder.build())
-                } catch (cpuEx: Exception) {
-                    throw RuntimeException(
-                        "GPU not supported on this device and CPU fallback also failed.\n" +
-                        "Please download the CPU model: gemma2-2b-it-cpu-int4.bin\n" +
-                        "CPU error: ${cpuEx.message}",
-                        cpuEx,
-                    )
-                }
+        } catch (e: Exception) {
+            if (isGpuError(e)) {
+                throw RuntimeException(
+                    "This model requires GPU acceleration that your device doesn't support.\n\n" +
+                    "You need the CPU version of the model.\n" +
+                    "Download: gemma2-2b-it-cpu-int4.bin (~1.3 GB)\n" +
+                    "Search 'gemma 2b it mediapipe' on Kaggle, accept Gemma terms, then download the cpu-int4 variant.",
+                    e,
+                )
             } else {
-                throw gpuEx
+                throw e
             }
         }
         isReady = true
@@ -56,24 +51,7 @@ class MediaPipeInferenceEngine @Inject constructor(
 
     private fun isGpuError(e: Exception): Boolean {
         val msg = e.message.orEmpty().lowercase()
-        return "opencl" in msg || "gpu" in msg || "clset" in msg || "opengl" in msg
-    }
-
-    // Uses reflection so this compiles against any MediaPipe version; no-op if API absent.
-    private fun trySetCpuBackend(builder: LlmInference.LlmInferenceOptions.Builder) {
-        try {
-            val backendClass = Class.forName(
-                "com.google.mediapipe.tasks.genai.llminference.LlmInference\$LlmInferenceOptions\$Backend"
-            )
-            val cpuValue = backendClass.enumConstants
-                ?.firstOrNull { (it as Enum<*>).name == "CPU" } ?: return
-            builder.javaClass
-                .getMethod("setPreferredBackend", backendClass)
-                .invoke(builder, cpuValue)
-            Timber.d("CPU backend set via reflection")
-        } catch (e: Exception) {
-            Timber.w("setPreferredBackend not available: ${e.message}")
-        }
+        return "opencl" in msg || "clset" in msg || "opengl" in msg
     }
 
     // generateResponse() is the synchronous API stable across MediaPipe 0.10.x versions.
