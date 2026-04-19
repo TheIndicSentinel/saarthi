@@ -230,24 +230,35 @@ private fun ModelPickStep(
                     accentColor = if (isSelected) SaarthiColors.Gold else SaarthiColors.GlassBorder,
                     onClick = { onSelect(path) },
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (isSelected) Icon(Icons.Default.CheckCircle, null, tint = SaarthiColors.Gold, modifier = Modifier.size(18.dp))
+                    // Column inside Box (GlassmorphicCard uses BoxScope) to prevent overlap
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (isSelected) Icon(
+                                Icons.Default.CheckCircle, null,
+                                tint = SaarthiColors.Gold,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Text(
+                                path.substringAfterLast("/"),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isSelected) SaarthiColors.Gold else SaarthiColors.TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        Spacer(Modifier.height(2.dp))
                         Text(
-                            path.substringAfterLast("/"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (isSelected) SaarthiColors.Gold else SaarthiColors.TextPrimary,
+                            path.substringBeforeLast("/"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = SaarthiColors.TextMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
                         )
                     }
-                    Text(
-                        path,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SaarthiColors.TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -255,57 +266,18 @@ private fun ModelPickStep(
 
         Spacer(Modifier.height(8.dp))
 
-        // Browse via SAF picker
         OutlinedButton(onClick = onBrowse, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.size(8.dp))
             Text("Browse for model file", color = SaarthiColors.TextPrimary)
         }
-
-        Spacer(Modifier.height(8.dp))
-
-        // Grant All Files Access + rescan
-        OutlinedButton(
-            onClick = {
-                onGrantAllFiles()
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
+        Spacer(Modifier.height(4.dp))
+        OutlinedButton(onClick = onGrantAllFiles, modifier = Modifier.fillMaxWidth()) {
             Text("Grant All Files Access (then rescan)", color = SaarthiColors.TextPrimary)
         }
+        Spacer(Modifier.height(4.dp))
         OutlinedButton(onClick = onRescan, modifier = Modifier.fillMaxWidth()) {
             Text("Rescan after granting access", color = SaarthiColors.TextPrimary)
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // Manual path entry fallback
-        Text("Or enter the full path manually:", style = MaterialTheme.typography.labelMedium, color = SaarthiColors.TextMuted)
-        Spacer(Modifier.height(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                value = manualPathInput,
-                onValueChange = onManualPathChange,
-                modifier = Modifier.weight(1f),
-                placeholder = {
-                    Text("/storage/emulated/0/Download/model.bin", color = SaarthiColors.TextMuted,
-                        style = MaterialTheme.typography.labelSmall)
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SaarthiColors.Gold,
-                    unfocusedBorderColor = SaarthiColors.GlassBorder,
-                    focusedTextColor = SaarthiColors.TextPrimary,
-                    unfocusedTextColor = SaarthiColors.TextPrimary,
-                ),
-                singleLine = true,
-            )
-            OutlinedButton(onClick = onSelectManualPath) {
-                Text("Use", color = SaarthiColors.Gold)
-            }
         }
 
         if (error != null) {

@@ -22,17 +22,58 @@ class MediaPipeInferenceEngine @Inject constructor(
     override var isReady: Boolean = false
         private set
 
-    override suspend fun initialize(config: InferenceConfig) {
+    override suspend fun initialize(config: InferenceConfig) = withContext(Dispatchers.IO) {
         Timber.d("Initializing MediaPipe engine: ${config.modelPath}")
-        val options = LlmInference.LlmInferenceOptions.builder()
+        val builder = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(config.modelPath)
             .setMaxTokens(config.maxTokens)
             .setTopK(config.topK)
             .setTemperature(config.temperature)
-            .build()
-        llmInference = LlmInference.createFromOptions(context, options)
+
+        llmInference = try {
+            LlmInference.createFromOptions(context, builder.build())
+        } catch (gpuEx: Exception) {
+            if (isGpuError(gpuEx)) {
+                Timber.w("GPU init failed (${gpuEx.message}), retrying with CPU backend")
+                trySetCpuBackend(builder)
+                try {
+                    LlmInference.createFromOptions(context, builder.build())
+                } catch (cpuEx: Exception) {
+                    throw RuntimeException(
+                        "GPU not supported on this device and CPU fallback also failed.\n" +
+                        "Please download the CPU model: gemma2-2b-it-cpu-int4.bin\n" +
+                        "CPU error: ${cpuEx.message}",
+                        cpuEx,
+                    )
+                }
+            } else {
+                throw gpuEx
+            }
+        }
         isReady = true
         Timber.d("MediaPipe engine ready")
+    }
+
+    private fun isGpuError(e: Exception): Boolean {
+        val msg = e.message.orEmpty().lowercase()
+        return "opencl" in msg || "gpu" in msg || "clset" in msg || "opengl" in msg
+    }
+
+    // Uses reflection so this compiles against any MediaPipe version; no-op if API absent.
+    private fun trySetCpuBackend(builder: LlmInference.LlmInferenceOptions.Builder) {
+        try {
+            val backendClass = Class.forName(
+                "com.google.mediapipe.tasks.genai.llminference.LlmInference\$LlmInferenceOptions\$Backend"
+            )
+            val cpuValue = backendClass.enumConstants
+                ?.firstOrNull { (it as Enum<*>).name == "CPU" } ?: return
+            builder.javaClass
+                .getMethod("setPreferredBackend", backendClass)
+                .invoke(builder, cpuValue)
+            Timber.d("CPU backend set via reflection")
+        } catch (e: Exception) {
+            Timber.w("setPreferredBackend not available: ${e.message}")
+        }
     }
 
     // generateResponse() is the synchronous API stable across MediaPipe 0.10.x versions.
