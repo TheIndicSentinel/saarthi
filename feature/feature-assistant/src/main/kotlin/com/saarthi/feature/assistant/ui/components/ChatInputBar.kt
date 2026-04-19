@@ -89,7 +89,7 @@ fun ChatInputBar(
         modifier = modifier
             .fillMaxWidth()
             .background(SaarthiColors.DeepSpace)
-            .padding(horizontal = 12.dp, top = 8.dp, bottom = 12.dp),
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
     ) {
         // Pending attachments strip
         AnimatedVisibility(
