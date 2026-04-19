@@ -22,4 +22,7 @@ interface MemoryDao {
 
     @Query("SELECT * FROM shared_memory WHERE packSource = :pack")
     fun observeByPack(pack: String): Flow<List<MemoryEntity>>
+
+    @Query("SELECT * FROM shared_memory ORDER BY updatedAt DESC")
+    suspend fun getAll(): List<MemoryEntity>
 }

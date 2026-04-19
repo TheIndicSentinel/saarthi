@@ -26,8 +26,10 @@ class MemoryRepositoryImpl @Inject constructor(
     override suspend fun delete(key: String) = dao.delete(key)
 
     override suspend fun buildContextSummary(): String {
-        val entries = dao.observeAll().let { /* snapshot */ emptyList<MemoryEntity>() }
-        return entries.joinToString("\n") { "[${it.packSource}] ${it.key}: ${it.value}" }
+        val entries = dao.getAll()
+        if (entries.isEmpty()) return ""
+        return "What I know about you:\n" +
+                entries.joinToString("\n") { "- ${it.key}: ${it.value}" }
     }
 }
 

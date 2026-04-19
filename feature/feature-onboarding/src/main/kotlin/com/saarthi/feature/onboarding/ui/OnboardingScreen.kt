@@ -35,17 +35,15 @@ import kotlin.math.sin
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -117,12 +115,7 @@ fun OnboardingScreen(
                     isLoading = state.isLoading,
                     error = state.error,
                 )
-                OnboardingStep.CHAT_TEST -> ChatTestStep(
-                    testInput = state.testInput,
-                    testResponse = state.testResponse,
-                    isTestLoading = state.isTestLoading,
-                    onInputChange = viewModel::onTestInputChange,
-                    onSend = viewModel::sendTestMessage,
+                OnboardingStep.CHAT_TEST -> SetupCompleteStep(
                     onComplete = viewModel::completeOnboarding,
                 )
                 OnboardingStep.DONE -> {}
@@ -475,104 +468,58 @@ private fun ModelInitStep(isLoading: Boolean, error: String?) {
 }
 
 @Composable
-private fun ChatTestStep(
-    testInput: String,
-    testResponse: String?,
-    isTestLoading: Boolean,
-    onInputChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onComplete: () -> Unit,
-) {
+private fun SetupCompleteStep(onComplete: () -> Unit) {
+    // Auto-navigate after 1.5s so user sees the success state briefly
+    LaunchedEffect(Unit) {
+        delay(1500)
+        onComplete()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Spacer(Modifier.height(48.dp))
-        Text("Test Your Model", style = MaterialTheme.typography.headlineMedium, color = SaarthiColors.Gold)
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(SaarthiColors.Gold.copy(alpha = 0.12f))
+                .border(1.dp, SaarthiColors.Gold.copy(alpha = 0.4f), RoundedCornerShape(24.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = SaarthiColors.Gold,
+                modifier = Modifier.size(52.dp),
+            )
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        Text(
+            "सारथी तैयार है",
+            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+            color = SaarthiColors.Gold,
+            textAlign = TextAlign.Center,
+        )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Send a message to verify the model is working correctly.",
-            style = MaterialTheme.typography.bodyMedium,
+            "Your AI is ready — offline, private, always with you.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = SaarthiColors.TextSecondary,
             textAlign = TextAlign.Center,
-            color = SaarthiColors.TextMuted,
         )
-        Spacer(Modifier.height(24.dp))
 
-        if (testResponse != null) {
-            GlassmorphicCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                accentColor = SaarthiColors.GlassBorder,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .verticalScroll(rememberScrollState())
-                        .padding(4.dp),
-                ) {
-                    Text(
-                        "Saarthi:",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = SaarthiColors.Gold,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        testResponse,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = SaarthiColors.TextPrimary,
-                    )
-                }
-            }
-        } else if (isTestLoading) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = SaarthiColors.Gold)
-                    Spacer(Modifier.height(12.dp))
-                    Text("Thinking…", color = SaarthiColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        } else {
-            Spacer(Modifier.weight(1f))
-        }
+        Spacer(Modifier.height(40.dp))
 
-        Spacer(Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                value = testInput,
-                onValueChange = onInputChange,
-                modifier = Modifier.weight(1f),
-                placeholder = {
-                    Text("Ask something…", color = SaarthiColors.TextMuted)
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SaarthiColors.Gold,
-                    unfocusedBorderColor = SaarthiColors.GlassBorder,
-                    focusedTextColor = SaarthiColors.TextPrimary,
-                    unfocusedTextColor = SaarthiColors.TextPrimary,
-                ),
-                singleLine = true,
-                enabled = !isTestLoading,
-            )
-            IconButton(
-                onClick = onSend,
-                enabled = testInput.isNotBlank() && !isTestLoading,
-            ) {
-                Icon(Icons.Default.Send, contentDescription = "Send", tint = SaarthiColors.Gold)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        SaarthiPrimaryButton(
-            text = "Continue to Saarthi",
-            onClick = onComplete,
-            modifier = Modifier.fillMaxWidth(),
+        CircularProgressIndicator(
+            color = SaarthiColors.Gold,
+            modifier = Modifier.size(28.dp),
+            strokeWidth = 2.dp,
         )
     }
 }

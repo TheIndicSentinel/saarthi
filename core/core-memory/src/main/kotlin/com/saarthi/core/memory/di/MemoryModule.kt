@@ -2,6 +2,7 @@ package com.saarthi.core.memory.di
 
 import android.content.Context
 import androidx.room.Room
+import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.MemoryDao
 import com.saarthi.core.memory.db.SaarthiDatabase
 import com.saarthi.core.memory.domain.MemoryRepository
@@ -26,6 +27,9 @@ object DatabaseModule {
 
     @Provides
     fun provideMemoryDao(db: SaarthiDatabase): MemoryDao = db.memoryDao()
+
+    @Provides
+    fun provideConversationDao(db: SaarthiDatabase): ConversationDao = db.conversationDao()
 }
 
 @Module
