@@ -23,6 +23,7 @@ class MediaPipeInferenceEngine @Inject constructor(
         private set
 
     override suspend fun initialize(config: InferenceConfig) = withContext(Dispatchers.IO) {
+        if (isReady) return@withContext  // already loaded — e.g. MainViewModel + OnboardingViewModel both call init
         Timber.d("Initializing MediaPipe engine: ${config.modelPath}")
         val builder = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(config.modelPath)

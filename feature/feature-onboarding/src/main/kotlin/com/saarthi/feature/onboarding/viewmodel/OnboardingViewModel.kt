@@ -10,6 +10,7 @@ import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.LanguageManager
@@ -49,13 +50,32 @@ enum class OnboardingStep { WELCOME, LANGUAGE_SELECT, MODEL_PICK, MODEL_INIT, CH
 
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
+    private val savedStateHandle: SavedStateHandle,
     private val languageManager: LanguageManager,
     private val inferenceEngine: InferenceEngine,
     private val repository: OnboardingRepository,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(OnboardingUiState())
+    // When launched from the "Change Model" route, skip straight to model picker
+    private val isModelChangeMode: Boolean =
+        savedStateHandle.get<Boolean>("modelChange") ?: false
+
+    private val _uiState = MutableStateFlow(
+        OnboardingUiState(
+            step = if (isModelChangeMode) OnboardingStep.MODEL_PICK else OnboardingStep.WELCOME,
+        )
+    )
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
+
+    init {
+        if (isModelChangeMode) {
+            viewModelScope.launch {
+                _uiState.update { it.copy(isScanning = true) }
+                val found = withContext(Dispatchers.IO) { repository.scanForModels() }
+                _uiState.update { it.copy(isScanning = false, modelCandidates = found) }
+            }
+        }
+    }
 
     // Keeps the ParcelFileDescriptor alive while the model is loading when we
     // can't resolve a direct file path from a content:// URI.

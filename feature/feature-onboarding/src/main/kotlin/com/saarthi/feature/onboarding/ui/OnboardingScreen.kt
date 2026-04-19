@@ -67,9 +67,12 @@ fun OnboardingScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    if (state.step == OnboardingStep.DONE) {
-        onOnboardingComplete()
-        return
+    // Use LaunchedEffect so navigation fires exactly once when step becomes DONE,
+    // not on every recomposition — the Composable-body version caused repeated navigation.
+    LaunchedEffect(state.step) {
+        if (state.step == OnboardingStep.DONE) {
+            onOnboardingComplete()
+        }
     }
 
     val filePicker = rememberLauncherForActivityResult(

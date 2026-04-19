@@ -124,8 +124,8 @@ fun ChatInputBar(
                 .clip(RoundedCornerShape(28.dp))
                 .background(SaarthiColors.NavyLight)
                 .border(1.dp, borderColor, RoundedCornerShape(28.dp))
-                .padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.Bottom,
+                .padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             // Attach

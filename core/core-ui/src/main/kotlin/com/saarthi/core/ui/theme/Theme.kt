@@ -1,6 +1,7 @@
 package com.saarthi.core.ui.theme
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -55,8 +56,11 @@ fun SaarthiTheme(content: @Composable () -> Unit) {
         MaterialTheme(
             colorScheme = SaarthiDarkColorScheme,
             typography  = SaarthiTypography,
-            content     = content,
-        )
+        ) {
+            // Surface forces the window background to DeepSpace,
+            // eliminating white flashes during navigation transitions.
+            Surface(color = SaarthiColors.DeepSpace, content = content)
+        }
     }
 }
 
