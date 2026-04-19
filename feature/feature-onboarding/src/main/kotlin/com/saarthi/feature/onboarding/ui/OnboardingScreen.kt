@@ -6,7 +6,9 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +22,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FolderOpen
@@ -123,22 +134,172 @@ fun OnboardingScreen(
 @Composable
 private fun WelcomeStep(onNext: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
-        Text("🪔", style = MaterialTheme.typography.displayLarge)
-        Spacer(Modifier.height(24.dp))
-        Text("Saarthi", style = MaterialTheme.typography.displayLarge, color = SaarthiColors.Gold)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.weight(0.07f))
+
+        // Sacred geometry art with brand text overlay
+        Box(modifier = Modifier.size(200.dp), contentAlignment = Alignment.Center) {
+            WelcomeMandala(modifier = Modifier.fillMaxSize())
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "सारथी",
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 44.sp,
+                    ),
+                    color = SaarthiColors.Gold,
+                )
+                Text(
+                    "SAARTHI",
+                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 6.sp),
+                    color = SaarthiColors.TextMuted,
+                )
+            }
+        }
+
+        Spacer(Modifier.weight(0.05f))
+
         Text(
-            "Your trusted offline AI guide.\nPrivate. Always available.",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
+            "आपका निजी AI सहायक",
+            style = MaterialTheme.typography.titleLarge,
             color = SaarthiColors.TextSecondary,
+            textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(48.dp))
-        SaarthiPrimaryButton(text = "Get Started", onClick = onNext, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Private · Offline · Always There",
+            style = MaterialTheme.typography.bodyMedium,
+            color = SaarthiColors.TextMuted,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(Modifier.weight(0.07f))
+
+        // Feature list
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            OnboardingFeatureRow(
+                icon = "🔒",
+                title = "Complete Privacy",
+                subtitle = "Your conversations never leave your device",
+                accentColor = SaarthiColors.Gold,
+            )
+            OnboardingFeatureRow(
+                icon = "📴",
+                title = "100% Offline",
+                subtitle = "Works without internet, anywhere in India",
+                accentColor = SaarthiColors.CyberTeal,
+            )
+            OnboardingFeatureRow(
+                icon = "🪔",
+                title = "Made for Bharat",
+                subtitle = "Understands Indian languages and context",
+                accentColor = SaarthiColors.Saffron,
+            )
+        }
+
+        Spacer(Modifier.weight(0.08f))
+
+        SaarthiPrimaryButton(
+            text = "शुरू करें — Get Started",
+            onClick = onNext,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Powered by Google Gemma 2B · Runs entirely on your device",
+            style = MaterialTheme.typography.labelMedium,
+            color = SaarthiColors.TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.weight(0.04f))
+    }
+}
+
+@Composable
+private fun WelcomeMandala(modifier: Modifier = Modifier) {
+    val gold = SaarthiColors.Gold
+    Canvas(modifier = modifier) {
+        val cx = size.width / 2
+        val cy = size.height / 2
+        val r1 = size.width * 0.47f
+        val r2 = size.width * 0.36f
+        val r3 = size.width * 0.24f
+        val sw = 1.2f
+
+        drawCircle(color = gold.copy(0.10f), radius = r1, center = Offset(cx, cy), style = Stroke(sw))
+        drawCircle(color = gold.copy(0.25f), radius = r2, center = Offset(cx, cy), style = Stroke(sw * 1.5f))
+        drawCircle(color = gold.copy(0.45f), radius = r3, center = Offset(cx, cy), style = Stroke(sw * 2f))
+
+        repeat(8) { i ->
+            val angle = i * (PI / 4)
+            drawLine(
+                color = gold.copy(0.08f),
+                start = Offset((cx + r3 * cos(angle)).toFloat(), (cy + r3 * sin(angle)).toFloat()),
+                end = Offset((cx + r1 * cos(angle)).toFloat(), (cy + r1 * sin(angle)).toFloat()),
+                strokeWidth = sw,
+            )
+        }
+
+        repeat(8) { i ->
+            val angle = i * (PI / 4) + (PI / 8)
+            drawCircle(
+                color = gold.copy(0.60f),
+                radius = 3.5f,
+                center = Offset((cx + r2 * cos(angle)).toFloat(), (cy + r2 * sin(angle)).toFloat()),
+            )
+        }
+
+        // 4 corner accents on outer ring
+        repeat(4) { i ->
+            val angle = i * (PI / 2) + (PI / 4)
+            drawLine(
+                color = gold.copy(0.20f),
+                start = Offset((cx + (r1 - 12f) * cos(angle)).toFloat(), (cy + (r1 - 12f) * sin(angle)).toFloat()),
+                end = Offset((cx + (r1 + 12f) * cos(angle)).toFloat(), (cy + (r1 + 12f) * sin(angle)).toFloat()),
+                strokeWidth = sw * 2f,
+            )
+        }
+    }
+}
+
+@Composable
+private fun OnboardingFeatureRow(
+    icon: String,
+    title: String,
+    subtitle: String,
+    accentColor: androidx.compose.ui.graphics.Color = SaarthiColors.Gold,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(SaarthiColors.NavyLight)
+            .border(1.dp, SaarthiColors.GlassBorder, RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(accentColor.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(icon, style = MaterialTheme.typography.titleLarge)
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = SaarthiColors.TextPrimary)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = SaarthiColors.TextMuted)
+        }
     }
 }
 

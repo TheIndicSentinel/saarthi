@@ -35,6 +35,12 @@ object SaarthiColors {
     val GlassBorder       = Color(0x1AFFFFFF)  // 10% white
     val GlassSurfaceHover = Color(0x1AFFFFFF)  // 10% white
 
+    // Indian cultural palette
+    val Saffron      = Color(0xFFFF6B2C)   // Kesari — fire, energy
+    val Marigold     = Color(0xFFFFB300)   // Genda — celebration
+    val TulsiGreen   = Color(0xFF2D7A4F)   // Tulsi — nature
+    val Terracotta   = Color(0xFFB5541A)   // Mitti — earth
+
     // Status
     val Error   = Color(0xFFFF5252)
     val Success = Color(0xFF69F0AE)

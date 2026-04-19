@@ -6,7 +6,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,16 +20,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -121,8 +129,6 @@ fun AssistantScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .statusBarsPadding()
-                .navigationBarsPadding()
                 .imePadding(),
         ) {
 
@@ -137,7 +143,10 @@ fun AssistantScreen(
 
             // ── Empty state ───────────────────────────────────────────────────
             if (messages.isEmpty()) {
-                EmptyState(modifier = Modifier.weight(1f))
+                EmptyState(
+                    modifier = Modifier.weight(1f),
+                    onSuggestionTap = { text -> viewModel.onInputChange(text) },
+                )
             } else {
                 // ── Messages ──────────────────────────────────────────────────
                 LazyColumn(
@@ -259,7 +268,7 @@ private fun ChatTopBar(
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text("Saarthi", style = MaterialTheme.typography.titleMedium, color = SaarthiColors.Gold)
-            Text("Gemma 2B · 100% Offline", style = MaterialTheme.typography.labelMedium, color = SaarthiColors.TextMuted)
+            Text("आपका सहायक · Offline", style = MaterialTheme.typography.labelMedium, color = SaarthiColors.TextMuted)
         }
 
         ModelStatusChip(
@@ -287,55 +296,146 @@ private fun ChatTopBar(
 }
 
 @Composable
-private fun EmptyState(modifier: Modifier = Modifier) {
+private fun EmptyState(
+    modifier: Modifier = Modifier,
+    onSuggestionTap: (String) -> Unit = {},
+) {
     Column(
-        modifier = modifier.fillMaxWidth().padding(32.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("🪔", style = MaterialTheme.typography.displayLarge)
+        // Sacred geometry + brand mark
+        Box(modifier = Modifier.size(160.dp), contentAlignment = Alignment.Center) {
+            MandalaCanvas(modifier = Modifier.fillMaxSize())
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "सारथी",
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 38.sp,
+                    ),
+                    color = SaarthiColors.Gold,
+                )
+                Text(
+                    "SAARTHI",
+                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 5.sp),
+                    color = SaarthiColors.TextMuted,
+                )
+            }
+        }
+
         Spacer(Modifier.height(20.dp))
+
         Text(
-            "Ask me anything",
-            style = MaterialTheme.typography.headlineMedium,
-            color = SaarthiColors.Gold,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Attach files · Use voice · Completely private\nPowered by Gemma 2B on-device",
+            "नमस्ते! मैं आपका सहायक हूँ।",
             style = MaterialTheme.typography.bodyMedium,
             color = SaarthiColors.TextMuted,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(32.dp))
-        // Suggestion chips
-        SuggestionChips()
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Ask me anything",
+            style = MaterialTheme.typography.headlineMedium,
+            color = SaarthiColors.TextPrimary,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // Feature badges
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FeatureBadge("🔒", "Private")
+            FeatureBadge("📴", "Offline")
+            FeatureBadge("🇮🇳", "Bharat")
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        SuggestionChips(onSuggestionTap = onSuggestionTap)
     }
 }
 
 @Composable
-private fun SuggestionChips() {
+private fun MandalaCanvas(modifier: Modifier = Modifier) {
+    val gold = SaarthiColors.Gold
+    Canvas(modifier = modifier) {
+        val cx = size.width / 2
+        val cy = size.height / 2
+        val r1 = size.width * 0.47f
+        val r2 = size.width * 0.34f
+        val r3 = size.width * 0.20f
+        val sw = 1.2f
+
+        drawCircle(color = gold.copy(0.12f), radius = r1, center = Offset(cx, cy), style = Stroke(sw))
+        drawCircle(color = gold.copy(0.28f), radius = r2, center = Offset(cx, cy), style = Stroke(sw * 1.5f))
+        drawCircle(color = gold.copy(0.45f), radius = r3, center = Offset(cx, cy), style = Stroke(sw * 2f))
+
+        repeat(8) { i ->
+            val angle = i * (PI / 4)
+            drawLine(
+                color = gold.copy(0.09f),
+                start = Offset((cx + r3 * cos(angle)).toFloat(), (cy + r3 * sin(angle)).toFloat()),
+                end = Offset((cx + r1 * cos(angle)).toFloat(), (cy + r1 * sin(angle)).toFloat()),
+                strokeWidth = sw,
+            )
+        }
+
+        repeat(8) { i ->
+            val angle = i * (PI / 4) + (PI / 8)
+            drawCircle(
+                color = gold.copy(0.55f),
+                radius = 3f,
+                center = Offset((cx + r2 * cos(angle)).toFloat(), (cy + r2 * sin(angle)).toFloat()),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FeatureBadge(icon: String, label: String) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(SaarthiColors.NavyLight)
+            .border(1.dp, SaarthiColors.GlassBorder, RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Text(icon, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(2.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = SaarthiColors.TextMuted)
+    }
+}
+
+@Composable
+private fun SuggestionChips(onSuggestionTap: (String) -> Unit = {}) {
     val suggestions = listOf(
-        "Explain quantum computing",
-        "Write a Python script",
-        "Summarize an attached PDF",
-        "Help me with my finances",
+        "Explain something simply",
+        "Help me write in Hindi",
+        "Summarize an attached file",
+        "Help plan my budget",
     )
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         suggestions.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { suggestion ->
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SaarthiColors.GlassSurface)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(SaarthiColors.NavyLight)
+                            .border(1.dp, SaarthiColors.GlassBorder, RoundedCornerShape(14.dp))
+                            .clickable { onSuggestionTap(suggestion) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                     ) {
                         Text(
                             text = suggestion,
                             style = MaterialTheme.typography.labelMedium,
                             color = SaarthiColors.TextSecondary,
+                            maxLines = 2,
                         )
                     }
                 }

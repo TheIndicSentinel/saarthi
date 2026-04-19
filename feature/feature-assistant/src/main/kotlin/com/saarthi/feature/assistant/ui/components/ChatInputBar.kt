@@ -88,14 +88,8 @@ fun ChatInputBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-            .background(SaarthiColors.NavyMid)
-            .border(
-                width = 1.dp,
-                color = borderColor,
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .background(SaarthiColors.DeepSpace)
+            .padding(horizontal = 12.dp, top = 8.dp, bottom = 12.dp),
     ) {
         // Pending attachments strip
         AnimatedVisibility(
@@ -106,7 +100,7 @@ fun ChatInputBar(
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.padding(bottom = 10.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
             ) {
                 pendingAttachments.forEach { file ->
                     AttachmentChip(file = file, onRemove = { onRemoveAttachment(file) })
@@ -114,19 +108,26 @@ fun ChatInputBar(
             }
         }
 
+        // Floating pill input row
         Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(28.dp))
+                .background(SaarthiColors.NavyLight)
+                .border(1.dp, borderColor, RoundedCornerShape(28.dp))
+                .padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             // Attach button
             IconButton(
                 onClick = onAttachClick,
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
                     .background(SaarthiColors.GlassSurface),
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Attach", tint = SaarthiColors.TextSecondary)
+                Icon(Icons.Default.Add, contentDescription = "Attach", tint = SaarthiColors.TextSecondary, modifier = Modifier.size(20.dp))
             }
 
             // Text input
@@ -163,17 +164,17 @@ fun ChatInputBar(
                 IconButton(
                     onClick = onStopStreaming,
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(SaarthiColors.Error.copy(alpha = 0.15f)),
                 ) {
-                    Icon(Icons.Default.Stop, contentDescription = "Stop", tint = SaarthiColors.Error)
+                    Icon(Icons.Default.Stop, contentDescription = "Stop", tint = SaarthiColors.Error, modifier = Modifier.size(20.dp))
                 }
             } else {
                 IconButton(
                     onClick = onVoiceClick,
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(
                             if (isListening) SaarthiColors.Error.copy(alpha = micAlpha * 0.3f)
@@ -184,25 +185,26 @@ fun ChatInputBar(
                         if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
                         contentDescription = "Voice",
                         tint = if (isListening) SaarthiColors.Error else SaarthiColors.TextSecondary,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }
 
-            // Send
+            // Send — prominent gold circle
             val canSend = (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isStreaming
             IconButton(
                 onClick = onSend,
                 enabled = canSend,
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
-                    .background(if (canSend) SaarthiColors.Gold else SaarthiColors.GoldDim),
+                    .background(if (canSend) SaarthiColors.Gold else SaarthiColors.GlassSurface),
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Send",
                     tint = if (canSend) SaarthiColors.DeepSpace else SaarthiColors.TextMuted,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }

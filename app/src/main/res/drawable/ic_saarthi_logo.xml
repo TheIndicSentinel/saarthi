@@ -3,7 +3,16 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Flame outer — Saffron/Kesari -->
     <path
-        android:fillColor="#FFC107"
-        android:pathData="M54,12L12,54L54,96L96,54L54,12Z" />
+        android:fillColor="#FF6B2C"
+        android:pathData="M54,16 C46,28 28,46 28,64 C28,80 39.6,92 54,92 C68.4,92 80,80 80,64 C80,46 62,28 54,16 Z"/>
+    <!-- Flame mid — Sacred Gold -->
+    <path
+        android:fillColor="#D4A843"
+        android:pathData="M54,30 C46,42 36,54 36,66 C36,76 43.8,84 54,84 C64.2,84 72,76 72,66 C72,54 62,42 54,30 Z"/>
+    <!-- Flame core — Warm Cream -->
+    <path
+        android:fillColor="#FFF3C4"
+        android:pathData="M54,52 C49,58 45,64 45,69 C45,74.3 49,79 54,79 C59,79 63,74.3 63,69 C63,64 59,58 54,52 Z"/>
 </vector>
