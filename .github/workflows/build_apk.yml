@@ -37,7 +37,17 @@ jobs:
           echo "ndk.dir=$ANDROID_HOME/ndk/27.0.12077973" >> local.properties
 
       - name: Build Debug APK
-        run: chmod +x gradlew && ./gradlew :app:assembleDebug --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace --no-configuration-cache 2>&1 | tee /tmp/build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/build.log
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
