@@ -40,7 +40,16 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleDebug --stacktrace --no-configuration-cache 2>&1 | tee /tmp/build.log
-          exit ${PIPESTATUS[0]}
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::group::Build failure summary (last 150 lines)"
+            tail -150 /tmp/build.log
+            echo "::endgroup::"
+            # Extract key error lines for annotation
+            ERROR_LINES=$(grep -E "^e:|error:|FAILED|Exception|KSP|Unresolved|> Could not" /tmp/build.log | tail -30)
+            echo "::error::Build failed. Key errors:%0A${ERROR_LINES}"
+          fi
+          exit $EXIT_CODE
 
       - name: Upload build log (always)
         if: always()
