@@ -42,6 +42,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val chatSessionDao: ChatSessionDao,
     private val fileContentExtractor: FileContentExtractor,
     private val languageManager: LanguageManager,
+    private val reminderManager: ReminderManager,
 ) : ChatRepository {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -155,9 +156,13 @@ class ChatRepositoryImpl @Inject constructor(
                 }
                 .onCompletion {
                     _tokensPerSecond.value = 0f
+
+                    // Parse markers out of the raw accumulated text
+                    val parsed = ResponseMarkerParser.parse(accumulated.toString())
+
                     val finalMsg = ChatMessage(
                         id = streamingId,
-                        content = accumulated.toString(),
+                        content = parsed.cleanText,
                         role = MessageRole.ASSISTANT,
                         isStreaming = false,
                         tokenCount = tokenCount,
@@ -166,6 +171,25 @@ class ChatRepositoryImpl @Inject constructor(
                         history.map { msg -> if (msg.id == streamingId) finalMsg else msg }
                     }
                     scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
+
+                    // Save extracted memories
+                    parsed.memories.forEach { marker ->
+                        scope.launch {
+                            memoryRepository.set(
+                                key = marker.key.trim().lowercase().replace(" ", "_"),
+                                value = marker.value.trim(),
+                                packSource = "USER",
+                            )
+                        }
+                    }
+
+                    // Schedule extracted reminders
+                    parsed.reminders.forEach { marker ->
+                        reminderManager.scheduleReminder(
+                            text = marker.text.trim(),
+                            timeStr = marker.time.trim(),
+                        )
+                    }
                 }
                 .collect {}
         }

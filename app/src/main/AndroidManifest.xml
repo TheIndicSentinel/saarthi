@@ -15,6 +15,13 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <!-- Model file access from Downloads on Android 11+ -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- Push notifications (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Exact alarms for reminders (Android 12+) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Keep alarms alive through Doze mode -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <application
         android:name=".SaarthiApp"
         android:allowBackup="false"
@@ -24,6 +31,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Saarthi.SplashScreen">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -33,5 +41,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Reminder alarm receiver -->
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.saarthi.app.REMINDER" />
+            </intent-filter>
+        </receiver>
+
     </application>
 </manifest>

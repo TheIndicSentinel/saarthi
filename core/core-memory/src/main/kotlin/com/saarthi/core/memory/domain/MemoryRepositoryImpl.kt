@@ -28,8 +28,29 @@ class MemoryRepositoryImpl @Inject constructor(
     override suspend fun buildContextSummary(): String {
         val entries = dao.getAll()
         if (entries.isEmpty()) return ""
-        return "What I know about you:\n" +
-                entries.joinToString("\n") { "- ${it.key}: ${it.value}" }
+
+        // Friendly label map — makes the context readable for the model
+        val labelMap = mapOf(
+            "user_name"       to "Name",
+            "user_age"        to "Age",
+            "user_city"       to "City/Location",
+            "user_profession" to "Profession",
+            "user_likes"      to "Likes",
+            "user_dislikes"   to "Dislikes",
+            "user_family"     to "Family",
+            "user_goals"      to "Goals",
+            "user_language"   to "Preferred language",
+            "user_health"     to "Health notes",
+            "user_budget"     to "Budget",
+        )
+
+        return buildString {
+            appendLine("Personal information about the user (use naturally in conversation):")
+            entries.forEach { e ->
+                val label = labelMap[e.key] ?: e.key.replace("_", " ").replaceFirstChar { it.uppercase() }
+                appendLine("- $label: ${e.value}")
+            }
+        }.trimEnd()
     }
 }
 

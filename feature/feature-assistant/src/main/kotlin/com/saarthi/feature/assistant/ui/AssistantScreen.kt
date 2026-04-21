@@ -153,6 +153,14 @@ fun AssistantScreen(
     }
     val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
 
+    // Request notification permission on Android 13+ so reminders can fire
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        val notifPermission = rememberPermissionState(Manifest.permission.POST_NOTIFICATIONS)
+        LaunchedEffect(Unit) {
+            if (!notifPermission.status.isGranted) notifPermission.launchPermissionRequest()
+        }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
