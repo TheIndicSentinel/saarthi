@@ -61,7 +61,7 @@ class AssistantViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "default")
 
     val currentLanguage: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SupportedLanguage.HINDI)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SupportedLanguage.HINDI)
 
     private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()

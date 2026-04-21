@@ -39,7 +39,11 @@ class MainViewModel @Inject constructor(
     val startState: StateFlow<AppStartState> = _startState.asStateFlow()
 
     val currentLanguage: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SupportedLanguage.HINDI)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SupportedLanguage.HINDI)
+
+    fun setLanguage(language: com.saarthi.core.i18n.SupportedLanguage) = viewModelScope.launch {
+        languageManager.setLanguage(language)
+    }
 
     init {
         viewModelScope.launch {

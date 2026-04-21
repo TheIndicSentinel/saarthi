@@ -17,9 +17,37 @@ enum class SupportedLanguage(
     PUNJABI(code = "pa", nativeName = "ਪੰਜਾਬੀ", englishName = "Punjabi", flag = "🇮🇳"),
     ODIA(code = "or", nativeName = "ଓଡ଼ିଆ", englishName = "Odia", flag = "🇮🇳");
 
+    /** Language-specific display name of the assistant. */
+    val appName: String get() = when (this) {
+        ENGLISH  -> "Companion"
+        HINDI    -> "सारथी"
+        TAMIL    -> "சாரதி"
+        TELUGU   -> "సారథి"
+        BENGALI  -> "সারথি"
+        MARATHI  -> "सारथी"
+        KANNADA  -> "ಸಾರಥಿ"
+        GUJARATI -> "સારથી"
+        PUNJABI  -> "ਸਾਰਥੀ"
+        ODIA     -> "ସାରଥୀ"
+    }
+
+    /** Short label shown inside the avatar circle (1-2 chars). */
+    val avatarLabel: String get() = when (this) {
+        ENGLISH  -> "Co"
+        HINDI    -> "सा"
+        TAMIL    -> "சா"
+        TELUGU   -> "సా"
+        BENGALI  -> "সা"
+        MARATHI  -> "सा"
+        KANNADA  -> "ಸಾ"
+        GUJARATI -> "સા"
+        PUNJABI  -> "ਸਾ"
+        ODIA     -> "ସା"
+    }
+
     /** Single character shown inside the Saarthi avatar circle in the chat header. */
     val firstLetter: String get() = when (this) {
-        ENGLISH  -> "S"
+        ENGLISH  -> "C"
         HINDI    -> "स"
         TAMIL    -> "ச"
         TELUGU   -> "స"
@@ -61,16 +89,16 @@ enum class SupportedLanguage(
 
     /** Chat top-bar subtitle when idle. */
     val chatOfflineSubtitle: String get() = when (this) {
-        ENGLISH  -> "Your assistant · Offline"
-        HINDI    -> "आपका सहायक · Offline"
-        TAMIL    -> "உங்கள் உதவியாளர் · Offline"
-        TELUGU   -> "మీ సహాయకుడు · Offline"
-        BENGALI  -> "আপনার সহায়ক · Offline"
-        MARATHI  -> "तुमचा सहाय्यक · Offline"
-        KANNADA  -> "ನಿಮ್ಮ ಸಹಾಯಕ · Offline"
-        GUJARATI -> "તમારો સહાયક · Offline"
-        PUNJABI  -> "ਤੁਹਾਡਾ ਸਹਾਇਕ · Offline"
-        ODIA     -> "ଆପଣଙ୍କ ସହାୟକ · Offline"
+        ENGLISH  -> "Your Companion · Offline"
+        HINDI    -> "आपका सारथी · Offline"
+        TAMIL    -> "உங்கள் சாரதி · Offline"
+        TELUGU   -> "మీ సారథి · Offline"
+        BENGALI  -> "আপনার সারথি · Offline"
+        MARATHI  -> "तुमचा सारथी · Offline"
+        KANNADA  -> "ನಿಮ್ಮ ಸಾರಥಿ · Offline"
+        GUJARATI -> "તમારો સારથી · Offline"
+        PUNJABI  -> "ਤੁਹਾਡਾ ਸਾਰਥੀ · Offline"
+        ODIA     -> "ଆପଣଙ୍କ ସାରଥୀ · Offline"
     }
 
     /** Chat top-bar subtitle while generating. */
@@ -129,19 +157,102 @@ enum class SupportedLanguage(
         ODIA     -> "ବାର୍ତ୍ତାଳାପ"
     }
 
-    /** Quick-suggestion chips shown on the empty chat screen. */
-    val suggestions: List<String> get() = when (this) {
-        ENGLISH  -> listOf("Explain something simply", "Help me write", "Summarize a file", "Plan my budget")
-        HINDI    -> listOf("सरल भाषा में समझाओ", "लिखने में मदद करो", "फ़ाइल सारांश दो", "बजट बनाने में मदद करो")
-        TAMIL    -> listOf("எளிமையாக விளக்கு", "எழுத உதவு", "கோப்பை சுருக்கு", "பட்ஜெட் திட்டமிடு")
-        TELUGU   -> listOf("సులభంగా వివరించు", "రాయడానికి సహాయపడు", "ఫైల్ సారాంశం ఇవ్వు", "బడ్జెట్ ప్లాన్ చేయి")
-        BENGALI  -> listOf("সহজভাবে বোঝাও", "লিখতে সাহায্য করো", "ফাইল সংক্ষেপ করো", "বাজেট পরিকল্পনা করো")
-        MARATHI  -> listOf("सोप्या भाषेत समजावा", "लिहायला मदत करा", "फाईल सारांश द्या", "बजेट बनवा")
-        KANNADA  -> listOf("ಸರಳವಾಗಿ ವಿವರಿಸಿ", "ಬರೆಯಲು ಸಹಾಯ ಮಾಡಿ", "ಫೈಲ್ ಸಾರಾಂಶ ನೀಡಿ", "ಬಜೆಟ್ ಯೋಜನೆ ಮಾಡಿ")
-        GUJARATI -> listOf("સરળ ભાષામાં સમજાવો", "લખવામાં મદદ કરો", "ફાઇલ સારાંશ આપો", "બજેટ બનાવો")
-        PUNJABI  -> listOf("ਸਰਲ ਭਾਸ਼ਾ ਵਿੱਚ ਸਮਝਾਓ", "ਲਿਖਣ ਵਿੱਚ ਮਦਦ ਕਰੋ", "ਫਾਈਲ ਸੰਖੇਪ ਦਿਓ", "ਬਜਟ ਬਣਾਓ")
-        ODIA     -> listOf("ସରଳ ଭାଷାରେ ବୁଝାନ୍ତୁ", "ଲେଖିବାରେ ସାହାଯ୍ୟ କରନ୍ତୁ", "ଫାଇଲ ସାରାଂଶ ଦିଅନ୍ତୁ", "ବଜେଟ ଯୋଜନା କରନ୍ତୁ")
+    /** "Change Language" menu item label. */
+    val changeLanguage: String get() = when (this) {
+        ENGLISH  -> "Change Language"
+        HINDI    -> "भाषा बदलें"
+        TAMIL    -> "மொழி மாற்று"
+        TELUGU   -> "భాష మార్చు"
+        BENGALI  -> "ভাষা পরিবর্তন"
+        MARATHI  -> "भाषा बदला"
+        KANNADA  -> "ಭಾಷೆ ಬದಲಿಸಿ"
+        GUJARATI -> "ભાષા બદલો"
+        PUNJABI  -> "ਭਾਸ਼ਾ ਬਦਲੋ"
+        ODIA     -> "ଭାଷା ପରିବର୍ତ୍ତନ"
     }
+
+    /** "Change AI Model" label. */
+    val changeModel: String get() = when (this) {
+        ENGLISH  -> "Change AI Model"
+        HINDI    -> "AI मॉडल बदलें"
+        TAMIL    -> "AI மாடல் மாற்று"
+        TELUGU   -> "AI మోడల్ మార్చు"
+        BENGALI  -> "AI মডেল পরিবর্তন"
+        MARATHI  -> "AI मॉडेल बदला"
+        KANNADA  -> "AI ಮಾದರಿ ಬದಲಿಸಿ"
+        GUJARATI -> "AI મૉડલ બદલો"
+        PUNJABI  -> "AI ਮਾਡਲ ਬਦਲੋ"
+        ODIA     -> "AI ମଡେଲ ବଦଳନ୍ତୁ"
+    }
+
+    /** Quick-suggestion chips shown on the empty chat screen — India-relevant. */
+    val suggestions: List<String> get() = when (this) {
+        ENGLISH  -> listOf(
+            "Explain a government scheme",
+            "Help me write a letter",
+            "Farming tips for this season",
+            "How to save money with UPI",
+        )
+        HINDI    -> listOf(
+            "PM योजना के बारे में बताओ",
+            "खेती की सलाह दो",
+            "पत्र लिखने में मदद करो",
+            "UPI से पैसे बचाने के तरीके",
+        )
+        TAMIL    -> listOf(
+            "அரசு திட்டம் பற்றி சொல்",
+            "விவசாய ஆலோசனை தா",
+            "கடிதம் எழுத உதவு",
+            "UPI பணம் சேமிப்பு",
+        )
+        TELUGU   -> listOf(
+            "ప్రభుత్వ పథకం గురించి చెప్పు",
+            "వ్యవసాయ సలహా ఇవ్వు",
+            "ఉత్తరం రాయడంలో సహాయపడు",
+            "UPI తో డబ్బు ఆదా",
+        )
+        BENGALI  -> listOf(
+            "সরকারি প্রকল্প সম্পর্কে বলো",
+            "কৃষি পরামর্শ দাও",
+            "চিঠি লিখতে সাহায্য করো",
+            "UPI দিয়ে সঞ্চয়",
+        )
+        MARATHI  -> listOf(
+            "सरकारी योजना सांगा",
+            "शेतीची माहिती द्या",
+            "पत्र लिहायला मदत करा",
+            "UPI ने पैसे वाचवा",
+        )
+        KANNADA  -> listOf(
+            "ಸರ್ಕಾರಿ ಯೋಜನೆ ಹೇಳಿ",
+            "ಕೃಷಿ ಸಲಹೆ ನೀಡಿ",
+            "ಪತ್ರ ಬರೆಯಲು ಸಹಾಯ ಮಾಡಿ",
+            "UPI ಉಳಿತಾಯ ಸಲಹೆ",
+        )
+        GUJARATI -> listOf(
+            "સરકારી યોજના સમજાવો",
+            "ખેતી અંગે સલાહ આપો",
+            "પત્ર લખવામાં મદદ કરો",
+            "UPI થી બચત",
+        )
+        PUNJABI  -> listOf(
+            "ਸਰਕਾਰੀ ਯੋਜਨਾ ਦੱਸੋ",
+            "ਖੇਤੀ ਸਲਾਹ ਦਿਓ",
+            "ਚਿੱਠੀ ਲਿਖਣ ਵਿੱਚ ਮਦਦ",
+            "UPI ਨਾਲ ਬੱਚਤ",
+        )
+        ODIA     -> listOf(
+            "ସରକାରୀ ଯୋଜନା କୁହନ୍ତୁ",
+            "କୃଷି ପରାମର୍ଶ ଦିଅନ୍ତୁ",
+            "ଚିଠି ଲେଖିବାରେ ସାହାଯ୍ୟ",
+            "UPI ସଞ୍ଚୟ ଉପାୟ",
+        )
+    }
+
+    /** Instruction appended to system prompt so the model responds in this language. */
+    val systemPromptInstruction: String get() =
+        "IMPORTANT: You must respond ONLY in $nativeName ($englishName). " +
+        "Never switch to Hindi or any other language unless the user explicitly asks you to."
 
     companion object {
         fun fromCode(code: String): SupportedLanguage =

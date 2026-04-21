@@ -1,6 +1,7 @@
 package com.saarthi.feature.assistant.data
 
 import com.saarthi.core.i18n.LanguageManager
+import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.memory.db.ChatSessionDao
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -47,7 +49,15 @@ class ChatRepositoryImpl @Inject constructor(
     private val _tokensPerSecond = MutableStateFlow(0f)
     private val _currentSessionId = MutableStateFlow("default")
 
+    // Kept in sync with LanguageManager so we can read it synchronously inside flow builders
+    @Volatile private var currentLanguage: SupportedLanguage = SupportedLanguage.HINDI
+
     init {
+        // Mirror language preference into local field
+        scope.launch {
+            languageManager.selectedLanguage.collect { lang -> currentLanguage = lang }
+        }
+        // Restore or create default session
         scope.launch {
             val sessions = chatSessionDao.getAll()
             val sessionId = if (sessions.isNotEmpty()) {
@@ -64,9 +74,7 @@ class ChatRepositoryImpl @Inject constructor(
             }
             _currentSessionId.value = sessionId
             val saved = conversationDao.getBySession(sessionId)
-            if (saved.isNotEmpty()) {
-                _history.value = saved.map { it.toChatMessage() }
-            }
+            if (saved.isNotEmpty()) _history.value = saved.map { it.toChatMessage() }
         }
     }
 
@@ -99,30 +107,23 @@ class ChatRepositoryImpl @Inject constructor(
             if (remaining.isNotEmpty()) {
                 switchSession(remaining.first().id)
             } else {
-                val id = createSession()
-                switchSession(id)
+                createSession()
             }
         }
     }
 
     override fun streamResponse(userMessage: String, attachments: List<AttachedFile>): Flow<String> {
         val sessionId = _currentSessionId.value
-        val userMsg = ChatMessage(
-            content = userMessage,
-            role = MessageRole.USER,
-            attachments = attachments,
-        )
+        val userMsg = ChatMessage(content = userMessage, role = MessageRole.USER, attachments = attachments)
         _history.update { it + userMsg }
         scope.launch { conversationDao.insert(userMsg.toEntity(sessionId)) }
 
         // Update session title from first user message
         scope.launch {
             val session = chatSessionDao.getAll().find { it.id == sessionId }
-            if (session != null && session.title == "New Chat") {
-                val title = userMessage.take(40).trimEnd()
+            if (session != null) {
+                val title = if (session.title == "New Chat") userMessage.take(40).trimEnd() else session.title
                 chatSessionDao.updateTitleAndTimestamp(sessionId, title, System.currentTimeMillis())
-            } else if (session != null) {
-                chatSessionDao.updateTitleAndTimestamp(sessionId, session.title, System.currentTimeMillis())
             }
         }
 
@@ -130,40 +131,44 @@ class ChatRepositoryImpl @Inject constructor(
         val placeholder = ChatMessage(id = streamingId, content = "", role = MessageRole.ASSISTANT, isStreaming = true)
         _history.update { it + placeholder }
 
-        val accumulated = StringBuilder()
-        val startTime = System.currentTimeMillis()
-        var tokenCount = 0
+        // Build prompt and run inference fully on IO — avoids blocking the main thread
+        return flow {
+            val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
+            val startTime = System.currentTimeMillis()
+            var tokenCount = 0
+            val accumulated = StringBuilder()
 
-        val prompt = buildPrompt(userMessage, attachments)
-
-        return inferenceEngine.generateStream(prompt, PackType.BASE)
-            .onEach { token ->
-                accumulated.append(token)
-                tokenCount++
-                val elapsed = (System.currentTimeMillis() - startTime) / 1000f
-                if (elapsed > 0) _tokensPerSecond.value = tokenCount / elapsed
-                _history.update { history ->
-                    history.map { msg ->
-                        if (msg.id == streamingId)
-                            msg.copy(content = accumulated.toString(), tokenCount = tokenCount)
-                        else msg
+            inferenceEngine.generateStream(prompt, PackType.BASE)
+                .onEach { token ->
+                    accumulated.append(token)
+                    tokenCount++
+                    val elapsed = (System.currentTimeMillis() - startTime) / 1000f
+                    if (elapsed > 0) _tokensPerSecond.value = tokenCount / elapsed
+                    _history.update { history ->
+                        history.map { msg ->
+                            if (msg.id == streamingId)
+                                msg.copy(content = accumulated.toString(), tokenCount = tokenCount)
+                            else msg
+                        }
                     }
+                    emit(token)
                 }
-            }
-            .onCompletion {
-                _tokensPerSecond.value = 0f
-                val finalMsg = ChatMessage(
-                    id = streamingId,
-                    content = accumulated.toString(),
-                    role = MessageRole.ASSISTANT,
-                    isStreaming = false,
-                    tokenCount = tokenCount,
-                )
-                _history.update { history ->
-                    history.map { msg -> if (msg.id == streamingId) finalMsg else msg }
+                .onCompletion {
+                    _tokensPerSecond.value = 0f
+                    val finalMsg = ChatMessage(
+                        id = streamingId,
+                        content = accumulated.toString(),
+                        role = MessageRole.ASSISTANT,
+                        isStreaming = false,
+                        tokenCount = tokenCount,
+                    )
+                    _history.update { history ->
+                        history.map { msg -> if (msg.id == streamingId) finalMsg else msg }
+                    }
+                    scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
                 }
-                scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
-            }
+                .collect {}
+        }
     }
 
     override suspend fun clearHistory() {
@@ -179,12 +184,10 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     // ── Prompt builder ────────────────────────────────────────────────────────
+    // Always called on IO thread from streamResponse.
 
-    private fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
-        val memoryContext = runCatching {
-            kotlinx.coroutines.runBlocking { memoryRepository.buildContextSummary() }
-        }.getOrDefault("")
-
+    private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
+        val memoryContext = runCatching { memoryRepository.buildContextSummary() }.getOrDefault("")
         val systemInstructions = buildSystemPrompt(memoryContext)
 
         val history = _history.value.let { all ->
@@ -235,16 +238,20 @@ class ChatRepositoryImpl @Inject constructor(
 
     private fun buildSystemPrompt(memoryContext: String): String = buildString {
         append(PackType.BASE.systemPrompt)
+        appendLine()
+        appendLine()
+        // Critical: tell the model exactly which language to respond in
+        append(currentLanguage.systemPromptInstruction)
         if (memoryContext.isNotEmpty()) {
-            appendLine(); appendLine()
+            appendLine()
+            appendLine()
             append(memoryContext)
         }
     }.trimEnd()
 
     private fun trimPrompt(prompt: String): String {
         val turns = prompt.split("<start_of_turn>").filter { it.isNotBlank() }
-        val trimmed = turns.takeLast(5)
-        return trimmed.joinToString("<start_of_turn>", prefix = "<start_of_turn>")
+        return turns.takeLast(5).joinToString("<start_of_turn>", prefix = "<start_of_turn>")
     }
 
     // ── Mapping ───────────────────────────────────────────────────────────────

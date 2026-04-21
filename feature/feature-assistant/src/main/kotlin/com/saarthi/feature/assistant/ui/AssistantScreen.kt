@@ -438,10 +438,10 @@ private fun ChatTopBar(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                language.firstLetter,
+                language.avatarLabel,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
+                    fontSize = 15.sp,
                 ),
                 color = SaarthiColors.Gold,
             )
@@ -451,7 +451,7 @@ private fun ChatTopBar(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Saarthi",
+                language.appName,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = SaarthiColors.Gold,
             )

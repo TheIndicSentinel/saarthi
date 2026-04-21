@@ -142,6 +142,8 @@ fun SaarthiNavHost(
                 onChangeModel = {
                     navController.navigate("${Route.Onboarding.path}?modelChange=true")
                 },
+                onChangeLanguage = { lang -> mainViewModel.setLanguage(lang) },
+                currentLanguage = currentLanguage,
                 greeting = currentLanguage.greeting,
                 exploreSubtitle = currentLanguage.exploreSubtitle,
             )
