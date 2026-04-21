@@ -19,8 +19,9 @@
 -keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
 -dontwarn kotlinx.coroutines.**
 
-# llama.cpp JNI bridge — keep so R8 doesn't strip the native method declarations
+# llama.cpp JNI bridge — all members must survive R8 (native methods + TokenCallback)
 -keep class com.saarthi.core.inference.engine.LlamaCppBridge { *; }
+-keep interface com.saarthi.core.inference.engine.LlamaCppBridge$TokenCallback { *; }
 
 # DataStore / protobuf
 -keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite { <fields>; }

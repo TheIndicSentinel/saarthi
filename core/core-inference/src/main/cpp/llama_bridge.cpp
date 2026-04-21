@@ -23,36 +23,38 @@ static void llama_log_cb(ggml_log_level level, const char* text, void*) {
 
 extern "C" {
 
-// ─── Model init ──────────────────────────────────────────────────────────────
+// ─── Model init via file descriptor (Android recommended approach) ────────────
+// Using /proc/self/fd/<fd> avoids scoped-storage path restrictions on Android 10+
 
 JNIEXPORT jlong JNICALL
-Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInit(
-    JNIEnv* env, jobject,
-    jstring modelPathJ, jint nCtx, jint nThreads, jint nGpuLayers) {
+Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
+    JNIEnv*, jobject,
+    jint fd, jint nCtx, jint nThreads, jint nGpuLayers) {
 
     llama_log_set(llama_log_cb, nullptr);
     llama_backend_init();
 
-    const char* modelPath = env->GetStringUTFChars(modelPathJ, nullptr);
+    // Resolve the fd to a path the C runtime can open
+    char modelPath[64];
+    snprintf(modelPath, sizeof(modelPath), "/proc/self/fd/%d", fd);
 
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = nGpuLayers;
 
     llama_model* model = llama_model_load_from_file(modelPath, mparams);
-    env->ReleaseStringUTFChars(modelPathJ, modelPath);
-
     if (!model) {
-        LOGE("Failed to load model");
+        LOGE("Failed to load model from fd=%d  path=%s", fd, modelPath);
         return -1L;
     }
 
     llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx      = nCtx;
-    cparams.n_threads  = nThreads;
+    cparams.n_ctx             = (uint32_t)nCtx;
+    cparams.n_threads         = nThreads;
+    cparams.n_threads_batch   = nThreads;
 
     llama_context* ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
-        LOGE("Failed to create context");
+        LOGE("Failed to create context  nCtx=%d  nThreads=%d", nCtx, nThreads);
         llama_model_free(model);
         return -1L;
     }
@@ -60,7 +62,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInit(
     const llama_vocab* vocab = llama_model_get_vocab(model);
 
     auto* lctx = new LlamaContext{model, ctx, vocab, nullptr};
-    LOGI("Model loaded, handle=%p  nCtx=%d  nThreads=%d  nGpuLayers=%d",
+    LOGI("Model loaded  handle=%p  nCtx=%d  nThreads=%d  nGpuLayers=%d",
          (void*)lctx, nCtx, nThreads, nGpuLayers);
     return reinterpret_cast<jlong>(lctx);
 }

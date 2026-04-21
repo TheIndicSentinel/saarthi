@@ -24,8 +24,11 @@ private val Context.onboardingDataStore: DataStore<Preferences>
 private val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
 private val SAVED_MODEL_PATH    = stringPreferencesKey("saved_model_path")
 
-private val MODEL_EXTENSIONS = setOf(".bin", ".task", ".tflite")
-private val MODEL_NAME_HINTS  = listOf("gemma", "llm", "model", "ai", "inference")
+private val MODEL_EXTENSIONS = setOf(".gguf", ".bin", ".task", ".tflite")
+private val MODEL_NAME_HINTS  = listOf(
+    "gemma", "llm", "model", "ai", "inference",
+    "llama", "qwen", "phi", "mistral", "falcon", "stablelm",
+)
 
 class OnboardingRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -45,15 +48,12 @@ class OnboardingRepositoryImpl @Inject constructor(
     }
 
     override fun getModelPath(): String? {
-        // Return the last user-confirmed path if the file still exists
         val saved = runCatching {
             kotlinx.coroutines.runBlocking {
                 context.onboardingDataStore.data.first()[SAVED_MODEL_PATH]
             }
         }.getOrNull()
         if (saved != null && File(saved).exists()) return saved
-
-        // Auto-scan as fallback
         return scanForModels().firstOrNull()
     }
 
@@ -61,17 +61,15 @@ class OnboardingRepositoryImpl @Inject constructor(
         val candidates = mutableListOf<File>()
 
         val searchRoots = listOfNotNull(
+            context.getExternalFilesDir("models"),
+            context.getExternalFilesDir(null),
             File(context.filesDir, "models"),
             context.filesDir,
-            context.getExternalFilesDir(null),
-            context.getExternalFilesDir("models"),
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            Environment.getExternalStorageDirectory(),
         )
 
         for (root in searchRoots) {
             if (root == null || !root.canRead()) continue
-            // Shallow + one level deep (avoids scanning entire storage tree)
             root.listFiles()?.forEach { f ->
                 if (f.isFile && isModelFile(f)) candidates += f
                 else if (f.isDirectory) {
@@ -82,13 +80,15 @@ class OnboardingRepositoryImpl @Inject constructor(
             }
         }
 
-        return candidates.distinctBy { it.absolutePath }.map { it.absolutePath }
+        return candidates.sortedByDescending { it.length() }
+            .distinctBy { it.absolutePath }
+            .map { it.absolutePath }
     }
 
     private fun isModelFile(f: File): Boolean {
         val name = f.name.lowercase()
         val hasExt = MODEL_EXTENSIONS.any { name.endsWith(it) }
         val hasHint = MODEL_NAME_HINTS.any { name.contains(it) }
-        return hasExt && (hasHint || f.length() > 100_000_000L) // >100 MB is likely a model
+        return hasExt && (hasHint || f.length() > 100_000_000L)
     }
 }

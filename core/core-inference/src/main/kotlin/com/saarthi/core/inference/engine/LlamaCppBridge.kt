@@ -12,29 +12,26 @@ object LlamaCppBridge {
         }.isSuccess
     }
 
-    /** Returns a native context handle (pointer as Long), or -1 on failure. */
-    external fun nativeInit(
-        modelPath: String,
+    /**
+     * Init via file descriptor — avoids Android scoped-storage path restrictions.
+     * The fd must remain open for the lifetime of the returned handle.
+     * Returns a native context handle (pointer as Long), or -1 on failure.
+     */
+    external fun nativeInitFd(
+        fd: Int,
         nCtx: Int,
         nThreads: Int,
         nGpuLayers: Int,
     ): Long
 
-    /**
-     * Load a GGUF LoRA adapter on top of the current model.
-     * Can be called at any time after [nativeInit] to swap the active adapter.
-     * Returns true on success.
-     */
     external fun nativeLoadLoraAdapter(
         contextHandle: Long,
         adapterPath: String,
         scale: Float,
     ): Boolean
 
-    /** Remove the active LoRA adapter, reverting to base-model behaviour. */
     external fun nativeClearLoraAdapter(contextHandle: Long)
 
-    /** Synchronous generation — blocks until full response is ready. */
     external fun nativeGenerate(
         contextHandle: Long,
         prompt: String,
@@ -43,10 +40,6 @@ object LlamaCppBridge {
         topK: Int,
     ): String
 
-    /**
-     * Streaming generation — calls [tokenCallback] for each token as it is produced.
-     * Returns when done or when the callback returns false.
-     */
     external fun nativeGenerateStream(
         contextHandle: Long,
         prompt: String,
@@ -59,7 +52,6 @@ object LlamaCppBridge {
     external fun nativeRelease(contextHandle: Long)
 
     interface TokenCallback {
-        /** Called per token. Return false to abort generation. */
         fun onToken(token: String): Boolean
     }
 }
