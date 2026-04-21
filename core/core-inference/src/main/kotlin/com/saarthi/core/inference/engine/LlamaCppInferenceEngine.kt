@@ -95,7 +95,7 @@ class LlamaCppInferenceEngine @Inject constructor(
             )
             val nativeErrSoFar = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
             DebugLogger.log("INIT", "nativeInitFd result=$handle  nativeErr=${nativeErrSoFar.take(200)}")
-            if (handle >= 0) {
+            if (handle != -1L) {
                 usedCtx = ctx
                 break
             }
@@ -173,7 +173,7 @@ class LlamaCppInferenceEngine @Inject constructor(
     }
 
     override fun release() {
-        if (contextHandle >= 0) {
+        if (contextHandle != -1L) {
             LlamaCppBridge.nativeRelease(contextHandle)
             contextHandle = -1L
         }

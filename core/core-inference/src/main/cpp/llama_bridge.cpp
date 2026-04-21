@@ -92,7 +92,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeLoadLoraAdapter(
     JNIEnv* env, jobject,
     jlong handle, jstring adapterPathJ, jfloat scale) {
 
-    if (handle < 0) return JNI_FALSE;
+    if (handle == (jlong)-1) return JNI_FALSE;
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
 
     // Free previously loaded adapter
@@ -121,7 +121,7 @@ JNIEXPORT void JNICALL
 Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeClearLoraAdapter(
     JNIEnv*, jobject, jlong handle) {
 
-    if (handle < 0) return;
+    if (handle == (jlong)-1) return;
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
 
     if (lctx->adapter) {
@@ -243,7 +243,7 @@ JNIEXPORT void JNICALL
 Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeRelease(
     JNIEnv*, jobject, jlong handle) {
 
-    if (handle < 0) return;
+    if (handle == (jlong)-1) return;
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
 
     if (lctx->adapter) llama_adapter_lora_free(lctx->adapter);
