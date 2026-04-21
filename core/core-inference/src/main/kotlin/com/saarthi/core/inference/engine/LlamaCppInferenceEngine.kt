@@ -27,12 +27,22 @@ class LlamaCppInferenceEngine @Inject constructor() : InferenceEngine {
             "Run: git submodule update --init --recursive in core/core-inference/src/main/cpp"
         )
         Timber.d("Initialising llama.cpp: ${config.modelPath}  gpuLayers=${config.nGpuLayers}")
-        val handle = LlamaCppBridge.nativeInit(
+        var handle = LlamaCppBridge.nativeInit(
             modelPath  = config.modelPath,
             nCtx       = config.nCtx,
             nThreads   = config.nThreads,
             nGpuLayers = config.nGpuLayers,
         )
+        // GPU init failed — retry CPU-only before giving up
+        if (handle < 0 && config.nGpuLayers > 0) {
+            Timber.w("GPU load failed (nGpuLayers=${config.nGpuLayers}), retrying CPU-only")
+            handle = LlamaCppBridge.nativeInit(
+                modelPath  = config.modelPath,
+                nCtx       = config.nCtx,
+                nThreads   = config.nThreads,
+                nGpuLayers = 0,
+            )
+        }
         if (handle < 0) throw RuntimeException(
             "llama.cpp failed to load model at ${config.modelPath}. " +
             "Make sure the file is a valid GGUF and the device has enough free RAM."

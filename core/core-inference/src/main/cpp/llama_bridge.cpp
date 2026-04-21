@@ -50,7 +50,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInit(
     cparams.n_ctx      = nCtx;
     cparams.n_threads  = nThreads;
 
-    llama_context* ctx = llama_new_context_with_model(model, cparams);
+    llama_context* ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
         LOGE("Failed to create context");
         llama_model_free(model);
