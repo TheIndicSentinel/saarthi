@@ -102,7 +102,7 @@ class LlamaCppInferenceEngine @Inject constructor(
             Timber.w("Init failed at nCtx=$ctx, trying smaller context…")
         }
 
-        if (handle < 0) {
+        if (handle == -1L) {
             val nativeError = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
             val ramAfter = availableRamMb()
             DebugLogger.log("INIT", "FAIL: all ctx sizes exhausted  nativeError=${nativeError.take(300)}  ramAfter=${ramAfter}MB")
