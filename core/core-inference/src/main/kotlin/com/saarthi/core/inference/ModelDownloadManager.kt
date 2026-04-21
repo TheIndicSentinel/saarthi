@@ -21,7 +21,7 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// GGUF magic: bytes 'G','G','U','F' = 0x47,0x47,0x55,0x46
+// GGUF magic: 'G','G','U','F' = 0x47,0x47,0x55,0x46
 private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
 
 @Singleton
@@ -39,8 +39,11 @@ class ModelDownloadManager @Inject constructor(
     fun localPathFor(model: ModelEntry): File = File(modelsDir(),    model.fileName)
     fun localPathFor(lora: LoraEntry):   File = File(adaptersDir(), lora.fileName)
 
-    fun isDownloaded(model: ModelEntry): Boolean = isFileComplete(localPathFor(model))
-    fun isDownloaded(lora: LoraEntry):   Boolean = isFileComplete(localPathFor(lora))
+    fun isDownloaded(model: ModelEntry): Boolean =
+        isFileComplete(localPathFor(model), model.fileSizeBytes)
+
+    fun isDownloaded(lora: LoraEntry): Boolean =
+        isFileComplete(localPathFor(lora), lora.fileSizeBytes)
 
     fun download(model: ModelEntry): Flow<DownloadProgress> =
         downloadFile(model.downloadUrl, localPathFor(model), model.displayName, model.fileSizeBytes)
@@ -51,15 +54,46 @@ class ModelDownloadManager @Inject constructor(
     fun cancelDownload(model: ModelEntry) = cancelByUrl(model.downloadUrl, localPathFor(model))
     fun cancelDownload(lora: LoraEntry)   = cancelByUrl(lora.downloadUrl,  localPathFor(lora))
 
+    /** Returns the set of file paths currently being actively downloaded. */
+    fun activeDownloadingPaths(): Set<String> {
+        val query = DownloadManager.Query().setFilterByStatus(
+            DownloadManager.STATUS_PENDING or
+            DownloadManager.STATUS_RUNNING or
+            DownloadManager.STATUS_PAUSED
+        )
+        val paths = mutableSetOf<String>()
+        dm.query(query)?.use { cursor ->
+            val uriCol = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+            while (cursor.moveToNext()) {
+                if (uriCol >= 0) {
+                    val localUri = cursor.getString(uriCol) ?: continue
+                    Uri.parse(localUri).path?.let { paths += it }
+                }
+            }
+        }
+        return paths
+    }
+
     // ── File validation ───────────────────────────────────────────────────────
 
     /**
-     * Returns true only if the file exists, is non-empty, and (for GGUF) has
-     * valid magic bytes. A partial/interrupted download is rejected and deleted
-     * so the next download() call starts fresh.
+     * A file is complete when:
+     * 1. It exists and is at least 1 MB
+     * 2. Its size is within 2% of [expectedBytes] (guards against partial downloads)
+     * 3. For GGUF files: the first 4 bytes are the GGUF magic
+     *
+     * Passing expectedBytes = 0 skips the size check (used for scanned files
+     * whose expected size is unknown).
      */
-    fun isFileComplete(file: File): Boolean {
-        if (!file.exists() || file.length() < 1_000_000L) return false
+    fun isFileComplete(file: File, expectedBytes: Long = 0L): Boolean {
+        if (!file.exists()) return false
+        val size = file.length()
+        if (size < 1_000_000L) return false
+        // Size check: must be >= 98% of expected (tolerates minor server-side differences)
+        if (expectedBytes > 0L && size < (expectedBytes * 0.98).toLong()) {
+            Timber.w("File ${file.name} is incomplete: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB")
+            return false
+        }
         if (!file.name.endsWith(".gguf", ignoreCase = true)) return true
         return runCatching {
             file.inputStream().use { s ->
@@ -77,14 +111,13 @@ class ModelDownloadManager @Inject constructor(
         title: String,
         expectedBytes: Long,
     ): Flow<DownloadProgress> = callbackFlow {
-        if (isFileComplete(destFile)) {
+        if (isFileComplete(destFile, expectedBytes)) {
             trySend(DownloadProgress.Completed(destFile.absolutePath))
             close()
             return@callbackFlow
         }
-        // Delete partial/corrupted file so DownloadManager starts fresh
         if (destFile.exists()) {
-            Timber.w("Deleting incomplete/corrupt file: ${destFile.name} (${destFile.length()} bytes)")
+            Timber.w("Deleting incomplete file: ${destFile.name} (${destFile.length() / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected)")
             destFile.delete()
         }
 
@@ -99,7 +132,7 @@ class ModelDownloadManager @Inject constructor(
         val downloadId = dm.enqueue(request)
         Timber.d("Download enqueued id=$downloadId  url=$url  expected=${expectedBytes / 1_048_576}MB")
 
-        registerCompletionReceiver(downloadId, destFile)
+        registerCompletionReceiver(downloadId, destFile, expectedBytes)
 
         while (true) {
             val progress = queryProgress(downloadId) ?: break
@@ -108,24 +141,28 @@ class ModelDownloadManager @Inject constructor(
         }
 
         awaitClose {
-            if (!isFileComplete(destFile)) dm.remove(downloadId)
+            if (!isFileComplete(destFile, expectedBytes)) dm.remove(downloadId)
         }
     }
 
     private fun ProducerScope<DownloadProgress>.registerCompletionReceiver(
         downloadId: Long,
         destFile: File,
+        expectedBytes: Long,
     ) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id != downloadId) return
                 if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL) {
-                    if (isFileComplete(destFile)) {
+                    if (isFileComplete(destFile, expectedBytes)) {
                         trySend(DownloadProgress.Completed(destFile.absolutePath))
                     } else {
                         destFile.delete()
-                        trySend(DownloadProgress.Failed("Download appears incomplete — file is invalid. Please try again."))
+                        trySend(DownloadProgress.Failed(
+                            "Download incomplete — file is ${destFile.length() / 1_048_576}MB " +
+                            "but expected ${expectedBytes / 1_048_576}MB. Please try again."
+                        ))
                     }
                 } else {
                     trySend(DownloadProgress.Failed(queryFailureReason(downloadId)))

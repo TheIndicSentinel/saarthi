@@ -91,7 +91,7 @@ class OnboardingViewModel @Inject constructor(
         if (isModelChangeMode) {
             viewModelScope.launch {
                 _uiState.update { it.copy(isScanning = true) }
-                val found = withContext(Dispatchers.IO) { repository.scanForModels() }
+                val found = withContext(Dispatchers.IO) { scanExcludingActive() }
                 _uiState.update { it.copy(isScanning = false, modelCandidates = found) }
             }
         }
@@ -107,7 +107,7 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isScanning = true) }
         viewModelScope.launch {
             languageManager.setLanguage(_uiState.value.selectedLanguage)
-            val found = withContext(Dispatchers.IO) { repository.scanForModels() }
+            val found = withContext(Dispatchers.IO) { scanExcludingActive() }
             _uiState.update { it.copy(isScanning = false, modelCandidates = found) }
         }
     }
@@ -168,7 +168,7 @@ class OnboardingViewModel @Inject constructor(
     fun rescanAfterPermissionGrant() {
         _uiState.update { it.copy(isScanning = true, needsAllFilesPermission = false) }
         viewModelScope.launch {
-            val found = withContext(Dispatchers.IO) { repository.scanForModels() }
+            val found = withContext(Dispatchers.IO) { scanExcludingActive() }
             _uiState.update { it.copy(isScanning = false, modelCandidates = found) }
         }
     }
@@ -217,6 +217,13 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update {
             it.copy(error = "Could not open file ($openError). Try using 'Enter path manually' below, or grant All Files Access and rescan.")
         }
+    }
+
+    // ── Scan (excludes actively downloading files) ────────────────────────────
+
+    private fun scanExcludingActive(): List<String> {
+        val activePaths = downloadManager.activeDownloadingPaths()
+        return repository.scanForModels().filter { it !in activePaths }
     }
 
     // ── Catalog download ──────────────────────────────────────────────────────
