@@ -219,11 +219,19 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    // ── Scan (excludes actively downloading files) ────────────────────────────
+    // ── Scan (excludes actively downloading + incomplete files) ──────────────
 
     private fun scanExcludingActive(): List<String> {
         val activePaths = downloadManager.activeDownloadingPaths()
-        return repository.scanForModels().filter { it !in activePaths }
+        return repository.scanForModels().filter { path ->
+            if (path in activePaths) return@filter false
+            val file = File(path)
+            val catalogEntry = modelCatalog.allModels.find {
+                downloadManager.localPathFor(it).absolutePath == path
+            }
+            val expectedBytes = catalogEntry?.fileSizeBytes ?: 0L
+            downloadManager.isFileComplete(file, expectedBytes)
+        }
     }
 
     // ── Catalog download ──────────────────────────────────────────────────────
@@ -260,14 +268,20 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun selectDownloadedModel(model: ModelEntry) {
-        val path = downloadManager.localPathFor(model).absolutePath
-        if (File(path).exists()) {
+        val file = downloadManager.localPathFor(model)
+        if (downloadManager.isFileComplete(file, model.fileSizeBytes)) {
             _uiState.update {
                 it.copy(
-                    selectedModelPath = path,
-                    modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
+                    selectedModelPath = file.absolutePath,
+                    modelCandidates = (listOf(file.absolutePath) + it.modelCandidates).distinct(),
                     error = null,
                 )
+            }
+        } else {
+            val sizeMb = if (file.exists()) file.length() / 1_048_576 else 0
+            val expectedMb = model.fileSizeBytes / 1_048_576
+            _uiState.update {
+                it.copy(error = "Download incomplete: ${sizeMb}MB of ${expectedMb}MB. Please wait or re-download.")
             }
         }
     }
@@ -285,6 +299,22 @@ class OnboardingViewModel @Inject constructor(
         val profile = _uiState.value.deviceProfile
         val catalogEntry = modelCatalog.allModels.find {
             downloadManager.localPathFor(it).absolutePath == path || it.fileName == path.substringAfterLast("/")
+        }
+
+        // Reject partial downloads before attempting native init
+        if (!path.startsWith("/proc/self/fd/")) {
+            val file = File(path)
+            val expectedBytes = catalogEntry?.fileSizeBytes ?: 0L
+            if (!downloadManager.isFileComplete(file, expectedBytes)) {
+                val sizeMb = if (file.exists()) file.length() / 1_048_576 else 0
+                val expectedMb = expectedBytes / 1_048_576
+                val hint = if (expectedMb > 0)
+                    "The file is ${sizeMb}MB but ${expectedMb}MB is expected — it is still downloading or corrupted."
+                else
+                    "The file appears incomplete or corrupted."
+                _uiState.update { it.copy(error = "Cannot load model: $hint\n\nWait for the download to finish, or delete and re-download.") }
+                return
+            }
         }
 
         val config = InferenceConfig(
