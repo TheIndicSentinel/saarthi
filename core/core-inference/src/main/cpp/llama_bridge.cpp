@@ -144,7 +144,7 @@ static std::string doGenerate(
     }
     tokens.resize(nTokens);
 
-    llama_kv_cache_clear(ctx);
+    llama_memory_clear(llama_get_memory(ctx), false);
 
     // Prefill
     llama_batch batch = llama_batch_get_one(tokens.data(), (int)tokens.size());
