@@ -11,11 +11,31 @@ android {
         versionCode = 1
         versionName = "1.0.0"
     }
-    // libc++_shared.so must be packaged when using c++_shared STL with JNI
+
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+            val keyAlias = System.getenv("KEY_ALIAS")
+            val keyPassword = System.getenv("KEY_PASSWORD")
+            if (keystorePath != null && keystorePassword != null && keyAlias != null && keyPassword != null) {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = false
-            keepDebugSymbols += "**/*.so"
         }
     }
 }
