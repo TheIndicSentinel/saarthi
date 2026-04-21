@@ -27,6 +27,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.saarthi.app.AppStartState
 import com.saarthi.app.MainViewModel
+import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.ui.theme.SaarthiColors
 import com.saarthi.feature.assistant.ui.AssistantScreen
 import com.saarthi.feature.onboarding.ui.OnboardingScreen
@@ -48,6 +49,7 @@ fun SaarthiNavHost(
     mainViewModel: MainViewModel = hiltViewModel(),
 ) {
     val startState by mainViewModel.startState.collectAsStateWithLifecycle()
+    val currentLanguage by mainViewModel.currentLanguage.collectAsStateWithLifecycle()
 
     // Show deep-space loading screen while reading prefs / initialising engine
     if (startState == AppStartState.Loading) {
@@ -140,6 +142,8 @@ fun SaarthiNavHost(
                 onChangeModel = {
                     navController.navigate("${Route.Onboarding.path}?modelChange=true")
                 },
+                greeting = currentLanguage.greeting,
+                exploreSubtitle = currentLanguage.exploreSubtitle,
             )
         }
 

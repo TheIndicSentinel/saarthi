@@ -38,6 +38,8 @@ import com.saarthi.core.ui.theme.saarthiColors
 fun HomeScreen(
     onNavigate: (Route) -> Unit,
     onChangeModel: () -> Unit = {},
+    greeting: String = "नमस्ते 🪔",
+    exploreSubtitle: String = "What would you like to explore?",
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -57,12 +59,12 @@ fun HomeScreen(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "नमस्ते 🪔",
+                    greeting,
                     style = MaterialTheme.typography.headlineMedium,
                     color = SaarthiColors.Gold,
                 )
                 Text(
-                    "What would you like to explore?",
+                    exploreSubtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = SaarthiColors.TextSecondary,
                 )

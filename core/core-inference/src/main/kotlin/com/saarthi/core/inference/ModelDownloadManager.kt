@@ -106,6 +106,21 @@ class ModelDownloadManager @Inject constructor(
 
     // ── Core implementation ───────────────────────────────────────────────────
 
+    /** Returns the DownloadManager download ID if [url] is currently pending/running/paused. */
+    private fun findActiveDownloadId(url: String): Long? {
+        val query = DownloadManager.Query().setFilterByStatus(
+            DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or DownloadManager.STATUS_PAUSED
+        )
+        dm.query(query)?.use { cursor ->
+            val idCol  = cursor.getColumnIndex(DownloadManager.COLUMN_ID)
+            val uriCol = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
+            while (cursor.moveToNext()) {
+                if (cursor.getString(uriCol) == url) return cursor.getLong(idCol)
+            }
+        }
+        return null
+    }
+
     private fun downloadFile(
         url: String,
         destFile: File,
@@ -117,21 +132,30 @@ class ModelDownloadManager @Inject constructor(
             close()
             return@callbackFlow
         }
-        if (destFile.exists()) {
-            Timber.w("Deleting incomplete file: ${destFile.name} (${destFile.length() / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected)")
-            destFile.delete()
-        }
 
-        val request = DownloadManager.Request(Uri.parse(url)).apply {
-            setTitle(title)
-            setDescription("Downloading AI model…")
-            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            setDestinationUri(Uri.fromFile(destFile))
-            setAllowedOverMetered(true)
-            setAllowedOverRoaming(false)
+        // If DownloadManager already has this download in progress (e.g. app was closed and reopened),
+        // reattach to it rather than starting a new download.
+        val existingId = findActiveDownloadId(url)
+        val downloadId: Long
+        if (existingId != null) {
+            downloadId = existingId
+            Timber.d("Reattaching to existing download id=$downloadId  url=$url")
+        } else {
+            if (destFile.exists()) {
+                Timber.w("Deleting incomplete file: ${destFile.name} (${destFile.length() / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected)")
+                destFile.delete()
+            }
+            val request = DownloadManager.Request(Uri.parse(url)).apply {
+                setTitle(title)
+                setDescription("Downloading AI model…")
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationUri(Uri.fromFile(destFile))
+                setAllowedOverMetered(true)
+                setAllowedOverRoaming(false)
+            }
+            downloadId = dm.enqueue(request)
+            Timber.d("Download enqueued id=$downloadId  url=$url  expected=${expectedBytes / 1_048_576}MB")
         }
-        val downloadId = dm.enqueue(request)
-        Timber.d("Download enqueued id=$downloadId  url=$url  expected=${expectedBytes / 1_048_576}MB")
 
         registerCompletionReceiver(downloadId, destFile, expectedBytes)
 

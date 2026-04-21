@@ -66,6 +66,7 @@ fun ChatInputBar(
     isStreaming: Boolean,
     isListening: Boolean,
     modifier: Modifier = Modifier,
+    hint: String = "Message Saarthi…",
 ) {
     val micPulse = rememberInfiniteTransition(label = "mic_pulse")
     val micAlpha by micPulse.animateFloat(
@@ -151,7 +152,7 @@ fun ChatInputBar(
                 modifier = Modifier.weight(1f),
                 placeholder = {
                     Text(
-                        if (isListening) "Listening…" else "Message Saarthi…",
+                        if (isListening) "Listening…" else hint,
                         color = SaarthiColors.TextMuted,
                         style = MaterialTheme.typography.bodyMedium,
                     )

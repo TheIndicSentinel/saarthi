@@ -16,12 +16,12 @@ import com.saarthi.feature.assistant.data.FileContentExtractor
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.ChatRepository
+import com.saarthi.feature.assistant.domain.ChatSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -39,6 +39,7 @@ data class AssistantUiState(
     val error: String? = null,
     val showAttachmentSheet: Boolean = false,
     val showClearDialog: Boolean = false,
+    val showDrawer: Boolean = false,
 )
 
 @HiltViewModel
@@ -53,13 +54,21 @@ class AssistantViewModel @Inject constructor(
     val messages: StateFlow<List<ChatMessage>> = chatRepository.getHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val sessions: StateFlow<List<ChatSession>> = chatRepository.getSessions()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val currentSessionId: StateFlow<String> = chatRepository.getCurrentSessionId()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "default")
+
+    val currentLanguage: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SupportedLanguage.HINDI)
+
     private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
 
     private var speechRecognizer: SpeechRecognizer? = null
 
     init {
-        // Mirror tokens/sec into UI state
         chatRepository.getTokensPerSecond()
             .onEach { tps -> _uiState.update { it.copy(tokensPerSecond = tps) } }
             .launchIn(viewModelScope)
@@ -144,6 +153,24 @@ class AssistantViewModel @Inject constructor(
     }
 
     fun deleteMessage(id: String) = viewModelScope.launch { chatRepository.deleteMessage(id) }
+
+    // ── Session management ────────────────────────────────────────────────────
+    fun openDrawer() = _uiState.update { it.copy(showDrawer = true) }
+    fun closeDrawer() = _uiState.update { it.copy(showDrawer = false) }
+
+    fun newChat() = viewModelScope.launch {
+        chatRepository.createSession()
+        _uiState.update { it.copy(showDrawer = false) }
+    }
+
+    fun switchSession(sessionId: String) = viewModelScope.launch {
+        chatRepository.switchSession(sessionId)
+        _uiState.update { it.copy(showDrawer = false) }
+    }
+
+    fun deleteSession(sessionId: String) = viewModelScope.launch {
+        chatRepository.deleteSession(sessionId)
+    }
 
     override fun onCleared() {
         speechRecognizer?.destroy()

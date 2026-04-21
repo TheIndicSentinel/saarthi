@@ -10,4 +10,5 @@ data class ConversationEntity(
     val role: String,           // "USER" | "ASSISTANT"
     val timestamp: Long,
     val tokenCount: Int = 0,
+    val sessionId: String = "default",
 )

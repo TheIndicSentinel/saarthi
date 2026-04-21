@@ -41,7 +41,7 @@ import javax.inject.Inject
 
 data class OnboardingUiState(
     val step: OnboardingStep = OnboardingStep.WELCOME,
-    val selectedLanguage: SupportedLanguage = SupportedLanguage.ENGLISH,
+    val selectedLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     // Device & catalog
     val deviceProfile: DeviceProfile? = null,
     val catalogModels: List<ModelEntry> = emptyList(),
@@ -90,6 +90,7 @@ class OnboardingViewModel @Inject constructor(
         val catalog = modelCatalog.recommendedFor(profile)
         _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
         refreshDownloadedModels()
+        restoreActiveDownloads()
 
         if (isModelChangeMode) {
             viewModelScope.launch {
@@ -287,6 +288,17 @@ class OnboardingViewModel @Inject constructor(
                 modelCandidates = it.modelCandidates.filterNot { p -> p.endsWith(model.fileName) },
                 error = null,
             )
+        }
+    }
+
+    private fun restoreActiveDownloads() {
+        val activePaths = downloadManager.activeDownloadingPaths()
+        if (activePaths.isEmpty()) return
+        modelCatalog.allModels.forEach { model ->
+            val modelPath = downloadManager.localPathFor(model).absolutePath
+            if (activePaths.any { it == modelPath }) {
+                downloadModel(model)
+            }
         }
     }
 

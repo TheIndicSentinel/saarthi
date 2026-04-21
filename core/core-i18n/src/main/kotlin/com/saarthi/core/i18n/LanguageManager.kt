@@ -25,7 +25,7 @@ class LanguageManager @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     val selectedLanguage: Flow<SupportedLanguage> = context.dataStore.data
-        .map { prefs -> SupportedLanguage.fromCode(prefs[LANGUAGE_KEY] ?: SupportedLanguage.ENGLISH.code) }
+        .map { prefs -> SupportedLanguage.fromCode(prefs[LANGUAGE_KEY] ?: SupportedLanguage.HINDI.code) }
 
     suspend fun setLanguage(language: SupportedLanguage) {
         context.dataStore.edit { it[LANGUAGE_KEY] = language.code }

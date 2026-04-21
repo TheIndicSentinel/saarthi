@@ -2,6 +2,8 @@ package com.saarthi.app
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saarthi.core.i18n.LanguageManager
+import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.PackAdapterManager
 import com.saarthi.core.inference.engine.InferenceEngine
@@ -9,9 +11,11 @@ import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -28,10 +32,14 @@ class MainViewModel @Inject constructor(
     private val inferenceEngine: InferenceEngine,
     private val modelCatalog: ModelCatalog,
     private val packAdapterManager: PackAdapterManager,
+    private val languageManager: LanguageManager,
 ) : ViewModel() {
 
     private val _startState = MutableStateFlow<AppStartState>(AppStartState.Loading)
     val startState: StateFlow<AppStartState> = _startState.asStateFlow()
+
+    val currentLanguage: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SupportedLanguage.HINDI)
 
     init {
         viewModelScope.launch {

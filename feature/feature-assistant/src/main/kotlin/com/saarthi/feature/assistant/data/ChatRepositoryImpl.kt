@@ -3,12 +3,15 @@ package com.saarthi.feature.assistant.data
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.memory.db.ChatSessionDao
+import com.saarthi.core.memory.db.ChatSessionEntity
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.ConversationEntity
 import com.saarthi.core.memory.domain.MemoryRepository
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.ChatRepository
+import com.saarthi.feature.assistant.domain.ChatSession
 import com.saarthi.feature.assistant.domain.MessageRole
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -25,14 +29,15 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val MAX_HISTORY_TURNS = 6     // 3 user + 3 assistant = 6 messages in context
-private const val MAX_PROMPT_CHARS = 3_200  // ~800 tokens — leaves room for response
+private const val MAX_HISTORY_TURNS = 6
+private const val MAX_PROMPT_CHARS = 3_200
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
     private val inferenceEngine: InferenceEngine,
     private val memoryRepository: MemoryRepository,
     private val conversationDao: ConversationDao,
+    private val chatSessionDao: ChatSessionDao,
     private val fileContentExtractor: FileContentExtractor,
     private val languageManager: LanguageManager,
 ) : ChatRepository {
@@ -40,11 +45,25 @@ class ChatRepositoryImpl @Inject constructor(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val _history = MutableStateFlow<List<ChatMessage>>(emptyList())
     private val _tokensPerSecond = MutableStateFlow(0f)
+    private val _currentSessionId = MutableStateFlow("default")
 
     init {
-        // Restore persisted conversation on startup
         scope.launch {
-            val saved = conversationDao.getAll()
+            val sessions = chatSessionDao.getAll()
+            val sessionId = if (sessions.isNotEmpty()) {
+                sessions.first().id
+            } else {
+                val defaultSession = ChatSessionEntity(
+                    id = "default",
+                    title = "New Chat",
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                )
+                chatSessionDao.insert(defaultSession)
+                "default"
+            }
+            _currentSessionId.value = sessionId
+            val saved = conversationDao.getBySession(sessionId)
             if (saved.isNotEmpty()) {
                 _history.value = saved.map { it.toChatMessage() }
             }
@@ -53,23 +72,62 @@ class ChatRepositoryImpl @Inject constructor(
 
     override fun getHistory(): Flow<List<ChatMessage>> = _history.asStateFlow()
     override fun getTokensPerSecond(): Flow<Float> = _tokensPerSecond.asStateFlow()
+    override fun getCurrentSessionId(): Flow<String> = _currentSessionId.asStateFlow()
+
+    override fun getSessions(): Flow<List<ChatSession>> =
+        chatSessionDao.getAllFlow().map { entities -> entities.map { it.toSession() } }
+
+    override suspend fun createSession(): String {
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        chatSessionDao.insert(ChatSessionEntity(id = id, title = "New Chat", createdAt = now, updatedAt = now))
+        switchSession(id)
+        return id
+    }
+
+    override suspend fun switchSession(sessionId: String) {
+        _currentSessionId.value = sessionId
+        val messages = conversationDao.getBySession(sessionId)
+        _history.value = messages.map { it.toChatMessage() }
+    }
+
+    override suspend fun deleteSession(sessionId: String) {
+        conversationDao.deleteBySession(sessionId)
+        chatSessionDao.deleteById(sessionId)
+        if (_currentSessionId.value == sessionId) {
+            val remaining = chatSessionDao.getAll()
+            if (remaining.isNotEmpty()) {
+                switchSession(remaining.first().id)
+            } else {
+                val id = createSession()
+                switchSession(id)
+            }
+        }
+    }
 
     override fun streamResponse(userMessage: String, attachments: List<AttachedFile>): Flow<String> {
+        val sessionId = _currentSessionId.value
         val userMsg = ChatMessage(
             content = userMessage,
             role = MessageRole.USER,
             attachments = attachments,
         )
         _history.update { it + userMsg }
-        scope.launch { conversationDao.insert(userMsg.toEntity()) }
+        scope.launch { conversationDao.insert(userMsg.toEntity(sessionId)) }
+
+        // Update session title from first user message
+        scope.launch {
+            val session = chatSessionDao.getAll().find { it.id == sessionId }
+            if (session != null && session.title == "New Chat") {
+                val title = userMessage.take(40).trimEnd()
+                chatSessionDao.updateTitleAndTimestamp(sessionId, title, System.currentTimeMillis())
+            } else if (session != null) {
+                chatSessionDao.updateTitleAndTimestamp(sessionId, session.title, System.currentTimeMillis())
+            }
+        }
 
         val streamingId = UUID.randomUUID().toString()
-        val placeholder = ChatMessage(
-            id = streamingId,
-            content = "",
-            role = MessageRole.ASSISTANT,
-            isStreaming = true,
-        )
+        val placeholder = ChatMessage(id = streamingId, content = "", role = MessageRole.ASSISTANT, isStreaming = true)
         _history.update { it + placeholder }
 
         val accumulated = StringBuilder()
@@ -104,13 +162,15 @@ class ChatRepositoryImpl @Inject constructor(
                 _history.update { history ->
                     history.map { msg -> if (msg.id == streamingId) finalMsg else msg }
                 }
-                scope.launch { conversationDao.insert(finalMsg.toEntity()) }
+                scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
             }
     }
 
     override suspend fun clearHistory() {
+        val sessionId = _currentSessionId.value
         _history.update { emptyList() }
-        conversationDao.deleteAll()
+        conversationDao.deleteBySession(sessionId)
+        chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
     }
 
     override suspend fun deleteMessage(id: String) {
@@ -119,45 +179,35 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     // ── Prompt builder ────────────────────────────────────────────────────────
-    // Uses Gemma 2 IT chat template for best instruction-following quality.
-    // System context is injected into the first user turn (Gemma 2 has no system turn).
+
     private fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
-        // Retrieve persisted memory facts (runs on IO coroutine context via suspend in scope)
-        // We use runBlocking-style here because buildPrompt is called inside a Flow builder
         val memoryContext = runCatching {
             kotlinx.coroutines.runBlocking { memoryRepository.buildContextSummary() }
         }.getOrDefault("")
 
         val systemInstructions = buildSystemPrompt(memoryContext)
 
-        // Recent history — exclude current user msg and streaming placeholder (last 2)
         val history = _history.value.let { all ->
-            val withoutCurrent = all.dropLast(2)  // drop: current user msg + streaming placeholder
+            val withoutCurrent = all.dropLast(2)
             withoutCurrent
                 .filter { it.content.isNotBlank() && !it.isStreaming }
                 .takeLast(MAX_HISTORY_TURNS)
         }
 
-        // File context using keyword-aware RAG chunking
         val fileContext = if (attachments.isNotEmpty())
             fileContentExtractor.buildRagContext(attachments, userMessage)
         else ""
 
         return buildString {
-            // First turn: embed system instructions in user turn (Gemma 2 format)
             if (history.isEmpty()) {
                 append("<start_of_turn>user\n")
                 append(systemInstructions)
                 append("\n\n")
-                if (fileContext.isNotEmpty()) {
-                    append(fileContext)
-                    append("\n")
-                }
+                if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
                 append("<end_of_turn>\n")
                 append("<start_of_turn>model\n")
             } else {
-                // Inject system into first historical user turn
                 val firstUser = history.first()
                 append("<start_of_turn>user\n")
                 append(systemInstructions)
@@ -165,7 +215,6 @@ class ChatRepositoryImpl @Inject constructor(
                 append(firstUser.content)
                 append("<end_of_turn>\n")
 
-                // Replay remaining history
                 history.drop(1).forEach { msg ->
                     val role = if (msg.role == MessageRole.USER) "user" else "model"
                     append("<start_of_turn>$role\n")
@@ -173,18 +222,13 @@ class ChatRepositoryImpl @Inject constructor(
                     append("<end_of_turn>\n")
                 }
 
-                // Current user message
                 append("<start_of_turn>user\n")
-                if (fileContext.isNotEmpty()) {
-                    append(fileContext)
-                    append("\n")
-                }
+                if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
                 append("<end_of_turn>\n")
                 append("<start_of_turn>model\n")
             }
         }.let { prompt ->
-            // Hard safety guard: if prompt exceeds budget, trim oldest history turns
             if (prompt.length > MAX_PROMPT_CHARS * 2) trimPrompt(prompt) else prompt
         }
     }
@@ -192,26 +236,26 @@ class ChatRepositoryImpl @Inject constructor(
     private fun buildSystemPrompt(memoryContext: String): String = buildString {
         append(PackType.BASE.systemPrompt)
         if (memoryContext.isNotEmpty()) {
-            appendLine()
-            appendLine()
+            appendLine(); appendLine()
             append(memoryContext)
         }
     }.trimEnd()
 
     private fun trimPrompt(prompt: String): String {
-        // Remove oldest turns (between the first and second <start_of_turn>) to fit budget
         val turns = prompt.split("<start_of_turn>").filter { it.isNotBlank() }
         val trimmed = turns.takeLast(5)
         return trimmed.joinToString("<start_of_turn>", prefix = "<start_of_turn>")
     }
 
-    // ── Entity mapping ────────────────────────────────────────────────────────
-    private fun ChatMessage.toEntity() = ConversationEntity(
+    // ── Mapping ───────────────────────────────────────────────────────────────
+
+    private fun ChatMessage.toEntity(sessionId: String) = ConversationEntity(
         id = id,
         content = content,
         role = role.name,
         timestamp = timestamp,
         tokenCount = tokenCount,
+        sessionId = sessionId,
     )
 
     private fun ConversationEntity.toChatMessage() = ChatMessage(
@@ -221,5 +265,12 @@ class ChatRepositoryImpl @Inject constructor(
         timestamp = timestamp,
         tokenCount = tokenCount,
         isStreaming = false,
+    )
+
+    private fun ChatSessionEntity.toSession() = ChatSession(
+        id = id,
+        title = title,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
     )
 }
