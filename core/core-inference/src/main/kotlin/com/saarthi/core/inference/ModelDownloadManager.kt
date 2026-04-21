@@ -10,6 +10,7 @@ import android.os.Build
 import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.LoraEntry
 import com.saarthi.core.inference.model.ModelEntry
+import com.saarthi.core.inference.DebugLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.channels.awaitClose
@@ -155,12 +156,15 @@ class ModelDownloadManager @Inject constructor(
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id != downloadId) return
                 if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL) {
-                    if (isFileComplete(destFile, expectedBytes)) {
+                    val actualSize = destFile.length()
+                    val complete = isFileComplete(destFile, expectedBytes)
+                    DebugLogger.log("DOWNLOAD", "STATUS_SUCCESSFUL  file=${destFile.name}  actualSize=${actualSize/1_048_576}MB  expectedSize=${expectedBytes/1_048_576}MB  isComplete=$complete  path=${destFile.absolutePath}")
+                    if (complete) {
                         trySend(DownloadProgress.Completed(destFile.absolutePath))
                     } else {
                         destFile.delete()
                         trySend(DownloadProgress.Failed(
-                            "Download incomplete — file is ${destFile.length() / 1_048_576}MB " +
+                            "Download incomplete — file is ${actualSize / 1_048_576}MB " +
                             "but expected ${expectedBytes / 1_048_576}MB. Please try again."
                         ))
                     }

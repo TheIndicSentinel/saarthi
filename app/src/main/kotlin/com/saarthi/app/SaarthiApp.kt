@@ -1,6 +1,7 @@
 package com.saarthi.app
 
 import android.app.Application
+import com.saarthi.core.inference.DebugLogger
 import dagger.hilt.android.HiltAndroidApp
 import timber.log.Timber
 
@@ -8,8 +9,7 @@ import timber.log.Timber
 class SaarthiApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        if (BuildConfig.DEBUG) {
-            Timber.plant(Timber.DebugTree())
-        }
+        Timber.plant(Timber.DebugTree())
+        DebugLogger.init(this)
     }
 }

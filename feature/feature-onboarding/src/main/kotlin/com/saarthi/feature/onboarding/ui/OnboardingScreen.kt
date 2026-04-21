@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -61,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.model.DownloadProgress
@@ -113,6 +115,7 @@ fun OnboardingScreen(
                     deviceProfile = state.deviceProfile,
                     catalogModels = state.catalogModels,
                     downloadProgress = state.downloadProgress,
+                    downloadedModelIds = state.downloadedModelIds,
                     localCandidates = state.modelCandidates,
                     selectedPath = state.selectedModelPath,
                     isScanning = state.isScanning,
@@ -120,6 +123,7 @@ fun OnboardingScreen(
                     onDownload = viewModel::downloadModel,
                     onCancelDownload = viewModel::cancelDownload,
                     onSelectDownloaded = viewModel::selectDownloadedModel,
+                    onDeleteDownloaded = viewModel::deleteModel,
                     onSelectLocal = viewModel::selectModel,
                     onBrowse = { filePicker.launch(arrayOf("*/*")) },
                     onConfirm = viewModel::confirmModelAndInit,
@@ -260,6 +264,7 @@ private fun ModelPickStep(
     deviceProfile: DeviceProfile?,
     catalogModels: List<ModelEntry>,
     downloadProgress: Map<String, DownloadProgress>,
+    downloadedModelIds: Set<String>,
     localCandidates: List<String>,
     selectedPath: String?,
     isScanning: Boolean,
@@ -267,6 +272,7 @@ private fun ModelPickStep(
     onDownload: (ModelEntry) -> Unit,
     onCancelDownload: (ModelEntry) -> Unit,
     onSelectDownloaded: (ModelEntry) -> Unit,
+    onDeleteDownloaded: (ModelEntry) -> Unit,
     onSelectLocal: (String) -> Unit,
     onBrowse: () -> Unit,
     onConfirm: () -> Unit,
@@ -334,9 +340,11 @@ private fun ModelPickStep(
                 model = model,
                 progress = progress,
                 isSelected = selectedPath?.endsWith(model.fileName) == true,
+                isDownloaded = model.id in downloadedModelIds,
                 onDownload = { onDownload(model) },
                 onCancel = { onCancelDownload(model) },
                 onSelect = { onSelectDownloaded(model) },
+                onDelete = { onDeleteDownloaded(model) },
             )
             Spacer(Modifier.height(10.dp))
         }
@@ -423,6 +431,13 @@ private fun ModelPickStep(
         if (error != null) {
             Spacer(Modifier.height(10.dp))
             Text(error, color = SaarthiColors.Error, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Debug log: ${DebugLogger.path()}",
+                style = MaterialTheme.typography.labelSmall,
+                color = SaarthiColors.TextMuted,
+                textAlign = TextAlign.Center,
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -440,9 +455,11 @@ private fun CatalogModelCard(
     model: ModelEntry,
     progress: DownloadProgress?,
     isSelected: Boolean,
+    isDownloaded: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
     onSelect: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val accentColor = when {
         isSelected -> SaarthiColors.Gold
@@ -498,21 +515,36 @@ private fun CatalogModelCard(
             }
 
             // Right action area
+            val fileReady = isDownloaded || progress is DownloadProgress.Completed
             when {
-                isSelected -> {
-                    Icon(Icons.Default.CheckCircle, null, tint = SaarthiColors.Gold, modifier = Modifier.size(28.dp))
-                }
-                progress is DownloadProgress.Completed -> {
-                    TextButton(onClick = onSelect) {
-                        Text("Use", color = SaarthiColors.Gold, style = MaterialTheme.typography.labelMedium)
-                    }
-                }
                 progress is DownloadProgress.Downloading -> {
+                    // Actively downloading — only show cancel
                     IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Default.Close, "Cancel", tint = SaarthiColors.Error, modifier = Modifier.size(20.dp))
                     }
                 }
+                isSelected && fileReady -> {
+                    // Selected + on disk — checkmark + delete
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, null, tint = SaarthiColors.Gold, modifier = Modifier.size(24.dp))
+                        IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
+                            Icon(Icons.Default.Delete, "Delete model", tint = SaarthiColors.Error.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+                fileReady -> {
+                    // Downloaded but not selected — Use + delete
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = onSelect, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                            Text("Use", color = SaarthiColors.Gold, style = MaterialTheme.typography.labelMedium)
+                        }
+                        IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
+                            Icon(Icons.Default.Delete, "Delete model", tint = SaarthiColors.TextMuted, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
                 else -> {
+                    // Not downloaded — show download button
                     IconButton(
                         onClick = onDownload,
                         modifier = Modifier
@@ -589,7 +621,14 @@ private fun ModelInitStep(isLoading: Boolean, error: String?) {
             )
         }
         if (error != null) {
-            Text("Error: $error", color = SaarthiColors.Error, style = MaterialTheme.typography.bodyMedium)
+            Text("Error: $error", color = SaarthiColors.Error, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Debug log saved to:\n${DebugLogger.path()}",
+                style = MaterialTheme.typography.labelSmall,
+                color = SaarthiColors.TextMuted,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }

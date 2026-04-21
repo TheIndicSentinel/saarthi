@@ -22,6 +22,9 @@ static void llama_log_cb(ggml_log_level level, const char* text, void*) {
     if (level >= GGML_LOG_LEVEL_ERROR) {
         LOGE("%s", text);
         g_last_error += text;
+    } else if (level >= GGML_LOG_LEVEL_WARN) {
+        LOGI("[WARN] %s", text);
+        g_last_error += text;  // capture warnings too — often contain the real failure reason
     } else {
         LOGI("%s", text);
     }

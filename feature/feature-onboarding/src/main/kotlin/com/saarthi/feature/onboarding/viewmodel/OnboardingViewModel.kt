@@ -25,6 +25,7 @@ import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.DebugLogger
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +55,7 @@ data class OnboardingUiState(
     val error: String? = null,
     val manualPathInput: String = "",
     val needsAllFilesPermission: Boolean = false,
+    val downloadedModelIds: Set<String> = emptySet(),
 )
 
 enum class OnboardingStep { WELCOME, LANGUAGE_SELECT, MODEL_PICK, MODEL_INIT, CHAT_TEST, DONE }
@@ -87,6 +89,7 @@ class OnboardingViewModel @Inject constructor(
         val profile = deviceProfiler.profile()
         val catalog = modelCatalog.recommendedFor(profile)
         _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
+        refreshDownloadedModels()
 
         if (isModelChangeMode) {
             viewModelScope.launch {
@@ -246,12 +249,14 @@ class OnboardingViewModel @Inject constructor(
                 }
                 if (progress is DownloadProgress.Completed) {
                     val path = progress.filePath
+                    DebugLogger.log("DOWNLOAD", "Completed  path=$path  size=${File(path).length() / 1_048_576}MB")
                     _uiState.update {
                         it.copy(
                             selectedModelPath = path,
                             modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
                         )
                     }
+                    refreshDownloadedModels()
                 }
             }
         }
@@ -265,6 +270,32 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update {
             it.copy(downloadProgress = it.downloadProgress - model.id)
         }
+        refreshDownloadedModels()
+    }
+
+    fun deleteModel(model: ModelEntry) {
+        downloadJobs[model.id]?.cancel()
+        downloadJobs.remove(model.id)
+        val file = downloadManager.localPathFor(model)
+        DebugLogger.log("DELETE", "Deleting ${file.absolutePath}  exists=${file.exists()}  size=${file.length() / 1_048_576}MB")
+        file.delete()
+        _uiState.update {
+            it.copy(
+                downloadProgress = it.downloadProgress - model.id,
+                downloadedModelIds = it.downloadedModelIds - model.id,
+                selectedModelPath = if (it.selectedModelPath?.endsWith(model.fileName) == true) null else it.selectedModelPath,
+                modelCandidates = it.modelCandidates.filterNot { p -> p.endsWith(model.fileName) },
+                error = null,
+            )
+        }
+    }
+
+    private fun refreshDownloadedModels() {
+        val ids = modelCatalog.allModels
+            .filter { downloadManager.isDownloaded(it) }
+            .map { it.id }
+            .toSet()
+        _uiState.update { it.copy(downloadedModelIds = ids) }
     }
 
     fun selectDownloadedModel(model: ModelEntry) {
