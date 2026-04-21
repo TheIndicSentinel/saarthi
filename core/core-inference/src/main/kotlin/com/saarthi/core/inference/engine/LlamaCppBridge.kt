@@ -51,6 +51,9 @@ object LlamaCppBridge {
 
     external fun nativeRelease(contextHandle: Long)
 
+    /** Returns the last error string logged by llama.cpp (empty if none). */
+    external fun nativeGetLastError(): String
+
     interface TokenCallback {
         fun onToken(token: String): Boolean
     }

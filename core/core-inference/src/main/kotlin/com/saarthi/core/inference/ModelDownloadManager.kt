@@ -21,13 +21,14 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// GGUF magic: bytes 'G','G','U','F' = 0x47,0x47,0x55,0x46
+private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
+
 @Singleton
 class ModelDownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-
-    // ── Directory helpers ─────────────────────────────────────────────────────
 
     fun modelsDir(): File =
         File(context.getExternalFilesDir(null), "models").also { it.mkdirs() }
@@ -35,24 +36,38 @@ class ModelDownloadManager @Inject constructor(
     fun adaptersDir(): File =
         File(context.getExternalFilesDir(null), "adapters").also { it.mkdirs() }
 
-    fun localPathFor(model: ModelEntry): File = File(modelsDir(),   model.fileName)
+    fun localPathFor(model: ModelEntry): File = File(modelsDir(),    model.fileName)
     fun localPathFor(lora: LoraEntry):   File = File(adaptersDir(), lora.fileName)
 
-    fun isDownloaded(model: ModelEntry): Boolean = localPathFor(model).exists()
-    fun isDownloaded(lora: LoraEntry):   Boolean = localPathFor(lora).exists()
-
-    // ── Download flows ────────────────────────────────────────────────────────
+    fun isDownloaded(model: ModelEntry): Boolean = isFileComplete(localPathFor(model))
+    fun isDownloaded(lora: LoraEntry):   Boolean = isFileComplete(localPathFor(lora))
 
     fun download(model: ModelEntry): Flow<DownloadProgress> =
-        downloadFile(model.downloadUrl, localPathFor(model), model.displayName)
+        downloadFile(model.downloadUrl, localPathFor(model), model.displayName, model.fileSizeBytes)
 
     fun downloadLora(lora: LoraEntry): Flow<DownloadProgress> =
-        downloadFile(lora.downloadUrl, localPathFor(lora), lora.displayName)
-
-    // ── Cancel ────────────────────────────────────────────────────────────────
+        downloadFile(lora.downloadUrl, localPathFor(lora), lora.displayName, lora.fileSizeBytes)
 
     fun cancelDownload(model: ModelEntry) = cancelByUrl(model.downloadUrl, localPathFor(model))
     fun cancelDownload(lora: LoraEntry)   = cancelByUrl(lora.downloadUrl,  localPathFor(lora))
+
+    // ── File validation ───────────────────────────────────────────────────────
+
+    /**
+     * Returns true only if the file exists, is non-empty, and (for GGUF) has
+     * valid magic bytes. A partial/interrupted download is rejected and deleted
+     * so the next download() call starts fresh.
+     */
+    fun isFileComplete(file: File): Boolean {
+        if (!file.exists() || file.length() < 1_000_000L) return false
+        if (!file.name.endsWith(".gguf", ignoreCase = true)) return true
+        return runCatching {
+            file.inputStream().use { s ->
+                val magic = ByteArray(4)
+                s.read(magic) == 4 && magic.contentEquals(GGUF_MAGIC)
+            }
+        }.getOrElse { false }
+    }
 
     // ── Core implementation ───────────────────────────────────────────────────
 
@@ -60,11 +75,17 @@ class ModelDownloadManager @Inject constructor(
         url: String,
         destFile: File,
         title: String,
+        expectedBytes: Long,
     ): Flow<DownloadProgress> = callbackFlow {
-        if (destFile.exists()) {
+        if (isFileComplete(destFile)) {
             trySend(DownloadProgress.Completed(destFile.absolutePath))
             close()
             return@callbackFlow
+        }
+        // Delete partial/corrupted file so DownloadManager starts fresh
+        if (destFile.exists()) {
+            Timber.w("Deleting incomplete/corrupt file: ${destFile.name} (${destFile.length()} bytes)")
+            destFile.delete()
         }
 
         val request = DownloadManager.Request(Uri.parse(url)).apply {
@@ -76,11 +97,10 @@ class ModelDownloadManager @Inject constructor(
             setAllowedOverRoaming(false)
         }
         val downloadId = dm.enqueue(request)
-        Timber.d("Download enqueued id=$downloadId  url=$url")
+        Timber.d("Download enqueued id=$downloadId  url=$url  expected=${expectedBytes / 1_048_576}MB")
 
         registerCompletionReceiver(downloadId, destFile)
 
-        // Poll progress until completion receiver fires
         while (true) {
             val progress = queryProgress(downloadId) ?: break
             trySend(progress)
@@ -88,7 +108,7 @@ class ModelDownloadManager @Inject constructor(
         }
 
         awaitClose {
-            if (!destFile.exists()) dm.remove(downloadId)
+            if (!isFileComplete(destFile)) dm.remove(downloadId)
         }
     }
 
@@ -101,7 +121,12 @@ class ModelDownloadManager @Inject constructor(
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id != downloadId) return
                 if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL) {
-                    trySend(DownloadProgress.Completed(destFile.absolutePath))
+                    if (isFileComplete(destFile)) {
+                        trySend(DownloadProgress.Completed(destFile.absolutePath))
+                    } else {
+                        destFile.delete()
+                        trySend(DownloadProgress.Failed("Download appears incomplete — file is invalid. Please try again."))
+                    }
                 } else {
                     trySend(DownloadProgress.Failed(queryFailureReason(downloadId)))
                 }
@@ -159,17 +184,11 @@ class ModelDownloadManager @Inject constructor(
             if (!cursor.moveToFirst()) return "Download failed"
             val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
             when (reason) {
-                DownloadManager.ERROR_HTTP_DATA_ERROR    -> "HTTP error (bad data from server)"
                 DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Not enough storage space"
-                DownloadManager.ERROR_FILE_ERROR         -> "File write error"
-                DownloadManager.ERROR_UNHANDLED_HTTP_CODE -> {
-                    val httpCode = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
-                    "HTTP $httpCode — model may require login at huggingface.co"
-                }
-                400 -> "HTTP 400 Bad Request"
-                401, 403 -> "HTTP $reason — model requires HuggingFace login (gated)"
-                404 -> "HTTP 404 — model file not found at URL"
-                else -> "Download failed (code $reason)"
+                DownloadManager.ERROR_FILE_ERROR         -> "Storage write error"
+                401, 403 -> "Model requires HuggingFace login (HTTP $reason)"
+                404      -> "Model file not found at URL (HTTP 404)"
+                else     -> "Download failed (code $reason)"
             }
         } ?: "Download failed"
     }

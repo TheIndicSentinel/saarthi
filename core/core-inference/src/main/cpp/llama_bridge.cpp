@@ -12,16 +12,30 @@ struct LlamaContext {
     llama_model*         model   = nullptr;
     llama_context*       ctx     = nullptr;
     const llama_vocab*   vocab   = nullptr;
-    // Active LoRA adapter (null = base model only)
     llama_adapter_lora*  adapter = nullptr;
 };
 
+// Captures the last error message from llama.cpp for surfacing to Kotlin
+static std::string g_last_error;
+
 static void llama_log_cb(ggml_log_level level, const char* text, void*) {
-    if (level >= GGML_LOG_LEVEL_ERROR) LOGE("%s", text);
-    else LOGI("%s", text);
+    if (level >= GGML_LOG_LEVEL_ERROR) {
+        LOGE("%s", text);
+        g_last_error += text;
+    } else {
+        LOGI("%s", text);
+    }
 }
 
 extern "C" {
+
+// ─── Last error ───────────────────────────────────────────────────────────────
+
+JNIEXPORT jstring JNICALL
+Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGetLastError(
+    JNIEnv* env, jobject) {
+    return env->NewStringUTF(g_last_error.c_str());
+}
 
 // ─── Model init via file descriptor (Android recommended approach) ────────────
 // Using /proc/self/fd/<fd> avoids scoped-storage path restrictions on Android 10+
@@ -31,6 +45,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
     JNIEnv*, jobject,
     jint fd, jint nCtx, jint nThreads, jint nGpuLayers) {
 
+    g_last_error.clear();
     llama_log_set(llama_log_cb, nullptr);
     llama_backend_init();
 

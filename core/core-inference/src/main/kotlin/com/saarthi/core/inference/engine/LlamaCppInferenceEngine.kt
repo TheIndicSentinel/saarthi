@@ -34,11 +34,23 @@ class LlamaCppInferenceEngine @Inject constructor() : InferenceEngine {
 
         val file = File(config.modelPath)
         if (!file.exists()) throw IllegalArgumentException(
-            "Model file not found: ${config.modelPath}"
+            "Model file not found: ${config.modelPath}\n\nPlease re-download the model."
         )
         if (!file.canRead()) throw SecurityException(
-            "Cannot read model file: ${config.modelPath}"
+            "Cannot read model file — storage permission may be needed."
         )
+
+        // Validate GGUF magic bytes before invoking native to give a clear error
+        if (config.modelPath.endsWith(".gguf", ignoreCase = true)) {
+            val magic = file.inputStream().use { s -> ByteArray(4).also { s.read(it) } }
+            val valid = magic.size == 4 &&
+                magic[0] == 0x47.toByte() && magic[1] == 0x47.toByte() &&
+                magic[2] == 0x55.toByte() && magic[3] == 0x46.toByte()
+            if (!valid) throw IllegalStateException(
+                "Model file is corrupted or incomplete (invalid GGUF header).\n\n" +
+                "Delete the file and re-download it."
+            )
+        }
 
         // Open via file descriptor — avoids scoped-storage path issues on Android 10+
         val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -64,11 +76,11 @@ class LlamaCppInferenceEngine @Inject constructor() : InferenceEngine {
         }
 
         if (handle < 0) {
+            val nativeError = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
             pfd.close()
-            throw RuntimeException(
-                "Failed to load model. The file may be corrupted, or the device does not have enough free RAM.\n\n" +
-                "Try closing other apps and loading again, or choose a smaller model (e.g. Llama 3.2 1B)."
-            )
+            val detail = if (nativeError.isNotBlank()) nativeError.trim().take(300) else
+                "No details available. Try closing other apps to free RAM."
+            throw RuntimeException("Model failed to load.\n\n$detail")
         }
 
         if (usedCtx < config.nCtx) {
