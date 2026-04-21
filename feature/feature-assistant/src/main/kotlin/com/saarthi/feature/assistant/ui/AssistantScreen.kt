@@ -111,12 +111,18 @@ import kotlin.math.sin
 @Composable
 fun AssistantScreen(
     onBack: (() -> Unit)? = null,
+    // Passed from SaarthiNavHost where MainViewModel already has the stored language loaded.
+    // Avoids showing HINDI for one frame while AssistantViewModel's fresh StateFlow catches up.
+    initialLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     viewModel: AssistantViewModel = hiltViewModel(),
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
-    val currentLanguage by viewModel.currentLanguage.collectAsStateWithLifecycle()
+    // Use the vmLanguage only if it has moved past the default initial value;
+    // otherwise prefer the parent-supplied initialLanguage that is already correct.
+    val vmLanguage by viewModel.currentLanguage.collectAsStateWithLifecycle()
+    val currentLanguage = if (vmLanguage != SupportedLanguage.HINDI) vmLanguage else initialLanguage
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val snackbarHost = remember { SnackbarHostState() }

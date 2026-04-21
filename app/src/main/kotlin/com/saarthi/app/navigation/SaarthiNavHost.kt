@@ -150,7 +150,10 @@ fun SaarthiNavHost(
         }
 
         composable(Route.Assistant.path) {
-            AssistantScreen(onBack = { navController.popBackStack() })
+            AssistantScreen(
+                onBack = { navController.popBackStack() },
+                initialLanguage = currentLanguage,
+            )
         }
 
         composable(Route.MoneyMentor.path) {
