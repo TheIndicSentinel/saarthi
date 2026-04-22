@@ -160,6 +160,19 @@ class ModelCatalog @Inject constructor() {
         ),
 
         ModelEntry(
+            id           = "gemma3-270m-it-q4",
+            displayName  = "Gemma 3 270M IT · Q4_K_M",
+            description  = "Google Gemma 3 270M — smallest model ever. Only ~200 MB, runs on any device instantly.",
+            downloadUrl  = "https://huggingface.co/bartowski/google_gemma-3-270m-it-GGUF/resolve/main/google_gemma-3-270m-it-Q4_K_M.gguf",
+            fileSizeBytes = 209_715_200L,
+            engineType   = EngineType.LLAMA_CPP,
+            requiredTier = DeviceTier.LOW,
+            modelFamily  = "gemma3",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 3", "Ultra Compact"),
+        ),
+        
+        ModelEntry(
             id           = "gemma3-1b-it-q4",
             displayName  = "Gemma 3 1B IT · Q4_K_M",
             description  = "Google Gemma 3 1B — smallest Gemma. Only ~650 MB, works on entry-level phones.",

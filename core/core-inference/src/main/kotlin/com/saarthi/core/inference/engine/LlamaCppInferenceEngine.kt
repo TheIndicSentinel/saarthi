@@ -47,14 +47,24 @@ class LlamaCppInferenceEngine @Inject constructor(
         }
 
         val ramMb = availableRamMb()
-        DebugLogger.log("INIT", "initialize() called  modelPath=${config.modelPath}")
-
-        if (!nativeAvailable) {
-            throw UnsupportedOperationException("llama.cpp native library (libllama_bridge.so) not found or failed to load.")
-        }
-
         val file = File(config.modelPath)
         if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
+
+        val fileSizeMb = file.length() / 1_048_576
+        DebugLogger.log("INIT", "initialize()  path=${config.modelPath} size=${fileSizeMb}MB  avail=${ramMb}MB")
+
+        // RAM Guard for llama.cpp
+        // We need at least the model size plus some overhead for context (KV cache)
+        if (ramMb < (fileSizeMb * 1.1).toInt()) {
+            throw RuntimeException(
+                "Not enough RAM to load ${file.name}.\n\n" +
+                "Model size: ${fileSizeMb}MB\n" +
+                "Available RAM: ${ramMb}MB\n\n" +
+                "This model is too large for your device's current free memory. Try a smaller variant (e.g. 1B or 4B) or close background apps."
+            )
+        }
+
+        if (!nativeAvailable) {
 
         // Validate GGUF magic bytes
         if (config.modelPath.endsWith(".gguf", ignoreCase = true)) {
