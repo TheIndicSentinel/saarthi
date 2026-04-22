@@ -65,7 +65,8 @@ class LlamaCppInferenceEngine @Inject constructor(
         }
 
         if (!nativeAvailable) {
-
+            throw UnsupportedOperationException("llama.cpp native library (libllama_bridge.so) not loaded!")
+        }
         // Validate GGUF magic bytes
         if (config.modelPath.endsWith(".gguf", ignoreCase = true)) {
             val magic = file.inputStream().use { s -> ByteArray(4).also { s.read(it) } }
