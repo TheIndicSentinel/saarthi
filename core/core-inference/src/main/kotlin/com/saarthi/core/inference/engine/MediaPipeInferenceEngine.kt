@@ -84,7 +84,8 @@ class MediaPipeInferenceEngine @Inject constructor(
             DebugLogger.log("MEDIAPIPE", "Native creation successful")
             engine
         } catch (e: Throwable) {
-            isReady = false
+            DebugLogger.log("MEDIAPIPE", "Creation FAILED: ${e.message}")
+            release() // Clean up partially allocated native resources
             if (isGpuError(e)) {
                 throw RuntimeException(
                     "This model requires GPU acceleration that your device doesn't support.\n\n" +
@@ -95,7 +96,6 @@ class MediaPipeInferenceEngine @Inject constructor(
                 )
             } else {
                 val errorMsg = e.message ?: e.javaClass.simpleName
-                DebugLogger.log("MEDIAPIPE", "Init failed: $errorMsg")
                 throw RuntimeException("MediaPipe failed to load model: $errorMsg", e)
             }
         }
@@ -115,6 +115,10 @@ class MediaPipeInferenceEngine @Inject constructor(
             emit(result)
         } catch (e: Exception) {
             Timber.e(e, "MediaPipe stream generation failed")
+            if (e is com.google.mediapipe.framework.MediaPipeException) {
+                DebugLogger.log("MEDIAPIPE", "Fatal generation error, releasing engine: ${e.message}")
+                release()
+            }
             throw e
         }
     }
@@ -125,15 +129,24 @@ class MediaPipeInferenceEngine @Inject constructor(
                 requireEngine().generateResponse(prompt)
             } catch (e: Exception) {
                 Timber.e(e, "MediaPipe generation failed")
+                if (e is com.google.mediapipe.framework.MediaPipeException) {
+                    DebugLogger.log("MEDIAPIPE", "Fatal generation error, releasing engine: ${e.message}")
+                    release()
+                }
                 throw e
             }
         }
 
     override fun release() {
-        llmInference?.close()
-        llmInference = null
+        DebugLogger.log("MEDIAPIPE", "release() called")
         isReady = false
         currentModelPath = null
+        try {
+            llmInference?.close()
+        } catch (e: Exception) {
+            DebugLogger.log("MEDIAPIPE", "Error closing engine: ${e.message}")
+        }
+        llmInference = null
     }
 
     private fun requireEngine(): LlmInference =
