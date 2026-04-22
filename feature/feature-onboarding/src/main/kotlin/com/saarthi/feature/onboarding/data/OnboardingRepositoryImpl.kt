@@ -78,7 +78,7 @@ class OnboardingRepositoryImpl @Inject constructor(
             }
         }
 
-        return candidates.sortedByDescending { it.length() }
+        candidates.sortedByDescending { it.length() }
             .distinctBy { it.absolutePath }
             .map { it.absolutePath }
     }
