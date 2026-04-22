@@ -31,15 +31,18 @@ class InferenceEngineSelector @Inject constructor(
         val engineChanged = engine !== activeEngine
         val modelChanged = config.modelPath != currentModelPath
 
-        // Force release if engine type OR model file has changed
-        if (engineChanged || modelChanged) {
-            Timber.d(
-                "Releasing active engine for new model: ${config.modelPath} " +
-                    "(engineChanged=$engineChanged, modelChanged=$modelChanged)"
-            )
-            activeEngine.release()
+        if (engineChanged) {
+            // Release BOTH engines — old to free resources, new to clear any stale
+            // native handle lingering from a previous session (prevents "Another handler" crash)
+            Timber.d("Engine type changed → releasing both engines before switch")
+            mediaPipeEngine.release()
+            llamaCppEngine.release()
             activeEngine = engine
-            currentModelPath = null // set only after successful init
+            currentModelPath = null
+        } else if (modelChanged) {
+            Timber.d("Model changed → releasing active engine: ${config.modelPath}")
+            activeEngine.release()
+            currentModelPath = null
         }
 
         Timber.d("InferenceEngineSelector → ${engine::class.simpleName}")
