@@ -4,6 +4,8 @@ import android.app.ActivityManager
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
@@ -15,6 +17,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
@@ -41,6 +44,7 @@ class MediaPipeInferenceEngine @Inject constructor(
 ) : InferenceEngine {
 
     private var llmInference: LlmInference? = null
+    private var inFlight: ListenableFuture<String>? = null
 
     override var isReady: Boolean = false
         private set
@@ -99,51 +103,82 @@ class MediaPipeInferenceEngine @Inject constructor(
      * conflict with the listener registered by a previous session.
      */
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
-        val engine = llmInference
-            ?: throw IllegalStateException("MediaPipe engine not initialised")
+        initMutex.withLock {
+            val engine = llmInference
+                ?: throw IllegalStateException("MediaPipe engine not initialised")
 
-        // Channel carries partial results; capacity=unlimited so the callback never blocks.
-        val resultChannel = Channel<Result<String?>>(Channel.UNLIMITED)
+            // MediaPipe only allows one active progress handler per process.
+            // Never start a second async generation until the previous future is complete.
+            if (inFlight?.isDone == false) {
+                DebugLogger.log("MEDIAPIPE", "generateStream blocked: previous generation still running")
+            }
 
-        withContext(Dispatchers.IO) {
-            engine.generateResponseAsync(prompt) { partialResult, done ->
-                if (done) {
-                    resultChannel.trySend(Result.success(null)) // sentinel
-                } else if (partialResult != null) {
-                    resultChannel.trySend(Result.success(partialResult))
+            // Channel carries partial results; capacity=unlimited so the callback never blocks.
+            val resultChannel = Channel<Result<String?>>(Channel.UNLIMITED)
+
+            val future = withContext(Dispatchers.IO) {
+                engine.generateResponseAsync(prompt) { partialResult, done ->
+                    if (done) {
+                        resultChannel.trySend(Result.success(null)) // sentinel
+                    } else if (partialResult != null) {
+                        resultChannel.trySend(Result.success(partialResult))
+                    }
                 }
             }
-        }
+            inFlight = future
 
-        // Drain the channel, re-throwing any engine errors on the flow side
-        for (result in resultChannel) {
-            val token = result.getOrThrow() ?: break   // null sentinel = done
-            if (token.isNotEmpty()) emit(token)
+            // Ensure the flow terminates on errors/cancellation.
+            future.addListener(
+                {
+                    runCatching { future.get() }
+                        .onFailure { resultChannel.trySend(Result.failure(it)) }
+                        .also { resultChannel.trySend(Result.success(null)) }
+                },
+                MoreExecutors.directExecutor(),
+            )
+
+            // Drain the channel, re-throwing any engine errors on the flow side
+            try {
+                for (result in resultChannel) {
+                    val token = result.getOrThrow() ?: break   // null sentinel = done
+                    if (token.isNotEmpty()) emit(token)
+                }
+            } finally {
+                resultChannel.close()
+                if (inFlight === future) inFlight = null
+            }
         }
     }
 
     override suspend fun generate(prompt: String, packType: PackType): String =
         withContext(Dispatchers.IO) {
-            val engine = llmInference
-                ?: throw IllegalStateException("MediaPipe engine not initialised")
-            try {
-                engine.generateResponse(prompt)
-            } catch (e: Exception) {
-                DebugLogger.log("MEDIAPIPE", "generateResponse FAILED: ${e.message}")
-                // If the native layer is broken, destroy so next call reinitialises
-                if (isFatalEngineError(e)) {
-                    forceDestroyEngine()
+            initMutex.withLock {
+                val engine = llmInference
+                    ?: throw IllegalStateException("MediaPipe engine not initialised")
+                try {
+                    engine.generateResponse(prompt)
+                } catch (e: Exception) {
+                    DebugLogger.log("MEDIAPIPE", "generateResponse FAILED: ${e.message}")
+                    // If the native layer is broken, destroy so next call reinitialises
+                    if (isFatalEngineError(e)) {
+                        forceDestroyEngine()
+                    }
+                    throw e
                 }
-                throw e
             }
         }
 
     // ─────────────────────────────────── release ─────────────────────────────
 
     override fun release() {
-        // Run synchronously — callers don't need to await full cleanup
+        // Run synchronously — callers don't need to await full cleanup.
+        // Use runBlocking so init/generate can't race release and double-register handlers.
         DebugLogger.log("MEDIAPIPE", "release() requested")
-        forceDestroyEngine()
+        runBlocking {
+            initMutex.withLock {
+                forceDestroyEngine()
+            }
+        }
     }
 
     // ─────────────────────────────────── helpers ─────────────────────────────
@@ -153,6 +188,13 @@ class MediaPipeInferenceEngine @Inject constructor(
      * This is what prevents "Another handler is already registered".
      */
     private fun forceDestroyEngine() {
+        // Cancel any in-flight generation first (unregisters progress handler).
+        inFlight?.let { f ->
+            DebugLogger.log("MEDIAPIPE", "forceDestroyEngine: cancel in-flight generation")
+            runCatching { f.cancel(true) }
+        }
+        inFlight = null
+
         val engine = llmInference ?: return
         llmInference = null          // clear FIRST
         isReady = false
