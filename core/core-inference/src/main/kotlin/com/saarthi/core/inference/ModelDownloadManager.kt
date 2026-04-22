@@ -12,11 +12,15 @@ import com.saarthi.core.inference.model.LoraEntry
 import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.DebugLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
@@ -28,8 +32,17 @@ private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
 @Singleton
 class ModelDownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val hfTokenManager: HuggingFaceTokenManager,
 ) {
     private val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // Mirrors the persisted HF token so it's available synchronously when a download starts.
+    @Volatile private var hfToken: String = ""
+
+    init {
+        scope.launch { hfTokenManager.token.collect { hfToken = it } }
+    }
 
     fun modelsDir(): File =
         File(context.getExternalFilesDir(null), "models").also { it.mkdirs() }
@@ -152,6 +165,12 @@ class ModelDownloadManager @Inject constructor(
                 setDestinationUri(Uri.fromFile(destFile))
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(false)
+                // HuggingFace gated models (Gemma family) require a Bearer token.
+                // The token is only sent on the initial HF request; the CDN redirect
+                // is pre-signed and doesn't need it, so DownloadManager redirects work fine.
+                if (hfToken.isNotEmpty()) {
+                    addRequestHeader("Authorization", "Bearer $hfToken")
+                }
             }
             downloadId = dm.enqueue(request)
             Timber.d("Download enqueued id=$downloadId  url=$url  expected=${expectedBytes / 1_048_576}MB")

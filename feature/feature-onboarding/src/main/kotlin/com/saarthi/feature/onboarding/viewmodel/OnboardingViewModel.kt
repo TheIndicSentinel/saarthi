@@ -16,6 +16,7 @@ import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.DeviceProfiler
+import com.saarthi.core.inference.HuggingFaceTokenManager
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.ModelDownloadManager
 import com.saarthi.core.inference.PackAdapterManager
@@ -31,8 +32,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,6 +73,7 @@ class OnboardingViewModel @Inject constructor(
     private val modelCatalog: ModelCatalog,
     private val downloadManager: ModelDownloadManager,
     private val packAdapterManager: PackAdapterManager,
+    private val hfTokenManager: HuggingFaceTokenManager,
 ) : ViewModel() {
 
     private val isModelChangeMode: Boolean =
@@ -81,6 +85,14 @@ class OnboardingViewModel @Inject constructor(
         )
     )
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
+
+    /** Current saved HuggingFace token (empty string = not set). */
+    val savedHfToken: StateFlow<String> = hfTokenManager.token
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    fun saveHfToken(token: String) {
+        viewModelScope.launch { hfTokenManager.setToken(token) }
+    }
 
     private var modelPfd: ParcelFileDescriptor? = null
     private val downloadJobs = mutableMapOf<String, Job>()

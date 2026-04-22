@@ -31,6 +31,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,6 +41,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +61,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -111,25 +119,30 @@ fun OnboardingScreen(
                     onSelect = viewModel::selectLanguage,
                     onNext = viewModel::proceedToModelPick,
                 )
-                OnboardingStep.MODEL_PICK -> ModelPickStep(
-                    deviceProfile = state.deviceProfile,
-                    catalogModels = state.catalogModels,
-                    downloadProgress = state.downloadProgress,
-                    downloadedModelIds = state.downloadedModelIds,
-                    localCandidates = state.modelCandidates,
-                    selectedPath = state.selectedModelPath,
-                    isScanning = state.isScanning,
-                    error = state.error,
-                    onDownload = viewModel::downloadModel,
-                    onCancelDownload = viewModel::cancelDownload,
-                    onSelectDownloaded = viewModel::selectDownloadedModel,
-                    onDeleteDownloaded = viewModel::deleteModel,
-                    onSelectLocal = viewModel::selectModel,
-                    onBrowse = { filePicker.launch(arrayOf("*/*")) },
-                    onConfirm = viewModel::confirmModelAndInit,
-                    onGrantAllFiles = { viewModel.openAllFilesAccessSettings(context) },
-                    onRescan = viewModel::rescanAfterPermissionGrant,
-                )
+                OnboardingStep.MODEL_PICK -> {
+                    val savedHfToken by viewModel.savedHfToken.collectAsStateWithLifecycle()
+                    ModelPickStep(
+                        deviceProfile = state.deviceProfile,
+                        catalogModels = state.catalogModels,
+                        downloadProgress = state.downloadProgress,
+                        downloadedModelIds = state.downloadedModelIds,
+                        localCandidates = state.modelCandidates,
+                        selectedPath = state.selectedModelPath,
+                        isScanning = state.isScanning,
+                        error = state.error,
+                        savedHfToken = savedHfToken,
+                        onSaveHfToken = viewModel::saveHfToken,
+                        onDownload = viewModel::downloadModel,
+                        onCancelDownload = viewModel::cancelDownload,
+                        onSelectDownloaded = viewModel::selectDownloadedModel,
+                        onDeleteDownloaded = viewModel::deleteModel,
+                        onSelectLocal = viewModel::selectModel,
+                        onBrowse = { filePicker.launch(arrayOf("*/*")) },
+                        onConfirm = viewModel::confirmModelAndInit,
+                        onGrantAllFiles = { viewModel.openAllFilesAccessSettings(context) },
+                        onRescan = viewModel::rescanAfterPermissionGrant,
+                    )
+                }
                 OnboardingStep.MODEL_INIT -> ModelInitStep(
                     isLoading = state.isLoading,
                     error = state.error,
@@ -269,6 +282,8 @@ private fun ModelPickStep(
     selectedPath: String?,
     isScanning: Boolean,
     error: String?,
+    savedHfToken: String,
+    onSaveHfToken: (String) -> Unit,
     onDownload: (ModelEntry) -> Unit,
     onCancelDownload: (ModelEntry) -> Unit,
     onSelectDownloaded: (ModelEntry) -> Unit,
@@ -280,6 +295,12 @@ private fun ModelPickStep(
     onRescan: () -> Unit,
 ) {
     var showLocalSection by remember { mutableStateOf(false) }
+    // Auto-expand the token section if the last error mentions login
+    val needsToken = error?.contains("login", ignoreCase = true) == true ||
+                     error?.contains("401", ignoreCase = true) == true ||
+                     error?.contains("403", ignoreCase = true) == true
+    var showTokenSection by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(needsToken) { if (needsToken) showTokenSection = true }
 
     Column(
         modifier = Modifier
@@ -323,7 +344,17 @@ private fun ModelPickStep(
             }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
+
+        // ── HuggingFace Token (required for Gemma family) ─────────────────────
+        HuggingFaceTokenSection(
+            savedToken = savedHfToken,
+            isExpanded = showTokenSection,
+            onToggle = { showTokenSection = !showTokenSection },
+            onSave = onSaveHfToken,
+        )
+
+        Spacer(Modifier.height(16.dp))
 
         // ── Catalog models ────────────────────────────────────────────────────
         Text(
@@ -676,6 +707,109 @@ private fun SetupCompleteStep(onComplete: () -> Unit) {
 
         Spacer(Modifier.height(40.dp))
         CircularProgressIndicator(color = SaarthiColors.Gold, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+    }
+}
+
+// ── HuggingFace Token ─────────────────────────────────────────────────────────
+
+@Composable
+private fun HuggingFaceTokenSection(
+    savedToken: String,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var draft by rememberSaveable { mutableStateOf(savedToken) }
+    var tokenVisible by remember { mutableStateOf(false) }
+
+    // Sync draft when savedToken loads from DataStore on first composition
+    LaunchedEffect(savedToken) { if (draft.isEmpty() && savedToken.isNotEmpty()) draft = savedToken }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(SaarthiColors.NavyLight)
+            .border(
+                1.dp,
+                if (savedToken.isNotEmpty()) SaarthiColors.CyberTeal.copy(0.5f) else SaarthiColors.GlassBorder,
+                RoundedCornerShape(12.dp),
+            ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Key, null, tint = SaarthiColors.Gold, modifier = Modifier.size(16.dp))
+                Column {
+                    Text(
+                        "HuggingFace Token",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = SaarthiColors.TextPrimary,
+                    )
+                    Text(
+                        if (savedToken.isNotEmpty()) "✓ Token saved — Gemma downloads enabled"
+                        else "Required for all Gemma models",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (savedToken.isNotEmpty()) SaarthiColors.CyberTeal else SaarthiColors.TextMuted,
+                    )
+                }
+            }
+            TextButton(onClick = onToggle) {
+                Text(
+                    if (isExpanded) "Hide ▲" else "Set ▼",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SaarthiColors.Gold,
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = isExpanded) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 14.dp)) {
+                Text(
+                    "Get a free read-only token at huggingface.co/settings/tokens\n" +
+                    "Required to download any Gemma model (Google's license requirement).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SaarthiColors.TextMuted,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("hf_xxxxxxxxxxxxxxxxxxxx", color = SaarthiColors.TextMuted) },
+                    visualTransformation = if (tokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { tokenVisible = !tokenVisible }) {
+                            Icon(
+                                if (tokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                null,
+                                tint = SaarthiColors.TextMuted,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = SaarthiColors.Gold,
+                        unfocusedBorderColor = SaarthiColors.GlassBorder,
+                        focusedTextColor = SaarthiColors.TextPrimary,
+                        unfocusedTextColor = SaarthiColors.TextPrimary,
+                        cursorColor = SaarthiColors.Gold,
+                    ),
+                )
+                Spacer(Modifier.height(8.dp))
+                SaarthiPrimaryButton(
+                    text = "Save Token",
+                    onClick = { onSave(draft) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 
