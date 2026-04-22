@@ -17,6 +17,65 @@ class ModelCatalog @Inject constructor() {
 
     val allModels: List<ModelEntry> = listOf(
 
+        // ══ GEMMA LiteRT — official Google on-device format (.task / .litertlm) ═
+        // These use the MediaPipe LlmInference engine (same as Edge Gallery).
+        // Gated models require a free Google / Kaggle licence acceptance first.
+
+        // FLAGSHIP ─────────────────────────────────────────────────────────────
+        ModelEntry(
+            id           = "gemma3n-e4b-litert-int4",
+            displayName  = "Gemma 3n E4B IT · INT4 (LiteRT)",
+            description  = "Google Gemma 3n E4B — official Edge Gallery model. Requires licence at google/gemma-3n-E4B-it-litert-lm.",
+            downloadUrl  = "https://huggingface.co/google/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4.litertlm",
+            fileSizeBytes = 5_283_061_760L,
+            engineType   = EngineType.MEDIAPIPE,
+            requiredTier = DeviceTier.FLAGSHIP,
+            modelFamily  = "gemma3n",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 3n", "LiteRT", "Requires Licence"),
+        ),
+
+        // MID ──────────────────────────────────────────────────────────────────
+        ModelEntry(
+            id           = "gemma4-e4b-litert-web",
+            displayName  = "Gemma 4 E4B IT · LiteRT",
+            description  = "Google Gemma 4 E4B — latest efficient 4B, Edge Gallery format. Great mid-range choice.",
+            downloadUrl  = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.task",
+            fileSizeBytes = 3_178_275_840L,
+            engineType   = EngineType.MEDIAPIPE,
+            requiredTier = DeviceTier.MID,
+            modelFamily  = "gemma4",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 4", "LiteRT", "Recommended"),
+        ),
+
+        ModelEntry(
+            id           = "gemma4-e2b-litert-web",
+            displayName  = "Gemma 4 E2B IT · LiteRT",
+            description  = "Google Gemma 4 E2B — compact efficient 2B, Edge Gallery format. Fast on mid-range phones.",
+            downloadUrl  = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task",
+            fileSizeBytes = 2_147_483_648L,
+            engineType   = EngineType.MEDIAPIPE,
+            requiredTier = DeviceTier.MID,
+            modelFamily  = "gemma4",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 4", "LiteRT", "Compact"),
+        ),
+
+        // LOW ──────────────────────────────────────────────────────────────────
+        ModelEntry(
+            id           = "gemma3-1b-litert-int4",
+            displayName  = "Gemma 3 1B IT · INT4 (LiteRT)",
+            description  = "Google Gemma 3 1B — only 555 MB, runs on budget phones. Requires licence at litert-community/Gemma3-1B-IT.",
+            downloadUrl  = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task",
+            fileSizeBytes = 581_959_680L,
+            engineType   = EngineType.MEDIAPIPE,
+            requiredTier = DeviceTier.LOW,
+            modelFamily  = "gemma3",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 3", "LiteRT", "Requires Licence", "Smallest"),
+        ),
+
         // ══ GEMMA FAMILY (Google — mobile-first, optimised for on-device) ═════
 
         // FLAGSHIP (≥8GB RAM + Vulkan) ─────────────────────────────────────────
