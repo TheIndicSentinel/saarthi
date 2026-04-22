@@ -265,17 +265,24 @@ class OnboardingViewModel @Inject constructor(
                     DebugLogger.log("DOWNLOAD", "Completed  path=$path  size=${File(path).length() / 1_048_576}MB")
                     
                     // Save path immediately so it's remembered even if init crashes later
-                    viewModelScope.launch {
-                        repository.saveModelPath(path)
+                    viewModelScope.launch(Dispatchers.IO) {
+                        try {
+                            repository.saveModelPath(path)
+                            DebugLogger.log("VMODEL", "Saved complete model path: $path")
+                        } catch (e: Exception) {
+                            DebugLogger.log("VMODEL", "Failed to save model path: ${e.message}")
+                        }
                     }
 
                     _uiState.update {
                         it.copy(
                             selectedModelPath = path,
                             modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
+                            error = null
                         )
                     }
                     refreshDownloadedModels()
+                    DebugLogger.log("VMODEL", "UI state updated with new model path")
                 }
             }
         }
@@ -387,10 +394,13 @@ class OnboardingViewModel @Inject constructor(
         )
 
         _uiState.update { it.copy(step = OnboardingStep.MODEL_INIT, isLoading = true, error = null) }
+        DebugLogger.log("VMODEL", "Starting model initialization: $path")
+        
         viewModelScope.launch {
             runCatching {
                 inferenceEngine.initialize(config)
             }.onSuccess {
+                DebugLogger.log("VMODEL", "Inference engine initialized successfully")
                 modelPfd?.close()
                 modelPfd = null
                 if (!path.startsWith("/proc/self/fd/")) {

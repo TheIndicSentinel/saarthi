@@ -54,14 +54,19 @@ class MediaPipeInferenceEngine @Inject constructor(
 
         Timber.d("Initializing MediaPipe engine: $path")
         
+        DebugLogger.log("MEDIAPIPE", "Building LlmInference options...")
         val builder = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(path)
             .setMaxTokens(config.maxTokens)
             // MediaPipe tasks-genai 0.10.20 exposes max-topK but not temperature/topK knobs.
             .setMaxTopK(config.topK)
-
+        val options = builder.build()
+        
         llmInference = try {
-            LlmInference.createFromOptions(context, builder.build())
+            DebugLogger.log("MEDIAPIPE", "Creating LlmInference instance (native call start)...")
+            val engine = LlmInference.createFromOptions(context, options)
+            DebugLogger.log("MEDIAPIPE", "Native creation successful")
+            engine
         } catch (e: Throwable) {
             isReady = false
             if (isGpuError(e)) {
