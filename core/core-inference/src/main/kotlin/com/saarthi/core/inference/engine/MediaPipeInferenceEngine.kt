@@ -115,7 +115,8 @@ class MediaPipeInferenceEngine @Inject constructor(
             emit(result)
         } catch (e: Exception) {
             Timber.e(e, "MediaPipe stream generation failed")
-            if (e is com.google.mediapipe.framework.MediaPipeException) {
+            // Check for MediaPipeException by name to avoid build-time unresolved reference issues
+            if (e.javaClass.simpleName == "MediaPipeException") {
                 DebugLogger.log("MEDIAPIPE", "Fatal generation error, releasing engine: ${e.message}")
                 release()
             }
@@ -129,7 +130,7 @@ class MediaPipeInferenceEngine @Inject constructor(
                 requireEngine().generateResponse(prompt)
             } catch (e: Exception) {
                 Timber.e(e, "MediaPipe generation failed")
-                if (e is com.google.mediapipe.framework.MediaPipeException) {
+                if (e.javaClass.simpleName == "MediaPipeException") {
                     DebugLogger.log("MEDIAPIPE", "Fatal generation error, releasing engine: ${e.message}")
                     release()
                 }
