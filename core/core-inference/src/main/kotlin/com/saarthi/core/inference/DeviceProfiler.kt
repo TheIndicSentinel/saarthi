@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.StatFs
 import com.saarthi.core.inference.model.DeviceProfile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -20,6 +21,11 @@ class DeviceProfiler @Inject constructor(
         val totalRamMb = memInfo.totalMem / 1_048_576
         val availRamMb = memInfo.availMem / 1_048_576
 
+        val availStorageMb = runCatching {
+            val stat = StatFs(context.filesDir.absolutePath)
+            stat.availableBlocksLong * stat.blockSizeLong / 1_048_576
+        }.getOrDefault(0L)
+
         val hasVulkan = context.packageManager.hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_LEVEL)
         val vulkanVersion = getVulkanVersion()
 
@@ -28,6 +34,7 @@ class DeviceProfiler @Inject constructor(
         return DeviceProfile(
             totalRamMb = totalRamMb,
             availableRamMb = availRamMb,
+            availableStorageMb = availStorageMb,
             cpuCores = Runtime.getRuntime().availableProcessors(),
             hasVulkan = hasVulkan,
             vulkanVersion = vulkanVersion,

@@ -216,7 +216,11 @@ fun AssistantScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         items(messages, key = { it.id }) { msg ->
-                            MessageBubble(message = msg, onDelete = { viewModel.deleteMessage(msg.id) })
+                            MessageBubble(
+                                message = msg,
+                                onDelete = { viewModel.deleteMessage(msg.id) },
+                                avatarLabel = currentLanguage.firstLetter,
+                            )
                         }
                         item { Spacer(Modifier.height(8.dp)) }
                     }

@@ -3,6 +3,7 @@ package com.saarthi.core.inference.model
 data class DeviceProfile(
     val totalRamMb: Long,
     val availableRamMb: Long,
+    val availableStorageMb: Long,
     val cpuCores: Int,
     val hasVulkan: Boolean,
     val vulkanVersion: String?,

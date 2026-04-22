@@ -51,11 +51,22 @@ class ReminderManager @Inject constructor(
      * @param timeStr Time in "HH:MM" 24h format (today; tomorrow if time already passed)
      * @return true if scheduled successfully
      */
+    /** Schedule a reminder [delayMinutes] minutes from now. Always accurate — no time-zone ambiguity. */
+    fun scheduleByDelay(text: String, delayMinutes: Int): Boolean {
+        val triggerMs = System.currentTimeMillis() + delayMinutes * 60_000L
+        return scheduleAt(text, triggerMs)
+    }
+
+    /** Schedule a reminder at an absolute HH:MM time today (tomorrow if already past). */
     fun scheduleReminder(text: String, timeStr: String): Boolean {
         val triggerMs = parseTimeToMs(timeStr) ?: run {
             Timber.w("ReminderManager: could not parse time '$timeStr'")
             return false
         }
+        return scheduleAt(text, triggerMs)
+    }
+
+    private fun scheduleAt(text: String, triggerMs: Long): Boolean {
         val id = (text.hashCode().toLong() + triggerMs).toInt() and 0x7FFFFFFF
 
         val intent = Intent(ACTION_REMINDER).apply {
@@ -76,7 +87,6 @@ class ReminderManager @Inject constructor(
                     if (am.canScheduleExactAlarms()) {
                         am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pi)
                     } else {
-                        // Fallback: inexact (fires within ~15 min window)
                         am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pi)
                     }
                 }

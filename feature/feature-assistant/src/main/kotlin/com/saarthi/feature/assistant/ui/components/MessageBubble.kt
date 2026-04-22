@@ -65,6 +65,7 @@ fun MessageBubble(
     message: ChatMessage,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    avatarLabel: String = "स",
 ) {
     val clipboard = LocalClipboardManager.current
     var showMenu by remember { mutableStateOf(false) }
@@ -79,7 +80,7 @@ fun MessageBubble(
     ) {
         // Assistant avatar
         if (!isUser) {
-            AssistantAvatar(modifier = Modifier.padding(end = 8.dp, bottom = 4.dp))
+            AssistantAvatar(label = avatarLabel, modifier = Modifier.padding(end = 8.dp, bottom = 4.dp))
         } else {
             Spacer(Modifier.width(48.dp))
         }
@@ -221,7 +222,7 @@ fun MessageBubble(
 }
 
 @Composable
-private fun AssistantAvatar(modifier: Modifier = Modifier) {
+private fun AssistantAvatar(label: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .size(32.dp)
@@ -235,7 +236,7 @@ private fun AssistantAvatar(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            "स",
+            label,
             style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,

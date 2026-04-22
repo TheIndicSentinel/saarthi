@@ -145,10 +145,12 @@ class ChatRepositoryImpl @Inject constructor(
                     tokenCount++
                     val elapsed = (System.currentTimeMillis() - startTime) / 1000f
                     if (elapsed > 0) _tokensPerSecond.value = tokenCount / elapsed
+                    // Strip complete marker tags so they never appear in the chat bubble
+                    val visible = ResponseMarkerParser.stripForDisplay(accumulated.toString())
                     _history.update { history ->
                         history.map { msg ->
                             if (msg.id == streamingId)
-                                msg.copy(content = accumulated.toString(), tokenCount = tokenCount)
+                                msg.copy(content = visible, tokenCount = tokenCount)
                             else msg
                         }
                     }
@@ -183,12 +185,15 @@ class ChatRepositoryImpl @Inject constructor(
                         }
                     }
 
-                    // Schedule extracted reminders
+                    // Schedule extracted reminders — relative (delay_minutes) or absolute (time)
                     parsed.reminders.forEach { marker ->
-                        reminderManager.scheduleReminder(
-                            text = marker.text.trim(),
-                            timeStr = marker.time.trim(),
-                        )
+                        val text = marker.text.trim()
+                        when {
+                            marker.delayMinutes != null ->
+                                reminderManager.scheduleByDelay(text, marker.delayMinutes)
+                            marker.time != null ->
+                                reminderManager.scheduleReminder(text, marker.time.trim())
+                        }
                     }
                 }
                 .collect {}

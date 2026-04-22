@@ -17,65 +17,146 @@ class ModelCatalog @Inject constructor() {
 
     val allModels: List<ModelEntry> = listOf(
 
+        // ══ GEMMA FAMILY (Google — mobile-first, optimised for on-device) ═════
+
         // FLAGSHIP (≥8GB RAM + Vulkan) ─────────────────────────────────────────
+        ModelEntry(
+            id           = "gemma3-12b-it-q4",
+            displayName  = "Gemma 3 12B IT · Q4_K_M",
+            description  = "Google's best mobile model. Excellent multilingual + reasoning. High-end phones only.",
+            downloadUrl  = "https://huggingface.co/bartowski/gemma-3-12b-it-GGUF/resolve/main/gemma-3-12b-it-Q4_K_M.gguf",
+            fileSizeBytes = 7_730_941_952L,
+            engineType   = EngineType.LLAMA_CPP,
+            requiredTier = DeviceTier.FLAGSHIP,
+            modelFamily  = "gemma3",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 3", "Best Quality"),
+        ),
+
+        ModelEntry(
+            id           = "gemma2-9b-it-q4",
+            displayName  = "Gemma 2 9B IT · Q4_K_M",
+            description  = "Google Gemma 2 9B — strong quality on flagship phones with ≥8 GB RAM.",
+            downloadUrl  = "https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf",
+            fileSizeBytes = 5_905_580_032L,
+            engineType   = EngineType.LLAMA_CPP,
+            requiredTier = DeviceTier.FLAGSHIP,
+            modelFamily  = "gemma2",
+            contextLength = 2048,
+            tags         = listOf("Google", "Gemma 2"),
+        ),
+
+        // MID (4–8 GB RAM) ─────────────────────────────────────────────────────
+        ModelEntry(
+            id           = "gemma3-4b-it-q4",
+            displayName  = "Gemma 3 4B IT · Q4_K_M",
+            description  = "Google Gemma 3 4B — best mid-range choice. Great Hindi/Indian language support.",
+            downloadUrl  = "https://huggingface.co/bartowski/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf",
+            fileSizeBytes = 2_684_354_560L,
+            engineType   = EngineType.LLAMA_CPP,
+            requiredTier = DeviceTier.MID,
+            modelFamily  = "gemma3",
+            contextLength = 4096,
+            tags         = listOf("Recommended", "Google", "Gemma 3"),
+        ),
+
+        ModelEntry(
+            id           = "gemma3n-e4b-it-q4",
+            displayName  = "Gemma 3n E4B IT · Q4_K_M",
+            description  = "Google's efficient 4B model — same footprint, faster inference on mid-range phones.",
+            downloadUrl  = "https://huggingface.co/bartowski/gemma-3n-E4B-it-GGUF/resolve/main/gemma-3n-E4B-it-Q4_K_M.gguf",
+            fileSizeBytes = 2_684_354_560L,
+            engineType   = EngineType.LLAMA_CPP,
+            requiredTier = DeviceTier.MID,
+            modelFamily  = "gemma3n",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 3n", "Efficient"),
+        ),
+
+        ModelEntry(
+            id           = "gemma2-2b-it-q4",
+            displayName  = "Gemma 2 2B IT · Q4_K_M",
+            description  = "Google Gemma 2 2B — compact and reliable. Good balance for mid-range phones.",
+            downloadUrl  = "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+            fileSizeBytes = 1_708_582_752L,
+            engineType   = EngineType.LLAMA_CPP,
+            requiredTier = DeviceTier.MID,
+            modelFamily  = "gemma2",
+            contextLength = 2048,
+            tags         = listOf("Google", "Gemma 2", "Compact"),
+        ),
+
+        // LOW (3–4 GB RAM) ─────────────────────────────────────────────────────
+        ModelEntry(
+            id           = "gemma3n-e2b-it-q4",
+            displayName  = "Gemma 3n E2B IT · Q4_K_M",
+            description  = "Google's efficient 2B — ~1.3 GB, runs on budget phones with 3 GB RAM.",
+            downloadUrl  = "https://huggingface.co/bartowski/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf",
+            fileSizeBytes = 1_396_703_232L,
+            engineType   = EngineType.LLAMA_CPP,
+            requiredTier = DeviceTier.LOW,
+            modelFamily  = "gemma3n",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 3n", "Low RAM"),
+        ),
+
+        ModelEntry(
+            id           = "gemma3-1b-it-q4",
+            displayName  = "Gemma 3 1B IT · Q4_K_M",
+            description  = "Google Gemma 3 1B — smallest Gemma. Only ~650 MB, works on entry-level phones.",
+            downloadUrl  = "https://huggingface.co/bartowski/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf",
+            fileSizeBytes = 681_574_400L,
+            engineType   = EngineType.LLAMA_CPP,
+            requiredTier = DeviceTier.LOW,
+            modelFamily  = "gemma3",
+            contextLength = 4096,
+            tags         = listOf("Google", "Gemma 3", "Smallest"),
+        ),
+
+        // ══ OTHER MODELS ══════════════════════════════════════════════════════
+
+        // FLAGSHIP ─────────────────────────────────────────────────────────────
         ModelEntry(
             id          = "qwen2.5-7b-instruct-q4",
             displayName = "Qwen 2.5 7B · Q4_K_M",
-            description = "Best quality. Strong reasoning and multilingual. Ideal for S23 Ultra and Pixel 8 Pro.",
+            description = "Strong reasoning and multilingual. Great alternative on flagship phones.",
             downloadUrl = "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
             fileSizeBytes = 4_683_074_240L,
             engineType  = EngineType.LLAMA_CPP,
             requiredTier = DeviceTier.FLAGSHIP,
             modelFamily  = "qwen2.5",
-            nGpuLayers  = 0,
             contextLength = 2048,
-            tags        = listOf("Recommended", "Best Quality"),
+            tags        = listOf("Best Quality", "Multilingual"),
         ),
 
         ModelEntry(
             id          = "llama3.2-3b-instruct-q4",
             displayName = "Llama 3.2 3B · Q4_K_M",
-            description = "Meta's compact Llama 3.2 — fast, good reasoning. Fits flagship and high mid-range.",
+            description = "Meta's compact Llama 3.2 — fast, good reasoning on flagship phones.",
             downloadUrl = "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
             fileSizeBytes = 2_019_377_696L,
             engineType  = EngineType.LLAMA_CPP,
             requiredTier = DeviceTier.FLAGSHIP,
             modelFamily  = "llama3.2",
-            nGpuLayers  = 0,
             contextLength = 2048,
             tags        = listOf("Fast", "Meta"),
         ),
 
-        // MID (4–8GB RAM) ──────────────────────────────────────────────────────
+        // MID ──────────────────────────────────────────────────────────────────
         ModelEntry(
             id          = "phi3.5-mini-instruct-q4",
             displayName = "Phi 3.5 Mini · Q4_K_M",
-            description = "Microsoft Phi 3.5 — strong reasoning per parameter, 3.8B fits mid-range devices.",
+            description = "Microsoft Phi 3.5 — strong reasoning per parameter for mid-range devices.",
             downloadUrl = "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
             fileSizeBytes = 2_393_232_672L,
             engineType  = EngineType.LLAMA_CPP,
             requiredTier = DeviceTier.MID,
             modelFamily  = "phi3.5",
-            nGpuLayers  = 0,
             contextLength = 2048,
             tags        = listOf("Microsoft", "Strong Reasoning"),
         ),
 
-        ModelEntry(
-            id          = "gemma2-2b-it-q4",
-            displayName = "Gemma 2 2B IT · Q4_K_M",
-            description = "Google Gemma 2 2B via llama.cpp — real streaming, better than the MediaPipe variant.",
-            downloadUrl = "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
-            fileSizeBytes = 1_708_582_752L,
-            engineType  = EngineType.LLAMA_CPP,
-            requiredTier = DeviceTier.MID,
-            modelFamily  = "gemma2",
-            nGpuLayers  = 0,
-            contextLength = 2048,
-            tags        = listOf("Compact", "Google"),
-        ),
-
-        // MID fallback / LOW ───────────────────────────────────────────────────
+        // LOW ──────────────────────────────────────────────────────────────────
         ModelEntry(
             id          = "llama3.2-1b-instruct-q4",
             displayName = "Llama 3.2 1B · Q4_K_M",
@@ -85,7 +166,6 @@ class ModelCatalog @Inject constructor() {
             engineType  = EngineType.LLAMA_CPP,
             requiredTier = DeviceTier.LOW,
             modelFamily  = "llama3.2",
-            nGpuLayers  = 0,
             contextLength = 2048,
             tags        = listOf("Smallest", "Low RAM"),
         ),
@@ -196,8 +276,18 @@ class ModelCatalog @Inject constructor() {
 
     // ── Lookup helpers ────────────────────────────────────────────────────────
 
-    fun recommendedFor(profile: DeviceProfile): List<ModelEntry> =
-        allModels.filter { it.requiredTier.ordinal <= profile.tier.ordinal }
+    /**
+     * Returns models that fit this device — filtered by RAM tier AND available storage.
+     * Storage gate: model must fit in 85% of free space (leaves headroom for extraction).
+     * Result is ordered best-fit first (highest tier that fits within storage first).
+     */
+    fun recommendedFor(profile: DeviceProfile): List<ModelEntry> {
+        val storageLimitMb = (profile.availableStorageMb * 0.85).toLong()
+        return allModels.filter { model ->
+            model.requiredTier.ordinal <= profile.tier.ordinal &&
+            model.fileSizeBytes / 1_048_576 <= storageLimitMb
+        }
+    }
 
     fun findById(id: String): ModelEntry? = allModels.find { it.id == id }
 
