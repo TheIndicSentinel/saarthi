@@ -52,6 +52,20 @@ class MediaPipeInferenceEngine @Inject constructor(
             "Cannot read model file — storage permission may be needed or file is in an inaccessible directory."
         )
 
+        // RAM guard: model needs at least ~1.5x its size in RAM to load
+        val fileSizeMb = file.length() / 1_048_576
+        val am = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memInfo = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val availRamMb = memInfo.availMem / 1_048_576
+        DebugLogger.log("MEDIAPIPE", "Model size: ${fileSizeMb}MB  Available RAM: ${availRamMb}MB")
+        if (availRamMb < fileSizeMb) {
+            throw RuntimeException(
+                "Not enough RAM to load this model.\n\n" +
+                "Model needs ~${fileSizeMb}MB but only ${availRamMb}MB is free.\n\n" +
+                "Close other apps and try again, or choose a smaller model."
+            )
+        }
+
         Timber.d("Initializing MediaPipe engine: $path")
         
         DebugLogger.log("MEDIAPIPE", "Building LlmInference options...")
@@ -63,7 +77,9 @@ class MediaPipeInferenceEngine @Inject constructor(
         val options = builder.build()
         
         llmInference = try {
-            DebugLogger.log("MEDIAPIPE", "Creating LlmInference instance (native call start)...")
+            DebugLogger.log("MEDIAPIPE", "Calling LlmInference.createFromOptions (native)...")
+            // Force flush before the native call that may kill the process
+            System.out.flush()
             val engine = LlmInference.createFromOptions(context, options)
             DebugLogger.log("MEDIAPIPE", "Native creation successful")
             engine
