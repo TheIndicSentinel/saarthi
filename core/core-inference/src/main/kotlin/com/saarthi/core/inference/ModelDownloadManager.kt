@@ -41,7 +41,7 @@ class ModelDownloadManager @Inject constructor(
     @Volatile private var hfToken: String = ""
 
     init {
-        scope.launch { hfTokenManager.token.collect { hfToken = it } }
+        scope.launch { hfTokenManager.effectiveToken.collect { hfToken = it } }
     }
 
     fun modelsDir(): File =

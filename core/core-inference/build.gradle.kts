@@ -25,11 +25,29 @@ val ndkExists = sdkDir.isNotEmpty() &&
 android {
     namespace  = "com.saarthi.core.inference"
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     if (ndkExists) {
         ndkVersion = "27.0.12077973"
     }
 
     defaultConfig {
+        // Embedded read-only HuggingFace token — enables seamless Gemma model downloads.
+        // Users never see or enter this; it is used automatically by ModelDownloadManager.
+        //
+        // To set it:
+        //   local.properties  →  hf.app.token=hf_xxxxxxxxxxxxxxxxxxxxxxxx
+        //   CI secret         →  env HF_APP_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxx
+        //
+        // The token only needs "read" scope. Accept each Gemma model licence once at
+        // huggingface.co/{repo} (free, one-click) with the account that owns the token.
+        val hfAppToken = localProps.getProperty("hf.app.token")
+            ?: System.getenv("HF_APP_TOKEN")
+            ?: ""
+        buildConfigField("String", "HF_APP_TOKEN", "\"$hfAppToken\"")
+
         if (ndkExists) {
             externalNativeBuild {
                 cmake {

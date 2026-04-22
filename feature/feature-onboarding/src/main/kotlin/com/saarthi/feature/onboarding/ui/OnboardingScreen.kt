@@ -31,9 +31,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,8 +38,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,7 +45,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,8 +55,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -119,30 +111,25 @@ fun OnboardingScreen(
                     onSelect = viewModel::selectLanguage,
                     onNext = viewModel::proceedToModelPick,
                 )
-                OnboardingStep.MODEL_PICK -> {
-                    val savedHfToken by viewModel.savedHfToken.collectAsStateWithLifecycle()
-                    ModelPickStep(
-                        deviceProfile = state.deviceProfile,
-                        catalogModels = state.catalogModels,
-                        downloadProgress = state.downloadProgress,
-                        downloadedModelIds = state.downloadedModelIds,
-                        localCandidates = state.modelCandidates,
-                        selectedPath = state.selectedModelPath,
-                        isScanning = state.isScanning,
-                        error = state.error,
-                        savedHfToken = savedHfToken,
-                        onSaveHfToken = viewModel::saveHfToken,
-                        onDownload = viewModel::downloadModel,
-                        onCancelDownload = viewModel::cancelDownload,
-                        onSelectDownloaded = viewModel::selectDownloadedModel,
-                        onDeleteDownloaded = viewModel::deleteModel,
-                        onSelectLocal = viewModel::selectModel,
-                        onBrowse = { filePicker.launch(arrayOf("*/*")) },
-                        onConfirm = viewModel::confirmModelAndInit,
-                        onGrantAllFiles = { viewModel.openAllFilesAccessSettings(context) },
-                        onRescan = viewModel::rescanAfterPermissionGrant,
-                    )
-                }
+                OnboardingStep.MODEL_PICK -> ModelPickStep(
+                    deviceProfile = state.deviceProfile,
+                    catalogModels = state.catalogModels,
+                    downloadProgress = state.downloadProgress,
+                    downloadedModelIds = state.downloadedModelIds,
+                    localCandidates = state.modelCandidates,
+                    selectedPath = state.selectedModelPath,
+                    isScanning = state.isScanning,
+                    error = state.error,
+                    onDownload = viewModel::downloadModel,
+                    onCancelDownload = viewModel::cancelDownload,
+                    onSelectDownloaded = viewModel::selectDownloadedModel,
+                    onDeleteDownloaded = viewModel::deleteModel,
+                    onSelectLocal = viewModel::selectModel,
+                    onBrowse = { filePicker.launch(arrayOf("*/*")) },
+                    onConfirm = viewModel::confirmModelAndInit,
+                    onGrantAllFiles = { viewModel.openAllFilesAccessSettings(context) },
+                    onRescan = viewModel::rescanAfterPermissionGrant,
+                )
                 OnboardingStep.MODEL_INIT -> ModelInitStep(
                     isLoading = state.isLoading,
                     error = state.error,
@@ -282,8 +269,6 @@ private fun ModelPickStep(
     selectedPath: String?,
     isScanning: Boolean,
     error: String?,
-    savedHfToken: String,
-    onSaveHfToken: (String) -> Unit,
     onDownload: (ModelEntry) -> Unit,
     onCancelDownload: (ModelEntry) -> Unit,
     onSelectDownloaded: (ModelEntry) -> Unit,
@@ -295,12 +280,6 @@ private fun ModelPickStep(
     onRescan: () -> Unit,
 ) {
     var showLocalSection by remember { mutableStateOf(false) }
-    // Auto-expand the token section if the last error mentions login
-    val needsToken = error?.contains("login", ignoreCase = true) == true ||
-                     error?.contains("401", ignoreCase = true) == true ||
-                     error?.contains("403", ignoreCase = true) == true
-    var showTokenSection by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(needsToken) { if (needsToken) showTokenSection = true }
 
     Column(
         modifier = Modifier
@@ -344,17 +323,7 @@ private fun ModelPickStep(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-
-        // ── HuggingFace Token (required for Gemma family) ─────────────────────
-        HuggingFaceTokenSection(
-            savedToken = savedHfToken,
-            isExpanded = showTokenSection,
-            onToggle = { showTokenSection = !showTokenSection },
-            onSave = onSaveHfToken,
-        )
-
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(20.dp))
 
         // ── Catalog models ────────────────────────────────────────────────────
         Text(
