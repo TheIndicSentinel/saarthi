@@ -47,15 +47,21 @@ class OnboardingRepositoryImpl @Inject constructor(
         context.onboardingDataStore.edit { it[SAVED_MODEL_PATH] = path }
     }
 
-    override suspend fun getModelPath(): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    override suspend fun getModelPath(): String? = withContext(Dispatchers.IO) {
         val saved = runCatching {
             context.onboardingDataStore.data.first()[SAVED_MODEL_PATH]
         }.getOrNull()
-        if (saved != null && File(saved).exists()) return@withContext saved
+        
+        if (saved != null && File(saved).exists()) {
+            DebugLogger.log("REPO", "Returning saved model path: $saved")
+            return@withContext saved
+        }
+        
+        DebugLogger.log("REPO", "No saved path found or file missing. Scanning...")
         scanForModels().firstOrNull()
     }
 
-    override suspend fun scanForModels(): List<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    override suspend fun scanForModels(): List<String> = withContext(Dispatchers.IO) {
         val candidates = mutableListOf<File>()
 
         val searchRoots = listOfNotNull(
@@ -87,6 +93,6 @@ class OnboardingRepositoryImpl @Inject constructor(
         val name = f.name.lowercase()
         val hasExt = MODEL_EXTENSIONS.any { name.endsWith(it) }
         val hasHint = MODEL_NAME_HINTS.any { name.contains(it) }
-        return hasExt && (hasHint || f.length() > 100_000_000L)
+        return hasExt && (hasHint || f.length() > 50_000_000L)
     }
 }

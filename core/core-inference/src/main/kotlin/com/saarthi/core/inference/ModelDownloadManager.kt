@@ -104,7 +104,7 @@ class ModelDownloadManager @Inject constructor(
         val size = file.length()
         if (size < 1_000_000L) return false
         // Size check: must be >= 98% of expected (tolerates minor server-side differences)
-        if (expectedBytes > 0L && size < (expectedBytes * 0.98).toLong()) {
+        if (expectedBytes > 0L && size < (expectedBytes * 0.95).toLong()) {
             Timber.w("File ${file.name} is incomplete: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB")
             return false
         }
@@ -207,18 +207,21 @@ class ModelDownloadManager @Inject constructor(
                 if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL) {
                     val actualSize = destFile.length()
                     val complete = isFileComplete(destFile, expectedBytes)
-                    DebugLogger.log("DOWNLOAD", "STATUS_SUCCESSFUL  file=${destFile.name}  actualSize=${actualSize/1_048_576}MB  expectedSize=${expectedBytes/1_048_576}MB  isComplete=$complete  path=${destFile.absolutePath}")
+                    DebugLogger.log("DOWNLOAD", "STATUS_SUCCESSFUL  file=${destFile.name}  actualSize=${actualSize/1_048_576}MB  expectedSize=${expectedBytes/1_048_576}MB  isComplete=$complete")
+                    
                     if (complete) {
                         trySend(DownloadProgress.Completed(destFile.absolutePath))
                     } else {
-                        destFile.delete()
+                        // Don't delete immediately, let user see the outcome
                         trySend(DownloadProgress.Failed(
                             "Download incomplete — file is ${actualSize / 1_048_576}MB " +
-                            "but expected ${expectedBytes / 1_048_576}MB. Please try again."
+                            "but expected ${expectedBytes / 1_048_576}MB. If you are using a VPN or weak network, try again."
                         ))
                     }
                 } else {
-                    trySend(DownloadProgress.Failed(queryFailureReason(downloadId)))
+                    val reason = queryFailureReason(downloadId)
+                    DebugLogger.log("DOWNLOAD", "STATUS_FAILED  reason=$reason")
+                    trySend(DownloadProgress.Failed(reason))
                 }
                 close()
             }

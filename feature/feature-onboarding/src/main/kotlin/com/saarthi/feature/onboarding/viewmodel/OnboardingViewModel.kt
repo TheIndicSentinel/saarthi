@@ -101,13 +101,16 @@ class OnboardingViewModel @Inject constructor(
         val profile = deviceProfiler.profile()
         val catalog = modelCatalog.recommendedFor(profile)
         _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
-        refreshDownloadedModels()
-        restoreActiveDownloads()
 
-        if (isModelChangeMode) {
-            viewModelScope.launch {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                refreshDownloadedModels()
+                restoreActiveDownloads()
+            }
+
+            if (isModelChangeMode) {
                 _uiState.update { it.copy(isScanning = true) }
-                val found = withContext(Dispatchers.IO) { scanExcludingActive() }
+                val found = scanExcludingActive()
                 _uiState.update { it.copy(isScanning = false, modelCandidates = found) }
             }
         }
@@ -262,18 +265,8 @@ class OnboardingViewModel @Inject constructor(
                 }
                 if (progress is DownloadProgress.Completed) {
                     val path = progress.filePath
-                    DebugLogger.log("DOWNLOAD", "Completed  path=$path  size=${File(path).length() / 1_048_576}MB")
+                    DebugLogger.log("DOWNLOAD", "Success: $path")
                     
-                    // Save path immediately so it's remembered even if init crashes later
-                    viewModelScope.launch(Dispatchers.IO) {
-                        try {
-                            repository.saveModelPath(path)
-                            DebugLogger.log("VMODEL", "Saved complete model path: $path")
-                        } catch (e: Exception) {
-                            DebugLogger.log("VMODEL", "Failed to save model path: ${e.message}")
-                        }
-                    }
-
                     _uiState.update {
                         it.copy(
                             selectedModelPath = path,
@@ -281,8 +274,10 @@ class OnboardingViewModel @Inject constructor(
                             error = null
                         )
                     }
-                    refreshDownloadedModels()
-                    DebugLogger.log("VMODEL", "UI state updated with new model path")
+                    
+                    viewModelScope.launch(Dispatchers.IO) {
+                        refreshDownloadedModels()
+                    }
                 }
             }
         }

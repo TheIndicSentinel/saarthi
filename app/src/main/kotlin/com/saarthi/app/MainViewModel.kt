@@ -47,7 +47,13 @@ class MainViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val isComplete = onboardingRepository.isOnboardingComplete().first()
+            // Safety delay to allow system services and logger to settle
+            kotlinx.coroutines.delay(500)
+            
+            val isComplete = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                onboardingRepository.isOnboardingComplete().first()
+            }
+            
             if (!isComplete) {
                 _startState.value = AppStartState.GoToOnboarding
                 return@launch
@@ -73,6 +79,7 @@ class MainViewModel @Inject constructor(
                 restoreModelFamily(modelPath)
                 _startState.value = AppStartState.GoToHome
             }.onFailure { e ->
+                com.saarthi.core.inference.DebugLogger.log("MAIN", "Startup init failed: ${e.message}")
                 _startState.value = AppStartState.ModelError(
                     e.message ?: "Failed to load AI model"
                 )

@@ -26,8 +26,9 @@ object DebugLogger {
             runCatching { it.parentFile?.mkdirs(); it.createNewFile() || it.exists() }.getOrDefault(false)
         } ?: candidates.last()
 
-        runCatching { file?.writeText("") } // clear on each app start
-        log("APP", "=== Saarthi debug log ===  path=${file?.absolutePath}")
+        // runCatching { file?.writeText("") } // STOP clearing on start
+        log("APP", "--------------------------------------------------")
+        log("APP", "=== Saarthi start session ===  path=${file?.absolutePath}")
         log("APP", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})  device=${Build.MANUFACTURER} ${Build.MODEL}")
     }
 
