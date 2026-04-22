@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 interface OnboardingRepository {
     fun isOnboardingComplete(): Flow<Boolean>
     suspend fun completeOnboarding(selectedLanguage: SupportedLanguage)
-    fun getModelPath(): String?
-    fun scanForModels(): List<String>
+    suspend fun getModelPath(): String?
+    suspend fun scanForModels(): List<String>
     suspend fun saveModelPath(path: String)
 }

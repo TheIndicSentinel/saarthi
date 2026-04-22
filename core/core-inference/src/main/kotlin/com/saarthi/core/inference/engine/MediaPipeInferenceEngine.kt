@@ -35,11 +35,11 @@ class MediaPipeInferenceEngine @Inject constructor(
         val path = config.modelPath
         val lower = path.lowercase()
         val supported =
-            lower.endsWith(".task") || lower.endsWith(".bin") || lower.endsWith(".litertlm")
+            lower.endsWith(".task") || lower.endsWith(".bin") || lower.endsWith(".litertlm") || lower.endsWith(".litert")
         if (!supported) {
             throw IllegalArgumentException(
                 "Unsupported MediaPipe model format: ${path.substringAfterLast('.')}\n\n" +
-                    "Supported: .task, .bin, .litertlm"
+                    "Supported: .task, .bin, .litertlm, .litert"
             )
         }
 
@@ -48,7 +48,7 @@ class MediaPipeInferenceEngine @Inject constructor(
             "Model file not found: $path\n\nPlease re-download the model."
         )
         if (!file.canRead()) throw SecurityException(
-            "Cannot read model file — storage permission may be needed."
+            "Cannot read model file — storage permission may be needed or file is in an inaccessible directory."
         )
 
         Timber.d("Initializing MediaPipe engine: $path")
@@ -72,7 +72,9 @@ class MediaPipeInferenceEngine @Inject constructor(
                     e,
                 )
             } else {
-                throw RuntimeException("MediaPipe failed to load model: ${e.message}", e)
+                val errorMsg = e.message ?: e.javaClass.simpleName
+                DebugLogger.log("MEDIAPIPE", "Init failed: $errorMsg")
+                throw RuntimeException("MediaPipe failed to load model: $errorMsg", e)
             }
         }
         isReady = true

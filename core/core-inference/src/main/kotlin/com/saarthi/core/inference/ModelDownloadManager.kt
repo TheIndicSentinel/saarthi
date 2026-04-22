@@ -108,13 +108,19 @@ class ModelDownloadManager @Inject constructor(
             Timber.w("File ${file.name} is incomplete: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB")
             return false
         }
-        if (!file.name.endsWith(".gguf", ignoreCase = true)) return true
-        return runCatching {
-            file.inputStream().use { s ->
-                val magic = ByteArray(4)
-                s.read(magic) == 4 && magic.contentEquals(GGUF_MAGIC)
-            }
-        }.getOrElse { false }
+        if (file.name.endsWith(".gguf", ignoreCase = true)) {
+            return runCatching {
+                file.inputStream().use { s ->
+                    val magic = ByteArray(4)
+                    s.read(magic) == 4 && magic.contentEquals(GGUF_MAGIC)
+                }
+            }.getOrElse { false }
+        }
+
+        // For LiteRT (.task, .litertlm, .bin, .tflite):
+        // We ensure it's at least 95% of expected size if expectedBytes > 0, 
+        // otherwise just trust the existence and minimum size check above.
+        return true
     }
 
     // ── Core implementation ───────────────────────────────────────────────────

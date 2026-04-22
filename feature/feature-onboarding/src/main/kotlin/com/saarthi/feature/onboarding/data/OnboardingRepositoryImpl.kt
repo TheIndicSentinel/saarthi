@@ -24,7 +24,7 @@ private val Context.onboardingDataStore: DataStore<Preferences>
 private val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
 private val SAVED_MODEL_PATH    = stringPreferencesKey("saved_model_path")
 
-private val MODEL_EXTENSIONS = setOf(".gguf", ".bin", ".task", ".tflite")
+private val MODEL_EXTENSIONS = setOf(".gguf", ".bin", ".task", ".tflite", ".litertlm", ".litert")
 private val MODEL_NAME_HINTS  = listOf(
     "gemma", "llm", "model", "ai", "inference",
     "llama", "qwen", "phi", "mistral", "falcon", "stablelm",
@@ -47,17 +47,15 @@ class OnboardingRepositoryImpl @Inject constructor(
         context.onboardingDataStore.edit { it[SAVED_MODEL_PATH] = path }
     }
 
-    override fun getModelPath(): String? {
+    override suspend fun getModelPath(): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val saved = runCatching {
-            kotlinx.coroutines.runBlocking {
-                context.onboardingDataStore.data.first()[SAVED_MODEL_PATH]
-            }
+            context.onboardingDataStore.data.first()[SAVED_MODEL_PATH]
         }.getOrNull()
-        if (saved != null && File(saved).exists()) return saved
-        return scanForModels().firstOrNull()
+        if (saved != null && File(saved).exists()) return@withContext saved
+        scanForModels().firstOrNull()
     }
 
-    override fun scanForModels(): List<String> {
+    override suspend fun scanForModels(): List<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val candidates = mutableListOf<File>()
 
         val searchRoots = listOfNotNull(

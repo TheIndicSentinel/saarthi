@@ -237,7 +237,7 @@ class OnboardingViewModel @Inject constructor(
 
     // ── Scan (excludes actively downloading + incomplete files) ──────────────
 
-    private fun scanExcludingActive(): List<String> {
+    private suspend fun scanExcludingActive(): List<String> {
         val activePaths = downloadManager.activeDownloadingPaths()
         return repository.scanForModels().filter { path ->
             if (path in activePaths) return@filter false
@@ -263,6 +263,12 @@ class OnboardingViewModel @Inject constructor(
                 if (progress is DownloadProgress.Completed) {
                     val path = progress.filePath
                     DebugLogger.log("DOWNLOAD", "Completed  path=$path  size=${File(path).length() / 1_048_576}MB")
+                    
+                    // Save path immediately so it's remembered even if init crashes later
+                    viewModelScope.launch {
+                        repository.saveModelPath(path)
+                    }
+
                     _uiState.update {
                         it.copy(
                             selectedModelPath = path,
