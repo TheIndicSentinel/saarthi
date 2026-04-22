@@ -35,6 +35,7 @@ jobs:
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "ndk.dir=$ANDROID_HOME/ndk/27.0.12077973" >> local.properties
+          echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}" >> local.properties
 
       - name: Decode keystore
         run: |
