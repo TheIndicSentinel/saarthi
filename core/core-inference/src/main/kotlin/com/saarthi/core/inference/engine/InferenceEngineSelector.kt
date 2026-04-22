@@ -20,18 +20,31 @@ class InferenceEngineSelector @Inject constructor(
     private val llamaCppEngine: LlamaCppInferenceEngine,
 ) : InferenceEngine {
 
+    private var currentModelPath: String? = null
     private var activeEngine: InferenceEngine = mediaPipeEngine
 
     override val isReady: Boolean get() = activeEngine.isReady
 
     override suspend fun initialize(config: InferenceConfig) {
         val engine = engineFor(config.modelPath)
-        if (engine !== activeEngine) {
+
+        val engineChanged = engine !== activeEngine
+        val modelChanged = config.modelPath != currentModelPath
+
+        // Force release if engine type OR model file has changed
+        if (engineChanged || modelChanged) {
+            Timber.d(
+                "Releasing active engine for new model: ${config.modelPath} " +
+                    "(engineChanged=$engineChanged, modelChanged=$modelChanged)"
+            )
             activeEngine.release()
             activeEngine = engine
+            currentModelPath = null // set only after successful init
         }
+
         Timber.d("InferenceEngineSelector → ${engine::class.simpleName}")
         activeEngine.initialize(config)
+        currentModelPath = config.modelPath
     }
 
     override fun generateStream(prompt: String, packType: PackType): Flow<String> =

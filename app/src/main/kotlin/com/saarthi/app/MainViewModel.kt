@@ -59,12 +59,6 @@ class MainViewModel @Inject constructor(
                 return@launch
             }
 
-            if (inferenceEngine.isReady) {
-                restoreModelFamily(modelPath)
-                _startState.value = AppStartState.GoToHome
-                return@launch
-            }
-
             val catalogEntry = modelCatalog.allModels.find {
                 modelPath.endsWith(it.fileName)
             }

@@ -5,12 +5,20 @@
 #define LOG_TAG "LlamaBridgeStub"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
+static std::string g_last_error = "llama.cpp backend not built (stub library)";
+
 extern "C" {
 
+JNIEXPORT jstring JNICALL
+Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGetLastError(
+    JNIEnv* env, jobject) {
+    return env->NewStringUTF(g_last_error.c_str());
+}
+
 JNIEXPORT jlong JNICALL
-Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInit(
-    JNIEnv*, jobject, jstring, jint, jint, jint) {
-    LOGI("Stub: nativeInit — submodule not built");
+Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
+    JNIEnv*, jobject, jint /*fd*/, jint /*nCtx*/, jint /*nThreads*/, jint /*nGpuLayers*/) {
+    LOGI("Stub: nativeInitFd — llama.cpp not built");
     return -1L;
 }
 
@@ -30,7 +38,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeClearLoraAdapter(
 JNIEXPORT jstring JNICALL
 Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGenerate(
     JNIEnv* env, jobject, jlong, jstring, jint, jfloat, jint) {
-    return env->NewStringUTF("[llama.cpp stub]");
+    return env->NewStringUTF("[llama.cpp unavailable]");
 }
 
 JNIEXPORT void JNICALL
@@ -39,7 +47,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGenerateStream(
     jclass cbClass = env->GetObjectClass(tokenCallback);
     jmethodID onToken = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)Z");
     if (onToken) {
-        jstring tok = env->NewStringUTF("[llama.cpp stub]");
+        jstring tok = env->NewStringUTF("[llama.cpp unavailable]");
         env->CallBooleanMethod(tokenCallback, onToken, tok);
         env->DeleteLocalRef(tok);
     }

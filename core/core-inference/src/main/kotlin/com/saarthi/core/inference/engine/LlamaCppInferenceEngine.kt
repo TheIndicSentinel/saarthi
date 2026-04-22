@@ -40,80 +40,51 @@ class LlamaCppInferenceEngine @Inject constructor(
     }
 
     override suspend fun initialize(config: InferenceConfig) = withContext(Dispatchers.IO) {
-        if (isReady) return@withContext
+        if (isReady) {
+            if (config.modelPath == this@LlamaCppInferenceEngine.config?.modelPath) return@withContext
+            Timber.d("Releasing existing llama.cpp state for model reload")
+            release()
+        }
 
         val ramMb = availableRamMb()
         DebugLogger.log("INIT", "initialize() called  modelPath=${config.modelPath}")
-        DebugLogger.log("INIT", "availableRAM=${ramMb}MB  nCtx=${config.nCtx}  nThreads=${config.nThreads}  nGpuLayers=${config.nGpuLayers}")
-        DebugLogger.log("INIT", "nativeAvailable=$nativeAvailable")
 
         if (!nativeAvailable) {
-            DebugLogger.log("INIT", "FAIL: native library not loaded")
-            throw UnsupportedOperationException("llama.cpp native library not found on this device.")
+            throw UnsupportedOperationException("llama.cpp native library (libllama_bridge.so) not found or failed to load.")
         }
 
         val file = File(config.modelPath)
-        DebugLogger.log("INIT", "file.exists=${file.exists()}  file.canRead=${file.canRead()}  file.length=${file.length() / 1_048_576}MB  path=${file.absolutePath}")
+        if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
 
-        if (!file.exists()) throw IllegalArgumentException(
-            "Model file not found: ${config.modelPath}\n\nPlease re-download the model."
-        )
-        if (!file.canRead()) throw SecurityException(
-            "Cannot read model file — storage permission may be needed."
-        )
-
-        // Validate GGUF magic bytes before invoking native to give a clear error
+        // Validate GGUF magic bytes
         if (config.modelPath.endsWith(".gguf", ignoreCase = true)) {
             val magic = file.inputStream().use { s -> ByteArray(4).also { s.read(it) } }
-            val valid = magic.size == 4 &&
-                magic[0] == 0x47.toByte() && magic[1] == 0x47.toByte() &&
-                magic[2] == 0x55.toByte() && magic[3] == 0x46.toByte()
-            DebugLogger.log("INIT", "GGUF magic check: valid=$valid  bytes=${magic.joinToString(",") { "0x%02X".format(it) }}")
-            if (!valid) throw IllegalStateException(
-                "Model file is corrupted or incomplete (invalid GGUF header).\n\n" +
-                "Delete the file and re-download it."
-            )
+            val valid = magic.size == 4 && magic[0] == 0x47.toByte() && magic[1] == 0x47.toByte() && magic[2] == 0x55.toByte() && magic[3] == 0x46.toByte()
+            if (!valid) throw IllegalStateException("Model file is corrupted (invalid GGUF header).")
         }
 
-        // Open via file descriptor — avoids scoped-storage path issues on Android 10+
         val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
         val fd  = pfd.fd
-        DebugLogger.log("INIT", "PFD opened  fd=$fd  procPath=/proc/self/fd/$fd")
 
-        Timber.d("Initialising llama.cpp fd=$fd  size=${file.length() / 1_048_576}MB  gpuLayers=${config.nGpuLayers}")
-
-        // Try descending context sizes until one fits in RAM
         var handle = -1L
         var usedCtx = config.nCtx
         for (ctx in CTX_LADDER.filter { it <= config.nCtx } + listOf(CTX_LADDER.last())) {
-            DebugLogger.log("INIT", "Trying nCtx=$ctx …")
             handle = LlamaCppBridge.nativeInitFd(
                 fd         = fd,
                 nCtx       = ctx,
                 nThreads   = config.nThreads,
                 nGpuLayers = config.nGpuLayers,
             )
-            val nativeErrSoFar = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
-            DebugLogger.log("INIT", "nativeInitFd result=$handle  nativeErr=${nativeErrSoFar.take(200)}")
             if (handle != -1L) {
                 usedCtx = ctx
                 break
             }
-            Timber.w("Init failed at nCtx=$ctx, trying smaller context…")
         }
 
         if (handle == -1L) {
-            val nativeError = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
-            val ramAfter = availableRamMb()
-            DebugLogger.log("INIT", "FAIL: all ctx sizes exhausted  nativeError=${nativeError.take(300)}  ramAfter=${ramAfter}MB")
             pfd.close()
-            val detail = if (nativeError.isNotBlank()) nativeError.trim().take(300) else
-                "No details available — availRAM was ${ramMb}MB before init. Try closing other apps."
-            throw RuntimeException("Model failed to load.\n\n$detail\n\nDebug log: ${DebugLogger.path()}")
-        }
-
-        if (usedCtx < config.nCtx) {
-            Timber.w("Loaded with reduced context nCtx=$usedCtx (requested ${config.nCtx}) due to RAM constraints")
+            val nativeError = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
+            throw RuntimeException("llama.cpp failed to load model: $nativeError")
         }
 
         modelPfd?.close()
@@ -121,7 +92,6 @@ class LlamaCppInferenceEngine @Inject constructor(
         contextHandle = handle
         this@LlamaCppInferenceEngine.config = config.copy(nCtx = usedCtx)
         isReady       = true
-        DebugLogger.log("INIT", "SUCCESS  handle=$handle  nCtx=$usedCtx  ramAfter=${availableRamMb()}MB")
         Timber.d("llama.cpp ready handle=$handle  nCtx=$usedCtx")
     }
 
@@ -129,19 +99,24 @@ class LlamaCppInferenceEngine @Inject constructor(
         check(isReady) { "LlamaCppInferenceEngine not initialised." }
         val cfg = config!!
         withContext(Dispatchers.IO) {
-            LlamaCppBridge.nativeGenerateStream(
-                contextHandle = contextHandle,
-                prompt        = prompt,
-                maxTokens     = cfg.maxTokens,
-                temperature   = cfg.temperature,
-                topK          = cfg.topK,
-                tokenCallback = object : LlamaCppBridge.TokenCallback {
-                    override fun onToken(token: String): Boolean {
-                        trySend(token)
-                        return !isClosedForSend
+            try {
+                LlamaCppBridge.nativeGenerateStream(
+                    contextHandle = contextHandle,
+                    prompt        = prompt,
+                    maxTokens     = cfg.maxTokens,
+                    temperature   = cfg.temperature,
+                    topK          = cfg.topK,
+                    tokenCallback = object : LlamaCppBridge.TokenCallback {
+                        override fun onToken(token: String): Boolean {
+                            trySend(token)
+                            return !isClosedForSend
+                        }
                     }
-                }
-            )
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "LlamaCpp native stream generation failed")
+                close(e)
+            }
         }
         close()
         awaitClose {}
@@ -151,20 +126,29 @@ class LlamaCppInferenceEngine @Inject constructor(
         withContext(Dispatchers.IO) {
             check(isReady) { "LlamaCppInferenceEngine not initialised." }
             val cfg = config!!
-            LlamaCppBridge.nativeGenerate(
-                contextHandle = contextHandle,
-                prompt        = prompt,
-                maxTokens     = cfg.maxTokens,
-                temperature   = cfg.temperature,
-                topK          = cfg.topK,
-            )
+            try {
+                LlamaCppBridge.nativeGenerate(
+                    contextHandle = contextHandle,
+                    prompt        = prompt,
+                    maxTokens     = cfg.maxTokens,
+                    temperature   = cfg.temperature,
+                    topK          = cfg.topK,
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "LlamaCpp native generation failed")
+                throw e
+            }
         }
 
     override suspend fun loadLoraAdapter(adapterPath: String, scale: Float) =
         withContext(Dispatchers.IO) {
             if (!isReady) return@withContext
-            val ok = LlamaCppBridge.nativeLoadLoraAdapter(contextHandle, adapterPath, scale)
-            if (!ok) Timber.w("LoRA adapter failed: $adapterPath")
+            try {
+                val ok = LlamaCppBridge.nativeLoadLoraAdapter(contextHandle, adapterPath, scale)
+                if (!ok) Timber.w("LoRA adapter failed: $adapterPath")
+            } catch (e: Exception) {
+                Timber.e(e, "Native LoRA load failed")
+            }
         }
 
     override fun clearLoraAdapter() {
