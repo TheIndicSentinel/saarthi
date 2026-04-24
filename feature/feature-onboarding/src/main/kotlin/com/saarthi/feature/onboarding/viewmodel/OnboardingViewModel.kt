@@ -107,20 +107,24 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             downloadManager.allProgress.collect { progressMap ->
                 _uiState.update { it.copy(downloadProgress = progressMap) }
-                progressMap.forEach { (modelId, progress) ->
-                    if (progress is DownloadProgress.Completed && modelId !in handledCompletions) {
-                        handledCompletions += modelId
-                        val path = progress.filePath
-                        DebugLogger.log("DOWNLOAD", "Success: $path")
-                        _uiState.update {
-                            it.copy(
-                                selectedModelPath = it.selectedModelPath ?: path,
-                                modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
-                                error = null,
-                            )
-                        }
-                        withContext(Dispatchers.IO) { refreshDownloadedModels() }
+                // Collect newly-completed downloads outside forEach (forEach is non-suspend).
+                val newlyCompleted = progressMap.entries.filter { (modelId, progress) ->
+                    progress is DownloadProgress.Completed && modelId !in handledCompletions
+                }
+                newlyCompleted.forEach { (modelId, progress) ->
+                    handledCompletions += modelId
+                    val path = (progress as DownloadProgress.Completed).filePath
+                    DebugLogger.log("DOWNLOAD", "Success: $path")
+                    _uiState.update {
+                        it.copy(
+                            selectedModelPath = it.selectedModelPath ?: path,
+                            modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
+                            error = null,
+                        )
                     }
+                }
+                if (newlyCompleted.isNotEmpty()) {
+                    withContext(Dispatchers.IO) { refreshDownloadedModels() }
                 }
             }
         }
