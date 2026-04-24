@@ -9,4 +9,5 @@ interface OnboardingRepository {
     suspend fun getModelPath(): String?
     suspend fun scanForModels(): List<String>
     suspend fun saveModelPath(path: String)
+    suspend fun clearModelPath()
 }

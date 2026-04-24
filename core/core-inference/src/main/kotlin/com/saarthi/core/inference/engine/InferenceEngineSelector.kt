@@ -1,5 +1,6 @@
 package com.saarthi.core.inference.engine
 
+import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import kotlinx.coroutines.flow.Flow
@@ -8,63 +9,51 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Routes inference to the correct backend:
- *   .gguf → LlamaCppInferenceEngine  (streaming, LoRA adapters, Vulkan GPU)
- *   all others → MediaPipeInferenceEngine (.task, .litertlm)
+ * Singleton inference engine — routes all requests to [LlamaCppInferenceEngine].
  *
- * This is the singleton [InferenceEngine] bound in the DI graph.
+ * Architecture decision: llama.cpp GGUF is the only supported backend.
  *
- * Release policy:
- *   - Engine type change (GGUF ↔ MediaPipe): release the engine being abandoned so its
- *     resources are freed, then initialize the new one.
- *   - Same engine type, different model path: do NOT call release() — let the individual
- *     engine handle model switching internally.  For MediaPipe in particular, calling
- *     release() followed by initialize() triggers the "Another handler is already
- *     registered" crash because close() does not reliably free the native handler slot.
- *   - Same engine type, same model path: no-op (engine handles "already loaded" internally).
+ *  • No process-level handler slot — zero "Another handler is already registered" crashes.
+ *  • True streaming token-by-token (via JNI callback).
+ *  • Native LoRA adapter support (future domain packs).
+ *  • Live model switching without app restart.
+ *  • Industry standard: same stack as Pocketpal AI, ChatterUI.
+ *
+ * MediaPipe LiteRT was removed: its process-level native handler cannot be reliably freed
+ * between sessions, causing unfixable "Another handler is already registered" crashes on
+ * model switch or Activity recreation.  All Google Gemma models are available as GGUF.
  */
 @Singleton
 class InferenceEngineSelector @Inject constructor(
-    private val mediaPipeEngine: MediaPipeInferenceEngine,
     private val llamaCppEngine: LlamaCppInferenceEngine,
 ) : InferenceEngine {
 
-    private var activeEngine: InferenceEngine = mediaPipeEngine
-
-    override val isReady: Boolean get() = activeEngine.isReady
+    override val isReady: Boolean get() = llamaCppEngine.isReady
 
     override suspend fun initialize(config: InferenceConfig) {
-        val engine = engineFor(config.modelPath)
-        val engineChanged = engine !== activeEngine
-
-        if (engineChanged) {
-            // Abandoning the current engine — release it so native resources are freed.
-            // The NEW engine is NOT pre-released: its internal "already loaded" check or
-            // model-switch logic handles any existing state safely.
-            Timber.d("InferenceEngineSelector: engine type changed — releasing ${activeEngine::class.simpleName}")
-            activeEngine.release()
-            activeEngine = engine
+        if (!config.modelPath.endsWith(".gguf", ignoreCase = true)) {
+            DebugLogger.log("ENGINE", "Unsupported model format — only GGUF is supported: ${config.modelPath}")
+            throw UnsupportedOperationException(
+                "Only GGUF models are supported.\n\n" +
+                "Please download a GGUF model from the model list.\n" +
+                "Legacy MediaPipe models (.task, .litertlm) are no longer supported."
+            )
         }
-
-        Timber.d("InferenceEngineSelector → ${engine::class.simpleName}")
-        activeEngine.initialize(config)
+        Timber.d("InferenceEngineSelector → LlamaCppInferenceEngine")
+        llamaCppEngine.initialize(config)
     }
 
     override fun generateStream(prompt: String, packType: PackType): Flow<String> =
-        activeEngine.generateStream(prompt, packType)
+        llamaCppEngine.generateStream(prompt, packType)
 
     override suspend fun generate(prompt: String, packType: PackType): String =
-        activeEngine.generate(prompt, packType)
+        llamaCppEngine.generate(prompt, packType)
 
     override suspend fun loadLoraAdapter(adapterPath: String, scale: Float) =
-        activeEngine.loadLoraAdapter(adapterPath, scale)
+        llamaCppEngine.loadLoraAdapter(adapterPath, scale)
 
     override fun clearLoraAdapter() =
-        activeEngine.clearLoraAdapter()
+        llamaCppEngine.clearLoraAdapter()
 
-    override fun release() = activeEngine.release()
-
-    private fun engineFor(modelPath: String): InferenceEngine =
-        if (modelPath.endsWith(".gguf", ignoreCase = true)) llamaCppEngine
-        else mediaPipeEngine
+    override fun release() = llamaCppEngine.release()
 }

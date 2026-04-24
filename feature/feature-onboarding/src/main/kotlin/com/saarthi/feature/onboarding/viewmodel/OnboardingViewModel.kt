@@ -30,7 +30,6 @@ import com.saarthi.core.inference.DebugLogger
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -95,17 +94,41 @@ class OnboardingViewModel @Inject constructor(
     }
 
     private var modelPfd: ParcelFileDescriptor? = null
-    private val downloadJobs = mutableMapOf<String, Job>()
+
+    /** Tracks completed downloads we've already acted on (set selectedModelPath). */
+    private val handledCompletions = mutableSetOf<String>()
 
     init {
         val profile = deviceProfiler.profile()
         val catalog = modelCatalog.recommendedFor(profile)
         _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
 
+        // Mirror app-lifetime download progress into UI state.
+        viewModelScope.launch {
+            downloadManager.allProgress.collect { progressMap ->
+                _uiState.update { it.copy(downloadProgress = progressMap) }
+                progressMap.forEach { (modelId, progress) ->
+                    if (progress is DownloadProgress.Completed && modelId !in handledCompletions) {
+                        handledCompletions += modelId
+                        val path = progress.filePath
+                        DebugLogger.log("DOWNLOAD", "Success: $path")
+                        _uiState.update {
+                            it.copy(
+                                selectedModelPath = it.selectedModelPath ?: path,
+                                modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
+                                error = null,
+                            )
+                        }
+                        withContext(Dispatchers.IO) { refreshDownloadedModels() }
+                    }
+                }
+            }
+        }
+
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 refreshDownloadedModels()
-                restoreActiveDownloads()
+                downloadManager.reattachActiveDownloads(modelCatalog.allModels)
             }
 
             if (isModelChangeMode) {
@@ -256,47 +279,15 @@ class OnboardingViewModel @Inject constructor(
     // ── Catalog download ──────────────────────────────────────────────────────
 
     fun downloadModel(model: ModelEntry) {
-        if (downloadJobs[model.id]?.isActive == true) return
-
-        val job = viewModelScope.launch {
-            downloadManager.download(model).collect { progress ->
-                _uiState.update {
-                    it.copy(downloadProgress = it.downloadProgress + (model.id to progress))
-                }
-                if (progress is DownloadProgress.Completed) {
-                    val path = progress.filePath
-                    DebugLogger.log("DOWNLOAD", "Success: $path")
-                    
-                    _uiState.update {
-                        it.copy(
-                            selectedModelPath = path,
-                            modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
-                            error = null
-                        )
-                    }
-                    
-                    viewModelScope.launch(Dispatchers.IO) {
-                        refreshDownloadedModels()
-                    }
-                }
-            }
-        }
-        downloadJobs[model.id] = job
+        downloadManager.startDownload(model)
     }
 
     fun cancelDownload(model: ModelEntry) {
-        downloadJobs[model.id]?.cancel()
-        downloadJobs.remove(model.id)
         downloadManager.cancelDownload(model)
-        _uiState.update {
-            it.copy(downloadProgress = it.downloadProgress - model.id)
-        }
         refreshDownloadedModels()
     }
 
     fun deleteModel(model: ModelEntry) {
-        downloadJobs[model.id]?.cancel()
-        downloadJobs.remove(model.id)
         val file = downloadManager.localPathFor(model)
         DebugLogger.log("DELETE", "Deleting ${file.absolutePath}  exists=${file.exists()}  size=${file.length() / 1_048_576}MB")
         file.delete()
@@ -308,17 +299,6 @@ class OnboardingViewModel @Inject constructor(
                 modelCandidates = it.modelCandidates.filterNot { p -> p.endsWith(model.fileName) },
                 error = null,
             )
-        }
-    }
-
-    private fun restoreActiveDownloads() {
-        val activePaths = downloadManager.activeDownloadingPaths()
-        if (activePaths.isEmpty()) return
-        modelCatalog.allModels.forEach { model ->
-            val modelPath = downloadManager.localPathFor(model).absolutePath
-            if (activePaths.any { it == modelPath }) {
-                downloadModel(model)
-            }
         }
     }
 

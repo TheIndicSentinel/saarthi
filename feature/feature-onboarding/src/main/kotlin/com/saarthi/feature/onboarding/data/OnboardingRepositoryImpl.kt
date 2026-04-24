@@ -27,7 +27,9 @@ private val Context.onboardingDataStore: DataStore<Preferences>
 private val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
 private val SAVED_MODEL_PATH    = stringPreferencesKey("saved_model_path")
 
-private val MODEL_EXTENSIONS = setOf(".gguf", ".bin", ".task", ".tflite", ".litertlm", ".litert")
+// Only GGUF models are supported. Legacy MediaPipe formats (.task, .litertlm) are excluded
+// to prevent them from appearing in scan results and crashing the engine.
+private val MODEL_EXTENSIONS = setOf(".gguf")
 private val MODEL_NAME_HINTS  = listOf(
     "gemma", "llm", "model", "ai", "inference",
     "llama", "qwen", "phi", "mistral", "falcon", "stablelm",
@@ -48,6 +50,10 @@ class OnboardingRepositoryImpl @Inject constructor(
 
     override suspend fun saveModelPath(path: String) {
         context.onboardingDataStore.edit { it[SAVED_MODEL_PATH] = path }
+    }
+
+    override suspend fun clearModelPath() {
+        context.onboardingDataStore.edit { it.remove(SAVED_MODEL_PATH) }
     }
 
     override suspend fun getModelPath(): String? = withContext(Dispatchers.IO) {

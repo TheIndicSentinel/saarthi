@@ -28,20 +28,34 @@ class SaarthiApp : Application() {
                 DebugLogger.log("CRASH", "UNCAUGHT on thread=${thread.name}")
                 DebugLogger.log("CRASH", "Type: ${throwable.javaClass.name}")
                 DebugLogger.log("CRASH", "Msg:  ${throwable.message}")
-                // Log the first 5 stack frames
                 throwable.stackTrace.take(5).forEach { frame ->
                     DebugLogger.log("CRASH", "  at $frame")
                 }
-                // Log cause if present
                 throwable.cause?.let { cause ->
                     DebugLogger.log("CRASH", "Caused by: ${cause.javaClass.name}: ${cause.message}")
                     cause.stackTrace.take(3).forEach { frame ->
                         DebugLogger.log("CRASH", "  at $frame")
                     }
                 }
-            } catch (_: Exception) {
-                // Never let the crash logger itself crash
+            } catch (_: Exception) {}
+
+            // "Another handler is already registered" is a MediaPipe process-level bug.
+            // With our new GGUF-only architecture this should never occur. If it does
+            // (e.g. old binary still resident), restart via MainActivity rather than
+            // killing the process, so the user sees an error instead of a blank crash.
+            val msg = throwable.message.orEmpty()
+            if ("Another handler" in msg || "handler is already" in msg) {
+                try {
+                    DebugLogger.log("CRASH", "MediaPipe handler conflict intercepted — restarting cleanly")
+                    val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                 android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    }
+                    if (intent != null) startActivity(intent)
+                } catch (_: Exception) {}
+                // Still pass to default so the process restarts
             }
+
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }

@@ -10,38 +10,60 @@ import android.os.Build
 import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.LoraEntry
 import com.saarthi.core.inference.model.ModelEntry
-import com.saarthi.core.inference.DebugLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.ProducerScope
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// GGUF magic: 'G','G','U','F' = 0x47,0x47,0x55,0x46
+// GGUF magic: 'G','G','U','F'
 private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
 
+/**
+ * Manages model downloads using Android [DownloadManager].
+ *
+ * Downloads run in [scope] which is tied to the Application, NOT to any ViewModel.
+ * Progress is exposed via [allProgress] (a StateFlow<Map<modelId, DownloadProgress>>)
+ * so the UI can subscribe/unsubscribe without affecting the underlying download.
+ *
+ * When the user navigates away and the ViewModel is cleared, the download continues
+ * in Android DownloadManager and [scope] keeps polling progress.  On return,
+ * the ViewModel re-subscribes to [allProgress] and immediately sees current state.
+ */
 @Singleton
 class ModelDownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val hfTokenManager: HuggingFaceTokenManager,
 ) {
     private val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+    /** Application-lifetime scope — survives ViewModel/Activity lifecycle. */
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // Mirrors the persisted HF token so it's available synchronously when a download starts.
+    /** Per-model download progress, keyed by model ID. UI observes this. */
+    private val _allProgress = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
+    val allProgress: StateFlow<Map<String, DownloadProgress>> = _allProgress.asStateFlow()
+
+    /** Active polling jobs keyed by model ID. Cancelling stops polling but NOT the download. */
+    private val activeJobs = mutableMapOf<String, Job>()
+
     @Volatile private var hfToken: String = ""
 
     init {
         scope.launch { hfTokenManager.effectiveToken.collect { hfToken = it } }
+        // Re-attach to any downloads that were already in progress (e.g. from a previous session).
+        scope.launch { delay(1_000) /* wait for DI to settle */ }
     }
 
     fun modelsDir(): File =
@@ -50,8 +72,8 @@ class ModelDownloadManager @Inject constructor(
     fun adaptersDir(): File =
         File(context.getExternalFilesDir(null), "adapters").also { it.mkdirs() }
 
-    fun localPathFor(model: ModelEntry): File = File(modelsDir(),    model.fileName)
-    fun localPathFor(lora: LoraEntry):   File = File(adaptersDir(), lora.fileName)
+    fun localPathFor(model: ModelEntry): File = File(modelsDir(), model.fileName)
+    fun localPathFor(lora: LoraEntry): File   = File(adaptersDir(), lora.fileName)
 
     fun isDownloaded(model: ModelEntry): Boolean =
         isFileComplete(localPathFor(model), model.fileSizeBytes)
@@ -59,53 +81,84 @@ class ModelDownloadManager @Inject constructor(
     fun isDownloaded(lora: LoraEntry): Boolean =
         isFileComplete(localPathFor(lora), lora.fileSizeBytes)
 
-    fun download(model: ModelEntry): Flow<DownloadProgress> =
-        downloadFile(model.downloadUrl, localPathFor(model), model.displayName, model.fileSizeBytes)
+    // ── Download API (called from ViewModel) ──────────────────────────────────
 
-    fun downloadLora(lora: LoraEntry): Flow<DownloadProgress> =
-        downloadFile(lora.downloadUrl, localPathFor(lora), lora.displayName, lora.fileSizeBytes)
+    /**
+     * Starts or reattaches to a download.  Progress is pushed into [allProgress]
+     * from [scope] regardless of which ViewModel is currently observing.
+     */
+    fun startDownload(model: ModelEntry) {
+        if (activeJobs[model.id]?.isActive == true) return  // already polling
 
-    fun cancelDownload(model: ModelEntry) = cancelByUrl(model.downloadUrl, localPathFor(model))
-    fun cancelDownload(lora: LoraEntry)   = cancelByUrl(lora.downloadUrl,  localPathFor(lora))
+        val destFile = localPathFor(model)
+        if (isFileComplete(destFile, model.fileSizeBytes)) {
+            _allProgress.update { it + (model.id to DownloadProgress.Completed(destFile.absolutePath)) }
+            return
+        }
 
-    /** Returns the set of file paths currently being actively downloaded. */
-    fun activeDownloadingPaths(): Set<String> {
-        val query = DownloadManager.Query().setFilterByStatus(
-            DownloadManager.STATUS_PENDING or
-            DownloadManager.STATUS_RUNNING or
-            DownloadManager.STATUS_PAUSED
-        )
-        val paths = mutableSetOf<String>()
-        dm.query(query)?.use { cursor ->
-            val uriCol = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
-            while (cursor.moveToNext()) {
-                if (uriCol >= 0) {
-                    val localUri = cursor.getString(uriCol) ?: continue
-                    Uri.parse(localUri).path?.let { paths += it }
-                }
+        val job = scope.launch {
+            val downloadId = enqueueOrReattach(model.downloadUrl, destFile, model.displayName)
+            if (downloadId == -1L) {
+                _allProgress.update { it + (model.id to DownloadProgress.Failed("Failed to start download")) }
+                return@launch
+            }
+
+            // Register a one-shot broadcast receiver for completion
+            registerCompletionReceiver(model.id, downloadId, destFile, model.fileSizeBytes)
+
+            // Poll progress until DownloadManager reports done or failure
+            while (true) {
+                val progress = queryProgress(downloadId) ?: break
+                _allProgress.update { it + (model.id to progress) }
+                delay(if (progress is DownloadProgress.Paused) 3_000L else 600L)
             }
         }
-        return paths
+        activeJobs[model.id] = job
     }
+
+    /** Cancels the active download AND removes the partial file. */
+    fun cancelDownload(model: ModelEntry) {
+        activeJobs[model.id]?.cancel()
+        activeJobs.remove(model.id)
+        cancelByUrl(model.downloadUrl, localPathFor(model))
+        _allProgress.update { it - model.id }
+    }
+
+    fun cancelDownload(lora: LoraEntry) = cancelByUrl(lora.downloadUrl, localPathFor(lora))
+
+    /** Clears completed/failed state from the progress map (after user dismissed). */
+    fun clearProgress(modelId: String) {
+        _allProgress.update { it - modelId }
+    }
+
+    /**
+     * Called on ViewModel init — reattaches progress polling for any model
+     * whose download is still active in Android DownloadManager.
+     */
+    fun reattachActiveDownloads(models: List<ModelEntry>) {
+        val activePaths = activeDownloadingPaths()
+        models.forEach { model ->
+            val modelPath = localPathFor(model).absolutePath
+            if (activePaths.any { it == modelPath } && activeJobs[model.id]?.isActive != true) {
+                DebugLogger.log("DOWNLOAD", "Reattaching to in-progress download: ${model.id}")
+                startDownload(model)
+            }
+        }
+    }
+
+    // ── Lora downloads (simple flow — adapters are small) ─────────────────────
+
+    fun downloadLora(lora: LoraEntry): Flow<DownloadProgress> =
+        legacyDownloadFlow(lora.downloadUrl, localPathFor(lora), lora.displayName, lora.fileSizeBytes)
 
     // ── File validation ───────────────────────────────────────────────────────
 
-    /**
-     * A file is complete when:
-     * 1. It exists and is at least 1 MB
-     * 2. Its size is within 2% of [expectedBytes] (guards against partial downloads)
-     * 3. For GGUF files: the first 4 bytes are the GGUF magic
-     *
-     * Passing expectedBytes = 0 skips the size check (used for scanned files
-     * whose expected size is unknown).
-     */
     fun isFileComplete(file: File, expectedBytes: Long = 0L): Boolean {
         if (!file.exists()) return false
         val size = file.length()
         if (size < 1_000_000L) return false
-        // Size check: must be >= 98% of expected (tolerates minor server-side differences)
         if (expectedBytes > 0L && size < (expectedBytes * 0.95).toLong()) {
-            Timber.w("File ${file.name} is incomplete: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB")
+            Timber.w("File ${file.name}: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected — incomplete")
             return false
         }
         if (file.name.endsWith(".gguf", ignoreCase = true)) {
@@ -116,16 +169,86 @@ class ModelDownloadManager @Inject constructor(
                 }
             }.getOrElse { false }
         }
-
-        // For LiteRT (.task, .litertlm, .bin, .tflite):
-        // We ensure it's at least 95% of expected size if expectedBytes > 0, 
-        // otherwise just trust the existence and minimum size check above.
         return true
     }
 
-    // ── Core implementation ───────────────────────────────────────────────────
+    /** Returns absolute paths of files currently being downloaded by Android DownloadManager. */
+    fun activeDownloadingPaths(): Set<String> {
+        val query = DownloadManager.Query().setFilterByStatus(
+            DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or DownloadManager.STATUS_PAUSED
+        )
+        val paths = mutableSetOf<String>()
+        dm.query(query)?.use { cursor ->
+            val uriCol = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+            while (cursor.moveToNext()) {
+                if (uriCol >= 0) Uri.parse(cursor.getString(uriCol) ?: continue).path?.let { paths += it }
+            }
+        }
+        return paths
+    }
 
-    /** Returns the DownloadManager download ID if [url] is currently pending/running/paused. */
+    // ── Internal ──────────────────────────────────────────────────────────────
+
+    private fun enqueueOrReattach(url: String, destFile: File, title: String): Long {
+        findActiveDownloadId(url)?.let { return it }
+
+        if (destFile.exists() && !isFileComplete(destFile, 0L)) {
+            Timber.w("Deleting partial file: ${destFile.name}")
+            destFile.delete()
+        }
+
+        return runCatching {
+            val request = DownloadManager.Request(Uri.parse(url)).apply {
+                setTitle(title)
+                setDescription("Downloading AI model…")
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationUri(Uri.fromFile(destFile))
+                setAllowedOverMetered(true)
+                setAllowedOverRoaming(true) // allow on all networks
+                if (hfToken.isNotEmpty()) addRequestHeader("Authorization", "Bearer $hfToken")
+            }
+            dm.enqueue(request).also { Timber.d("Enqueued download id=$it  url=$url") }
+        }.getOrElse { -1L }
+    }
+
+    private fun registerCompletionReceiver(
+        modelId: String,
+        downloadId: Long,
+        destFile: File,
+        expectedBytes: Long,
+    ) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+                if (id != downloadId) return
+
+                runCatching { ctx.unregisterReceiver(this) }
+
+                val progress = if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL &&
+                                   isFileComplete(destFile, expectedBytes)) {
+                    DebugLogger.log("DOWNLOAD", "Complete: ${destFile.name}  ${destFile.length() / 1_048_576}MB")
+                    DownloadProgress.Completed(destFile.absolutePath)
+                } else {
+                    val reason = queryFailureReason(downloadId)
+                    DebugLogger.log("DOWNLOAD", "Failed: $reason")
+                    DownloadProgress.Failed(reason)
+                }
+                _allProgress.update { it + (modelId to progress) }
+                activeJobs.remove(modelId)
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(
+                receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                Context.RECEIVER_NOT_EXPORTED,
+            )
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            context.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+        }
+    }
+
     private fun findActiveDownloadId(url: String): Long? {
         val query = DownloadManager.Query().setFilterByStatus(
             DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or DownloadManager.STATUS_PAUSED
@@ -138,109 +261,6 @@ class ModelDownloadManager @Inject constructor(
             }
         }
         return null
-    }
-
-    private fun downloadFile(
-        url: String,
-        destFile: File,
-        title: String,
-        expectedBytes: Long,
-    ): Flow<DownloadProgress> = callbackFlow {
-        if (isFileComplete(destFile, expectedBytes)) {
-            trySend(DownloadProgress.Completed(destFile.absolutePath))
-            close()
-            return@callbackFlow
-        }
-
-        // If DownloadManager already has this download in progress (e.g. app was closed and reopened),
-        // reattach to it rather than starting a new download.
-        val existingId = findActiveDownloadId(url)
-        val downloadId: Long
-        if (existingId != null) {
-            downloadId = existingId
-            Timber.d("Reattaching to existing download id=$downloadId  url=$url")
-        } else {
-            if (destFile.exists()) {
-                Timber.w("Deleting incomplete file: ${destFile.name} (${destFile.length() / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected)")
-                destFile.delete()
-            }
-            val request = DownloadManager.Request(Uri.parse(url)).apply {
-                setTitle(title)
-                setDescription("Downloading AI model…")
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationUri(Uri.fromFile(destFile))
-                setAllowedOverMetered(true)
-                setAllowedOverRoaming(false)
-                // HuggingFace gated models (Gemma family) require a Bearer token.
-                // The token is only sent on the initial HF request; the CDN redirect
-                // is pre-signed and doesn't need it, so DownloadManager redirects work fine.
-                if (hfToken.isNotEmpty()) {
-                    addRequestHeader("Authorization", "Bearer $hfToken")
-                }
-            }
-            downloadId = dm.enqueue(request)
-            Timber.d("Download enqueued id=$downloadId  url=$url  expected=${expectedBytes / 1_048_576}MB")
-        }
-
-        registerCompletionReceiver(downloadId, destFile, expectedBytes)
-
-        while (true) {
-            val progress = queryProgress(downloadId) ?: break
-            trySend(progress)
-            // Poll slower when paused to avoid battery drain
-            delay(if (progress is DownloadProgress.Paused) 3_000L else 500L)
-        }
-
-        // Do NOT cancel the DownloadManager download when the flow closes (e.g. user navigates
-        // away). The system download continues in the background; restoreActiveDownloads()
-        // reattaches on the next visit. Explicit cancellation is handled by cancelDownload().
-        awaitClose { /* intentionally empty — download continues in background */ }
-    }
-
-    private fun ProducerScope<DownloadProgress>.registerCompletionReceiver(
-        downloadId: Long,
-        destFile: File,
-        expectedBytes: Long,
-    ) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-                if (id != downloadId) return
-                if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL) {
-                    val actualSize = destFile.length()
-                    val complete = isFileComplete(destFile, expectedBytes)
-                    DebugLogger.log("DOWNLOAD", "STATUS_SUCCESSFUL  file=${destFile.name}  actualSize=${actualSize/1_048_576}MB  expectedSize=${expectedBytes/1_048_576}MB  isComplete=$complete")
-                    
-                    if (complete) {
-                        trySend(DownloadProgress.Completed(destFile.absolutePath))
-                    } else {
-                        // Don't delete immediately, let user see the outcome
-                        trySend(DownloadProgress.Failed(
-                            "Download incomplete — file is ${actualSize / 1_048_576}MB " +
-                            "but expected ${expectedBytes / 1_048_576}MB. If you are using a VPN or weak network, try again."
-                        ))
-                    }
-                } else {
-                    val reason = queryFailureReason(downloadId)
-                    DebugLogger.log("DOWNLOAD", "STATUS_FAILED  reason=$reason")
-                    trySend(DownloadProgress.Failed(reason))
-                }
-                close()
-            }
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(
-                receiver,
-                IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-                Context.RECEIVER_NOT_EXPORTED,
-            )
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            context.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
-        }
-
-        invokeOnClose { runCatching { context.unregisterReceiver(receiver) } }
     }
 
     private fun cancelByUrl(url: String, localFile: File) {
@@ -267,23 +287,19 @@ class ModelDownloadManager @Inject constructor(
             val reason     = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
             when (status) {
                 DownloadManager.STATUS_RUNNING,
-                DownloadManager.STATUS_PENDING  -> DownloadProgress.Downloading(downloaded, total)
-                DownloadManager.STATUS_PAUSED   -> {
-                    val msg = when (reason) {
-                        DownloadManager.PAUSED_QUEUED_FOR_WIFI ->
-                            "Waiting for Wi-Fi. Enable \"download over mobile data\" or connect to Wi-Fi."
-                        DownloadManager.PAUSED_WAITING_FOR_NETWORK ->
-                            "Waiting for network connection…"
-                        DownloadManager.PAUSED_WAITING_TO_RETRY ->
-                            "Download paused — will retry shortly."
-                        else -> "Download paused."
-                    }
-                    DownloadProgress.Paused(msg)
-                }
-                DownloadManager.STATUS_FAILED   -> DownloadProgress.Failed(queryFailureReason(downloadId))
-                else                            -> null
+                DownloadManager.STATUS_PENDING -> DownloadProgress.Downloading(downloaded, total)
+                DownloadManager.STATUS_PAUSED  -> DownloadProgress.Paused(pauseReason(reason))
+                DownloadManager.STATUS_FAILED  -> DownloadProgress.Failed(queryFailureReason(downloadId))
+                else                           -> null
             }
         }
+    }
+
+    private fun pauseReason(code: Int) = when (code) {
+        DownloadManager.PAUSED_QUEUED_FOR_WIFI    -> "Waiting for Wi-Fi — connect to Wi-Fi or enable mobile data downloads in Settings."
+        DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "Waiting for network…"
+        DownloadManager.PAUSED_WAITING_TO_RETRY    -> "Will retry shortly…"
+        else                                       -> "Download paused."
     }
 
     private fun queryFailureReason(downloadId: Long): String {
@@ -292,19 +308,14 @@ class ModelDownloadManager @Inject constructor(
             if (!cursor.moveToFirst()) return "Download failed"
             val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
             when (reason) {
-                DownloadManager.ERROR_INSUFFICIENT_SPACE ->
-                    "Not enough storage space. Free up space on your device and try again."
-                DownloadManager.ERROR_FILE_ERROR ->
-                    "Storage write error. Check available space and try again."
-                DownloadManager.ERROR_HTTP_DATA_ERROR ->
-                    "Network error during download. Check your connection and retry."
-                DownloadManager.ERROR_TOO_MANY_REDIRECTS ->
-                    "Download failed: too many redirects."
-                DownloadManager.ERROR_UNHANDLED_HTTP_CODE ->
-                    "Download failed: unexpected server response."
-                401, 403 -> "Model requires HuggingFace login — token may be expired (HTTP $reason)."
-                404      -> "Model file not found at URL (HTTP 404). The model may have moved."
-                else     -> "Download failed (code $reason)"
+                DownloadManager.ERROR_INSUFFICIENT_SPACE  -> "Not enough storage. Free space and try again."
+                DownloadManager.ERROR_FILE_ERROR          -> "Storage write error. Check available space."
+                DownloadManager.ERROR_HTTP_DATA_ERROR     -> "Network error. Check your connection and retry."
+                DownloadManager.ERROR_TOO_MANY_REDIRECTS  -> "Too many redirects — download failed."
+                DownloadManager.ERROR_UNHANDLED_HTTP_CODE -> "Unexpected server response."
+                401, 403 -> "Access denied (HTTP $reason) — HuggingFace token may be expired."
+                404      -> "Model not found at URL (HTTP 404)."
+                else     -> "Download failed (code $reason)."
             }
         } ?: "Download failed"
     }
@@ -315,5 +326,22 @@ class ModelDownloadManager @Inject constructor(
             if (cursor.moveToFirst()) cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
             else DownloadManager.STATUS_FAILED
         } ?: DownloadManager.STATUS_FAILED
+    }
+
+    /** Simple flow for small downloads (LoRA adapters) that don't need app-lifetime tracking. */
+    private fun legacyDownloadFlow(
+        url: String, destFile: File, title: String, expectedBytes: Long,
+    ): Flow<DownloadProgress> = kotlinx.coroutines.flow.callbackFlow {
+        if (isFileComplete(destFile, expectedBytes)) {
+            trySend(DownloadProgress.Completed(destFile.absolutePath)); close(); return@callbackFlow
+        }
+        val downloadId = enqueueOrReattach(url, destFile, title)
+        if (downloadId == -1L) { trySend(DownloadProgress.Failed("Failed to start download")); close(); return@callbackFlow }
+        while (true) {
+            val p = queryProgress(downloadId) ?: break
+            trySend(p)
+            delay(if (p is DownloadProgress.Paused) 3_000L else 600L)
+        }
+        kotlinx.coroutines.channels.awaitClose {}
     }
 }
