@@ -35,33 +35,6 @@ class ModelCatalog @Inject constructor() {
             tags         = listOf("Google", "Gemma 3n", "LiteRT", "Requires Licence"),
         ),
 
-        // MID ──────────────────────────────────────────────────────────────────
-        ModelEntry(
-            id           = "gemma4-e4b-litert-web",
-            displayName  = "Gemma 4 E4B IT · LiteRT",
-            description  = "Google Gemma 4 E4B — latest efficient 4B, Edge Gallery format. Great mid-range choice.",
-            downloadUrl  = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.task",
-            fileSizeBytes = 3_178_275_840L,
-            engineType   = EngineType.MEDIAPIPE,
-            requiredTier = DeviceTier.MID,
-            modelFamily  = "gemma4",
-            contextLength = 4096,
-            tags         = listOf("Google", "Gemma 4", "LiteRT", "Recommended"),
-        ),
-
-        ModelEntry(
-            id           = "gemma4-e2b-litert-web",
-            displayName  = "Gemma 4 E2B IT · LiteRT",
-            description  = "Google Gemma 4 E2B — compact efficient 2B, Edge Gallery format. Fast on mid-range phones.",
-            downloadUrl  = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task",
-            fileSizeBytes = 2_147_483_648L,
-            engineType   = EngineType.MEDIAPIPE,
-            requiredTier = DeviceTier.MID,
-            modelFamily  = "gemma4",
-            contextLength = 4096,
-            tags         = listOf("Google", "Gemma 4", "LiteRT", "Compact"),
-        ),
-
         // LOW ──────────────────────────────────────────────────────────────────
         ModelEntry(
             id           = "gemma3-1b-litert-int4",

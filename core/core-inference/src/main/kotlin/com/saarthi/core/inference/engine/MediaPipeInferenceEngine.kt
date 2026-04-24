@@ -107,10 +107,19 @@ class MediaPipeInferenceEngine @Inject constructor(
             val engine = llmInference
                 ?: throw IllegalStateException("MediaPipe engine not initialised")
 
-            // MediaPipe only allows one active progress handler per process.
-            // Never start a second async generation until the previous future is complete.
-            if (inFlight?.isDone == false) {
-                DebugLogger.log("MEDIAPIPE", "generateStream blocked: previous generation still running")
+            // Cancel any previous in-flight generation before registering a new handler.
+            // Skipping this is what causes "Another handler is already registered".
+            val stale = inFlight
+            if (stale != null && !stale.isDone) {
+                DebugLogger.log("MEDIAPIPE", "generateStream: cancelling stale in-flight generation")
+                runCatching { stale.cancel(true) }
+                inFlight = null
+                // forceDestroyEngine resets state and calls engine.close() to unregister
+                // the native handler — without this, the cancelled handler stays registered.
+                forceDestroyEngine()
+                throw IllegalStateException(
+                    "Previous generation was still running. Please send your message again."
+                )
             }
 
             // Channel carries partial results; capacity=unlimited so the callback never blocks.
@@ -127,17 +136,16 @@ class MediaPipeInferenceEngine @Inject constructor(
             }
             inFlight = future
 
-            // Ensure the flow terminates on errors/cancellation.
+            // If the future fails (e.g. OOM during generation) send error into channel.
             future.addListener(
                 {
                     runCatching { future.get() }
                         .onFailure { resultChannel.trySend(Result.failure(it)) }
-                        .also { resultChannel.trySend(Result.success(null)) }
+                        .also { resultChannel.trySend(Result.success(null)) } // sentinel
                 },
                 MoreExecutors.directExecutor(),
             )
 
-            // Drain the channel, re-throwing any engine errors on the flow side
             try {
                 for (result in resultChannel) {
                     val token = result.getOrThrow() ?: break   // null sentinel = done
@@ -145,7 +153,16 @@ class MediaPipeInferenceEngine @Inject constructor(
                 }
             } finally {
                 resultChannel.close()
-                if (inFlight === future) inFlight = null
+                if (inFlight === future) {
+                    inFlight = null
+                    // If the flow was cancelled before generation finished, the native handler
+                    // is still registered.  Destroy the engine now so that the next call to
+                    // generateResponseAsync doesn't throw "Another handler is already registered".
+                    if (!future.isDone) {
+                        DebugLogger.log("MEDIAPIPE", "Flow cancelled mid-generation — destroying engine to free native handler")
+                        forceDestroyEngine()
+                    }
+                }
             }
         }
     }
@@ -217,7 +234,7 @@ class MediaPipeInferenceEngine @Inject constructor(
             lower.endsWith(".litertlm") || lower.endsWith(".litert")
         if (!supported) throw IllegalArgumentException(
             "Unsupported MediaPipe model format: ${path.substringAfterLast('.')}\n\n" +
-                "Supported: .task, .bin, .litertlm, .litert"
+                "Supported: .task, .bin, .litertlm"
         )
 
         val file = File(path)
@@ -227,18 +244,18 @@ class MediaPipeInferenceEngine @Inject constructor(
         if (!file.canRead()) throw SecurityException(
             "Cannot read model file — storage permission may be needed."
         )
+        if (file.length() < 1_000_000L) throw IllegalArgumentException(
+            "Model file appears incomplete (${file.length() / 1024}KB).\n\nPlease re-download the model."
+        )
 
-        // RAM guard
+        // Log RAM for diagnostics only — MediaPipe uses GPU/mmap and manages its own memory.
+        // Do NOT block on RAM here: the engine uses quantised weights on the GPU and the
+        // file size does not map 1-to-1 to RAM consumption.
         val fileSizeMb = file.length() / 1_048_576
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memInfo = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
         val availRamMb = memInfo.availMem / 1_048_576
-        DebugLogger.log("MEDIAPIPE", "Model: ${fileSizeMb}MB  Available RAM: ${availRamMb}MB")
-        if (availRamMb < fileSizeMb) throw RuntimeException(
-            "Not enough RAM to load this model.\n\n" +
-                "Model needs ~${fileSizeMb}MB but only ${availRamMb}MB is free.\n\n" +
-                "Close other apps and try again, or choose a smaller model."
-        )
+        DebugLogger.log("MEDIAPIPE", "Model: ${fileSizeMb}MB  Available RAM: ${availRamMb}MB  (MediaPipe manages its own memory)")
     }
 
     private fun isFatalEngineError(e: Throwable): Boolean {
@@ -253,17 +270,33 @@ class MediaPipeInferenceEngine @Inject constructor(
             "opencl" in msg || "clset" in msg || "opengl" in msg ->
                 RuntimeException(
                     "This model requires GPU acceleration not supported by your device.\n\n" +
-                        "Please download the CPU-only variant of the model.",
+                        "Choose a smaller model or a GGUF variant.",
                     e
                 )
             "another handler" in msg || "handler is already" in msg ->
                 RuntimeException(
-                    "Internal engine conflict detected.\n\n" +
-                        "Please force-stop the app, then relaunch and try again.",
+                    "Engine conflict — previous session didn't close cleanly.\n\n" +
+                        "Force-stop the app and try again.",
+                    e
+                )
+            "failed to load" in msg || "can't open" in msg || "no such file" in msg ->
+                RuntimeException(
+                    "Model file could not be loaded.\n\n" +
+                        "The file may be corrupted. Delete it and re-download.",
+                    e
+                )
+            "out of memory" in msg || "oom" in msg ->
+                RuntimeException(
+                    "Not enough memory to load this model.\n\n" +
+                        "Close background apps and try again, or choose a smaller model.",
                     e
                 )
             else ->
-                RuntimeException("MediaPipe failed to load model: ${e.message}", e)
+                RuntimeException(
+                    "Failed to load model (${e.javaClass.simpleName}): ${e.message}\n\n" +
+                        "If this persists, delete the model file and re-download.",
+                    e
+                )
         }
     }
 }

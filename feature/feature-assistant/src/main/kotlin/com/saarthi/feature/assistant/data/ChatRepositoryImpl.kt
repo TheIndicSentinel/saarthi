@@ -20,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
@@ -140,6 +141,18 @@ class ChatRepositoryImpl @Inject constructor(
             val accumulated = StringBuilder()
 
             inferenceEngine.generateStream(prompt, PackType.BASE)
+                .catch { e ->
+                    // Surface engine errors as a visible assistant message — never crash the app.
+                    val errMsg = e.message?.takeIf { it.isNotBlank() }
+                        ?: "Something went wrong. Please try again."
+                    _history.update { history ->
+                        history.map { msg ->
+                            if (msg.id == streamingId)
+                                msg.copy(content = errMsg, isStreaming = false)
+                            else msg
+                        }
+                    }
+                }
                 .onEach { token ->
                     accumulated.append(token)
                     tokenCount++
