@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.io.File
@@ -342,6 +343,6 @@ class ModelDownloadManager @Inject constructor(
             trySend(p)
             delay(if (p is DownloadProgress.Paused) 3_000L else 600L)
         }
-        kotlinx.coroutines.channels.awaitClose {}
+        awaitClose {}
     }
 }
