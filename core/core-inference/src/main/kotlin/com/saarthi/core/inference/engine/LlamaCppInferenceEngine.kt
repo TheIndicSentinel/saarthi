@@ -53,14 +53,14 @@ class LlamaCppInferenceEngine @Inject constructor(
         val fileSizeMb = file.length() / 1_048_576
         DebugLogger.log("INIT", "initialize()  path=${config.modelPath} size=${fileSizeMb}MB  avail=${ramMb}MB")
 
-        // RAM Guard for llama.cpp
-        // We need at least the model size plus some overhead for context (KV cache)
-        if (ramMb < (fileSizeMb * 1.1).toInt()) {
+        // llama.cpp uses memory-mapped file I/O — the model weights are paged on demand
+        // by the OS and do NOT need to fit entirely in free RAM.  We only block when
+        // available RAM is critically low (< 400 MB), which would prevent even the
+        // KV cache and runtime overhead from allocating.
+        if (ramMb < 400) {
             throw RuntimeException(
-                "Not enough RAM to load ${file.name}.\n\n" +
-                "Model size: ${fileSizeMb}MB\n" +
-                "Available RAM: ${ramMb}MB\n\n" +
-                "This model is too large for your device's current free memory. Try a smaller variant (e.g. 1B or 4B) or close background apps."
+                "Available RAM is critically low (${ramMb}MB).\n\n" +
+                "Close background apps and try again."
             )
         }
 

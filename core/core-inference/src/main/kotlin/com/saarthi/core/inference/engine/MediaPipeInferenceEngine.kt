@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.runBlocking
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
@@ -23,15 +22,19 @@ import javax.inject.Singleton
 /**
  * MediaPipe LLM inference engine wrapper.
  *
- * Crash prevention: MediaPipe's native layer allows only ONE active LlmInference
- * handler per process.  [generateResponseAsync] registers a persistent native handler
- * that must be freed via [close] — cancelling the coroutine mid-generation does NOT
- * free it, causing "Another handler is already registered" on the next call.
+ * Critical design constraint: MediaPipe's native layer registers a process-level
+ * handler slot in [LlmInference.createFromOptions].  Calling [LlmInference.close]
+ * does NOT reliably free this slot — any subsequent [createFromOptions] throws
+ * "Another handler is already registered".
  *
- * Fix: [generateStream] uses the synchronous [generateResponse] instead.  It runs
- * entirely on [Dispatchers.IO] inside [initMutex] so there is no persistent handler
- * to leak.  [forceDestroyEngine] nulls the reference BEFORE closing so a crash inside
- * close() cannot leave stale state.
+ * Strategy: load the model ONCE and keep the [LlmInference] instance alive for the
+ * process lifetime.  [release] only marks [isReady] false; it does NOT close the
+ * native instance.  The instance is closed (and immediately replaced) only when
+ * [initialize] is called with a DIFFERENT model path.  This eliminates the
+ * close→createFromOptions pattern that causes the crash.
+ *
+ * Generation uses [LlmInference.generateResponse] (synchronous, no async handler
+ * registration) protected by [initMutex] so only one call runs at a time.
  */
 @Singleton
 class MediaPipeInferenceEngine @Inject constructor(
@@ -45,24 +48,38 @@ class MediaPipeInferenceEngine @Inject constructor(
 
     private var currentModelPath: String? = null
 
-    /** Serializes all init/release/generate so native handler is never double-registered. */
+    /** Serializes all init/generate so native handler is never double-registered. */
     private val initMutex = Mutex()
 
     // ─────────────────────────────────── initialize ──────────────────────────
 
     override suspend fun initialize(config: InferenceConfig) = withContext(Dispatchers.IO) {
         initMutex.withLock {
-            if (isReady && config.modelPath == currentModelPath) {
-                DebugLogger.log("MEDIAPIPE", "Already loaded: ${config.modelPath}")
+            // If the instance is already alive for this path, just re-mark ready.
+            // This handles the case where release() was called (sets isReady=false)
+            // but the native instance is still loaded — avoids close→createFromOptions.
+            if (llmInference != null && config.modelPath == currentModelPath) {
+                DebugLogger.log("MEDIAPIPE", "Already loaded (reattach): ${config.modelPath}")
+                isReady = true
                 return@withLock
             }
 
-            // Always destroy first — prevents "Another handler" crash
-            forceDestroyEngine()
+            // Different model requested — close the old instance first, then load new.
+            // This is the ONLY place we call close(); doing it here (same lock scope as
+            // the subsequent createFromOptions) minimises the window for a race.
+            if (llmInference != null) {
+                DebugLogger.log("MEDIAPIPE", "Model changed — closing old instance")
+                closeEngine()
+                // Give the native layer a moment to fully release before creating new one.
+                Thread.sleep(300)
+                System.gc()
+                System.runFinalization()
+                Thread.sleep(200)
+            }
 
             validateModel(config.modelPath)
 
-            DebugLogger.log("MEDIAPIPE", "Building LlmInference options for ${config.modelPath}")
+            DebugLogger.log("MEDIAPIPE", "Building LlmInference for ${config.modelPath}")
             val options = LlmInferenceOptions.builder()
                 .setModelPath(config.modelPath)
                 .setMaxTokens(config.maxTokens)
@@ -70,14 +87,12 @@ class MediaPipeInferenceEngine @Inject constructor(
                 .build()
 
             llmInference = try {
-                DebugLogger.log("MEDIAPIPE", "Calling createFromOptions (native)…")
-                System.out.flush()
+                DebugLogger.log("MEDIAPIPE", "Calling createFromOptions…")
                 val engine = LlmInference.createFromOptions(context, options)
                 DebugLogger.log("MEDIAPIPE", "createFromOptions succeeded")
                 engine
             } catch (e: Throwable) {
                 DebugLogger.log("MEDIAPIPE", "createFromOptions FAILED: ${e.javaClass.simpleName}: ${e.message}")
-                forceDestroyEngine()   // clean up any partial alloc
                 throw mapError(e, config.modelPath)
             }
 
@@ -89,26 +104,21 @@ class MediaPipeInferenceEngine @Inject constructor(
 
     // ─────────────────────────────────── generation ──────────────────────────
 
-    /**
-     * Generates a full response synchronously on IO and emits it as a single token.
-     *
-     * Using [LlmInference.generateResponse] (synchronous) instead of
-     * [generateResponseAsync] eliminates the "Another handler is already registered"
-     * crash entirely: synchronous generation does not register a persistent native
-     * progress listener, so there is nothing to leak when the coroutine is cancelled
-     * (e.g. on screen lock).  The mutex ensures only one generation runs at a time.
-     */
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
         val response = withContext(Dispatchers.IO) {
             initMutex.withLock {
                 val engine = llmInference
                     ?: throw IllegalStateException("MediaPipe engine not initialised")
-                DebugLogger.log("MEDIAPIPE", "generateStream: starting synchronous generation")
+                DebugLogger.log("MEDIAPIPE", "generateStream: synchronous generation start")
                 try {
                     engine.generateResponse(prompt)
                 } catch (e: Throwable) {
                     DebugLogger.log("MEDIAPIPE", "generateStream FAILED: ${e.javaClass.simpleName}: ${e.message}")
-                    if (isFatalEngineError(e)) forceDestroyEngine()
+                    // On fatal native error, close the broken instance so next initialize()
+                    // loads a fresh one.
+                    if (isFatalEngineError(e)) {
+                        closeEngine()
+                    }
                     throw mapError(e, currentModelPath ?: "")
                 }
             }
@@ -125,11 +135,8 @@ class MediaPipeInferenceEngine @Inject constructor(
                 try {
                     engine.generateResponse(prompt)
                 } catch (e: Exception) {
-                    DebugLogger.log("MEDIAPIPE", "generateResponse FAILED: ${e.message}")
-                    // If the native layer is broken, destroy so next call reinitialises
-                    if (isFatalEngineError(e)) {
-                        forceDestroyEngine()
-                    }
+                    DebugLogger.log("MEDIAPIPE", "generate FAILED: ${e.message}")
+                    if (isFatalEngineError(e)) closeEngine()
                     throw e
                 }
             }
@@ -137,38 +144,35 @@ class MediaPipeInferenceEngine @Inject constructor(
 
     // ─────────────────────────────────── release ─────────────────────────────
 
+    /**
+     * Marks the engine as not ready without closing the native instance.
+     *
+     * Closing the native [LlmInference] does NOT reliably free MediaPipe's process-level
+     * handler slot, so a subsequent [createFromOptions] (triggered by a re-init) would
+     * crash with "Another handler is already registered".  Instead, we keep the instance
+     * alive and re-attach to it in [initialize] if the same model is requested again.
+     */
     override fun release() {
-        // Run synchronously — callers don't need to await full cleanup.
-        // Use runBlocking so init/generate can't race release and double-register handlers.
-        DebugLogger.log("MEDIAPIPE", "release() requested")
-        runBlocking {
-            initMutex.withLock {
-                forceDestroyEngine()
-            }
-        }
+        DebugLogger.log("MEDIAPIPE", "release() — marking not ready (native instance kept alive)")
+        isReady = false
+        // Do NOT close llmInference here.  See class-level KDoc.
     }
 
     // ─────────────────────────────────── helpers ─────────────────────────────
 
-    /**
-     * Nulls the reference BEFORE closing so crash-in-close can't leave stale state.
-     * This is what prevents "Another handler is already registered".
-     */
-    private fun forceDestroyEngine() {
+    /** Closes and nulls the native instance. Only called when switching to a different model. */
+    private fun closeEngine() {
         val engine = llmInference ?: return
-        llmInference = null          // clear FIRST
+        llmInference = null
         isReady = false
         currentModelPath = null
-        DebugLogger.log("MEDIAPIPE", "forceDestroyEngine: closing native handle")
+        DebugLogger.log("MEDIAPIPE", "closeEngine: closing native handle")
         try {
             engine.close()
-            DebugLogger.log("MEDIAPIPE", "forceDestroyEngine: closed OK")
+            DebugLogger.log("MEDIAPIPE", "closeEngine: closed OK")
         } catch (e: Exception) {
-            // Log but do not rethrow — ref is already null so handler is unregistered
-            DebugLogger.log("MEDIAPIPE", "forceDestroyEngine: close() threw (ignored): ${e.message}")
+            DebugLogger.log("MEDIAPIPE", "closeEngine: close() threw (ignored): ${e.message}")
         }
-        // Suggest GC so native finaliser runs before next createFromOptions
-        System.gc()
     }
 
     private fun validateModel(path: String) {
@@ -191,14 +195,11 @@ class MediaPipeInferenceEngine @Inject constructor(
             "Model file appears incomplete (${file.length() / 1024}KB).\n\nPlease re-download the model."
         )
 
-        // Log RAM for diagnostics only — MediaPipe uses GPU/mmap and manages its own memory.
-        // Do NOT block on RAM here: the engine uses quantised weights on the GPU and the
-        // file size does not map 1-to-1 to RAM consumption.
         val fileSizeMb = file.length() / 1_048_576
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memInfo = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
         val availRamMb = memInfo.availMem / 1_048_576
-        DebugLogger.log("MEDIAPIPE", "Model: ${fileSizeMb}MB  Available RAM: ${availRamMb}MB  (MediaPipe manages its own memory)")
+        DebugLogger.log("MEDIAPIPE", "Model: ${fileSizeMb}MB  Available RAM: ${availRamMb}MB")
     }
 
     private fun isFatalEngineError(e: Throwable): Boolean {
@@ -218,8 +219,7 @@ class MediaPipeInferenceEngine @Inject constructor(
                 )
             "another handler" in msg || "handler is already" in msg ->
                 RuntimeException(
-                    "Engine conflict — previous session didn't close cleanly.\n\n" +
-                        "Force-stop the app and try again.",
+                    "Engine conflict — please force-stop the app once and try again.",
                     e
                 )
             "failed to load" in msg || "can't open" in msg || "no such file" in msg ->
@@ -231,7 +231,7 @@ class MediaPipeInferenceEngine @Inject constructor(
             "out of memory" in msg || "oom" in msg ->
                 RuntimeException(
                     "Not enough memory to load this model.\n\n" +
-                        "Close background apps and try again, or choose a smaller model.",
+                        "Close background apps or choose a smaller model.",
                     e
                 )
             else ->

@@ -10,9 +10,18 @@ import javax.inject.Singleton
 /**
  * Routes inference to the correct backend:
  *   .gguf → LlamaCppInferenceEngine  (streaming, LoRA adapters, Vulkan GPU)
- *   .bin  → MediaPipeInferenceEngine (fallback for pre-downloaded MediaPipe models)
+ *   all others → MediaPipeInferenceEngine (.task, .litertlm)
  *
  * This is the singleton [InferenceEngine] bound in the DI graph.
+ *
+ * Release policy:
+ *   - Engine type change (GGUF ↔ MediaPipe): release the engine being abandoned so its
+ *     resources are freed, then initialize the new one.
+ *   - Same engine type, different model path: do NOT call release() — let the individual
+ *     engine handle model switching internally.  For MediaPipe in particular, calling
+ *     release() followed by initialize() triggers the "Another handler is already
+ *     registered" crash because close() does not reliably free the native handler slot.
+ *   - Same engine type, same model path: no-op (engine handles "already loaded" internally).
  */
 @Singleton
 class InferenceEngineSelector @Inject constructor(
@@ -20,34 +29,25 @@ class InferenceEngineSelector @Inject constructor(
     private val llamaCppEngine: LlamaCppInferenceEngine,
 ) : InferenceEngine {
 
-    private var currentModelPath: String? = null
     private var activeEngine: InferenceEngine = mediaPipeEngine
 
     override val isReady: Boolean get() = activeEngine.isReady
 
     override suspend fun initialize(config: InferenceConfig) {
         val engine = engineFor(config.modelPath)
-
         val engineChanged = engine !== activeEngine
-        val modelChanged = config.modelPath != currentModelPath
 
         if (engineChanged) {
-            // Release BOTH engines — old to free resources, new to clear any stale
-            // native handle lingering from a previous session (prevents "Another handler" crash)
-            Timber.d("Engine type changed → releasing both engines before switch")
-            mediaPipeEngine.release()
-            llamaCppEngine.release()
-            activeEngine = engine
-            currentModelPath = null
-        } else if (modelChanged) {
-            Timber.d("Model changed → releasing active engine: ${config.modelPath}")
+            // Abandoning the current engine — release it so native resources are freed.
+            // The NEW engine is NOT pre-released: its internal "already loaded" check or
+            // model-switch logic handles any existing state safely.
+            Timber.d("InferenceEngineSelector: engine type changed — releasing ${activeEngine::class.simpleName}")
             activeEngine.release()
-            currentModelPath = null
+            activeEngine = engine
         }
 
         Timber.d("InferenceEngineSelector → ${engine::class.simpleName}")
         activeEngine.initialize(config)
-        currentModelPath = config.modelPath
     }
 
     override fun generateStream(prompt: String, packType: PackType): Flow<String> =
