@@ -4,14 +4,11 @@ import android.app.ActivityManager
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions
-import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.MoreExecutors
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
@@ -26,17 +23,15 @@ import javax.inject.Singleton
 /**
  * MediaPipe LLM inference engine wrapper.
  *
- * Key crash fix: MediaPipe's native layer allows only ONE active LlmInference
- * handler per process. Calling createFromOptions a second time — even after
- * close() — triggers "Another handler is already registered" if the old
- * JVM object hasn't been fully GC-collected.
+ * Crash prevention: MediaPipe's native layer allows only ONE active LlmInference
+ * handler per process.  [generateResponseAsync] registers a persistent native handler
+ * that must be freed via [close] — cancelling the coroutine mid-generation does NOT
+ * free it, causing "Another handler is already registered" on the next call.
  *
- * Solution:
- *  1. [initMutex] serialises all init/release operations — no concurrent creation.
- *  2. [forceDestroyEngine] nulls the reference FIRST, then closes — so even if
- *     close() throws, the stale reference is gone.
- *  3. generateResponseAsync is used for streaming to avoid a separate async
- *     handler registration that conflicts with synchronous calls.
+ * Fix: [generateStream] uses the synchronous [generateResponse] instead.  It runs
+ * entirely on [Dispatchers.IO] inside [initMutex] so there is no persistent handler
+ * to leak.  [forceDestroyEngine] nulls the reference BEFORE closing so a crash inside
+ * close() cannot leave stale state.
  */
 @Singleton
 class MediaPipeInferenceEngine @Inject constructor(
@@ -44,14 +39,13 @@ class MediaPipeInferenceEngine @Inject constructor(
 ) : InferenceEngine {
 
     private var llmInference: LlmInference? = null
-    private var inFlight: ListenableFuture<String>? = null
 
     override var isReady: Boolean = false
         private set
 
     private var currentModelPath: String? = null
 
-    /** Serializes all init/release so native handler is never double-registered. */
+    /** Serializes all init/release/generate so native handler is never double-registered. */
     private val initMutex = Mutex()
 
     // ─────────────────────────────────── initialize ──────────────────────────
@@ -96,75 +90,31 @@ class MediaPipeInferenceEngine @Inject constructor(
     // ─────────────────────────────────── generation ──────────────────────────
 
     /**
-     * Streams the full response token-by-token using [LlmInference.generateResponseAsync].
+     * Generates a full response synchronously on IO and emits it as a single token.
      *
-     * MediaPipe's async callback is the ONLY thread-safe generation path —
-     * the synchronous [generateResponse] blocks a coroutine thread and can
-     * conflict with the listener registered by a previous session.
+     * Using [LlmInference.generateResponse] (synchronous) instead of
+     * [generateResponseAsync] eliminates the "Another handler is already registered"
+     * crash entirely: synchronous generation does not register a persistent native
+     * progress listener, so there is nothing to leak when the coroutine is cancelled
+     * (e.g. on screen lock).  The mutex ensures only one generation runs at a time.
      */
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
-        initMutex.withLock {
-            val engine = llmInference
-                ?: throw IllegalStateException("MediaPipe engine not initialised")
-
-            // Cancel any previous in-flight generation before registering a new handler.
-            // Skipping this is what causes "Another handler is already registered".
-            val stale = inFlight
-            if (stale != null && !stale.isDone) {
-                DebugLogger.log("MEDIAPIPE", "generateStream: cancelling stale in-flight generation")
-                runCatching { stale.cancel(true) }
-                inFlight = null
-                // forceDestroyEngine resets state and calls engine.close() to unregister
-                // the native handler — without this, the cancelled handler stays registered.
-                forceDestroyEngine()
-                throw IllegalStateException(
-                    "Previous generation was still running. Please send your message again."
-                )
-            }
-
-            // Channel carries partial results; capacity=unlimited so the callback never blocks.
-            val resultChannel = Channel<Result<String?>>(Channel.UNLIMITED)
-
-            val future = withContext(Dispatchers.IO) {
-                engine.generateResponseAsync(prompt) { partialResult, done ->
-                    if (done) {
-                        resultChannel.trySend(Result.success(null)) // sentinel
-                    } else if (partialResult != null) {
-                        resultChannel.trySend(Result.success(partialResult))
-                    }
-                }
-            }
-            inFlight = future
-
-            // If the future fails (e.g. OOM during generation) send error into channel.
-            future.addListener(
-                {
-                    runCatching { future.get() }
-                        .onFailure { resultChannel.trySend(Result.failure(it)) }
-                        .also { resultChannel.trySend(Result.success(null)) } // sentinel
-                },
-                MoreExecutors.directExecutor(),
-            )
-
-            try {
-                for (result in resultChannel) {
-                    val token = result.getOrThrow() ?: break   // null sentinel = done
-                    if (token.isNotEmpty()) emit(token)
-                }
-            } finally {
-                resultChannel.close()
-                if (inFlight === future) {
-                    inFlight = null
-                    // If the flow was cancelled before generation finished, the native handler
-                    // is still registered.  Destroy the engine now so that the next call to
-                    // generateResponseAsync doesn't throw "Another handler is already registered".
-                    if (!future.isDone) {
-                        DebugLogger.log("MEDIAPIPE", "Flow cancelled mid-generation — destroying engine to free native handler")
-                        forceDestroyEngine()
-                    }
+        val response = withContext(Dispatchers.IO) {
+            initMutex.withLock {
+                val engine = llmInference
+                    ?: throw IllegalStateException("MediaPipe engine not initialised")
+                DebugLogger.log("MEDIAPIPE", "generateStream: starting synchronous generation")
+                try {
+                    engine.generateResponse(prompt)
+                } catch (e: Throwable) {
+                    DebugLogger.log("MEDIAPIPE", "generateStream FAILED: ${e.javaClass.simpleName}: ${e.message}")
+                    if (isFatalEngineError(e)) forceDestroyEngine()
+                    throw mapError(e, currentModelPath ?: "")
                 }
             }
         }
+        DebugLogger.log("MEDIAPIPE", "generateStream: response length=${response.length}")
+        if (response.isNotEmpty()) emit(response)
     }
 
     override suspend fun generate(prompt: String, packType: PackType): String =
@@ -205,13 +155,6 @@ class MediaPipeInferenceEngine @Inject constructor(
      * This is what prevents "Another handler is already registered".
      */
     private fun forceDestroyEngine() {
-        // Cancel any in-flight generation first (unregisters progress handler).
-        inFlight?.let { f ->
-            DebugLogger.log("MEDIAPIPE", "forceDestroyEngine: cancel in-flight generation")
-            runCatching { f.cancel(true) }
-        }
-        inFlight = null
-
         val engine = llmInference ?: return
         llmInference = null          // clear FIRST
         isReady = false

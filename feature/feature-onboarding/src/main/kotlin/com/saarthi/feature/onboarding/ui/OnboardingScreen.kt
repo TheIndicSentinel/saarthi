@@ -517,8 +517,8 @@ private fun CatalogModelCard(
             // Right action area
             val fileReady = isDownloaded || progress is DownloadProgress.Completed
             when {
-                progress is DownloadProgress.Downloading -> {
-                    // Actively downloading — only show cancel
+                progress is DownloadProgress.Downloading || progress is DownloadProgress.Paused -> {
+                    // Actively downloading or paused — only show cancel
                     IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Default.Close, "Cancel", tint = SaarthiColors.Error, modifier = Modifier.size(20.dp))
                     }
@@ -590,6 +590,17 @@ private fun CatalogModelCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = SaarthiColors.TextMuted,
             )
+        }
+
+        if (progress is DownloadProgress.Paused) {
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
+                color = SaarthiColors.Gold.copy(alpha = 0.5f),
+                trackColor = SaarthiColors.GlassBorder,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(progress.reason, color = SaarthiColors.Gold, style = MaterialTheme.typography.labelSmall)
         }
 
         if (progress is DownloadProgress.Failed) {

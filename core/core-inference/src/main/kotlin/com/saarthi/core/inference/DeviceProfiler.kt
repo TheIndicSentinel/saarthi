@@ -21,8 +21,10 @@ class DeviceProfiler @Inject constructor(
         val totalRamMb = memInfo.totalMem / 1_048_576
         val availRamMb = memInfo.availMem / 1_048_576
 
+        // Use external files dir — that's where models are stored. Fall back to internal.
+        val storageDir = context.getExternalFilesDir(null) ?: context.filesDir
         val availStorageMb = runCatching {
-            val stat = StatFs(context.filesDir.absolutePath)
+            val stat = StatFs(storageDir.absolutePath)
             stat.availableBlocksLong * stat.blockSizeLong / 1_048_576
         }.getOrDefault(0L)
 

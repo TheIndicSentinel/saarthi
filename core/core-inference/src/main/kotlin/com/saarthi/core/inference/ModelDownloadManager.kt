@@ -187,12 +187,14 @@ class ModelDownloadManager @Inject constructor(
         while (true) {
             val progress = queryProgress(downloadId) ?: break
             trySend(progress)
-            delay(500)
+            // Poll slower when paused to avoid battery drain
+            delay(if (progress is DownloadProgress.Paused) 3_000L else 500L)
         }
 
-        awaitClose {
-            if (!isFileComplete(destFile, expectedBytes)) dm.remove(downloadId)
-        }
+        // Do NOT cancel the DownloadManager download when the flow closes (e.g. user navigates
+        // away). The system download continues in the background; restoreActiveDownloads()
+        // reattaches on the next visit. Explicit cancellation is handled by cancelDownload().
+        awaitClose { /* intentionally empty — download continues in background */ }
     }
 
     private fun ProducerScope<DownloadProgress>.registerCompletionReceiver(
@@ -262,9 +264,22 @@ class ModelDownloadManager @Inject constructor(
             val status     = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
             val downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
             val total      = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+            val reason     = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
             when (status) {
                 DownloadManager.STATUS_RUNNING,
                 DownloadManager.STATUS_PENDING  -> DownloadProgress.Downloading(downloaded, total)
+                DownloadManager.STATUS_PAUSED   -> {
+                    val msg = when (reason) {
+                        DownloadManager.PAUSED_QUEUED_FOR_WIFI ->
+                            "Waiting for Wi-Fi. Enable \"download over mobile data\" or connect to Wi-Fi."
+                        DownloadManager.PAUSED_WAITING_FOR_NETWORK ->
+                            "Waiting for network connection…"
+                        DownloadManager.PAUSED_WAITING_TO_RETRY ->
+                            "Download paused — will retry shortly."
+                        else -> "Download paused."
+                    }
+                    DownloadProgress.Paused(msg)
+                }
                 DownloadManager.STATUS_FAILED   -> DownloadProgress.Failed(queryFailureReason(downloadId))
                 else                            -> null
             }
@@ -277,10 +292,18 @@ class ModelDownloadManager @Inject constructor(
             if (!cursor.moveToFirst()) return "Download failed"
             val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
             when (reason) {
-                DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Not enough storage space"
-                DownloadManager.ERROR_FILE_ERROR         -> "Storage write error"
-                401, 403 -> "Model requires HuggingFace login (HTTP $reason)"
-                404      -> "Model file not found at URL (HTTP 404)"
+                DownloadManager.ERROR_INSUFFICIENT_SPACE ->
+                    "Not enough storage space. Free up space on your device and try again."
+                DownloadManager.ERROR_FILE_ERROR ->
+                    "Storage write error. Check available space and try again."
+                DownloadManager.ERROR_HTTP_DATA_ERROR ->
+                    "Network error during download. Check your connection and retry."
+                DownloadManager.ERROR_TOO_MANY_REDIRECTS ->
+                    "Download failed: too many redirects."
+                DownloadManager.ERROR_UNHANDLED_HTTP_CODE ->
+                    "Download failed: unexpected server response."
+                401, 403 -> "Model requires HuggingFace login — token may be expired (HTTP $reason)."
+                404      -> "Model file not found at URL (HTTP 404). The model may have moved."
                 else     -> "Download failed (code $reason)"
             }
         } ?: "Download failed"
