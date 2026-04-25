@@ -98,9 +98,8 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
     # Tagging Extension) where older Android versions silently corrupted memory.
     # Disabling SVE2 forces GGML to use the fixed-width NEON path on all cores.
     if(ANDROID AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-        add_compile_options(-mno-sve2 -mno-sve)
         set(GGML_SVE              OFF CACHE BOOL "" FORCE)
-        message(STATUS "SVE2: disabled (heterogeneous core widths on Android — using NEON)")
+        message(STATUS "SVE: disabled (heterogeneous SVE widths on Android — using NEON only)")
     endif()
 
     # Use Android's bundled OpenBLAS-equivalent via GGML_BLAS is not needed;
