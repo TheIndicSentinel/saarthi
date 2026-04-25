@@ -34,14 +34,38 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
         set(_NDK_GLSLC   "${ANDROID_NDK}/shader-tools/${_NDK_HOST_TAG}/glslc")
 
         if(EXISTS "${_NDK_GLSLC}")
-            set(Vulkan_INCLUDE_DIR      "${_NDK_SYSROOT}/usr/include"
-                CACHE PATH     "" FORCE)
-            set(Vulkan_LIBRARY          "${_NDK_SYSROOT}/usr/lib/${ANDROID_ABI}/libvulkan.so"
-                CACHE FILEPATH "" FORCE)
-            set(Vulkan_GLSLC_EXECUTABLE "${_NDK_GLSLC}"
-                CACHE FILEPATH "" FORCE)
+            # Headers from NDK sysroot
+            set(Vulkan_INCLUDE_DIR "${_NDK_SYSROOT}/usr/include" CACHE PATH "" FORCE)
+
+            # libvulkan.so lives under the linker triple, not ANDROID_ABI.
+            # Let Android's own CMake toolchain locate it via find_library so the
+            # ABI→triple mapping (arm64-v8a → aarch64-linux-android, etc.) is handled
+            # correctly regardless of which ABI is being built.
+            find_library(_VULKAN_SYSTEM_LIB vulkan)
+            if(_VULKAN_SYSTEM_LIB)
+                set(Vulkan_LIBRARY "${_VULKAN_SYSTEM_LIB}" CACHE FILEPATH "" FORCE)
+            else()
+                # Fallback: construct path from known NDK sysroot layout
+                set(_ANDROID_TRIPLE "${CMAKE_ANDROID_ARCH_TRIPLE}")
+                if(NOT _ANDROID_TRIPLE)
+                    # CMake < 3.21 — map manually
+                    if(ANDROID_ABI STREQUAL "arm64-v8a")
+                        set(_ANDROID_TRIPLE "aarch64-linux-android")
+                    elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+                        set(_ANDROID_TRIPLE "arm-linux-androideabi")
+                    elseif(ANDROID_ABI STREQUAL "x86_64")
+                        set(_ANDROID_TRIPLE "x86_64-linux-android")
+                    else()
+                        set(_ANDROID_TRIPLE "i686-linux-android")
+                    endif()
+                endif()
+                set(Vulkan_LIBRARY "${_NDK_SYSROOT}/usr/lib/${_ANDROID_TRIPLE}/libvulkan.so"
+                    CACHE FILEPATH "" FORCE)
+            endif()
+
+            set(Vulkan_GLSLC_EXECUTABLE "${_NDK_GLSLC}" CACHE FILEPATH "" FORCE)
             set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-            message(STATUS "Vulkan: ON  (NDK glslc ${_NDK_GLSLC})")
+            message(STATUS "Vulkan: ON  glslc=${_NDK_GLSLC}  lib=${Vulkan_LIBRARY}")
         else()
             set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
             message(STATUS "Vulkan: OFF (NDK glslc not found at ${_NDK_GLSLC})")
