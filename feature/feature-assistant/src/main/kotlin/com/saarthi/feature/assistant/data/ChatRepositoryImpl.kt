@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import com.saarthi.core.inference.DebugLogger
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -134,6 +135,7 @@ class ChatRepositoryImpl @Inject constructor(
         // Build prompt and run inference fully on IO — avoids blocking the main thread
         return flow {
             val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
+            DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
             val startTime = System.currentTimeMillis()
             var tokenCount = 0
             val accumulated = StringBuilder()
@@ -143,6 +145,7 @@ class ChatRepositoryImpl @Inject constructor(
                     // Surface engine errors as a visible assistant message — never crash the app.
                     val errMsg = e.message?.takeIf { it.isNotBlank() }
                         ?: "Something went wrong. Please try again."
+                    DebugLogger.log("CHAT", "streamResponse ERROR: $errMsg")
                     _history.update { history ->
                         history.map { msg ->
                             if (msg.id == streamingId)
@@ -167,7 +170,10 @@ class ChatRepositoryImpl @Inject constructor(
                     }
                     emit(token)
                 }
-                .onCompletion {
+                .onCompletion { throwable ->
+                    val elapsed = (System.currentTimeMillis() - startTime) / 1000f
+                    val tps = if (elapsed > 0) tokenCount / elapsed else 0f
+                    DebugLogger.log("CHAT", "streamResponse done  tokens=$tokenCount  elapsed=${elapsed.toInt()}s  tps=${"%.1f".format(tps)}  error=${throwable?.message}")
                     _tokensPerSecond.value = 0f
 
                     // Parse markers out of the raw accumulated text

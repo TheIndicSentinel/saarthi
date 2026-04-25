@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <string>
 #include <vector>
+#include <mutex>
 #include "llama.h"
 
 #define LOG_TAG "LlamaBridge"
@@ -15,8 +16,10 @@ struct LlamaContext {
     llama_adapter_lora*  adapter = nullptr;
 };
 
-// Captures the last error message from llama.cpp for surfacing to Kotlin
 static std::string g_last_error;
+
+// Backend is process-global — init once, never free (matches llama.cpp lifecycle).
+static std::once_flag g_backend_once;
 
 static void llama_log_cb(ggml_log_level level, const char* text, void*) {
     if (level >= GGML_LOG_LEVEL_ERROR) {
@@ -24,7 +27,7 @@ static void llama_log_cb(ggml_log_level level, const char* text, void*) {
         g_last_error += text;
     } else if (level >= GGML_LOG_LEVEL_WARN) {
         LOGI("[WARN] %s", text);
-        g_last_error += text;  // capture warnings too — often contain the real failure reason
+        g_last_error += text;
     } else {
         LOGI("%s", text);
     }
@@ -40,8 +43,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGetLastError(
     return env->NewStringUTF(g_last_error.c_str());
 }
 
-// ─── Model init via file descriptor (Android recommended approach) ────────────
-// Using /proc/self/fd/<fd> avoids scoped-storage path restrictions on Android 10+
+// ─── Model init via file descriptor ──────────────────────────────────────────
 
 JNIEXPORT jlong JNICALL
 Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
@@ -49,10 +51,14 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
     jint fd, jint nCtx, jint nThreads, jint nGpuLayers) {
 
     g_last_error.clear();
-    llama_log_set(llama_log_cb, nullptr);
-    llama_backend_init();
 
-    // Resolve the fd to a path the C runtime can open
+    // Init backend exactly once per process lifetime.
+    std::call_once(g_backend_once, []() {
+        llama_log_set(llama_log_cb, nullptr);
+        llama_backend_init();
+        LOGI("llama_backend_init() called (once)");
+    });
+
     char modelPath[64];
     snprintf(modelPath, sizeof(modelPath), "/proc/self/fd/%d", fd);
 
@@ -66,9 +72,9 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
     }
 
     llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx             = (uint32_t)nCtx;
-    cparams.n_threads         = nThreads;
-    cparams.n_threads_batch   = nThreads;
+    cparams.n_ctx           = (uint32_t)nCtx;
+    cparams.n_threads       = nThreads;
+    cparams.n_threads_batch = nThreads;
 
     llama_context* ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
@@ -95,7 +101,6 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeLoadLoraAdapter(
     if (handle == (jlong)-1) return JNI_FALSE;
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
 
-    // Free previously loaded adapter
     if (lctx->adapter) {
         llama_adapter_lora_free(lctx->adapter);
         lctx->adapter = nullptr;
@@ -125,7 +130,6 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeClearLoraAdapter(
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
 
     if (lctx->adapter) {
-        // Pass empty adapter list to clear
         llama_set_adapters_lora(lctx->ctx, nullptr, 0, nullptr);
         llama_adapter_lora_free(lctx->adapter);
         lctx->adapter = nullptr;
@@ -145,7 +149,7 @@ static std::string doGenerate(
     jobject tokenCallback,
     jmethodID onTokenMethod) {
 
-    llama_context* ctx   = lctx->ctx;
+    llama_context*     ctx   = lctx->ctx;
     const llama_vocab* vocab = lctx->vocab;
 
     // Tokenise
@@ -159,19 +163,24 @@ static std::string doGenerate(
                                   tokens.data(), (int)tokens.size(), true, true);
     }
     if (nTokens <= 0) {
-        LOGE("Tokenization failed");
+        LOGE("Tokenization failed  promptLen=%d", promptLen);
         return "";
     }
     tokens.resize(nTokens);
+    LOGI("doGenerate  promptTokens=%d  maxTokens=%d  stream=%s",
+         nTokens, maxTokens, (streamEnv ? "yes" : "no"));
 
-    llama_memory_clear(llama_get_memory(ctx), false);
+    // Reset the KV cache fully (data=true) so stale state from a previous
+    // inference cannot corrupt the current one.
+    llama_memory_clear(llama_get_memory(ctx), true);
 
     // Prefill
     llama_batch batch = llama_batch_get_one(tokens.data(), (int)tokens.size());
     if (llama_decode(ctx, batch) != 0) {
-        LOGE("llama_decode failed on prefill");
+        LOGE("llama_decode failed on prefill  nTokens=%d", nTokens);
         return "";
     }
+    LOGI("Prefill done — starting decode loop");
 
     // Sampler chain
     llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
@@ -181,30 +190,83 @@ static std::string doGenerate(
 
     std::string result;
     char tokenBuf[256];
+    bool aborted = false;
 
     for (int i = 0; i < maxTokens; ++i) {
         llama_token token = llama_sampler_sample(sampler, ctx, -1);
+        llama_sampler_accept(sampler, token);
 
-        if (llama_vocab_is_eog(vocab, token)) break;
+        if (llama_vocab_is_eog(vocab, token)) {
+            LOGI("EOG token at i=%d — generation complete", i);
+            break;
+        }
 
         int len = llama_token_to_piece(vocab, token, tokenBuf, (int)sizeof(tokenBuf) - 1, 0, false);
-        if (len <= 0) break;
+        if (len <= 0) {
+            LOGE("token_to_piece returned %d at i=%d", len, i);
+            break;
+        }
         tokenBuf[len] = '\0';
 
         if (streamEnv && tokenCallback && onTokenMethod) {
             jstring jTok = streamEnv->NewStringUTF(tokenBuf);
+            if (!jTok) {
+                LOGE("NewStringUTF returned null at token %d — aborting stream", i);
+                aborted = true;
+                break;
+            }
+
             jboolean cont = streamEnv->CallBooleanMethod(tokenCallback, onTokenMethod, jTok);
             streamEnv->DeleteLocalRef(jTok);
-            if (!cont) break;
+
+            // If the Kotlin side threw an exception, log it, clear it, and stop.
+            // Do NOT call any further JNI functions with a pending exception — it
+            // causes a fatal "JNI: pending exception" abort.
+            if (streamEnv->ExceptionCheck()) {
+                jthrowable ex = streamEnv->ExceptionOccurred();
+                streamEnv->ExceptionClear();
+                if (ex) {
+                    jclass exCls = streamEnv->GetObjectClass(ex);
+                    jmethodID getMessage = streamEnv->GetMethodID(
+                        exCls, "getMessage", "()Ljava/lang/String;");
+                    if (getMessage) {
+                        jstring msg = (jstring)streamEnv->CallObjectMethod(ex, getMessage);
+                        if (msg) {
+                            const char* msgStr = streamEnv->GetStringUTFChars(msg, nullptr);
+                            LOGE("JNI callback exception at token %d: %s", i, msgStr);
+                            streamEnv->ReleaseStringUTFChars(msg, msgStr);
+                            streamEnv->DeleteLocalRef(msg);
+                        }
+                    }
+                    streamEnv->DeleteLocalRef(exCls);
+                    streamEnv->DeleteLocalRef(ex);
+                }
+                aborted = true;
+                break;
+            }
+            if (!cont) {
+                LOGI("Kotlin callback returned false at token %d — stream cancelled", i);
+                aborted = true;
+                break;
+            }
         } else {
             result.append(tokenBuf, len);
         }
 
         llama_batch nextBatch = llama_batch_get_one(&token, 1);
-        if (llama_decode(ctx, nextBatch) != 0) break;
+        if (llama_decode(ctx, nextBatch) != 0) {
+            LOGE("llama_decode failed at token %d", i);
+            break;
+        }
+
+        if (i > 0 && i % 50 == 0) {
+            LOGI("Generation progress: %d tokens", i);
+        }
     }
 
     llama_sampler_free(sampler);
+    LOGI("doGenerate done  result_len=%d  aborted=%s",
+         (int)(streamEnv ? 0 : result.size()), (aborted ? "yes" : "no"));
     return result;
 }
 
@@ -230,8 +292,8 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGenerateStream(
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
     const char* prompt = env->GetStringUTFChars(promptJ, nullptr);
 
-    jclass    cbClass    = env->GetObjectClass(tokenCallback);
-    jmethodID onTokenId  = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)Z");
+    jclass    cbClass   = env->GetObjectClass(tokenCallback);
+    jmethodID onTokenId = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)Z");
 
     doGenerate(lctx, prompt, maxTokens, temperature, topK, env, tokenCallback, onTokenId);
     env->ReleaseStringUTFChars(promptJ, prompt);
@@ -250,7 +312,9 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeRelease(
     llama_free(lctx->ctx);
     llama_model_free(lctx->model);
     delete lctx;
-    llama_backend_free();
+    // llama_backend_free() intentionally omitted — the backend is process-global
+    // and must not be freed while other contexts may exist or while the app is
+    // running.  It is freed automatically when the process exits.
     LOGI("LlamaContext released");
 }
 
