@@ -104,16 +104,35 @@ class LlamaCppInferenceEngine @Inject constructor(
 
             var handle = -1L
             var usedCtx = adaptiveMaxCtx
-            for (ctx in CTX_LADDER.filter { it <= adaptiveMaxCtx } + listOf(CTX_LADDER.last())) {
+            var usedGpuLayers = config.nGpuLayers
+
+            val ctxList = CTX_LADDER.filter { it <= adaptiveMaxCtx } + listOf(CTX_LADDER.last())
+
+            // First attempt: GPU-accelerated (Vulkan) if nGpuLayers > 0
+            for (ctx in ctxList) {
                 handle = LlamaCppBridge.nativeInitFd(
                     fd         = fd,
                     nCtx       = ctx,
                     nThreads   = config.nThreads,
                     nGpuLayers = config.nGpuLayers,
                 )
-                if (handle != -1L) {
-                    usedCtx = ctx
-                    break
+                if (handle != -1L) { usedCtx = ctx; break }
+            }
+
+            // If GPU init failed, retry CPU-only (nGpuLayers=0) — handles devices
+            // where Vulkan is unavailable or returns an unsupported driver error.
+            if (handle == -1L && config.nGpuLayers > 0) {
+                val gpuError = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
+                DebugLogger.log("INIT", "GPU init failed ($gpuError) — retrying CPU-only")
+                usedGpuLayers = 0
+                for (ctx in ctxList) {
+                    handle = LlamaCppBridge.nativeInitFd(
+                        fd         = fd,
+                        nCtx       = ctx,
+                        nThreads   = config.nThreads,
+                        nGpuLayers = 0,
+                    )
+                    if (handle != -1L) { usedCtx = ctx; break }
                 }
             }
 
@@ -123,12 +142,13 @@ class LlamaCppInferenceEngine @Inject constructor(
                 throw RuntimeException("llama.cpp failed to load model: $nativeError")
             }
 
+            val gpuMode = if (usedGpuLayers > 0) "Vulkan GPU layers=$usedGpuLayers" else "CPU-only"
             modelPfd      = pfd
             contextHandle = handle
-            this@LlamaCppInferenceEngine.config = config.copy(nCtx = usedCtx)
+            this@LlamaCppInferenceEngine.config = config.copy(nCtx = usedCtx, nGpuLayers = usedGpuLayers)
             isReady       = true
-            Timber.d("llama.cpp ready handle=$handle  nCtx=$usedCtx")
-            DebugLogger.log("INIT", "Model ready  handle=$handle  nCtx=$usedCtx")
+            Timber.d("llama.cpp ready handle=$handle  nCtx=$usedCtx  $gpuMode")
+            DebugLogger.log("INIT", "Model ready  handle=$handle  nCtx=$usedCtx  $gpuMode")
         }
     }
 

@@ -12,7 +12,7 @@ data class ModelEntry(
     val requiredTier: DeviceTier,
     /** Short family key used to match LoRA adapters, e.g. "qwen2.5", "llama3.2", "gemma2". */
     val modelFamily: String,
-    val nGpuLayers: Int = 0,
+    val nGpuLayers: Int = 999,
     val contextLength: Int = 2048,
     val tags: List<String> = emptyList(),
 ) {

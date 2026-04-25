@@ -14,9 +14,42 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
     set(LLAMA_NATIVE          OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
 
-    # Phase 1: CPU-only (no glslc shader compiler needed on host)
-    # Phase 2: set GGML_VULKAN=ON after installing LunarG Vulkan SDK on Mac
-    set(GGML_VULKAN           OFF CACHE BOOL "" FORCE)
+    # Vulkan GPU acceleration — Android NDK 25+ ships glslc in shader-tools/,
+    # so no external LunarG SDK is needed.  We detect the NDK-bundled glslc and
+    # pre-set the Vulkan CMake variables before ggml-vulkan's find_package() runs.
+    if(ANDROID)
+        if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+            set(_NDK_HOST_TAG "linux-x86_64")
+        elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+            if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
+                set(_NDK_HOST_TAG "darwin-arm64")
+            else()
+                set(_NDK_HOST_TAG "darwin-x86_64")
+            endif()
+        else()
+            set(_NDK_HOST_TAG "windows-x86_64")
+        endif()
+
+        set(_NDK_SYSROOT "${ANDROID_NDK}/toolchains/llvm/prebuilt/${_NDK_HOST_TAG}/sysroot")
+        set(_NDK_GLSLC   "${ANDROID_NDK}/shader-tools/${_NDK_HOST_TAG}/glslc")
+
+        if(EXISTS "${_NDK_GLSLC}")
+            set(Vulkan_INCLUDE_DIR      "${_NDK_SYSROOT}/usr/include"
+                CACHE PATH     "" FORCE)
+            set(Vulkan_LIBRARY          "${_NDK_SYSROOT}/usr/lib/${ANDROID_ABI}/libvulkan.so"
+                CACHE FILEPATH "" FORCE)
+            set(Vulkan_GLSLC_EXECUTABLE "${_NDK_GLSLC}"
+                CACHE FILEPATH "" FORCE)
+            set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+            message(STATUS "Vulkan: ON  (NDK glslc ${_NDK_GLSLC})")
+        else()
+            set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+            message(STATUS "Vulkan: OFF (NDK glslc not found at ${_NDK_GLSLC})")
+        endif()
+    else()
+        set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+    endif()
+
     set(GGML_OPENMP           OFF CACHE BOOL "" FORCE)
 
     # Android NEON (ARM vector instructions — free perf on all modern Android)

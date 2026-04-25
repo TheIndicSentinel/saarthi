@@ -376,7 +376,7 @@ class OnboardingViewModel @Inject constructor(
             maxTokens   = 1024,
             nCtx        = catalogEntry?.contextLength ?: 2048,
             nThreads    = (profile?.cpuCores?.coerceAtMost(8)) ?: 4,
-            nGpuLayers  = if (profile?.hasVulkan == true) catalogEntry?.nGpuLayers ?: 0 else 0,
+            nGpuLayers  = catalogEntry?.nGpuLayers ?: 999,
         )
 
         _uiState.update { it.copy(step = OnboardingStep.MODEL_INIT, isLoading = true, error = null) }

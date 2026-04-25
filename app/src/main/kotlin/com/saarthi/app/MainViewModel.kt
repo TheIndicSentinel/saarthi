@@ -82,7 +82,7 @@ class MainViewModel @Inject constructor(
                 modelPath  = modelPath,
                 nCtx       = catalogEntry?.contextLength ?: 2048,
                 nThreads   = (Runtime.getRuntime().availableProcessors()).coerceAtMost(8).coerceAtLeast(4),
-                nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
+                nGpuLayers = catalogEntry?.nGpuLayers    ?: 999,
             )
 
             runCatching {
