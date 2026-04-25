@@ -57,7 +57,7 @@ class ModelDownloadManager @Inject constructor(
     val allProgress: StateFlow<Map<String, DownloadProgress>> = _allProgress.asStateFlow()
 
     /** Active polling jobs keyed by model ID. Cancelling stops polling but NOT the download. */
-    private val activeJobs = mutableMapOf<String, Job>()
+    private val activeJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
 
     @Volatile private var hfToken: String = ""
 
@@ -218,24 +218,30 @@ class ModelDownloadManager @Inject constructor(
         destFile: File,
         expectedBytes: Long,
     ) {
-        val receiver = object : BroadcastReceiver() {
+        lateinit var receiver: BroadcastReceiver
+        receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id != downloadId) return
 
-                runCatching { ctx.unregisterReceiver(this) }
+                // Use goAsync so file I/O and DownloadManager queries run off the main thread.
+                val pendingResult = goAsync()
+                scope.launch {
+                    runCatching { ctx.unregisterReceiver(receiver) }
 
-                val progress = if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL &&
-                                   isFileComplete(destFile, expectedBytes)) {
-                    DebugLogger.log("DOWNLOAD", "Complete: ${destFile.name}  ${destFile.length() / 1_048_576}MB")
-                    DownloadProgress.Completed(destFile.absolutePath)
-                } else {
-                    val reason = queryFailureReason(downloadId)
-                    DebugLogger.log("DOWNLOAD", "Failed: $reason")
-                    DownloadProgress.Failed(reason)
+                    val progress = if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL &&
+                                       isFileComplete(destFile, expectedBytes)) {
+                        DebugLogger.log("DOWNLOAD", "Complete: ${destFile.name}  ${destFile.length() / 1_048_576}MB")
+                        DownloadProgress.Completed(destFile.absolutePath)
+                    } else {
+                        val reason = queryFailureReason(downloadId)
+                        DebugLogger.log("DOWNLOAD", "Failed: $reason")
+                        DownloadProgress.Failed(reason)
+                    }
+                    _allProgress.update { it + (modelId to progress) }
+                    activeJobs.remove(modelId)
+                    pendingResult.finish()
                 }
-                _allProgress.update { it + (modelId to progress) }
-                activeJobs.remove(modelId)
             }
         }
 

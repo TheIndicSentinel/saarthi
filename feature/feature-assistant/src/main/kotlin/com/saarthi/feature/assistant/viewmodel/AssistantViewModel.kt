@@ -72,6 +72,18 @@ class AssistantViewModel @Inject constructor(
         chatRepository.getTokensPerSecond()
             .onEach { tps -> _uiState.update { it.copy(tokensPerSecond = tps) } }
             .launchIn(viewModelScope)
+
+        // Keep modelReady in sync — isReady can change after ViewModel is created
+        // (e.g., MainViewModel finishes initializing while AssistantScreen is already shown).
+        viewModelScope.launch {
+            while (true) {
+                val ready = inferenceEngine.isReady
+                if (_uiState.value.modelReady != ready) {
+                    _uiState.update { it.copy(modelReady = ready) }
+                }
+                kotlinx.coroutines.delay(500)
+            }
+        }
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────

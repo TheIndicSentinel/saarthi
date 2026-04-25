@@ -89,10 +89,14 @@ class MainViewModel @Inject constructor(
                 restoreModelFamily(modelPath)
                 _startState.value = AppStartState.GoToHome
             }.onFailure { e ->
-                com.saarthi.core.inference.DebugLogger.log("MAIN", "Startup init failed: ${e.message}")
-                _startState.value = AppStartState.ModelError(
-                    e.message ?: "Failed to load AI model"
-                )
+                val msg = when {
+                    e is OutOfMemoryError ->
+                        "Not enough RAM to load the saved model.\n\nClose background apps and retry, or select a smaller model."
+                    e.message?.isNotBlank() == true -> e.message!!
+                    else -> "Failed to load AI model (${e.javaClass.simpleName})"
+                }
+                com.saarthi.core.inference.DebugLogger.log("MAIN", "Startup init failed: $msg")
+                _startState.value = AppStartState.ModelError(msg)
             }
         }
     }

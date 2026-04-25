@@ -50,9 +50,9 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3n-e4b-it-q4",
             displayName   = "Gemma 3n E4B IT · Q4_K_M",
-            description   = "Google Gemma 3n E4B — mobile-efficient architecture (MatFormer). Same quality as 4B with faster inference. Great for flagship and high-end mid-range.",
+            description   = "Google Gemma 3n E4B — mobile-efficient architecture (MatFormer). Same quality as 4B with faster inference. ~4 GB download. Great for flagship and high-end mid-range.",
             downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3n-E4B-it-GGUF/resolve/main/google_gemma-3n-E4B-it-Q4_K_M.gguf",
-            fileSizeBytes = 2_684_354_560L,
+            fileSizeBytes = 4_236_509_184L,
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.FLAGSHIP,
             modelFamily   = "gemma3n",

@@ -122,6 +122,13 @@ class OnboardingViewModel @Inject constructor(
                             error = null,
                         )
                     }
+                    // If user is still on MODEL_PICK with no model chosen, auto-select this one.
+                    // They still have to tap "Use Model" to actually load it — we don't auto-init
+                    // because loading takes time and we want the user to see the progress screen.
+                    val s = _uiState.value
+                    if (s.step == OnboardingStep.MODEL_PICK && s.selectedModelPath == path) {
+                        DebugLogger.log("DOWNLOAD", "Model auto-selected: ${path.substringAfterLast('/')}")
+                    }
                 }
                 if (newlyCompleted.isNotEmpty()) {
                     withContext(Dispatchers.IO) { refreshDownloadedModels() }
@@ -390,7 +397,15 @@ class OnboardingViewModel @Inject constructor(
                 packAdapterManager.setActiveModelFamily(family)
                 _uiState.update { it.copy(isLoading = false, isModelReady = true, step = OnboardingStep.CHAT_TEST) }
             }.onFailure { e ->
-                _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isLoading = false, error = "Model load failed: ${e.message}") }
+                val errorMsg = when {
+                    e is OutOfMemoryError ->
+                        "Not enough RAM to load this model.\n\nClose background apps and try again, or choose a smaller model."
+                    e.message?.contains("RAM", ignoreCase = true) == true -> e.message!!
+                    e.message?.isNotBlank() == true -> "Model load failed: ${e.message}"
+                    else -> "Model load failed (${e.javaClass.simpleName}).\n\nThis model may be too large for your device. Try a smaller model."
+                }
+                DebugLogger.log("VMODEL", "Init failed: $errorMsg")
+                _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isLoading = false, error = errorMsg) }
             }
         }
     }
