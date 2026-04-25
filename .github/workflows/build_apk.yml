@@ -57,6 +57,27 @@ jobs:
           mkdir -p keystore
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore/saarthi-release.jks
 
+      - name: Patch ggml — remove SVE2/SME Android variants
+        # Belt-and-suspenders alongside the CMake-level patch.
+        # Removes android_armv9 GGML backend variants before CMake configure runs
+        # so they are never compiled into the APK.  These variants crash on
+        # Snapdragon 8 Gen 2 / Android 16 due to heterogeneous SVE2 core widths.
+        run: |
+          python3 - << 'PYEOF'
+          import re, sys
+          path = 'core/core-inference/src/main/cpp/llama.cpp/ggml/src/CMakeLists.txt'
+          with open(path, 'r') as f:
+              content = f.read()
+          patched = re.sub(r'[ \t]*ggml_add_cpu_backend_variant\(android_armv9[^\n]*\n', '', content)
+          if 'android_armv9' in patched:
+              print("ERROR: SVE patch failed — android_armv9 still present", file=sys.stderr)
+              sys.exit(1)
+          with open(path, 'w') as f:
+              f.write(patched)
+          removed = content.count('android_armv9') - patched.count('android_armv9')
+          print(f"SVE patch OK: removed {removed} android_armv9 variant(s)")
+          PYEOF
+
       - name: Build Release APK
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/keystore/saarthi-release.jks

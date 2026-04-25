@@ -269,9 +269,12 @@ static std::string doGenerate(
             return "";
         }
         int chunk = std::min(PREFILL_CHUNK, nTokens - pos);
+        NLOG("GEN", "Prefill chunk pos=%d/%d  len=%d", pos, nTokens, chunk);
         llama_batch chunk_batch = llama_batch_get_one(tokens.data() + pos, chunk);
-        if (llama_decode(ctx, chunk_batch) != 0) {
-            NLOGE("GEN", "llama_decode FAILED on prefill chunk pos=%d/%d", pos, nTokens);
+        int decode_ret = llama_decode(ctx, chunk_batch);
+        NLOG("GEN", "Prefill chunk pos=%d done  ret=%d", pos, decode_ret);
+        if (decode_ret != 0) {
+            NLOGE("GEN", "llama_decode FAILED on prefill chunk pos=%d/%d  ret=%d", pos, nTokens, decode_ret);
             return "";
         }
     }

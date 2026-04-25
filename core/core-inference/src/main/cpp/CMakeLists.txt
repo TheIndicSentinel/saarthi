@@ -104,20 +104,27 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
     if(ANDROID)
         set(_GGML_CPU_CMAKE "${LLAMA_DIR}/ggml/src/CMakeLists.txt")
         file(READ "${_GGML_CPU_CMAKE}" _ggml_cpu)
-        string(REPLACE
-            "ggml_add_cpu_backend_variant(android_armv9.0_1    DOTPROD MATMUL_INT8 FP16_VECTOR_ARITHMETIC SVE2)"
-            "# Removed android_armv9.0_1 — SVE2 SIGSEGV on Snapdragon 8 Gen 2 (heterogeneous core widths)"
+
+        # Use REGEX REPLACE to remove ALL android_armv9 variant registrations regardless
+        # of exact whitespace, parameter order, or future additions.  The regex matches the
+        # entire function call on a single line (multiline is disabled in cmake regex).
+        string(REGEX REPLACE
+            "[ \t]*ggml_add_cpu_backend_variant\\(android_armv9[^\n]*\n"
+            ""
             _ggml_cpu "${_ggml_cpu}")
-        string(REPLACE
-            "ggml_add_cpu_backend_variant(android_armv9.2_1    DOTPROD MATMUL_INT8 FP16_VECTOR_ARITHMETIC SVE SME)"
-            "# Removed android_armv9.2_1 — SVE+SME SIGSEGV on Snapdragon 8 Gen 2"
-            _ggml_cpu "${_ggml_cpu}")
-        string(REPLACE
-            "ggml_add_cpu_backend_variant(android_armv9.2_2    DOTPROD MATMUL_INT8 FP16_VECTOR_ARITHMETIC SVE SVE2 SME)"
-            "# Removed android_armv9.2_2 — SVE+SVE2+SME SIGSEGV on Snapdragon 8 Gen 2"
-            _ggml_cpu "${_ggml_cpu}")
+
+        # Hard fail if any android_armv9 variant is still present — better a build error
+        # than a silent SVE2 SIGSEGV on device.
+        string(FIND "${_ggml_cpu}" "android_armv9" _sve_remaining)
+        if(NOT _sve_remaining EQUAL -1)
+            message(FATAL_ERROR
+                "SVE patch FAILED: android_armv9 variants still present in "
+                "${_GGML_CPU_CMAKE}. The regex did not match. "
+                "Inspect the file and update the pattern.")
+        endif()
+
         file(WRITE "${_GGML_CPU_CMAKE}" "${_ggml_cpu}")
-        message(STATUS "SVE patch applied: ARMv9 SVE/SVE2/SME Android variants removed from ggml/src/CMakeLists.txt")
+        message(STATUS "SVE patch verified: all android_armv9 SVE/SVE2/SME variants removed")
     endif()
 
     # Use Android's bundled OpenBLAS-equivalent via GGML_BLAS is not needed;
