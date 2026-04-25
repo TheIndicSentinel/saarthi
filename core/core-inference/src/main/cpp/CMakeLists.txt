@@ -97,7 +97,28 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
     # its buffer → SIGSEGV.  Android 16 (API 36) catches this via MTE (Memory
     # Tagging Extension) where older Android versions silently corrupted memory.
     # Disabling SVE2 forces GGML to use the fixed-width NEON path on all cores.
-    # SVE/SVE2/SME variants are excluded at source in ggml/src/CMakeLists.txt.
+    # SVE/SVE2/SME variants are patched out of ggml/src/CMakeLists.txt below
+    # before add_subdirectory so the change works with any upstream checkout
+    # without requiring a fork or a committed submodule change.
+
+    if(ANDROID)
+        set(_GGML_CPU_CMAKE "${LLAMA_DIR}/ggml/src/CMakeLists.txt")
+        file(READ "${_GGML_CPU_CMAKE}" _ggml_cpu)
+        string(REPLACE
+            "ggml_add_cpu_backend_variant(android_armv9.0_1    DOTPROD MATMUL_INT8 FP16_VECTOR_ARITHMETIC SVE2)"
+            "# Removed android_armv9.0_1 — SVE2 SIGSEGV on Snapdragon 8 Gen 2 (heterogeneous core widths)"
+            _ggml_cpu "${_ggml_cpu}")
+        string(REPLACE
+            "ggml_add_cpu_backend_variant(android_armv9.2_1    DOTPROD MATMUL_INT8 FP16_VECTOR_ARITHMETIC SVE SME)"
+            "# Removed android_armv9.2_1 — SVE+SME SIGSEGV on Snapdragon 8 Gen 2"
+            _ggml_cpu "${_ggml_cpu}")
+        string(REPLACE
+            "ggml_add_cpu_backend_variant(android_armv9.2_2    DOTPROD MATMUL_INT8 FP16_VECTOR_ARITHMETIC SVE SVE2 SME)"
+            "# Removed android_armv9.2_2 — SVE+SVE2+SME SIGSEGV on Snapdragon 8 Gen 2"
+            _ggml_cpu "${_ggml_cpu}")
+        file(WRITE "${_GGML_CPU_CMAKE}" "${_ggml_cpu}")
+        message(STATUS "SVE patch applied: ARMv9 SVE/SVE2/SME Android variants removed from ggml/src/CMakeLists.txt")
+    endif()
 
     # Use Android's bundled OpenBLAS-equivalent via GGML_BLAS is not needed;
     # NEON-optimised kernels are already fast on Snapdragon.
