@@ -85,8 +85,23 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
 
     set(GGML_OPENMP           OFF CACHE BOOL "" FORCE)
 
-    # Android NEON (ARM vector instructions — free perf on all modern Android)
+    # NEON is safe — it has fixed 128-bit width on all ARMv8/ARMv9 cores.
     set(GGML_NEON             ON  CACHE BOOL "" FORCE)
+
+    # SVE2 (Scalable Vector Extension 2) is DISABLED on Android.
+    # Snapdragon 8 Gen 2 has heterogeneous SVE2 core widths:
+    #   Cortex-X3 prime core  → 256-bit SVE2
+    #   Cortex-A715/A510      → 128-bit SVE2
+    # When Android's scheduler migrates a GGML worker thread mid-computation
+    # from a 256-bit core to a 128-bit core, the vectorized kernel writes beyond
+    # its buffer → SIGSEGV.  Android 16 (API 36) catches this via MTE (Memory
+    # Tagging Extension) where older Android versions silently corrupted memory.
+    # Disabling SVE2 forces GGML to use the fixed-width NEON path on all cores.
+    if(ANDROID AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+        add_compile_options(-mno-sve2 -mno-sve)
+        set(GGML_SVE              OFF CACHE BOOL "" FORCE)
+        message(STATUS "SVE2: disabled (heterogeneous core widths on Android — using NEON)")
+    endif()
 
     # Use Android's bundled OpenBLAS-equivalent via GGML_BLAS is not needed;
     # NEON-optimised kernels are already fast on Snapdragon.

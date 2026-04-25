@@ -30,7 +30,9 @@
         android:localeConfig="@xml/locales_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Saarthi.SplashScreen">
+        android:theme="@style/Theme.Saarthi.SplashScreen"
+        android:memtagMode="off"
+        android:enableOnBackInvokedCallback="true">
 
         <activity
             android:name=".MainActivity"
