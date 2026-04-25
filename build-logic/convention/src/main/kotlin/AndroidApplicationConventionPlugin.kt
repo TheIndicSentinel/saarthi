@@ -13,7 +13,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             extensions.configure<ApplicationExtension> {
                 compileSdk = 35
                 defaultConfig {
-                    minSdk = 26
+                    minSdk = 28
                     targetSdk = 35
                 }
                 buildFeatures { buildConfig = true }
