@@ -9,9 +9,9 @@ import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -195,6 +195,9 @@ class LlamaCppInferenceEngine @Inject constructor(
     // so the UI still sees streaming.  nativeGenerateStream remains available
     // but is not used here because JNI callbacks from native threads are a
     // known SIGSEGV vector on certain Android/driver combinations.
+    // generateStream uses nativeGenerate (blocking, no JNI callbacks) to avoid
+    // JNI callback crashes.  flowOn(IO) runs the entire block on an IO thread so
+    // withContext is not needed and does not violate flow context preservation.
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
         check(isReady) { "Model not loaded. Please initialize the inference engine first." }
         val cfg = config ?: error("Model not loaded. Please initialize the inference engine first.")
@@ -204,23 +207,21 @@ class LlamaCppInferenceEngine @Inject constructor(
 
         if (usingGpu) markGpuGenerationStarted()
 
-        val result = withContext(Dispatchers.IO) {
-            try {
-                LlamaCppBridge.nativeGenerate(
-                    contextHandle = handle,
-                    prompt        = prompt,
-                    maxTokens     = cfg.maxTokens,
-                    temperature   = cfg.temperature,
-                    topK          = cfg.topK,
-                )
-            } catch (e: Throwable) {
-                if (usingGpu) markGpuGenerationEnded()
-                val msg = e.message?.takeIf { it.isNotBlank() }
-                    ?: "Generation failed (${e.javaClass.simpleName})"
-                DebugLogger.log("GENERATE", "Error: $msg")
-                Timber.e(e, "LlamaCpp nativeGenerate failed")
-                throw RuntimeException(msg, e)
-            }
+        val result: String = try {
+            LlamaCppBridge.nativeGenerate(
+                contextHandle = handle,
+                prompt        = prompt,
+                maxTokens     = cfg.maxTokens,
+                temperature   = cfg.temperature,
+                topK          = cfg.topK,
+            )
+        } catch (e: Throwable) {
+            if (usingGpu) markGpuGenerationEnded()
+            val msg = e.message?.takeIf { it.isNotBlank() }
+                ?: "Generation failed (${e.javaClass.simpleName})"
+            DebugLogger.log("GENERATE", "Error: $msg")
+            Timber.e(e, "LlamaCpp nativeGenerate failed")
+            throw RuntimeException(msg, e)
         }
 
         if (usingGpu) markGpuGenerationEnded()
@@ -231,11 +232,9 @@ class LlamaCppInferenceEngine @Inject constructor(
             return@flow
         }
 
-        // Emit word-by-word so ChatRepositoryImpl accumulates tokens exactly as before.
-        // Split on whitespace boundaries while keeping the whitespace attached so spacing
-        // is preserved in the chat bubble.
-        val chunks = result.split(Regex("(?<=\\s)|(?=\\s)")).filter { it.isNotEmpty() }
-        chunks.forEach { emit(it) }
+        // Emit word-by-word for streaming UX.  Split keeps whitespace attached so
+        // spacing is preserved in the chat bubble exactly as with token-by-token.
+        result.split(Regex("(?<=\\s)|(?=\\s)")).forEach { if (it.isNotEmpty()) emit(it) }
     }.flowOn(Dispatchers.IO)
 
     override suspend fun generate(prompt: String, packType: PackType): String =
