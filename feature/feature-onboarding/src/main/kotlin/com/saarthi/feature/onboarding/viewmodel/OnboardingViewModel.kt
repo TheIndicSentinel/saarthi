@@ -375,7 +375,7 @@ class OnboardingViewModel @Inject constructor(
             modelPath   = path,
             maxTokens   = 1024,
             nCtx        = catalogEntry?.contextLength ?: 2048,
-            nThreads    = (profile?.cpuCores?.coerceAtMost(6)) ?: 4,
+            nThreads    = (profile?.cpuCores?.coerceAtMost(8)) ?: 4,
             nGpuLayers  = if (profile?.hasVulkan == true) catalogEntry?.nGpuLayers ?: 0 else 0,
         )
 

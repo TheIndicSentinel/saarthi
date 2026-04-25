@@ -109,9 +109,9 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3n-e2b-it-q4",
             displayName   = "Gemma 3n E2B IT · Q4_K_M",
-            description   = "Google Gemma 3n E2B — mobile-efficient architecture. ~1.3 GB, designed specifically for on-device inference on budget phones.",
+            description   = "Google Gemma 3n E2B — mobile-efficient architecture. ~2.6 GB, designed for on-device inference. Fast on mid-range and flagship phones.",
             downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3n-E2B-it-GGUF/resolve/main/google_gemma-3n-E2B-it-Q4_K_M.gguf",
-            fileSizeBytes = 1_396_703_232L,
+            fileSizeBytes = 2_787_213_312L,
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3n",
@@ -224,17 +224,27 @@ class ModelCatalog @Inject constructor() {
     // ── Lookup helpers ────────────────────────────────────────────────────────
 
     /**
-     * Returns models ordered best-first for this device, filtered by RAM tier and
-     * available storage.  Storage gate: model must fit within 90% of free space.
+     * Returns models ordered best-first for this device.
      *
-     * For FLAGSHIP devices the 4B / E4B models are listed before the 12B so the user
-     * sees practical options first; the 12B is shown below as a premium option.
+     * Filters by:
+     *  - Device tier (requiredTier ≤ profile tier)
+     *  - Available storage (model must fit in 90% of free space)
+     *  - Available RAM: model must leave at least 1.5 GB headroom after load.
+     *    llama.cpp uses memory-mapped I/O, but the KV cache + runtime overhead
+     *    need ~1 GB minimum; below that, the OS pages heavily and inference
+     *    becomes unusably slow.
+     *
+     * All models remain visible via the full list — this only affects the
+     * "recommended" section so users see options that will actually run well.
      */
     fun recommendedFor(profile: DeviceProfile): List<ModelEntry> {
         val storageLimitMb = (profile.availableStorageMb * 0.90).toLong()
+        val minRemainingRamMb = 1_500L
         return allModels.filter { model ->
+            val modelSizeMb = model.fileSizeBytes / 1_048_576
             model.requiredTier.ordinal <= profile.tier.ordinal &&
-            model.fileSizeBytes / 1_048_576 <= storageLimitMb
+            modelSizeMb <= storageLimitMb &&
+            (profile.availableRamMb - modelSizeMb) >= minRemainingRamMb
         }
     }
 

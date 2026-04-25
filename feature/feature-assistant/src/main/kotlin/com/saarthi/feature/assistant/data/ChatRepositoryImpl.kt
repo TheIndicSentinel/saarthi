@@ -51,14 +51,12 @@ class ChatRepositoryImpl @Inject constructor(
     private val _tokensPerSecond = MutableStateFlow(0f)
     private val _currentSessionId = MutableStateFlow("default")
 
-    // Kept in sync with LanguageManager so we can read it synchronously inside flow builders
-    @Volatile private var currentLanguage: SupportedLanguage = SupportedLanguage.HINDI
+    // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
+    // Reading .value gives the current language without any async race condition.
+    private val currentLanguage: SupportedLanguage
+        get() = languageManager.selectedLanguage.value
 
     init {
-        // Mirror language preference into local field
-        scope.launch {
-            languageManager.selectedLanguage.collect { lang -> currentLanguage = lang }
-        }
         // Restore or create default session
         scope.launch {
             val sessions = chatSessionDao.getAll()

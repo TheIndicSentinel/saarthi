@@ -53,11 +53,6 @@ import com.saarthi.core.ui.theme.SaarthiColors
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.MessageRole
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
-private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
@@ -194,24 +189,14 @@ fun MessageBubble(
                 }
             }
 
-            // Timestamp
-            Row(
-                modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            // Token count (debug aid — timestamp removed per UX preference)
+            if (message.tokenCount > 0 && !isUser) {
                 Text(
-                    timeFormat.format(Date(message.timestamp)),
+                    "${message.tokenCount}t",
+                    modifier = Modifier.padding(top = 3.dp, start = 4.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = SaarthiColors.TextMuted,
                 )
-                if (message.tokenCount > 0 && !isUser) {
-                    Text(
-                        "· ${message.tokenCount}t",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SaarthiColors.TextMuted,
-                    )
-                }
             }
         }
 

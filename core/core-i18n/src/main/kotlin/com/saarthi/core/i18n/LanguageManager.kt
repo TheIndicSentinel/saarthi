@@ -1,7 +1,6 @@
 package com.saarthi.core.i18n
 
 import android.content.Context
-import android.os.LocaleList
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.datastore.core.DataStore
@@ -10,8 +9,13 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,18 +28,22 @@ private val LANGUAGE_KEY = stringPreferencesKey("selected_language")
 class LanguageManager @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    val selectedLanguage: Flow<SupportedLanguage> = context.dataStore.data
+    // Application-lifetime scope — starts collecting DataStore immediately on injection
+    // so ChatRepositoryImpl and ViewModels see the correct language on first read,
+    // not the HINDI default that they would get from a cold Flow.
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    val selectedLanguage: StateFlow<SupportedLanguage> = context.dataStore.data
         .map { prefs -> SupportedLanguage.fromCode(prefs[LANGUAGE_KEY] ?: SupportedLanguage.HINDI.code) }
+        .stateIn(scope, SharingStarted.Eagerly, SupportedLanguage.HINDI)
 
     suspend fun setLanguage(language: SupportedLanguage) {
         context.dataStore.edit { it[LANGUAGE_KEY] = language.code }
-        // Apply via AppCompat — works without restart on API 33+
         AppCompatDelegate.setApplicationLocales(
             LocaleListCompat.create(Locale(language.code))
         )
     }
 
-    // Inject language preference into prompt for multilingual Gemma responses
     fun buildLanguageInstruction(language: SupportedLanguage): String =
         "Please respond in ${language.nativeName} (${language.englishName})."
 }

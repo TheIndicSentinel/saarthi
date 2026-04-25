@@ -20,11 +20,10 @@ MEMORY — When the user shares personal info, append tags at the END of your re
 Keys: user_name, user_age, user_dob, user_city, user_profession, user_likes, user_dislikes, user_family, user_goals, user_language, user_health, user_budget
 One tag per fact. Always recall saved memories naturally in conversation.
 
-REMINDER — Append at the END of your reply:
-Absolute time → [SAARTHI_REMINDER text="task" time="18:00"] (24-hour HH:MM)
-Relative time → [SAARTHI_REMINDER text="task" delay_minutes="30"]
-Convert naturally: "in 5 min"→delay_minutes="5", "in 2 hours"→delay_minutes="120", "at 6 PM"→time="18:00"
-Tags are processed by the app — never mention or explain them.""",
+REMINDER — If the user asks to be reminded of something, append ONE tag at the END of your reply:
+[SAARTHI_REMINDER text="task" delay_minutes="N"]
+Convert naturally: "in 5 min"→delay_minutes="5", "in 2 hours"→delay_minutes="120", "tomorrow"→delay_minutes="1440"
+Tags are processed by the app — never mention or explain them to the user.""",
     ),
 
     KNOWLEDGE(

@@ -70,6 +70,11 @@ class LlamaCppInferenceEngine @Inject constructor(
                 )
             }
 
+            // Log a warning when the model takes most of the available RAM — inference will be slow.
+            if (fileSizeMb > 0 && (ramMb - fileSizeMb) < 1_000) {
+                DebugLogger.log("INIT", "WARNING: model ${fileSizeMb}MB but only ${ramMb}MB avail — expect slow inference. Consider a smaller model.")
+            }
+
             if (!nativeAvailable) {
                 throw UnsupportedOperationException("llama.cpp native library (libllama_bridge.so) not loaded!")
             }
@@ -84,9 +89,22 @@ class LlamaCppInferenceEngine @Inject constructor(
             val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             val fd  = pfd.fd
 
+            // Reduce context window when RAM is tight to avoid KV-cache-induced paging.
+            // After mmap, the OS still needs RAM for KV cache + activations + app overhead.
+            val estimatedRamAfterLoadMb = ramMb - fileSizeMb
+            val adaptiveMaxCtx = when {
+                estimatedRamAfterLoadMb >= 3_000 -> config.nCtx
+                estimatedRamAfterLoadMb >= 1_800 -> minOf(config.nCtx, 2048)
+                estimatedRamAfterLoadMb >= 1_000 -> minOf(config.nCtx, 1024)
+                else                             -> minOf(config.nCtx, 512)
+            }
+            if (adaptiveMaxCtx < config.nCtx) {
+                DebugLogger.log("INIT", "RAM tight (${estimatedRamAfterLoadMb}MB after model) — nCtx ${config.nCtx}→$adaptiveMaxCtx")
+            }
+
             var handle = -1L
-            var usedCtx = config.nCtx
-            for (ctx in CTX_LADDER.filter { it <= config.nCtx } + listOf(CTX_LADDER.last())) {
+            var usedCtx = adaptiveMaxCtx
+            for (ctx in CTX_LADDER.filter { it <= adaptiveMaxCtx } + listOf(CTX_LADDER.last())) {
                 handle = LlamaCppBridge.nativeInitFd(
                     fd         = fd,
                     nCtx       = ctx,

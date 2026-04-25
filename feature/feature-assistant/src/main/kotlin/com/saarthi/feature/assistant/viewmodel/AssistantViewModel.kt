@@ -60,8 +60,10 @@ class AssistantViewModel @Inject constructor(
     val currentSessionId: StateFlow<String> = chatRepository.getCurrentSessionId()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "default")
 
+    // selectedLanguage is already a StateFlow — use its current value as the initial
+    // state so we never show HINDI for one frame when the user selected another language.
     val currentLanguage: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
-        .stateIn(viewModelScope, SharingStarted.Eagerly, SupportedLanguage.HINDI)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, languageManager.selectedLanguage.value)
 
     private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
