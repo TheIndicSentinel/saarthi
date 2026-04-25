@@ -31,18 +31,15 @@ jobs:
             "ndk;27.0.12077973" \
             "cmake;3.22.1"
 
-      - name: Prepare Vulkan C++ headers for NDK cross-compilation
+      - name: Install Vulkan C++ headers for cross-compilation
         run: |
-          # NDK ships vulkan.h (C) but not vulkan.hpp (C++ bindings).
-          # ggml-vulkan.cpp requires vulkan.hpp — install it from the host
-          # Ubuntu package and copy into the NDK sysroot so clang++ finds it
-          # when cross-compiling with --sysroot.
-          sudo apt-get install -y --no-install-recommends libvulkan-dev
-          NDK_VULKAN_INC="$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/vulkan"
-          # Copy every .hpp (C++ bindings) — .h files are already present in the NDK
-          for f in /usr/include/vulkan/*.hpp; do
-            [ -f "$f" ] && cp "$f" "$NDK_VULKAN_INC/" && echo "Copied: $(basename $f)"
-          done
+          # ggml-vulkan.cpp needs vulkan/vulkan.hpp (C++ Vulkan bindings) and
+          # spirv/unified1/spirv.hpp (SPIRV-Headers).  The NDK sysroot only
+          # ships the C API.  CMakeLists.txt sets Vulkan_INCLUDE_DIR=/usr/include
+          # so the cross-compiler finds these via absolute -I (not sysroot-relative).
+          sudo apt-get install -y --no-install-recommends libvulkan-dev spirv-headers
+          echo "vulkan.hpp: $(ls /usr/include/vulkan/vulkan.hpp 2>/dev/null || echo MISSING)"
+          echo "spirv.hpp:  $(ls /usr/include/spirv/unified1/spirv.hpp 2>/dev/null || echo MISSING)"
 
       - name: Write local.properties
         run: |

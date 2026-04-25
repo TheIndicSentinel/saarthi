@@ -34,38 +34,44 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
         set(_NDK_GLSLC   "${ANDROID_NDK}/shader-tools/${_NDK_HOST_TAG}/glslc")
 
         if(EXISTS "${_NDK_GLSLC}")
-            # Headers from NDK sysroot
-            set(Vulkan_INCLUDE_DIR "${_NDK_SYSROOT}/usr/include" CACHE PATH "" FORCE)
-
-            # libvulkan.so lives under the linker triple, not ANDROID_ABI.
-            # Let Android's own CMake toolchain locate it via find_library so the
-            # ABI→triple mapping (arm64-v8a → aarch64-linux-android, etc.) is handled
-            # correctly regardless of which ABI is being built.
-            find_library(_VULKAN_SYSTEM_LIB vulkan)
-            if(_VULKAN_SYSTEM_LIB)
-                set(Vulkan_LIBRARY "${_VULKAN_SYSTEM_LIB}" CACHE FILEPATH "" FORCE)
+            # ggml-vulkan.cpp includes vulkan/vulkan.hpp and spirv/unified1/spirv.hpp
+            # (C++ Vulkan bindings).  The NDK sysroot only ships the C API (vulkan.h).
+            # These C++ headers live on the HOST build machine.
+            #
+            # Explicit -I paths passed by CMake are absolute, NOT sysroot-relative,
+            # so the cross-compiler finds host headers at their real paths even when
+            # building with --sysroot.
+            #
+            # CI requirement: apt-get install libvulkan-dev spirv-headers
+            #   → puts vulkan/vulkan.hpp and spirv/unified1/spirv.hpp under /usr/include
+            if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+                set(_VULKAN_HDR_DIR "/usr/include")
             else()
-                # Fallback: construct path from known NDK sysroot layout
-                set(_ANDROID_TRIPLE "${CMAKE_ANDROID_ARCH_TRIPLE}")
-                if(NOT _ANDROID_TRIPLE)
-                    # CMake < 3.21 — map manually
-                    if(ANDROID_ABI STREQUAL "arm64-v8a")
-                        set(_ANDROID_TRIPLE "aarch64-linux-android")
-                    elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
-                        set(_ANDROID_TRIPLE "arm-linux-androideabi")
-                    elseif(ANDROID_ABI STREQUAL "x86_64")
-                        set(_ANDROID_TRIPLE "x86_64-linux-android")
-                    else()
-                        set(_ANDROID_TRIPLE "i686-linux-android")
-                    endif()
-                endif()
-                set(Vulkan_LIBRARY "${_NDK_SYSROOT}/usr/lib/${_ANDROID_TRIPLE}/libvulkan.so"
-                    CACHE FILEPATH "" FORCE)
+                # macOS: fall back to NDK C headers — Vulkan will be disabled below
+                # if the C++ headers aren't present.
+                set(_VULKAN_HDR_DIR "${_NDK_SYSROOT}/usr/include")
             endif()
 
-            set(Vulkan_GLSLC_EXECUTABLE "${_NDK_GLSLC}" CACHE FILEPATH "" FORCE)
-            set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-            message(STATUS "Vulkan: ON  glslc=${_NDK_GLSLC}  lib=${Vulkan_LIBRARY}")
+            if(EXISTS "${_VULKAN_HDR_DIR}/vulkan/vulkan.hpp" AND
+               EXISTS "${_VULKAN_HDR_DIR}/spirv/unified1/spirv.hpp")
+
+                set(Vulkan_INCLUDE_DIR "${_VULKAN_HDR_DIR}" CACHE PATH "" FORCE)
+
+                # libvulkan stub: Android CMake toolchain knows the ABI triple
+                find_library(_VULKAN_SYSTEM_LIB vulkan)
+                if(_VULKAN_SYSTEM_LIB)
+                    set(Vulkan_LIBRARY "${_VULKAN_SYSTEM_LIB}" CACHE FILEPATH "" FORCE)
+                    set(Vulkan_GLSLC_EXECUTABLE "${_NDK_GLSLC}" CACHE FILEPATH "" FORCE)
+                    set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+                    message(STATUS "Vulkan: ON  inc=${_VULKAN_HDR_DIR}  lib=${_VULKAN_SYSTEM_LIB}")
+                else()
+                    set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+                    message(STATUS "Vulkan: OFF (libvulkan stub not found by find_library)")
+                endif()
+            else()
+                set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+                message(STATUS "Vulkan: OFF (C++ headers missing — run: apt-get install libvulkan-dev spirv-headers)")
+            endif()
         else()
             set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
             message(STATUS "Vulkan: OFF (NDK glslc not found at ${_NDK_GLSLC})")
