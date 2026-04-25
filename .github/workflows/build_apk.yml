@@ -31,6 +31,19 @@ jobs:
             "ndk;27.0.12077973" \
             "cmake;3.22.1"
 
+      - name: Prepare Vulkan C++ headers for NDK cross-compilation
+        run: |
+          # NDK ships vulkan.h (C) but not vulkan.hpp (C++ bindings).
+          # ggml-vulkan.cpp requires vulkan.hpp — install it from the host
+          # Ubuntu package and copy into the NDK sysroot so clang++ finds it
+          # when cross-compiling with --sysroot.
+          sudo apt-get install -y --no-install-recommends libvulkan-dev
+          NDK_VULKAN_INC="$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/vulkan"
+          # Copy every .hpp (C++ bindings) — .h files are already present in the NDK
+          for f in /usr/include/vulkan/*.hpp; do
+            [ -f "$f" ] && cp "$f" "$NDK_VULKAN_INC/" && echo "Copied: $(basename $f)"
+          done
+
       - name: Write local.properties
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
