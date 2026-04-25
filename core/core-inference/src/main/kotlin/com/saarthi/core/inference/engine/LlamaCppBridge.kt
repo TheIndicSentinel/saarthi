@@ -54,6 +54,9 @@ object LlamaCppBridge {
     /** Returns the last error string logged by llama.cpp (empty if none). */
     external fun nativeGetLastError(): String
 
+    /** Routes native NLOG/NLOGE output into the same debug log file as DebugLogger. */
+    external fun nativeSetDebugLogPath(path: String)
+
     interface TokenCallback {
         fun onToken(token: String): Boolean
     }

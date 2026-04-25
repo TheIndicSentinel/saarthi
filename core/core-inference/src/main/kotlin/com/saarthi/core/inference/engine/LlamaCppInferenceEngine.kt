@@ -105,6 +105,8 @@ class LlamaCppInferenceEngine @Inject constructor(
             if (!nativeAvailable) {
                 throw UnsupportedOperationException("llama.cpp native library (libllama_bridge.so) not loaded!")
             }
+            // Route native NLOG/NLOGE into saarthi_debug.log so crash traces are visible.
+            runCatching { LlamaCppBridge.nativeSetDebugLogPath(DebugLogger.path()) }
             // Validate GGUF magic bytes
             if (config.modelPath.endsWith(".gguf", ignoreCase = true)) {
                 val magic = file.inputStream().use { s -> ByteArray(4).also { s.read(it) } }
@@ -188,61 +190,53 @@ class LlamaCppInferenceEngine @Inject constructor(
         }
     }
 
-    override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow {
-        if (!isReady) {
-            close(IllegalStateException("Model not loaded. Please initialize the inference engine first."))
-            return@callbackFlow
-        }
-        val cfg = config ?: run {
-            close(IllegalStateException("Model not loaded. Please initialize the inference engine first."))
-            return@callbackFlow
-        }
+    // generateStream uses nativeGenerate (blocking, no JNI callbacks) to avoid
+    // JNI callback crashes.  The full result is emitted word-by-word in Kotlin
+    // so the UI still sees streaming.  nativeGenerateStream remains available
+    // but is not used here because JNI callbacks from native threads are a
+    // known SIGSEGV vector on certain Android/driver combinations.
+    override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
+        check(isReady) { "Model not loaded. Please initialize the inference engine first." }
+        val cfg = config ?: error("Model not loaded. Please initialize the inference engine first.")
         val handle = contextHandle
         val usingGpu = cfg.nGpuLayers > 0
-        DebugLogger.log("GENERATE", "Stream start  handle=$handle  maxTokens=${cfg.maxTokens}  gpu=$usingGpu")
+        DebugLogger.log("GENERATE", "Stream start (blocking)  handle=$handle  maxTokens=${cfg.maxTokens}  gpu=$usingGpu")
 
-        // Persist a flag BEFORE entering native code.  If a Vulkan shader causes a
-        // native crash (SIGSEGV kills the process), this flag stays set and will be
-        // detected by initialize() on the next launch, triggering CPU-only fallback.
         if (usingGpu) markGpuGenerationStarted()
 
-        var tokenCount = 0
-        withContext(Dispatchers.IO) {
+        val result = withContext(Dispatchers.IO) {
             try {
-                LlamaCppBridge.nativeGenerateStream(
+                LlamaCppBridge.nativeGenerate(
                     contextHandle = handle,
                     prompt        = prompt,
                     maxTokens     = cfg.maxTokens,
                     temperature   = cfg.temperature,
                     topK          = cfg.topK,
-                    tokenCallback = object : LlamaCppBridge.TokenCallback {
-                        override fun onToken(token: String): Boolean {
-                            tokenCount++
-                            trySend(token)
-                            return !isClosedForSend
-                        }
-                    }
                 )
             } catch (e: Throwable) {
-                // Java/Kotlin exception (not a native crash) — clear the flag and report
                 if (usingGpu) markGpuGenerationEnded()
                 val msg = e.message?.takeIf { it.isNotBlank() }
                     ?: "Generation failed (${e.javaClass.simpleName})"
                 DebugLogger.log("GENERATE", "Error: $msg")
-                Timber.e(e, "LlamaCpp native stream generation failed")
-                close(RuntimeException(msg, e))
-                return@withContext
+                Timber.e(e, "LlamaCpp nativeGenerate failed")
+                throw RuntimeException(msg, e)
             }
         }
-        // Normal completion — generation was safe, clear the crash guard flag
+
         if (usingGpu) markGpuGenerationEnded()
-        DebugLogger.log("GENERATE", "Stream done  tokens=$tokenCount")
-        if (tokenCount == 0) {
-            DebugLogger.log("GENERATE", "WARNING: 0 tokens generated — model may be misloaded or prompt malformed")
+        DebugLogger.log("GENERATE", "Stream done (blocking)  resultChars=${result.length}")
+
+        if (result.isEmpty()) {
+            DebugLogger.log("GENERATE", "WARNING: empty result — model may be misloaded or prompt malformed")
+            return@flow
         }
-        close()
-        awaitClose {}
-    }
+
+        // Emit word-by-word so ChatRepositoryImpl accumulates tokens exactly as before.
+        // Split on whitespace boundaries while keeping the whitespace attached so spacing
+        // is preserved in the chat bubble.
+        val chunks = result.split(Regex("(?<=\\s)|(?=\\s)")).filter { it.isNotEmpty() }
+        chunks.forEach { emit(it) }
+    }.flowOn(Dispatchers.IO)
 
     override suspend fun generate(prompt: String, packType: PackType): String =
         withContext(Dispatchers.IO) {
