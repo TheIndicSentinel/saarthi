@@ -13,7 +13,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- File attachments — legacy (Android ≤ 12) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <!-- Model file access from Downloads on Android 11+ -->
+    <!-- Model file access from Downloads on Android 11+.
+         Required because GGUF model files (≥800MB) are too large for app-private storage
+         and must be read from the user-selected Downloads directory.
+         Play Store listing must declare this use in the policy form. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- Push notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -21,6 +24,15 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Keep alarms alive through Doze mode -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Android 11+ package visibility: needed for SpeechRecognizer.isRecognitionAvailable()
+         to correctly detect installed speech recognition services. Without this the API
+         returns false even when Google/AOSP recognition is available. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 
     <application
         android:name=".SaarthiApp"
@@ -31,12 +43,21 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Saarthi.SplashScreen"
-        android:memtagMode="off"
-        android:enableOnBackInvokedCallback="true">
+        android:enableOnBackInvokedCallback="true"
+        android:memtagMode="off">
+        <!--
+            memtagMode="off": Disables ARM MTE (Memory Tagging Extension) for this process.
+            llama.cpp's GGML allocator does not tag memory allocations, so MTE on ARMv9
+            devices (Android 16+) converts previously-silent NEON kernel out-of-bound
+            writes into hard SIGSEGV crashes. The SVE2 root cause is addressed via the
+            CMake patch that removes android_armv9 GGML backend variants. This flag is a
+            secondary safeguard for any remaining untagged allocations in llama.cpp.
+        -->
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

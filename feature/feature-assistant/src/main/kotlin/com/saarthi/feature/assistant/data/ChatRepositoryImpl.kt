@@ -34,7 +34,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val MAX_HISTORY_TURNS = 6
-private const val MAX_PROMPT_CHARS = 3_200
+private const val MAX_PROMPT_CHARS = 4_096  // ~1:1 to tokens — fits within a 2K–4K context window
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
@@ -236,12 +236,13 @@ class ChatRepositoryImpl @Inject constructor(
         val memoryContext = runCatching { memoryRepository.buildContextSummary() }.getOrDefault("")
         val systemInstructions = buildSystemPrompt(memoryContext)
 
-        val history = _history.value.let { all ->
-            val withoutCurrent = all.dropLast(2)
-            withoutCurrent
-                .filter { it.content.isNotBlank() && !it.isStreaming }
-                .takeLast(MAX_HISTORY_TURNS)
-        }
+        // Exclude the currently-streaming placeholder and any other streaming messages
+        // using a content-based filter rather than positional dropLast, which is fragile
+        // when messages are deleted or the order changes.
+        val history = _history.value
+            .filter { it.content.isNotBlank() && !it.isStreaming }
+            .dropLast(1)  // exclude the just-added user message (already appended to _history)
+            .takeLast(MAX_HISTORY_TURNS)
 
         val fileContext = if (attachments.isNotEmpty())
             fileContentExtractor.buildRagContext(attachments, userMessage)
@@ -278,7 +279,7 @@ class ChatRepositoryImpl @Inject constructor(
                 append("<start_of_turn>model\n")
             }
         }.let { prompt ->
-            if (prompt.length > MAX_PROMPT_CHARS * 2) trimPrompt(prompt) else prompt
+            if (prompt.length > MAX_PROMPT_CHARS) trimPrompt(prompt) else prompt
         }
     }
 

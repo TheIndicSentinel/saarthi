@@ -47,9 +47,6 @@ class MainViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Safety delay to allow system services and logger to settle
-            kotlinx.coroutines.delay(500)
-            
             val isComplete = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 onboardingRepository.isOnboardingComplete().first()
             }
@@ -82,7 +79,7 @@ class MainViewModel @Inject constructor(
                 modelPath  = modelPath,
                 nCtx       = catalogEntry?.contextLength ?: 2048,
                 nThreads   = (Runtime.getRuntime().availableProcessors() / 2).coerceAtMost(4).coerceAtLeast(2),
-                nGpuLayers = catalogEntry?.nGpuLayers    ?: 999,
+                nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
 
             runCatching {

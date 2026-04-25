@@ -4,7 +4,15 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-android { namespace = "com.saarthi.core.memory" }
+android {
+    namespace = "com.saarthi.core.memory"
+}
+
+ksp {
+    // Exports Room schema JSON files to schemas/ so migrations can be written
+    // against a known baseline. Check these files into git alongside schema changes.
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
 
 dependencies {
     implementation(libs.room.runtime)

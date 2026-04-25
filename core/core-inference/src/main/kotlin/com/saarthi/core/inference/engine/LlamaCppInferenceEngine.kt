@@ -8,10 +8,15 @@ import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -25,7 +30,10 @@ class LlamaCppInferenceEngine @Inject constructor(
 
     @Volatile private var contextHandle: Long = -1L
     @Volatile private var config: InferenceConfig? = null
-    private var modelPfd: ParcelFileDescriptor? = null
+    @Volatile private var modelPfd: ParcelFileDescriptor? = null
+
+    private val _isReadyFlow = MutableStateFlow(false)
+    override val isReadyFlow: Flow<Boolean> = _isReadyFlow.asStateFlow()
 
     @Volatile override var isReady: Boolean = false
         private set
@@ -38,10 +46,8 @@ class LlamaCppInferenceEngine @Inject constructor(
     private val CTX_LADDER = listOf(2048, 1024, 512, 256)
 
     // ── Vulkan crash detection ───────────────────────────────────────────────
-    // If a GPU-accelerated generation causes a native crash (SIGSEGV/SIGABRT),
-    // the process is killed without executing any finally/catch block.  We use
-    // a commit()-persisted SharedPreferences flag to detect this on the next
-    // startup and permanently fall back to CPU-only for that device.
+    // A commit()-persisted flag survives process kill. If it's set on startup,
+    // a GPU-accelerated generation caused the previous crash → fall back to CPU.
     private val enginePrefs: SharedPreferences
         get() = context.getSharedPreferences("llama_engine_prefs", Context.MODE_PRIVATE)
 
@@ -50,7 +56,7 @@ class LlamaCppInferenceEngine @Inject constructor(
         enginePrefs.getBoolean("vulkan_failed",   false)
 
     private fun markGpuGenerationStarted() =
-        enginePrefs.edit().putBoolean("gpu_gen_pending", true).commit()  // commit = synchronous
+        enginePrefs.edit().putBoolean("gpu_gen_pending", true).commit()  // synchronous write
 
     private fun markGpuGenerationEnded() =
         enginePrefs.edit().putBoolean("gpu_gen_pending", false).apply()
@@ -70,9 +76,12 @@ class LlamaCppInferenceEngine @Inject constructor(
         return mi.availMem / 1_048_576
     }
 
+    private fun setReady(value: Boolean) {
+        isReady = value
+        _isReadyFlow.value = value
+    }
+
     override suspend fun initialize(config: InferenceConfig) = withContext(Dispatchers.IO) {
-        // Mutex ensures only one initialization runs at a time — prevents race between
-        // MainViewModel startup init and OnboardingViewModel manual init.
         initMutex.withLock {
             if (isReady) {
                 if (config.modelPath == this@LlamaCppInferenceEngine.config?.modelPath) {
@@ -92,22 +101,19 @@ class LlamaCppInferenceEngine @Inject constructor(
 
             if (ramMb < 400) {
                 throw RuntimeException(
-                    "Available RAM is critically low (${ramMb}MB).\n\n" +
-                    "Close background apps and try again."
+                    "Available RAM is critically low (${ramMb}MB).\n\nClose background apps and try again."
                 )
             }
 
-            // Log a warning when the model takes most of the available RAM — inference will be slow.
             if (fileSizeMb > 0 && (ramMb - fileSizeMb) < 1_000) {
-                DebugLogger.log("INIT", "WARNING: model ${fileSizeMb}MB but only ${ramMb}MB avail — expect slow inference. Consider a smaller model.")
+                DebugLogger.log("INIT", "WARNING: model ${fileSizeMb}MB but only ${ramMb}MB avail — expect slow inference.")
             }
 
             if (!nativeAvailable) {
                 throw UnsupportedOperationException("llama.cpp native library (libllama_bridge.so) not loaded!")
             }
-            // Route native NLOG/NLOGE into saarthi_debug.log so crash traces are visible.
             runCatching { LlamaCppBridge.nativeSetDebugLogPath(DebugLogger.path()) }
-            // Validate GGUF magic bytes
+
             if (config.modelPath.endsWith(".gguf", ignoreCase = true)) {
                 val magic = file.inputStream().use { s -> ByteArray(4).also { s.read(it) } }
                 val valid = magic.size == 4 && magic[0] == 0x47.toByte() && magic[1] == 0x47.toByte() &&
@@ -118,8 +124,6 @@ class LlamaCppInferenceEngine @Inject constructor(
             val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             val fd  = pfd.fd
 
-            // Reduce context window when RAM is tight to avoid KV-cache-induced paging.
-            // After mmap, the OS still needs RAM for KV cache + activations + app overhead.
             val estimatedRamAfterLoadMb = ramMb - fileSizeMb
             val adaptiveMaxCtx = when {
                 estimatedRamAfterLoadMb >= 3_000 -> config.nCtx
@@ -135,8 +139,6 @@ class LlamaCppInferenceEngine @Inject constructor(
             var usedCtx = adaptiveMaxCtx
             val ctxList = CTX_LADDER.filter { it <= adaptiveMaxCtx } + listOf(CTX_LADDER.last())
 
-            // If a previous GPU generation caused a native crash (process killed),
-            // fall back to CPU-only permanently for this device.
             val requestedGpuLayers = if (config.nGpuLayers > 0 && vulkanPreviouslyCrashed()) {
                 recordVulkanCrash()
                 DebugLogger.log("INIT", "Vulkan crash history — loading CPU-only")
@@ -146,30 +148,19 @@ class LlamaCppInferenceEngine @Inject constructor(
             }
             var usedGpuLayers = requestedGpuLayers
 
-            // First attempt: GPU-accelerated (Vulkan) if layers > 0
             for (ctx in ctxList) {
-                handle = LlamaCppBridge.nativeInitFd(
-                    fd         = fd,
-                    nCtx       = ctx,
-                    nThreads   = config.nThreads,
-                    nGpuLayers = requestedGpuLayers,
-                )
+                handle = LlamaCppBridge.nativeInitFd(fd = fd, nCtx = ctx,
+                    nThreads = config.nThreads, nGpuLayers = requestedGpuLayers)
                 if (handle != -1L) { usedCtx = ctx; break }
             }
 
-            // If GPU init failed, retry CPU-only (handles devices where Vulkan is
-            // unavailable or the driver rejects the config outright).
             if (handle == -1L && requestedGpuLayers > 0) {
                 val gpuError = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
                 DebugLogger.log("INIT", "GPU init failed ($gpuError) — retrying CPU-only")
                 usedGpuLayers = 0
                 for (ctx in ctxList) {
-                    handle = LlamaCppBridge.nativeInitFd(
-                        fd         = fd,
-                        nCtx       = ctx,
-                        nThreads   = config.nThreads,
-                        nGpuLayers = 0,
-                    )
+                    handle = LlamaCppBridge.nativeInitFd(fd = fd, nCtx = ctx,
+                        nThreads = config.nThreads, nGpuLayers = 0)
                     if (handle != -1L) { usedCtx = ctx; break }
                 }
             }
@@ -184,66 +175,70 @@ class LlamaCppInferenceEngine @Inject constructor(
             modelPfd      = pfd
             contextHandle = handle
             this@LlamaCppInferenceEngine.config = config.copy(nCtx = usedCtx, nGpuLayers = usedGpuLayers)
-            isReady       = true
-            Timber.d("llama.cpp ready handle=$handle  nCtx=$usedCtx  $gpuMode")
+            setReady(true)
             DebugLogger.log("INIT", "Model ready  handle=$handle  nCtx=$usedCtx  $gpuMode")
         }
     }
 
-    // generateStream uses nativeGenerate (blocking, no JNI callbacks) to avoid
-    // JNI callback crashes.  The full result is emitted word-by-word in Kotlin
-    // so the UI still sees streaming.  nativeGenerateStream remains available
-    // but is not used here because JNI callbacks from native threads are a
-    // known SIGSEGV vector on certain Android/driver combinations.
-    // generateStream uses nativeGenerate (blocking, no JNI callbacks) to avoid
-    // JNI callback crashes.  flowOn(IO) runs the entire block on an IO thread so
-    // withContext is not needed and does not violate flow context preservation.
-    override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
-        check(isReady) { "Model not loaded. Please initialize the inference engine first." }
-        val cfg = config ?: error("Model not loaded. Please initialize the inference engine first.")
+    override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow {
+        val cfg = config
+            ?: throw IllegalStateException("Model not loaded. Please initialize the inference engine first.")
         val handle = contextHandle
-        val usingGpu = cfg.nGpuLayers > 0
-        DebugLogger.log("GENERATE", "Stream start (blocking)  handle=$handle  maxTokens=${cfg.maxTokens}  gpu=$usingGpu")
+        if (handle == -1L) throw IllegalStateException("Engine not initialized.")
 
+        val usingGpu = cfg.nGpuLayers > 0
         if (usingGpu) markGpuGenerationStarted()
 
-        val result: String = try {
-            LlamaCppBridge.nativeGenerate(
-                contextHandle = handle,
-                prompt        = prompt,
-                maxTokens     = cfg.maxTokens,
-                temperature   = cfg.temperature,
-                topK          = cfg.topK,
-            )
-        } catch (e: Throwable) {
-            if (usingGpu) markGpuGenerationEnded()
-            val msg = e.message?.takeIf { it.isNotBlank() }
-                ?: "Generation failed (${e.javaClass.simpleName})"
-            DebugLogger.log("GENERATE", "Error: $msg")
-            Timber.e(e, "LlamaCpp nativeGenerate failed")
-            throw RuntimeException(msg, e)
+        DebugLogger.log("GENERATE", "Stream start (real-time)  handle=$handle  maxTokens=${cfg.maxTokens}  gpu=$usingGpu")
+
+        val callback = object : LlamaCppBridge.TokenCallback {
+            override fun onToken(token: String): Boolean {
+                if (!isActive) return false
+                return trySend(token).isSuccess
+            }
         }
 
-        if (usingGpu) markGpuGenerationEnded()
-        DebugLogger.log("GENERATE", "Stream done (blocking)  resultChars=${result.length}")
-
-        if (result.isEmpty()) {
-            DebugLogger.log("GENERATE", "WARNING: empty result — model may be misloaded or prompt malformed")
-            return@flow
+        val job = launch(Dispatchers.IO) {
+            try {
+                LlamaCppBridge.nativeGenerateStream(
+                    contextHandle = handle,
+                    prompt        = prompt,
+                    maxTokens     = cfg.maxTokens,
+                    temperature   = cfg.temperature,
+                    topK          = cfg.topK,
+                    tokenCallback = callback,
+                )
+            } catch (e: Throwable) {
+                if (e !is CancellationException) {
+                    val msg = e.message?.takeIf { it.isNotBlank() }
+                        ?: "Generation failed (${e.javaClass.simpleName})"
+                    DebugLogger.log("GENERATE", "Error: $msg")
+                    close(RuntimeException(msg, e))
+                    return@launch
+                }
+            } finally {
+                if (usingGpu) markGpuGenerationEnded()
+            }
+            close()
         }
 
-        // Emit word-by-word for streaming UX.  Split keeps whitespace attached so
-        // spacing is preserved in the chat bubble exactly as with token-by-token.
-        result.split(Regex("(?<=\\s)|(?=\\s)")).forEach { if (it.isNotEmpty()) emit(it) }
-    }.flowOn(Dispatchers.IO)
+        awaitClose {
+            // Tell native layer to exit the decode loop at the next token boundary
+            LlamaCppBridge.nativeCancelGeneration(handle)
+            job.cancel()
+            DebugLogger.log("GENERATE", "Stream cancelled — native cancel signalled")
+        }
+    }
 
     override suspend fun generate(prompt: String, packType: PackType): String =
         withContext(Dispatchers.IO) {
-            check(isReady) { "LlamaCppInferenceEngine not initialised." }
-            val cfg = config!!
+            val cfg = config
+                ?: throw IllegalStateException("LlamaCppInferenceEngine not initialised.")
+            val handle = contextHandle
+            if (handle == -1L) throw IllegalStateException("Engine not initialized.")
             try {
                 LlamaCppBridge.nativeGenerate(
-                    contextHandle = contextHandle,
+                    contextHandle = handle,
                     prompt        = prompt,
                     maxTokens     = cfg.maxTokens,
                     temperature   = cfg.temperature,
@@ -281,6 +276,7 @@ class LlamaCppInferenceEngine @Inject constructor(
         }
         modelPfd?.close()
         modelPfd = null
-        isReady  = false
+        config = null
+        setReady(false)
     }
 }

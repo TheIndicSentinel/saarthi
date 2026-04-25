@@ -4,6 +4,7 @@ import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -29,6 +30,7 @@ class InferenceEngineSelector @Inject constructor(
 ) : InferenceEngine {
 
     override val isReady: Boolean get() = llamaCppEngine.isReady
+    override val isReadyFlow: Flow<Boolean> get() = llamaCppEngine.isReadyFlow
 
     override suspend fun initialize(config: InferenceConfig) {
         if (!config.modelPath.endsWith(".gguf", ignoreCase = true)) {

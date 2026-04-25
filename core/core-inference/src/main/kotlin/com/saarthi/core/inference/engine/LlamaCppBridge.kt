@@ -51,6 +51,13 @@ object LlamaCppBridge {
 
     external fun nativeRelease(contextHandle: Long)
 
+    /**
+     * Signals the current generation on [contextHandle] to stop.
+     * Safe to call from any thread — sets an atomic flag checked inside doGenerate.
+     * The native call returns within one token-decode cycle after this is called.
+     */
+    external fun nativeCancelGeneration(contextHandle: Long)
+
     /** Returns the last error string logged by llama.cpp (empty if none). */
     external fun nativeGetLastError(): String
 

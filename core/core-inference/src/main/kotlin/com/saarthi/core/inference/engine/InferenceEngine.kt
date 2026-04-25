@@ -7,6 +7,14 @@ import kotlinx.coroutines.flow.Flow
 interface InferenceEngine {
     val isReady: Boolean
 
+    /**
+     * Hot flow that emits whenever [isReady] changes.
+     * Default implementation emits the current value once; implementations should
+     * override with a [kotlinx.coroutines.flow.StateFlow] for push-based observation.
+     */
+    val isReadyFlow: Flow<Boolean>
+        get() = kotlinx.coroutines.flow.flow { emit(isReady) }
+
     suspend fun initialize(config: InferenceConfig)
 
     /** Streams partial tokens as they are generated. */

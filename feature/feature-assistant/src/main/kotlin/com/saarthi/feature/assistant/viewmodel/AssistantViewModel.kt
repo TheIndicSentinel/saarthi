@@ -75,17 +75,10 @@ class AssistantViewModel @Inject constructor(
             .onEach { tps -> _uiState.update { it.copy(tokensPerSecond = tps) } }
             .launchIn(viewModelScope)
 
-        // Keep modelReady in sync — isReady can change after ViewModel is created
-        // (e.g., MainViewModel finishes initializing while AssistantScreen is already shown).
-        viewModelScope.launch {
-            while (true) {
-                val ready = inferenceEngine.isReady
-                if (_uiState.value.modelReady != ready) {
-                    _uiState.update { it.copy(modelReady = ready) }
-                }
-                kotlinx.coroutines.delay(500)
-            }
-        }
+        // Push-based isReady observation via StateFlow — no polling, no wakeup cost.
+        inferenceEngine.isReadyFlow
+            .onEach { ready -> _uiState.update { it.copy(modelReady = ready) } }
+            .launchIn(viewModelScope)
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────
@@ -127,6 +120,9 @@ class AssistantViewModel @Inject constructor(
             _uiState.update { it.copy(error = "Voice recognition not available on this device") }
             return
         }
+        // Destroy any existing recognizer before creating a new one to prevent leaking
+        // the old instance if startListening() is called while already listening.
+        speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(getApplication()).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onResults(results: Bundle?) {

@@ -8,7 +8,6 @@ compose-bom = "2024.09.00"
 compose-compiler = "1.5.14"
 room = "2.6.1"
 datastore = "1.1.1"
-mediapipe = "0.10.33"
 coroutines = "1.8.1"
 lifecycle = "2.8.4"
 navigation = "2.8.0"
@@ -65,9 +64,6 @@ room-compiler = { group = "androidx.room", name = "room-compiler", version.ref =
 
 # DataStore
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
-
-# MediaPipe (Gemma on-device inference)
-mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipe" }
 
 # Coroutines
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

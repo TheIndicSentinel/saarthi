@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <atomic>
 #include <cstdio>
 #include "llama.h"
 
@@ -11,23 +12,26 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 struct LlamaContext {
-    llama_model*         model   = nullptr;
-    llama_context*       ctx     = nullptr;
-    const llama_vocab*   vocab   = nullptr;
-    llama_adapter_lora*  adapter = nullptr;
+    llama_model*         model     = nullptr;
+    llama_context*       ctx       = nullptr;
+    const llama_vocab*   vocab     = nullptr;
+    llama_adapter_lora*  adapter   = nullptr;
+    std::atomic<bool>    cancelled { false };
 };
 
+// g_last_error is written from llama.cpp's internal threads via llama_log_cb.
+// Protect with a dedicated mutex separate from g_log_mutex to avoid contention.
 static std::string g_last_error;
+static std::mutex  g_error_mutex;
+
 static std::once_flag g_backend_once;
 
-// File handle for writing native logs into saarthi_debug.log.
-// Set via nativeSetDebugLogPath so native crash traces are visible
-// alongside Kotlin logs — critical for diagnosing SIGSEGV crashes.
+// FILE* written to by NLOG/NLOGE so native crash traces appear alongside Kotlin logs.
+// Opened via nativeSetDebugLogPath(); survives SIGSEGV because we fflush after each write.
 static FILE* g_debug_log = nullptr;
 static std::mutex g_log_mutex;
 
 static void native_log(bool is_error, const char* tag, const char* fmt, ...) {
-    // Format the message
     char buf[512];
     va_list args;
     va_start(args, fmt);
@@ -40,7 +44,6 @@ static void native_log(bool is_error, const char* tag, const char* fmt, ...) {
         LOGI("[%s] %s", tag, buf);
     }
 
-    // Write to saarthi_debug.log with a flush so data survives a crash.
     std::lock_guard<std::mutex> lock(g_log_mutex);
     if (g_debug_log) {
         fprintf(g_debug_log, "[NATIVE/%s] %s\n", tag, buf);
@@ -54,13 +57,14 @@ static void native_log(bool is_error, const char* tag, const char* fmt, ...) {
 static void llama_log_cb(ggml_log_level level, const char* text, void*) {
     if (level >= GGML_LOG_LEVEL_ERROR) {
         LOGE("%s", text);
-        g_last_error += text;
-        // Also write llama.cpp errors to file
+        {
+            std::lock_guard<std::mutex> lock(g_error_mutex);
+            g_last_error += text;
+        }
         std::lock_guard<std::mutex> lock(g_log_mutex);
         if (g_debug_log) { fprintf(g_debug_log, "[NATIVE/LLAMA_ERR] %s", text); fflush(g_debug_log); }
     } else if (level >= GGML_LOG_LEVEL_WARN) {
         LOGI("[WARN] %s", text);
-        g_last_error += text;
     } else {
         LOGI("%s", text);
     }
@@ -68,7 +72,7 @@ static void llama_log_cb(ggml_log_level level, const char* text, void*) {
 
 extern "C" {
 
-// ─── Debug log path (call once after DebugLogger.init) ───────────────────────
+// ─── Debug log path ───────────────────────────────────────────────────────────
 
 JNIEXPORT void JNICALL
 Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeSetDebugLogPath(
@@ -77,7 +81,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeSetDebugLogPath(
     if (g_debug_log) { fclose(g_debug_log); g_debug_log = nullptr; }
     if (!pathJ) return;
     const char* path = env->GetStringUTFChars(pathJ, nullptr);
-    g_debug_log = fopen(path, "a");  // append so we don't lose previous session data
+    g_debug_log = fopen(path, "a");
     env->ReleaseStringUTFChars(pathJ, path);
     if (g_debug_log) {
         fprintf(g_debug_log, "[NATIVE/INIT] Native log routing active\n");
@@ -90,6 +94,7 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeSetDebugLogPath(
 JNIEXPORT jstring JNICALL
 Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGetLastError(
     JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> lock(g_error_mutex);
     return env->NewStringUTF(g_last_error.c_str());
 }
 
@@ -100,7 +105,10 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
     JNIEnv*, jobject,
     jint fd, jint nCtx, jint nThreads, jint nGpuLayers) {
 
-    g_last_error.clear();
+    {
+        std::lock_guard<std::mutex> lock(g_error_mutex);
+        g_last_error.clear();
+    }
 
     std::call_once(g_backend_once, []() {
         llama_log_set(llama_log_cb, nullptr);
@@ -188,6 +196,18 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeClearLoraAdapter(
     }
 }
 
+// ─── Cancel in-progress generation ───────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeCancelGeneration(
+    JNIEnv*, jobject, jlong handle) {
+
+    if (handle == (jlong)-1) return;
+    auto* lctx = reinterpret_cast<LlamaContext*>(handle);
+    lctx->cancelled.store(true, std::memory_order_release);
+    NLOG("GEN", "nativeCancelGeneration — cancelled flag set");
+}
+
 // ─── Generation ──────────────────────────────────────────────────────────────
 
 static std::string doGenerate(
@@ -199,6 +219,15 @@ static std::string doGenerate(
     JNIEnv* streamEnv,
     jobject tokenCallback,
     jmethodID onTokenMethod) {
+
+    // Reset cancel flag from any previous run
+    lctx->cancelled.store(false, std::memory_order_release);
+
+    // Clear per-call errors — stale errors from a previous generation must not pollute this call.
+    {
+        std::lock_guard<std::mutex> lock(g_error_mutex);
+        g_last_error.clear();
+    }
 
     llama_context*     ctx   = lctx->ctx;
     const llama_vocab* vocab = lctx->vocab;
@@ -222,20 +251,24 @@ static std::string doGenerate(
     tokens.resize(nTokens);
     NLOG("GEN", "Tokenized  promptTokens=%d", nTokens);
 
-    // Reset KV cache (data=true clears everything for a clean inference)
+    // Reset KV cache for a clean inference
     NLOG("GEN", "Clearing KV cache...");
     llama_memory_clear(llama_get_memory(ctx), true);
     NLOG("GEN", "KV cache cleared");
 
-    // Chunked prefill: feed the prompt in small chunks instead of one large batch.
-    // A single llama_decode() call with 300+ tokens triggers a SIGSEGV in GGML's
-    // NEON/SVE kernel on Snapdragon 8 Gen 2 / Android 16 (ARMv9 SVE2 alignment
-    // fault).  Processing 32 tokens at a time avoids the large-batch code path.
+    // Chunked prefill: feed the prompt in 32-token chunks.
+    // A single llama_decode() with the full prompt triggered a SIGSEGV in GGML's
+    // NEON kernel on Snapdragon 8 Gen 2 / Android 16 before the SVE2 patch.
+    // Chunked prefill is kept as a defence-in-depth measure and has no perf cost
+    // on mobile where KV-cache prefill is memory-bound, not compute-bound.
     const int PREFILL_CHUNK = 32;
-    NLOG("GEN", "Starting chunked prefill  nTokens=%d  chunkSize=%d...", nTokens, PREFILL_CHUNK);
+    NLOG("GEN", "Starting chunked prefill  nTokens=%d  chunkSize=%d", nTokens, PREFILL_CHUNK);
     for (int pos = 0; pos < nTokens; pos += PREFILL_CHUNK) {
-        int chunk = (nTokens - pos < PREFILL_CHUNK) ? (nTokens - pos) : PREFILL_CHUNK;
-        NLOG("GEN", "Prefill chunk pos=%d  chunk=%d", pos, chunk);
+        if (lctx->cancelled.load(std::memory_order_acquire)) {
+            NLOG("GEN", "Cancelled during prefill at pos=%d", pos);
+            return "";
+        }
+        int chunk = std::min(PREFILL_CHUNK, nTokens - pos);
         llama_batch chunk_batch = llama_batch_get_one(tokens.data() + pos, chunk);
         if (llama_decode(ctx, chunk_batch) != 0) {
             NLOGE("GEN", "llama_decode FAILED on prefill chunk pos=%d/%d", pos, nTokens);
@@ -256,6 +289,12 @@ static std::string doGenerate(
     int tokenCount = 0;
 
     for (int i = 0; i < maxTokens; ++i) {
+        if (lctx->cancelled.load(std::memory_order_acquire)) {
+            NLOG("GEN", "Cancelled at token %d", i);
+            aborted = true;
+            break;
+        }
+
         llama_token token = llama_sampler_sample(sampler, ctx, -1);
         llama_sampler_accept(sampler, token);
 
@@ -313,7 +352,6 @@ static std::string doGenerate(
             result.append(tokenBuf, len);
         }
 
-        NLOG("GEN", "Decode step i=%d...", i);
         llama_batch nextBatch = llama_batch_get_one(&token, 1);
         if (llama_decode(ctx, nextBatch) != 0) {
             NLOGE("GEN", "llama_decode FAILED at token %d", i);
@@ -334,6 +372,10 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGenerate(
     JNIEnv* env, jobject,
     jlong handle, jstring promptJ, jint maxTokens, jfloat temperature, jint topK) {
 
+    if (handle == (jlong)-1) {
+        NLOGE("GEN", "nativeGenerate called with invalid handle");
+        return env->NewStringUTF("");
+    }
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
     const char* prompt = env->GetStringUTFChars(promptJ, nullptr);
     std::string result = doGenerate(lctx, prompt, maxTokens, temperature, topK,
@@ -348,11 +390,16 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGenerateStream(
     jlong handle, jstring promptJ, jint maxTokens, jfloat temperature, jint topK,
     jobject tokenCallback) {
 
+    if (handle == (jlong)-1) {
+        NLOGE("GEN", "nativeGenerateStream called with invalid handle");
+        return;
+    }
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
     const char* prompt = env->GetStringUTFChars(promptJ, nullptr);
 
     jclass    cbClass   = env->GetObjectClass(tokenCallback);
     jmethodID onTokenId = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)Z");
+    env->DeleteLocalRef(cbClass);
 
     doGenerate(lctx, prompt, maxTokens, temperature, topK, env, tokenCallback, onTokenId);
     env->ReleaseStringUTFChars(promptJ, prompt);
@@ -366,6 +413,9 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeRelease(
 
     if (handle == (jlong)-1) return;
     auto* lctx = reinterpret_cast<LlamaContext*>(handle);
+
+    // Signal any in-progress generation to stop before freeing resources
+    lctx->cancelled.store(true, std::memory_order_release);
 
     NLOG("RELEASE", "Releasing handle=%p", (void*)lctx);
     if (lctx->adapter) llama_adapter_lora_free(lctx->adapter);

@@ -1,8 +1,3 @@
-# MediaPipe — keep runtime classes, suppress missing proto/annotation-processor refs
--keep class com.google.mediapipe.** { *; }
--dontwarn com.google.mediapipe.**
--dontwarn com.google.mediapipe.proto.**
-
 # AutoValue / javapoet annotation-processor shims (compile-time only, not in APK)
 -dontwarn javax.lang.model.**
 -dontwarn autovalue.shaded.**

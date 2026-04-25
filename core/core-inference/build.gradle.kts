@@ -8,7 +8,7 @@ plugins {
 
 // Check whether the NDK is installed before enabling the native build.
 // Without NDK the app still compiles — LlamaCppBridge.tryLoad() returns false
-// and the InferenceEngineSelector falls back to MediaPipe automatically.
+// and the stub library is used instead.
 val localProps = Properties().also { props ->
     rootProject.file("local.properties")
         .takeIf { it.exists() }
@@ -76,7 +76,6 @@ android {
 }
 
 dependencies {
-    implementation(libs.mediapipe.tasks.genai)
     implementation(libs.coroutines.android)
     implementation(libs.datastore.preferences)
     implementation(project(":core:core-common"))
