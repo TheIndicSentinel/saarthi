@@ -191,10 +191,13 @@ class LlamaCppInferenceEngine @Inject constructor(
 
         DebugLogger.log("GENERATE", "Stream start (real-time)  handle=$handle  maxTokens=${cfg.maxTokens}  gpu=$usingGpu")
 
+        // Capture ProducerScope so the anonymous object can reference isActive/trySend.
+        // Inside an object expression the outer 'this' (ProducerScope) is shadowed.
+        val producer = this
         val callback = object : LlamaCppBridge.TokenCallback {
             override fun onToken(token: String): Boolean {
-                if (!isActive) return false
-                return trySend(token).isSuccess
+                if (!producer.isActive) return false
+                return producer.trySend(token).isSuccess
             }
         }
 
