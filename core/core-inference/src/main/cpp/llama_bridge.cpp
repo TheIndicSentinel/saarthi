@@ -227,12 +227,20 @@ static std::string doGenerate(
     llama_memory_clear(llama_get_memory(ctx), true);
     NLOG("GEN", "KV cache cleared");
 
-    // Prefill
-    NLOG("GEN", "Starting prefill  nTokens=%d...", nTokens);
-    llama_batch batch = llama_batch_get_one(tokens.data(), (int)tokens.size());
-    if (llama_decode(ctx, batch) != 0) {
-        NLOGE("GEN", "llama_decode FAILED on prefill  nTokens=%d", nTokens);
-        return "";
+    // Chunked prefill: feed the prompt in small chunks instead of one large batch.
+    // A single llama_decode() call with 300+ tokens triggers a SIGSEGV in GGML's
+    // NEON/SVE kernel on Snapdragon 8 Gen 2 / Android 16 (ARMv9 SVE2 alignment
+    // fault).  Processing 32 tokens at a time avoids the large-batch code path.
+    const int PREFILL_CHUNK = 32;
+    NLOG("GEN", "Starting chunked prefill  nTokens=%d  chunkSize=%d...", nTokens, PREFILL_CHUNK);
+    for (int pos = 0; pos < nTokens; pos += PREFILL_CHUNK) {
+        int chunk = (nTokens - pos < PREFILL_CHUNK) ? (nTokens - pos) : PREFILL_CHUNK;
+        NLOG("GEN", "Prefill chunk pos=%d  chunk=%d", pos, chunk);
+        llama_batch chunk_batch = llama_batch_get_one(tokens.data() + pos, chunk);
+        if (llama_decode(ctx, chunk_batch) != 0) {
+            NLOGE("GEN", "llama_decode FAILED on prefill chunk pos=%d/%d", pos, nTokens);
+            return "";
+        }
     }
     NLOG("GEN", "Prefill done — decode loop starting");
 
