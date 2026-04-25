@@ -2,6 +2,7 @@ package com.saarthi.core.inference.engine
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.ParcelFileDescriptor
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
@@ -35,6 +36,32 @@ class LlamaCppInferenceEngine @Inject constructor(
 
     // Context sizes to try in order — smaller = less KV-cache RAM
     private val CTX_LADDER = listOf(2048, 1024, 512, 256)
+
+    // ── Vulkan crash detection ───────────────────────────────────────────────
+    // If a GPU-accelerated generation causes a native crash (SIGSEGV/SIGABRT),
+    // the process is killed without executing any finally/catch block.  We use
+    // a commit()-persisted SharedPreferences flag to detect this on the next
+    // startup and permanently fall back to CPU-only for that device.
+    private val enginePrefs: SharedPreferences
+        get() = context.getSharedPreferences("llama_engine_prefs", Context.MODE_PRIVATE)
+
+    private fun vulkanPreviouslyCrashed(): Boolean =
+        enginePrefs.getBoolean("gpu_gen_pending", false) ||
+        enginePrefs.getBoolean("vulkan_failed",   false)
+
+    private fun markGpuGenerationStarted() =
+        enginePrefs.edit().putBoolean("gpu_gen_pending", true).commit()  // commit = synchronous
+
+    private fun markGpuGenerationEnded() =
+        enginePrefs.edit().putBoolean("gpu_gen_pending", false).apply()
+
+    private fun recordVulkanCrash() {
+        DebugLogger.log("INIT", "Vulkan crash detected — disabling GPU for this device")
+        enginePrefs.edit()
+            .putBoolean("gpu_gen_pending", false)
+            .putBoolean("vulkan_failed",   true)
+            .commit()
+    }
 
     private fun availableRamMb(): Long {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -104,24 +131,33 @@ class LlamaCppInferenceEngine @Inject constructor(
 
             var handle = -1L
             var usedCtx = adaptiveMaxCtx
-            var usedGpuLayers = config.nGpuLayers
-
             val ctxList = CTX_LADDER.filter { it <= adaptiveMaxCtx } + listOf(CTX_LADDER.last())
 
-            // First attempt: GPU-accelerated (Vulkan) if nGpuLayers > 0
+            // If a previous GPU generation caused a native crash (process killed),
+            // fall back to CPU-only permanently for this device.
+            val requestedGpuLayers = if (config.nGpuLayers > 0 && vulkanPreviouslyCrashed()) {
+                recordVulkanCrash()
+                DebugLogger.log("INIT", "Vulkan crash history — loading CPU-only")
+                0
+            } else {
+                config.nGpuLayers
+            }
+            var usedGpuLayers = requestedGpuLayers
+
+            // First attempt: GPU-accelerated (Vulkan) if layers > 0
             for (ctx in ctxList) {
                 handle = LlamaCppBridge.nativeInitFd(
                     fd         = fd,
                     nCtx       = ctx,
                     nThreads   = config.nThreads,
-                    nGpuLayers = config.nGpuLayers,
+                    nGpuLayers = requestedGpuLayers,
                 )
                 if (handle != -1L) { usedCtx = ctx; break }
             }
 
-            // If GPU init failed, retry CPU-only (nGpuLayers=0) — handles devices
-            // where Vulkan is unavailable or returns an unsupported driver error.
-            if (handle == -1L && config.nGpuLayers > 0) {
+            // If GPU init failed, retry CPU-only (handles devices where Vulkan is
+            // unavailable or the driver rejects the config outright).
+            if (handle == -1L && requestedGpuLayers > 0) {
                 val gpuError = runCatching { LlamaCppBridge.nativeGetLastError() }.getOrDefault("")
                 DebugLogger.log("INIT", "GPU init failed ($gpuError) — retrying CPU-only")
                 usedGpuLayers = 0
@@ -162,7 +198,14 @@ class LlamaCppInferenceEngine @Inject constructor(
             return@callbackFlow
         }
         val handle = contextHandle
-        DebugLogger.log("GENERATE", "Stream start  handle=$handle  maxTokens=${cfg.maxTokens}")
+        val usingGpu = cfg.nGpuLayers > 0
+        DebugLogger.log("GENERATE", "Stream start  handle=$handle  maxTokens=${cfg.maxTokens}  gpu=$usingGpu")
+
+        // Persist a flag BEFORE entering native code.  If a Vulkan shader causes a
+        // native crash (SIGSEGV kills the process), this flag stays set and will be
+        // detected by initialize() on the next launch, triggering CPU-only fallback.
+        if (usingGpu) markGpuGenerationStarted()
+
         var tokenCount = 0
         withContext(Dispatchers.IO) {
             try {
@@ -181,6 +224,8 @@ class LlamaCppInferenceEngine @Inject constructor(
                     }
                 )
             } catch (e: Throwable) {
+                // Java/Kotlin exception (not a native crash) — clear the flag and report
+                if (usingGpu) markGpuGenerationEnded()
                 val msg = e.message?.takeIf { it.isNotBlank() }
                     ?: "Generation failed (${e.javaClass.simpleName})"
                 DebugLogger.log("GENERATE", "Error: $msg")
@@ -189,6 +234,8 @@ class LlamaCppInferenceEngine @Inject constructor(
                 return@withContext
             }
         }
+        // Normal completion — generation was safe, clear the crash guard flag
+        if (usingGpu) markGpuGenerationEnded()
         DebugLogger.log("GENERATE", "Stream done  tokens=$tokenCount")
         if (tokenCount == 0) {
             DebugLogger.log("GENERATE", "WARNING: 0 tokens generated — model may be misloaded or prompt malformed")

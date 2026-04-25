@@ -79,9 +79,9 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3-4b-it-q4",
             displayName   = "Gemma 3 4B IT · Q4_K_M",
-            description   = "Google Gemma 3 4B — best choice for mid-range phones (4–8 GB RAM). Excellent Hindi, multilingual and reasoning. 2.5 GB download.",
+            description   = "Google Gemma 3 4B — best choice for mid-range phones (4–8 GB RAM). Excellent Hindi, multilingual and reasoning. ~2.4 GB download.",
             downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf",
-            fileSizeBytes = 2_684_354_560L,
+            fileSizeBytes = 2_489_348_096L,
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3",

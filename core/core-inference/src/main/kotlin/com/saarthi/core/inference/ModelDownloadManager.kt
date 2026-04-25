@@ -76,8 +76,31 @@ class ModelDownloadManager @Inject constructor(
     fun localPathFor(model: ModelEntry): File = File(modelsDir(), model.fileName)
     fun localPathFor(lora: LoraEntry): File   = File(adaptersDir(), lora.fileName)
 
+    /**
+     * Returns the actual file on disk for a model — checks canonical name first,
+     * then DownloadManager-suffixed variants (-1, -2 …) that Android creates when
+     * the destination file already exists at download time.
+     * If a suffixed file is found it is renamed to the canonical path so subsequent
+     * calls always resolve to [localPathFor].
+     */
+    fun resolveLocalFile(model: ModelEntry): File {
+        val canonical = localPathFor(model)
+        if (canonical.exists()) return canonical
+        val base = model.fileName.substringBeforeLast('.')
+        val ext  = model.fileName.substringAfterLast('.')
+        for (i in 1..9) {
+            val candidate = File(modelsDir(), "$base-$i.$ext")
+            if (candidate.exists()) {
+                DebugLogger.log("DOWNLOAD", "Renaming suffixed file ${candidate.name} → ${canonical.name}")
+                candidate.renameTo(canonical)
+                return canonical
+            }
+        }
+        return canonical
+    }
+
     fun isDownloaded(model: ModelEntry): Boolean =
-        isFileComplete(localPathFor(model), model.fileSizeBytes)
+        isFileComplete(resolveLocalFile(model), model.fileSizeBytes)
 
     fun isDownloaded(lora: LoraEntry): Boolean =
         isFileComplete(localPathFor(lora), lora.fileSizeBytes)
@@ -91,7 +114,8 @@ class ModelDownloadManager @Inject constructor(
     fun startDownload(model: ModelEntry) {
         if (activeJobs[model.id]?.isActive == true) return  // already polling
 
-        val destFile = localPathFor(model)
+        // resolveLocalFile renames any DownloadManager-suffixed file to the canonical path
+        val destFile = resolveLocalFile(model)
         if (isFileComplete(destFile, model.fileSizeBytes)) {
             _allProgress.update { it + (model.id to DownloadProgress.Completed(destFile.absolutePath)) }
             return
@@ -193,8 +217,11 @@ class ModelDownloadManager @Inject constructor(
     private fun enqueueOrReattach(url: String, destFile: File, title: String): Long {
         findActiveDownloadId(url)?.let { return it }
 
-        if (destFile.exists() && !isFileComplete(destFile, 0L)) {
-            Timber.w("Deleting partial file: ${destFile.name}")
+        // Always delete the destination before enqueuing.  Android DownloadManager
+        // creates "file-1.gguf", "file-2.gguf" etc. when the destination already
+        // exists — this causes filename mismatches and "not downloaded" UI state.
+        if (destFile.exists()) {
+            Timber.w("Deleting existing file before download: ${destFile.name}")
             destFile.delete()
         }
 
