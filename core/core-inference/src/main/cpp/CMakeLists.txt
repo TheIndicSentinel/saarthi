@@ -55,14 +55,20 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
             if(EXISTS "${_VULKAN_HDR_DIR}/vulkan/vulkan.hpp" AND
                EXISTS "${_VULKAN_HDR_DIR}/spirv/unified1/spirv.hpp")
 
-                set(Vulkan_INCLUDE_DIR "${_VULKAN_HDR_DIR}" CACHE PATH "" FORCE)
+                # Pre-set Vulkan CMake variables so ggml-vulkan's find_package(Vulkan REQUIRED)
+                # succeeds without searching the cross-compilation sysroot.
+                set(Vulkan_INCLUDE_DIR      "${_VULKAN_HDR_DIR}" CACHE PATH     "" FORCE)
+                set(Vulkan_GLSLC_EXECUTABLE "${_NDK_GLSLC}"      CACHE FILEPATH "" FORCE)
 
-                # libvulkan stub: Android CMake toolchain knows the ABI triple
+                # libvulkan stub: Android CMake toolchain resolves the ABI triple
                 find_library(_VULKAN_SYSTEM_LIB vulkan)
                 if(_VULKAN_SYSTEM_LIB)
                     set(Vulkan_LIBRARY "${_VULKAN_SYSTEM_LIB}" CACHE FILEPATH "" FORCE)
-                    set(Vulkan_GLSLC_EXECUTABLE "${_NDK_GLSLC}" CACHE FILEPATH "" FORCE)
                     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+                    # Remember the header dir — used after add_subdirectory() below
+                    # to directly inject it into ggml-vulkan's include paths, bypassing
+                    # any FindVulkan / Vulkan::Vulkan propagation issue in cross-builds.
+                    set(_VULKAN_EXTRA_INC "${_VULKAN_HDR_DIR}")
                     message(STATUS "Vulkan: ON  inc=${_VULKAN_HDR_DIR}  lib=${_VULKAN_SYSTEM_LIB}")
                 else()
                     set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
@@ -89,6 +95,15 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
     # NEON-optimised kernels are already fast on Snapdragon.
 
     add_subdirectory(${LLAMA_DIR} llama_cpp_build)
+
+    # Direct include-path injection for ggml-vulkan.
+    # FindVulkan's Vulkan::Vulkan INTERFACE_INCLUDE_DIRECTORIES doesn't always
+    # propagate correctly in Android cross-builds.  Explicitly adding the host
+    # header dir to the target guarantees clang++ receives the -I flag.
+    if(GGML_VULKAN AND _VULKAN_EXTRA_INC AND TARGET ggml-vulkan)
+        target_include_directories(ggml-vulkan PRIVATE "${_VULKAN_EXTRA_INC}")
+        message(STATUS "Vulkan: injected -I${_VULKAN_EXTRA_INC} into ggml-vulkan")
+    endif()
 
     add_library(llama_bridge SHARED llama_bridge.cpp)
 
