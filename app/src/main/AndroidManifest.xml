@@ -24,6 +24,10 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Keep alarms alive through Doze mode -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Foreground service keeps the app alive during heavy AI inference.
+         Without this, Android 14+/Samsung OneUI kills the process in 2-10s. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- Android 11+ package visibility: needed for SpeechRecognizer.isRecognitionAvailable()
          to correctly detect installed speech recognition services. Without this the API
@@ -73,6 +77,16 @@
                 <action android:name="com.saarthi.app.REMINDER" />
             </intent-filter>
         </receiver>
+
+        <!-- Foreground service that keeps the process alive during AI model inference -->
+        <service
+            android:name="com.saarthi.core.inference.InferenceService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="On-device AI model inference (LLM text generation)" />
+        </service>
 
     </application>
 </manifest>

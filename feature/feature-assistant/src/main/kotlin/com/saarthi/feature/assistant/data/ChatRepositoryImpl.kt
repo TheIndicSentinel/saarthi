@@ -1,7 +1,9 @@
 package com.saarthi.feature.assistant.data
 
+import android.content.Context
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.memory.db.ChatSessionDao
@@ -32,12 +34,14 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import dagger.hilt.android.qualifiers.ApplicationContext
 
 private const val MAX_HISTORY_TURNS = 6
 private const val MAX_PROMPT_CHARS = 4_096  // ~1:1 to tokens — fits within a 2K–4K context window
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val inferenceEngine: InferenceEngine,
     private val memoryRepository: MemoryRepository,
     private val conversationDao: ConversationDao,
@@ -140,8 +144,13 @@ class ChatRepositoryImpl @Inject constructor(
             var tokenCount = 0
             val accumulated = StringBuilder()
 
+            // Start foreground service BEFORE inference — prevents Android from killing process
+            InferenceService.start(appContext)
+
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
+                    // Stop foreground service on error
+                    InferenceService.stop(appContext)
                     // Surface engine errors as a visible assistant message — never crash the app.
                     val errMsg = e.message?.takeIf { it.isNotBlank() }
                         ?: "Something went wrong. Please try again."
@@ -171,6 +180,8 @@ class ChatRepositoryImpl @Inject constructor(
                     emit(token)
                 }
                 .onCompletion { throwable ->
+                    // Stop foreground service when generation is done
+                    InferenceService.stop(appContext)
                     val elapsed = (System.currentTimeMillis() - startTime) / 1000f
                     val tps = if (elapsed > 0) tokenCount / elapsed else 0f
                     DebugLogger.log("CHAT", "streamResponse done  tokens=$tokenCount  elapsed=${elapsed.toInt()}s  tps=${"%.1f".format(tps)}  error=${throwable?.message}")

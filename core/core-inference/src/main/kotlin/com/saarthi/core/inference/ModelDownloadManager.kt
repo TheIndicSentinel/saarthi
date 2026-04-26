@@ -138,6 +138,25 @@ class ModelDownloadManager @Inject constructor(
                 _allProgress.update { it + (model.id to progress) }
                 delay(if (progress is DownloadProgress.Paused) 3_000L else 600L)
             }
+
+            // The polling loop exited (STATUS_SUCCESSFUL or cursor gone).
+            // The BroadcastReceiver *may* have already fired, but in a race condition
+            // it might not yet have. Check the file directly and emit Completed if valid.
+            // This prevents the UI from staying stuck at 99%.
+            delay(500) // Small delay to let DownloadManager flush to disk
+            if (isFileComplete(destFile, model.fileSizeBytes)) {
+                DebugLogger.log("DOWNLOAD", "Success (poll-exit): ${destFile.name}  ${destFile.length() / 1_048_576}MB")
+                _allProgress.update { it + (model.id to DownloadProgress.Completed(destFile.absolutePath)) }
+            } else {
+                // Check if maybe the status is actually failed
+                val finalStatus = queryStatus(downloadId)
+                if (finalStatus == DownloadManager.STATUS_FAILED) {
+                    val reason = queryFailureReason(downloadId)
+                    DebugLogger.log("DOWNLOAD", "Failed (poll-exit): $reason")
+                    _allProgress.update { it + (model.id to DownloadProgress.Failed(reason)) }
+                }
+                // Otherwise let the BroadcastReceiver handle it
+            }
         }
         activeJobs[model.id] = job
     }
@@ -349,7 +368,16 @@ class ModelDownloadManager @Inject constructor(
                 DownloadManager.STATUS_PENDING -> DownloadProgress.Downloading(downloaded, total)
                 DownloadManager.STATUS_PAUSED  -> DownloadProgress.Paused(pauseReason(reason))
                 DownloadManager.STATUS_FAILED  -> DownloadProgress.Failed(queryFailureReason(downloadId))
-                else                           -> null
+                DownloadManager.STATUS_SUCCESSFUL -> {
+                    // Polling loop reaches here when download completes. The BroadcastReceiver
+                    // handles the "official" completion event, but returning null here causes
+                    // the UI to stick at 99%. Emit Completed to break the loop cleanly.
+                    val localUri = cursor.getString(cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI))
+                    val path = localUri?.let { Uri.parse(it).path } ?: ""
+                    DebugLogger.log("DOWNLOAD", "queryProgress: STATUS_SUCCESSFUL  path=$path  size=${downloaded}B")
+                    null // Exit the polling loop — the BroadcastReceiver handles the Completed emit
+                }
+                else -> null
             }
         }
     }
