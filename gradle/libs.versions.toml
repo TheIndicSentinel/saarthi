@@ -19,7 +19,7 @@ splashscreen = "1.0.1"
 activity-compose = "1.9.1"
 core-ktx = "1.13.1"
 accompanist = "0.34.0"
-mediapipe-genai = "0.10.22"
+mediapipe-genai = "0.10.33"
 
 [libraries]
 # AndroidX Core

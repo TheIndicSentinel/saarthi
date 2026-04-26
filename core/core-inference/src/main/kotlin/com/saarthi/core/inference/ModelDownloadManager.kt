@@ -226,13 +226,6 @@ class ModelDownloadManager @Inject constructor(
             destFile.delete()
         }
 
-        // Gated repos (google/ or saarthi-ai/ private) absolutely require the token.
-        // Public community repos (bartowski/ or litert-community/) may FAIL if an
-        // Authorization header is sent because S3/CloudFront redirects reject
-        // unexpected Bearer tokens.
-        val isGated = url.contains("/google/") || url.contains("/saarthi-ai/")
-        val isPublicCommunity = url.contains("/bartowski/") || url.contains("/litert-community/")
-
         return runCatching {
             val request = DownloadManager.Request(Uri.parse(url)).apply {
                 setTitle(title)
@@ -240,25 +233,28 @@ class ModelDownloadManager @Inject constructor(
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationUri(Uri.fromFile(destFile))
                 setAllowedOverMetered(true)
-                setAllowedOverRoaming(true) 
-                
-                if (isGated && !isPublicCommunity) {
-                    // Fetch fresh token for gated request
-                    val currentToken = hfToken.ifEmpty { 
-                        kotlinx.coroutines.withTimeoutOrNull(2000) { 
-                            hfTokenManager.effectiveToken.first() 
+                setAllowedOverRoaming(true)
+
+                // All HuggingFace repos in the catalog are gated (google/, litert-community/)
+                // or accept Bearer tokens gracefully (bartowski/).  Always attach the token
+                // so Android DownloadManager's initial request is authenticated.
+                if (url.contains("huggingface.co")) {
+                    val currentToken = hfToken.ifEmpty {
+                        kotlinx.coroutines.withTimeoutOrNull(2000) {
+                            hfTokenManager.effectiveToken.first()
                         } ?: ""
                     }
                     if (currentToken.isNotEmpty()) {
                         addRequestHeader("Authorization", "Bearer $currentToken")
                     } else {
-                        Timber.w("No HF token available for gated URL: $url")
+                        Timber.w("No HF token available — download may fail for gated repos")
                     }
                 }
             }
             dm.enqueue(request).also { Timber.d("Enqueued download id=$it  url=$url") }
         }.getOrElse { -1L }
     }
+
 
     private fun registerCompletionReceiver(
         modelId: String,
