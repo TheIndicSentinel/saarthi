@@ -13,7 +13,21 @@ object LlamaCppBridge {
     }
 
     /**
-     * Init via file descriptor — avoids Android scoped-storage path restrictions.
+     * Init via real filesystem path.  Preferred over nativeInitFd when the model
+     * is in app-private storage: avoids /proc/self/fd/ mmap page-fault restrictions
+     * that Samsung OneUI / Android 16 SELinux enforces during inference.
+     * use_mmap is disabled internally so there are no page faults at decode time.
+     */
+    external fun nativeInitFromPath(
+        path: String,
+        nCtx: Int,
+        nThreads: Int,
+        nGpuLayers: Int,
+    ): Long
+
+    /**
+     * Init via file descriptor — fallback for content-provider URIs without a
+     * real filesystem path. use_mmap is also disabled here for the same reason.
      * The fd must remain open for the lifetime of the returned handle.
      * Returns a native context handle (pointer as Long), or -1 on failure.
      */

@@ -99,13 +99,14 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGetLastError(
     return env->NewStringUTF(g_last_error.c_str());
 }
 
-// ─── Model init via file descriptor ──────────────────────────────────────────
+// ─── Shared model+context init ────────────────────────────────────────────────
 
-JNIEXPORT jlong JNICALL
-Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
-    JNIEnv*, jobject,
-    jint fd, jint nCtx, jint nThreads, jint nGpuLayers) {
-
+// use_mmap=false: load model tensors via read() into RAM rather than mmap().
+// On Samsung OneUI / Android 16, mmap-backed pages from /proc/self/fd/ paths
+// can be blocked by SELinux during the page-fault handling that occurs when GGML
+// first accesses a tensor during llama_decode → SIGSEGV in the compute thread.
+// With use_mmap=false all tensor data is in a malloc'd buffer before decode runs.
+static jlong initModel(const char* modelPath, jint nCtx, jint nThreads, jint nGpuLayers) {
     {
         std::lock_guard<std::mutex> lock(g_error_mutex);
         g_last_error.clear();
@@ -117,17 +118,17 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
         NLOG("INIT", "llama_backend_init() called (once)");
     });
 
-    char modelPath[64];
-    snprintf(modelPath, sizeof(modelPath), "/proc/self/fd/%d", fd);
-    NLOG("INIT", "nativeInitFd  fd=%d  nCtx=%d  nThreads=%d  nGpuLayers=%d", fd, nCtx, nThreads, nGpuLayers);
+    NLOG("INIT", "initModel  path=%s  nCtx=%d  nThreads=%d  nGpuLayers=%d",
+         modelPath, nCtx, nThreads, nGpuLayers);
 
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = nGpuLayers;
+    mparams.use_mmap     = false;   // load into RAM — avoids mmap page-fault crash
 
-    NLOG("INIT", "Loading model...");
+    NLOG("INIT", "Loading model (use_mmap=false)...");
     llama_model* model = llama_model_load_from_file(modelPath, mparams);
     if (!model) {
-        NLOGE("INIT", "Failed to load model  fd=%d", fd);
+        NLOGE("INIT", "Failed to load model  path=%s", modelPath);
         return -1L;
     }
     NLOG("INIT", "Model loaded OK");
@@ -149,6 +150,32 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
     auto* lctx = new LlamaContext{model, ctx, vocab, nullptr};
     NLOG("INIT", "Context ready  handle=%p  nCtx=%d  nGpuLayers=%d", (void*)lctx, nCtx, nGpuLayers);
     return reinterpret_cast<jlong>(lctx);
+}
+
+// ─── Model init via real filesystem path (preferred) ─────────────────────────
+
+JNIEXPORT jlong JNICALL
+Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFromPath(
+    JNIEnv* env, jobject,
+    jstring pathJ, jint nCtx, jint nThreads, jint nGpuLayers) {
+
+    const char* path = env->GetStringUTFChars(pathJ, nullptr);
+    jlong result = initModel(path, nCtx, nThreads, nGpuLayers);
+    env->ReleaseStringUTFChars(pathJ, path);
+    return result;
+}
+
+// ─── Model init via file descriptor (fallback for content-URI models) ─────────
+
+JNIEXPORT jlong JNICALL
+Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeInitFd(
+    JNIEnv*, jobject,
+    jint fd, jint nCtx, jint nThreads, jint nGpuLayers) {
+
+    char modelPath[64];
+    snprintf(modelPath, sizeof(modelPath), "/proc/self/fd/%d", fd);
+    NLOG("INIT", "nativeInitFd  fd=%d  → path=%s", fd, modelPath);
+    return initModel(modelPath, nCtx, nThreads, nGpuLayers);
 }
 
 // ─── LoRA adapter ────────────────────────────────────────────────────────────

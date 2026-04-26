@@ -122,8 +122,10 @@ class LlamaCppInferenceEngine @Inject constructor(
                 if (!valid) throw IllegalStateException("Model file is corrupted (invalid GGUF header).")
             }
 
+            // Open PFD as fallback for content-URIs; real-path init is preferred below.
             val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             val fd  = pfd.fd
+            val useRealPath = !config.modelPath.startsWith("/proc/self/fd/")
 
             val estimatedRamAfterLoadMb = ramMb - fileSizeMb
             val adaptiveMaxCtx = when {
@@ -150,8 +152,16 @@ class LlamaCppInferenceEngine @Inject constructor(
             var usedGpuLayers = requestedGpuLayers
 
             for (ctx in ctxList) {
-                handle = LlamaCppBridge.nativeInitFd(fd = fd, nCtx = ctx,
-                    nThreads = config.nThreads, nGpuLayers = requestedGpuLayers)
+                handle = if (useRealPath) {
+                    // Preferred: real path — use_mmap disabled in native to avoid
+                    // /proc/self/fd page-fault crashes on Samsung Android 16.
+                    DebugLogger.log("INIT", "Using real-path init (no mmap): ${config.modelPath.substringAfterLast('/')}")
+                    LlamaCppBridge.nativeInitFromPath(config.modelPath, ctx,
+                        config.nThreads, requestedGpuLayers)
+                } else {
+                    LlamaCppBridge.nativeInitFd(fd = fd, nCtx = ctx,
+                        nThreads = config.nThreads, nGpuLayers = requestedGpuLayers)
+                }
                 if (handle != -1L) { usedCtx = ctx; break }
             }
 
@@ -160,8 +170,13 @@ class LlamaCppInferenceEngine @Inject constructor(
                 DebugLogger.log("INIT", "GPU init failed ($gpuError) — retrying CPU-only")
                 usedGpuLayers = 0
                 for (ctx in ctxList) {
-                    handle = LlamaCppBridge.nativeInitFd(fd = fd, nCtx = ctx,
-                        nThreads = config.nThreads, nGpuLayers = 0)
+                    handle = if (useRealPath) {
+                        LlamaCppBridge.nativeInitFromPath(config.modelPath, ctx,
+                            config.nThreads, 0)
+                    } else {
+                        LlamaCppBridge.nativeInitFd(fd = fd, nCtx = ctx,
+                            nThreads = config.nThreads, nGpuLayers = 0)
+                    }
                     if (handle != -1L) { usedCtx = ctx; break }
                 }
             }
