@@ -1,6 +1,13 @@
 package com.saarthi.core.inference.model
 
-enum class EngineType { MEDIAPIPE, LLAMA_CPP }
+enum class EngineType {
+    /** MediaPipe LiteRT (.task / .litertlm) — GPU-accelerated, Google official. */
+    LITERT,
+    /** llama.cpp GGUF — CPU fallback for community/custom models. */
+    LLAMA_CPP,
+    /** Kept for source compatibility; treated as LITERT at runtime. */
+    MEDIAPIPE,
+}
 
 data class ModelEntry(
     val id: String,

@@ -80,4 +80,5 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(project(":core:core-common"))
     implementation(libs.timber)
+    implementation(libs.mediapipe.tasks.genai)
 }

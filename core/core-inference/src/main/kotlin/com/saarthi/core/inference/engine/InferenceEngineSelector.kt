@@ -4,58 +4,92 @@ import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Singleton inference engine — routes all requests to [LlamaCppInferenceEngine].
+ * Routes inference requests to the correct backend based on model file extension:
  *
- * Architecture decision: llama.cpp GGUF is the only supported backend.
+ *   .task / .litertlm / .bin  →  [LiteRTInferenceEngine]  (MediaPipe GPU-accelerated, primary)
+ *   .gguf                     →  [LlamaCppInferenceEngine] (CPU fallback, GGUF custom models)
  *
- *  • No process-level handler slot — zero "Another handler is already registered" crashes.
- *  • True streaming token-by-token (via JNI callback).
- *  • Native LoRA adapter support (future domain packs).
- *  • Live model switching without app restart.
- *  • Industry standard: same stack as Pocketpal AI, ChatterUI.
- *
- * MediaPipe LiteRT was removed: its process-level native handler cannot be reliably freed
- * between sessions, causing unfixable "Another handler is already registered" crashes on
- * model switch or Activity recreation.  All Google Gemma models are available as GGUF.
+ * LiteRT is the primary backend for all official Google Gemma mobile models.
+ * llama.cpp is kept as a fallback for community GGUF models on devices where LiteRT
+ * delegates are unavailable (x86 emulator, old drivers).
  */
 @Singleton
 class InferenceEngineSelector @Inject constructor(
+    private val liteRtEngine: LiteRTInferenceEngine,
     private val llamaCppEngine: LlamaCppInferenceEngine,
 ) : InferenceEngine {
 
-    override val isReady: Boolean get() = llamaCppEngine.isReady
-    override val isReadyFlow: Flow<Boolean> get() = llamaCppEngine.isReadyFlow
+    private enum class ActiveBackend { LITERT, LLAMA_CPP }
+
+    @Volatile private var activeBackend: ActiveBackend = ActiveBackend.LITERT
+
+    private val activeEngine: InferenceEngine
+        get() = when (activeBackend) {
+            ActiveBackend.LITERT   -> liteRtEngine
+            ActiveBackend.LLAMA_CPP -> llamaCppEngine
+        }
+
+    override val isReady: Boolean get() = activeEngine.isReady
+    override val isReadyFlow: Flow<Boolean> get() = activeEngine.isReadyFlow
 
     override suspend fun initialize(config: InferenceConfig) {
-        if (!config.modelPath.endsWith(".gguf", ignoreCase = true)) {
-            DebugLogger.log("ENGINE", "Unsupported model format — only GGUF is supported: ${config.modelPath}")
-            throw UnsupportedOperationException(
-                "Only GGUF models are supported.\n\n" +
-                "Please download a GGUF model from the model list.\n" +
-                "Legacy MediaPipe models (.task, .litertlm) are no longer supported."
-            )
+        val path = config.modelPath
+        when {
+            isLiteRTModel(path) -> {
+                if (llamaCppEngine.isReady) {
+                    Timber.d("Releasing llama.cpp before switching to LiteRT")
+                    llamaCppEngine.release()
+                }
+                activeBackend = ActiveBackend.LITERT
+                DebugLogger.log("ENGINE", "→ LiteRT  model=${path.substringAfterLast('/')}")
+                liteRtEngine.initialize(config)
+            }
+            isGgufModel(path) -> {
+                if (liteRtEngine.isReady) {
+                    Timber.d("Releasing LiteRT before switching to llama.cpp")
+                    liteRtEngine.release()
+                }
+                activeBackend = ActiveBackend.LLAMA_CPP
+                DebugLogger.log("ENGINE", "→ llama.cpp  model=${path.substringAfterLast('/')}")
+                llamaCppEngine.initialize(config)
+            }
+            else -> {
+                val ext = path.substringAfterLast('.', "unknown")
+                throw UnsupportedOperationException(
+                    "Unsupported model format: .$ext\n\n" +
+                    "Supported formats: .task (LiteRT — recommended) or .gguf (llama.cpp)"
+                )
+            }
         }
-        Timber.d("InferenceEngineSelector → LlamaCppInferenceEngine")
-        llamaCppEngine.initialize(config)
     }
 
     override fun generateStream(prompt: String, packType: PackType): Flow<String> =
-        llamaCppEngine.generateStream(prompt, packType)
+        activeEngine.generateStream(prompt, packType)
 
     override suspend fun generate(prompt: String, packType: PackType): String =
-        llamaCppEngine.generate(prompt, packType)
+        activeEngine.generate(prompt, packType)
 
     override suspend fun loadLoraAdapter(adapterPath: String, scale: Float) =
-        llamaCppEngine.loadLoraAdapter(adapterPath, scale)
+        activeEngine.loadLoraAdapter(adapterPath, scale)
 
     override fun clearLoraAdapter() =
-        llamaCppEngine.clearLoraAdapter()
+        activeEngine.clearLoraAdapter()
 
-    override fun release() = llamaCppEngine.release()
+    override fun release() {
+        liteRtEngine.release()
+        llamaCppEngine.release()
+    }
+
+    private fun isLiteRTModel(path: String): Boolean {
+        val lower = path.lowercase()
+        return lower.endsWith(".task") || lower.endsWith(".litertlm") || lower.endsWith(".bin")
+    }
+
+    private fun isGgufModel(path: String): Boolean =
+        path.endsWith(".gguf", ignoreCase = true)
 }

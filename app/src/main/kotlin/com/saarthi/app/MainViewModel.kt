@@ -62,16 +62,6 @@ class MainViewModel @Inject constructor(
                 return@launch
             }
 
-            // Legacy MediaPipe models (.task / .litertlm / .bin) are no longer supported.
-            // Redirect to model selection rather than crashing with "Another handler".
-            if (isLegacyMediaPipePath(modelPath)) {
-                com.saarthi.core.inference.DebugLogger.log("MAIN",
-                    "Legacy MediaPipe model detected — redirecting to model selection: $modelPath")
-                onboardingRepository.clearModelPath()
-                _startState.value = AppStartState.GoToOnboarding
-                return@launch
-            }
-
             val catalogEntry = modelCatalog.allModels.find {
                 modelPath.endsWith(it.fileName)
             }
@@ -97,12 +87,6 @@ class MainViewModel @Inject constructor(
                 _startState.value = AppStartState.ModelError(msg)
             }
         }
-    }
-
-    private fun isLegacyMediaPipePath(path: String): Boolean {
-        val lower = path.lowercase()
-        return lower.endsWith(".task") || lower.endsWith(".litertlm") ||
-               lower.endsWith(".litert") || lower.endsWith(".tflite")
     }
 
     private fun restoreModelFamily(modelPath: String) {
