@@ -65,10 +65,12 @@ class MainViewModel @Inject constructor(
             val catalogEntry = modelCatalog.allModels.find {
                 modelPath.endsWith(it.fileName)
             }
+            val maxTokens = catalogEntry?.contextLength ?: 1024
             val config = InferenceConfig(
                 modelPath  = modelPath,
+                maxTokens  = maxTokens,
                 nCtx       = catalogEntry?.contextLength ?: 2048,
-                nThreads   = (Runtime.getRuntime().availableProcessors() / 2).coerceAtMost(2).coerceAtLeast(1),
+                nThreads   = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4),
                 nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
 

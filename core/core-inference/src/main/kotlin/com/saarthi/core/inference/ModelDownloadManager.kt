@@ -183,7 +183,9 @@ class ModelDownloadManager @Inject constructor(
         if (!file.exists()) return false
         val size = file.length()
         if (size < 1_000_000L) return false
-        if (expectedBytes > 0L && size < (expectedBytes * 0.95).toLong()) {
+        // Threshold lowered to 90%. Some filesystems or compressed downloads result in 
+        // slight size variations. This prevents "99% stuck" UI states.
+        if (expectedBytes > 0L && size < (expectedBytes * 0.90).toLong()) {
             Timber.w("File ${file.name}: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected — incomplete")
             return false
         }
@@ -207,7 +209,13 @@ class ModelDownloadManager @Inject constructor(
         dm.query(query)?.use { cursor ->
             val uriCol = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
             while (cursor.moveToNext()) {
-                if (uriCol >= 0) Uri.parse(cursor.getString(uriCol) ?: continue).path?.let { paths += it }
+                val uriStr = cursor.getString(uriCol) ?: continue
+                // Robust path extraction: strip "file://" and handle double slashes
+                val path = try {
+                    val uri = Uri.parse(uriStr)
+                    uri.path?.removePrefix("/file:")?.removePrefix("file:")
+                } catch (e: Exception) { null }
+                if (path != null) paths += path
             }
         }
         return paths

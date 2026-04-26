@@ -50,7 +50,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3n",
-            contextLength = 4096,
+            contextLength = 1024,  // GPU KV-cache limit: 3n E2B INT4 + 4096 ctx = GPU OOM on mobile
             tags          = listOf("Recommended", "LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Fast"),
         ),
 
@@ -65,7 +65,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3n",
-            contextLength = 4096,
+            contextLength = 1024,  // GPU KV-cache limit: 3n E4B INT4 + 4096 ctx = GPU OOM on mobile
             tags          = listOf("LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Best Quality"),
         ),
 
@@ -76,11 +76,11 @@ class ModelCatalog @Inject constructor() {
             displayName   = "Gemma 3 1B IT · LiteRT INT4  ⚡",
             description   = "Google Gemma 3 1B — smallest Gemma, GPU-accelerated. ~750 MB download. Works on any Android phone with ≥2 GB RAM. Great for budget devices.",
             downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task",
-            fileSizeBytes = 786_432_000L,
+            fileSizeBytes = 794_372_096L, // 757.5 MiB. Previous 786MB was an estimate.
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3",
-            contextLength = 4096,
+            contextLength = 1280,  // ~750MB model can handle 1280 safely on mobile GPU
             tags          = listOf("LiteRT GPU", "Google", "Gemma 3", "Ultra-Compact", "Budget"),
         ),
 
@@ -158,13 +158,13 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3-1b-it-q4",
             displayName   = "Gemma 3 1B IT · GGUF Q4_K_M  (CPU fallback)",
-            description   = "Gemma 3 1B in GGUF format. ~650 MB. CPU-only fallback for entry-level phones. Use the LiteRT version above for better speed.",
+            description   = "Gemma 3 1B in GGUF format. ~770 MB. CPU-only fallback for entry-level phones. Use the LiteRT version above for better speed.",
             downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q4_K_M.gguf",
-            fileSizeBytes = 681_574_400L,
+            fileSizeBytes = 806_058_496L, // Exact size from curl
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3",
-            contextLength = 4096,
+            contextLength = 2048,  // Lower ctx for 1B GGUF to ensure stability
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3"),
         ),
 

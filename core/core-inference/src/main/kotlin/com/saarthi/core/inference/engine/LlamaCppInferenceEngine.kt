@@ -226,7 +226,11 @@ class LlamaCppInferenceEngine @Inject constructor(
 
         runCatching { wakeLock.acquire(10 * 60 * 1000L) } // max 10 min for large GGUF
 
-        DebugLogger.log("GENERATE", "Stream start (real-time)  handle=$handle  maxTokens=${cfg.maxTokens}  gpu=$usingGpu")
+        // CRITICAL: maxTokens must never exceed nCtx. If it does, llama.cpp tries to decode
+        // past the end of the KV-cache buffer → immediate SIGSEGV / native crash.
+        // Leave a 256-token safety margin for the prompt itself.
+        val safeMaxTokens = cfg.maxTokens.coerceAtMost(cfg.nCtx - 256).coerceAtLeast(128)
+        DebugLogger.log("GENERATE", "Stream start (real-time)  handle=$handle  maxTokens=$safeMaxTokens (nCtx=${cfg.nCtx})  gpu=$usingGpu")
 
         // Capture ProducerScope so the anonymous object can reference isActive/trySend.
         // Inside an object expression the outer 'this' (ProducerScope) is shadowed.
@@ -243,7 +247,7 @@ class LlamaCppInferenceEngine @Inject constructor(
                 LlamaCppBridge.nativeGenerateStream(
                     contextHandle = handle,
                     prompt        = prompt,
-                    maxTokens     = cfg.maxTokens,
+                    maxTokens     = safeMaxTokens,
                     temperature   = cfg.temperature,
                     topK          = cfg.topK,
                     tokenCallback = callback,

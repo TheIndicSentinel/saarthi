@@ -371,10 +371,11 @@ class OnboardingViewModel @Inject constructor(
             }
         }
 
+        val contextLength = catalogEntry?.contextLength ?: 2048
         val config = InferenceConfig(
             modelPath   = path,
-            maxTokens   = catalogEntry?.contextLength?.coerceAtMost(4096) ?: 2048,
-            nCtx        = catalogEntry?.contextLength ?: 2048,
+            maxTokens   = contextLength.coerceAtMost(4096),
+            nCtx        = contextLength,
             nThreads    = ((profile?.cpuCores ?: 4) / 2).coerceIn(2, 4),
             nGpuLayers  = catalogEntry?.nGpuLayers ?: 0,
         )
