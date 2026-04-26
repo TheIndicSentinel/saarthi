@@ -78,7 +78,7 @@ class MainViewModel @Inject constructor(
             val config = InferenceConfig(
                 modelPath  = modelPath,
                 nCtx       = catalogEntry?.contextLength ?: 2048,
-                nThreads   = (Runtime.getRuntime().availableProcessors() / 2).coerceAtMost(4).coerceAtLeast(2),
+                nThreads   = (Runtime.getRuntime().availableProcessors() / 2).coerceAtMost(2).coerceAtLeast(1),
                 nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
 
