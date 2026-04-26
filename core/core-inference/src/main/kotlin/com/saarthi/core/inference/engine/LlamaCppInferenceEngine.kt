@@ -171,6 +171,7 @@ class LlamaCppInferenceEngine @Inject constructor(
             var usedGpuLayers = requestedGpuLayers
 
             for (ctx in ctxList) {
+                handle = if (useRealPath) {
                     // Re-enabling mmap for real paths. This allows the OS to manage memory 
                     // pressure more efficiently than resident malloc allocations.
                     DebugLogger.log("INIT", "Using real-path init (mmap enabled): ${config.modelPath.substringAfterLast('/')}")

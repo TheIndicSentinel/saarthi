@@ -160,7 +160,7 @@ class LiteRTInferenceEngine @Inject constructor(
             val inference = llmInference
                 ?: throw IllegalStateException("LiteRT engine not initialised.")
             DebugLogger.log("LITERT", "Generate start  promptChars=${prompt.length}")
-            runCatching { wakeLock.acquire(5 * 60 * 1000L) }
+            // runCatching { wakeLock.acquire(5 * 60 * 1000L) }
             try {
                 inference.generateResponse(prompt)
             } catch (e: Exception) {
