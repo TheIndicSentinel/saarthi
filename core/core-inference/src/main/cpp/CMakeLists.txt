@@ -88,15 +88,6 @@ if(EXISTS "${LLAMA_DIR}/CMakeLists.txt")
     # NEON is safe — it has fixed 128-bit width on all ARMv8/ARMv9 cores.
     set(GGML_NEON             ON  CACHE BOOL "" FORCE)
 
-    # Hard-disable SVE/SVE2/SME instruction emission for all GGML/llama source files.
-    # This is belt-and-suspenders on top of the android_armv9 variant removal: even if
-    # a code path in the non-variant GGML kernel would auto-vectorize with SVE, the
-    # compiler is physically prevented from emitting those instructions.
-    # -mno-sve / -mno-sve2 are honoured by NDK clang 17+ (NDK 26+).
-    if(ANDROID AND CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-        add_compile_options(-mno-sve -mno-sve2)
-        message(STATUS "SVE/SVE2 compile-time disabled via -mno-sve -mno-sve2")
-    endif()
 
     # SVE2 (Scalable Vector Extension 2) is DISABLED on Android.
     # Snapdragon 8 Gen 2 has heterogeneous SVE2 core widths:
