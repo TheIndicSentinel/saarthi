@@ -42,10 +42,10 @@ class ModelCatalog @Inject constructor() {
         // ── Gemma 3n E2B IT · LiteRT (mobile-first MatFormer, recommended LOW/MID) ─
 
         ModelEntry(
-            id            = "gemma3n-e2b-it-litert-int8",
-            displayName   = "Gemma 3n E2B IT · LiteRT INT8  ⚡ Recommended",
+            id            = "gemma3n-e2b-it-litert-int4",
+            displayName   = "Gemma 3n E2B IT · LiteRT INT4  ⚡ Recommended",
             description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated via LiteRT: 20–35 tok/s on Adreno 7xx/8xx. ~1.4 GB download. Best choice for mid-range and flagship phones.",
-            downloadUrl   = "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int8.task",
+            downloadUrl   = "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task",
             fileSizeBytes = 1_468_006_400L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
@@ -57,10 +57,10 @@ class ModelCatalog @Inject constructor() {
         // ── Gemma 3n E4B IT · LiteRT (mobile-first MatFormer, recommended FLAGSHIP) ─
 
         ModelEntry(
-            id            = "gemma3n-e4b-it-litert-int8",
-            displayName   = "Gemma 3n E4B IT · LiteRT INT8  ⚡",
+            id            = "gemma3n-e4b-it-litert-int4",
+            displayName   = "Gemma 3n E4B IT · LiteRT INT4  ⚡",
             description   = "Google Gemma 3n E4B — mobile-first MatFormer, same quality as 4B at lower cost. GPU-accelerated: 15–25 tok/s. ~2.6 GB download. Best quality on flagship phones.",
-            downloadUrl   = "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int8.task",
+            downloadUrl   = "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task",
             fileSizeBytes = 2_684_354_560L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
@@ -75,7 +75,7 @@ class ModelCatalog @Inject constructor() {
             id            = "gemma3-1b-it-litert-int8",
             displayName   = "Gemma 3 1B IT · LiteRT INT8  ⚡",
             description   = "Google Gemma 3 1B — smallest Gemma, GPU-accelerated. ~750 MB download. Works on any Android phone with ≥2 GB RAM. Great for budget devices.",
-            downloadUrl   = "https://huggingface.co/google/gemma-3-1b-it-litert-preview/resolve/main/gemma3-1b-it-int8.task",
+            downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int8.task",
             fileSizeBytes = 786_432_000L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
@@ -90,8 +90,8 @@ class ModelCatalog @Inject constructor() {
             id            = "gemma2-2b-it-litert-int8",
             displayName   = "Gemma 2 2B IT · LiteRT INT8  ⚡",
             description   = "Google Gemma 2 2B — proven previous-gen model, GPU-accelerated. ~1.3 GB download. Reliable for mid-range phones with 4–6 GB RAM.",
-            downloadUrl   = "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/gemma2-2b-it-cpu-int8.litertlm",
-            fileSizeBytes = 1_363_148_800L,
+            downloadUrl   = "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/Gemma2-2B-IT_multi-prefill-seq_q8_ekv1280.task",
+            fileSizeBytes = 1_572_864_000L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma2",
@@ -193,6 +193,7 @@ class ModelCatalog @Inject constructor() {
             contextLength = 2048,
             tags          = listOf("GGUF", "CPU", "Google", "Gemma 2"),
         ),
+
     )
 
     // ── LoRA adapters ─────────────────────────────────────────────────────────
