@@ -41,6 +41,14 @@ class InferenceEngineSelector @Inject constructor(
         val path = config.modelPath
         when {
             isLiteRTModel(path) -> {
+                // /proc/self/fd/ paths come from URI-picked files. MediaPipe's native stat()
+                // cannot resolve them — reject early with a user-readable message.
+                if (isFdPath(path)) {
+                    throw IllegalArgumentException(
+                        "LiteRT models must be downloaded to the app's models folder.\n\n" +
+                        "Please use the catalog download button instead of the file browser."
+                    )
+                }
                 if (llamaCppEngine.isReady) {
                     Timber.d("Releasing llama.cpp before switching to LiteRT")
                     llamaCppEngine.release()
@@ -92,4 +100,7 @@ class InferenceEngineSelector @Inject constructor(
 
     private fun isGgufModel(path: String): Boolean =
         path.endsWith(".gguf", ignoreCase = true)
+
+    private fun isFdPath(path: String): Boolean =
+        path.startsWith("/proc/self/fd/")
 }

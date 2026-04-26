@@ -66,6 +66,15 @@ class LiteRTInferenceEngine @Inject constructor(
             setReady(false)
             closeInternal()
 
+            // LiteRT's native layer calls stat() on the path — /proc/self/fd/N is not a real
+            // filesystem path and will cause a native crash when MediaPipe tries to open it.
+            if (config.modelPath.startsWith("/proc/self/fd/")) {
+                throw IllegalArgumentException(
+                    "LiteRT models must be in the app's models folder with a real file path.\n\n" +
+                    "Please download the model using the catalog instead of picking it from the file browser."
+                )
+            }
+
             val file = File(config.modelPath)
             if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
 
@@ -105,8 +114,8 @@ class LiteRTInferenceEngine @Inject constructor(
         val producer = this
 
         try {
-            inference.generateResponseAsync(prompt) { partialResult: String, done: Boolean ->
-                if (partialResult.isNotEmpty()) {
+            inference.generateResponseAsync(prompt) { partialResult: String?, done: Boolean ->
+                if (!partialResult.isNullOrEmpty()) {
                     producer.trySend(partialResult)
                 }
                 if (done) {

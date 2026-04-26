@@ -106,8 +106,18 @@ class LlamaCppInferenceEngine @Inject constructor(
                 )
             }
 
-            if (fileSizeMb > 0 && (ramMb - fileSizeMb) < 1_000) {
-                DebugLogger.log("INIT", "WARNING: model ${fileSizeMb}MB but only ${ramMb}MB avail — expect slow inference.")
+            if (fileSizeMb > 0) {
+                val headroomMb = ramMb - fileSizeMb
+                when {
+                    headroomMb < 512 -> throw RuntimeException(
+                        "Not enough RAM to safely load this model.\n\n" +
+                        "Model: ${fileSizeMb}MB  Available: ${ramMb}MB  Headroom: ${headroomMb}MB\n\n" +
+                        "At least 512 MB headroom is required for the KV cache and UI. " +
+                        "Close background apps or choose a smaller model."
+                    )
+                    headroomMb < 1_000 ->
+                        DebugLogger.log("INIT", "RAM tight (${headroomMb}MB headroom) — nCtx will be reduced")
+                }
             }
 
             if (!nativeAvailable) {
