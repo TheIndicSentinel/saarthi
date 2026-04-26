@@ -112,7 +112,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3n",
-            contextLength = 4096,
+            contextLength = 1024,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3n"),
         ),
 
@@ -125,7 +125,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.FLAGSHIP,
             modelFamily   = "gemma3n",
-            contextLength = 4096,
+            contextLength = 1024,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3n"),
         ),
 
@@ -138,7 +138,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3",
-            contextLength = 4096,
+            contextLength = 1024,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3"),
         ),
 
@@ -151,7 +151,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.FLAGSHIP,
             modelFamily   = "gemma3",
-            contextLength = 4096,
+            contextLength = 1024,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3", "Max Quality"),
         ),
 

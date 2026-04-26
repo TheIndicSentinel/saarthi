@@ -70,7 +70,7 @@ class MainViewModel @Inject constructor(
                 modelPath  = modelPath,
                 maxTokens  = maxTokens,
                 nCtx       = catalogEntry?.contextLength ?: 2048,
-                nThreads   = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4),
+                nThreads   = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 2),
                 nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
 

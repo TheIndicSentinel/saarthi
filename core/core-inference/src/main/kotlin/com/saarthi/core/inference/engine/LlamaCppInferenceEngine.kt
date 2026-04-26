@@ -171,10 +171,9 @@ class LlamaCppInferenceEngine @Inject constructor(
             var usedGpuLayers = requestedGpuLayers
 
             for (ctx in ctxList) {
-                handle = if (useRealPath) {
-                    // Preferred: real path — use_mmap disabled in native to avoid
-                    // /proc/self/fd page-fault crashes on Samsung Android 16.
-                    DebugLogger.log("INIT", "Using real-path init (no mmap): ${config.modelPath.substringAfterLast('/')}")
+                    // Re-enabling mmap for real paths. This allows the OS to manage memory 
+                    // pressure more efficiently than resident malloc allocations.
+                    DebugLogger.log("INIT", "Using real-path init (mmap enabled): ${config.modelPath.substringAfterLast('/')}")
                     LlamaCppBridge.nativeInitFromPath(config.modelPath, ctx,
                         config.nThreads, requestedGpuLayers)
                 } else {
@@ -224,7 +223,7 @@ class LlamaCppInferenceEngine @Inject constructor(
         val usingGpu = cfg.nGpuLayers > 0
         if (usingGpu) markGpuGenerationStarted()
 
-        runCatching { wakeLock.acquire(10 * 60 * 1000L) } // max 10 min for large GGUF
+        // runCatching { wakeLock.acquire(10 * 60 * 1000L) } // Temporarily disabled for S23/S24 troubleshooting
 
         // CRITICAL: maxTokens must never exceed nCtx. If it does, llama.cpp tries to decode
         // past the end of the KV-cache buffer → immediate SIGSEGV / native crash.
@@ -262,7 +261,7 @@ class LlamaCppInferenceEngine @Inject constructor(
                 }
             } finally {
                 if (usingGpu) markGpuGenerationEnded()
-                runCatching { if (wakeLock.isHeld) wakeLock.release() }
+                // runCatching { if (wakeLock.isHeld) wakeLock.release() }
             }
             close()
         }
@@ -270,7 +269,7 @@ class LlamaCppInferenceEngine @Inject constructor(
         awaitClose {
             LlamaCppBridge.nativeCancelGeneration(handle)
             job.cancel()
-            runCatching { if (wakeLock.isHeld) wakeLock.release() }
+            // runCatching { if (wakeLock.isHeld) wakeLock.release() }
             DebugLogger.log("GENERATE", "Stream cancelled — native cancel signalled")
         }
     }
