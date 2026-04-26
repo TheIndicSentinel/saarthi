@@ -12,11 +12,12 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 struct LlamaContext {
-    llama_model*         model     = nullptr;
-    llama_context*       ctx       = nullptr;
-    const llama_vocab*   vocab     = nullptr;
-    llama_adapter_lora*  adapter   = nullptr;
-    std::atomic<bool>    cancelled { false };
+    llama_model*         model           = nullptr;
+    llama_context*       ctx             = nullptr;
+    const llama_vocab*   vocab           = nullptr;
+    llama_adapter_lora*  adapter         = nullptr;
+    std::atomic<bool>    cancelled       { false };
+    int                  generationCount = 0;  // cleared on release; gates KV cache clear
 };
 
 // g_last_error is written from llama.cpp's internal threads via llama_log_cb.
@@ -251,34 +252,37 @@ static std::string doGenerate(
     tokens.resize(nTokens);
     NLOG("GEN", "Tokenized  promptTokens=%d", nTokens);
 
-    // Reset KV cache for a clean inference
-    NLOG("GEN", "Clearing KV cache...");
-    llama_memory_clear(llama_get_memory(ctx), true);
-    NLOG("GEN", "KV cache cleared");
+    // Clear KV cache only for turn ≥ 2 (multi-turn conversation).
+    // A fresh context (generationCount == 0) already has an empty KV cache;
+    // calling llama_memory_clear on it caused a SIGSEGV inside the first
+    // llama_decode on Android 16 / Snapdragon 8 Gen 2.
+    if (lctx->generationCount > 0) {
+        NLOG("GEN", "Multi-turn: clearing KV cache (turn %d)", lctx->generationCount + 1);
+        llama_memory_clear(llama_get_memory(ctx), true);
+        NLOG("GEN", "KV cache cleared");
+    } else {
+        NLOG("GEN", "First turn: skipping KV cache clear (fresh context)");
+    }
+    lctx->generationCount++;
 
-    // Chunked prefill: feed the prompt in 32-token chunks.
-    // A single llama_decode() with the full prompt triggered a SIGSEGV in GGML's
-    // NEON kernel on Snapdragon 8 Gen 2 / Android 16 before the SVE2 patch.
-    // Chunked prefill is kept as a defence-in-depth measure and has no perf cost
-    // on mobile where KV-cache prefill is memory-bound, not compute-bound.
-    const int PREFILL_CHUNK = 32;
-    NLOG("GEN", "Starting chunked prefill  nTokens=%d  chunkSize=%d", nTokens, PREFILL_CHUNK);
-    for (int pos = 0; pos < nTokens; pos += PREFILL_CHUNK) {
-        if (lctx->cancelled.load(std::memory_order_acquire)) {
-            NLOG("GEN", "Cancelled during prefill at pos=%d", pos);
-            return "";
-        }
-        int chunk = std::min(PREFILL_CHUNK, nTokens - pos);
-        NLOG("GEN", "Prefill chunk pos=%d/%d  len=%d", pos, nTokens, chunk);
-        llama_batch chunk_batch = llama_batch_get_one(tokens.data() + pos, chunk);
-        int decode_ret = llama_decode(ctx, chunk_batch);
-        NLOG("GEN", "Prefill chunk pos=%d done  ret=%d", pos, decode_ret);
+    // Prefill: submit the entire prompt in one llama_decode call.
+    // llama.cpp internally splits it at n_ubatch (default 512) boundaries so
+    // the compute graph stays within its pre-allocated scratch buffers.
+    NLOG("GEN", "Prefilling %d tokens...", nTokens);
+    if (lctx->cancelled.load(std::memory_order_acquire)) {
+        NLOG("GEN", "Cancelled before prefill");
+        return "";
+    }
+    {
+        llama_batch prefill_batch = llama_batch_get_one(tokens.data(), nTokens);
+        int decode_ret = llama_decode(ctx, prefill_batch);
+        NLOG("GEN", "Prefill done  ret=%d", decode_ret);
         if (decode_ret != 0) {
-            NLOGE("GEN", "llama_decode FAILED on prefill chunk pos=%d/%d  ret=%d", pos, nTokens, decode_ret);
+            NLOGE("GEN", "llama_decode FAILED on prefill  ret=%d", decode_ret);
             return "";
         }
     }
-    NLOG("GEN", "Prefill done — decode loop starting");
+    NLOG("GEN", "Prefill complete — starting decode loop");
 
     // Sampler chain
     llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
