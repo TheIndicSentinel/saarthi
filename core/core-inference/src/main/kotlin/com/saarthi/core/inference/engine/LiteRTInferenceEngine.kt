@@ -19,7 +19,6 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
-import kotlin.random.Random
 
 /**
  * Inference engine backed by Google MediaPipe LLM Inference (LiteRT).
@@ -82,12 +81,12 @@ class LiteRTInferenceEngine @Inject constructor(
             DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=${config.maxTokens}")
 
             try {
+                // tasks-genai >= 0.10.17: setTopK/setTemperature/setRandomSeed were moved
+                // out of LlmInferenceOptions.Builder into a per-request SamplingParams API.
+                // The builder now only accepts setModelPath and setMaxTokens.
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(config.modelPath)
                     .setMaxTokens(config.maxTokens)
-                    .setTopK(config.topK)
-                    .setTemperature(config.temperature)
-                    .setRandomSeed(Random.nextInt())
                     .build()
 
                 llmInference    = LlmInference.createFromOptions(context, options)
