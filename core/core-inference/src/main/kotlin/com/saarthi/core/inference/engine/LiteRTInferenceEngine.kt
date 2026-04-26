@@ -1,6 +1,7 @@
 package com.saarthi.core.inference.engine
 
 import android.content.Context
+import android.os.PowerManager
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
@@ -47,6 +48,15 @@ class LiteRTInferenceEngine @Inject constructor(
 
     private val initMutex = Mutex()
 
+    // Prevents Android from killing the process during heavy GPU/CPU inference.
+    // LiteRT can take 8–30 seconds for first token on large models; without this
+    // the low-memory killer may terminate us mid-decode.
+    private val wakeLock: PowerManager.WakeLock by lazy {
+        (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "saarthi:litert_inference")
+            .also { it.setReferenceCounted(false) }
+    }
+
     private fun setReady(value: Boolean) {
         isReady = value
         _isReadyFlow.value = value
@@ -78,7 +88,10 @@ class LiteRTInferenceEngine @Inject constructor(
             if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
 
             val sizeMb = file.length() / 1_048_576
-            DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=${config.maxTokens}")
+            // Gemma models need at least 1280 tokens for the KV cache. Setting maxTokens
+            // lower than this causes a native buffer overflow in TfLitePrefillDecodeRunner.
+            val effectiveMaxTokens = config.maxTokens.coerceAtLeast(1280)
+            DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
             try {
                 // tasks-genai >= 0.10.17: setTopK/setTemperature/setRandomSeed were moved
@@ -86,7 +99,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 // The builder now only accepts setModelPath and setMaxTokens.
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(config.modelPath)
-                    .setMaxTokens(config.maxTokens)
+                    .setMaxTokens(effectiveMaxTokens)
                     .build()
 
                 llmInference    = LlmInference.createFromOptions(context, options)
@@ -109,6 +122,10 @@ class LiteRTInferenceEngine @Inject constructor(
 
         DebugLogger.log("LITERT", "Stream start  promptChars=${prompt.length}")
 
+        // Hold a WakeLock for the duration of the generation — without this, Android's
+        // low-memory killer terminates the process mid-decode with no Kotlin exception.
+        runCatching { wakeLock.acquire(5 * 60 * 1000L) } // max 5 min
+
         // Capture ProducerScope so the lambda (called from MediaPipe's thread) can send/close.
         val producer = this
 
@@ -119,10 +136,12 @@ class LiteRTInferenceEngine @Inject constructor(
                 }
                 if (done) {
                     DebugLogger.log("LITERT", "Stream complete")
+                    runCatching { if (wakeLock.isHeld) wakeLock.release() }
                     producer.close()
                 }
             }
         } catch (e: Exception) {
+            runCatching { if (wakeLock.isHeld) wakeLock.release() }
             if (e !is CancellationException) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
                 DebugLogger.log("LITERT", "Stream error: $msg")
@@ -131,9 +150,7 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         awaitClose {
-            // MediaPipe does not expose a public cancel API.
-            // The channel closes and the consumer stops; the ongoing generation
-            // will finish silently in the background on MediaPipe's thread.
+            runCatching { if (wakeLock.isHeld) wakeLock.release() }
             DebugLogger.log("LITERT", "Stream cancelled (consumer closed)")
         }
     }
@@ -143,12 +160,15 @@ class LiteRTInferenceEngine @Inject constructor(
             val inference = llmInference
                 ?: throw IllegalStateException("LiteRT engine not initialised.")
             DebugLogger.log("LITERT", "Generate start  promptChars=${prompt.length}")
+            runCatching { wakeLock.acquire(5 * 60 * 1000L) }
             try {
                 inference.generateResponse(prompt)
             } catch (e: Exception) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
                 Timber.e(e, "LiteRT generation failed")
                 throw RuntimeException(msg, e)
+            } finally {
+                runCatching { if (wakeLock.isHeld) wakeLock.release() }
             }
         }
 

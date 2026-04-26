@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
@@ -45,6 +46,14 @@ class LlamaCppInferenceEngine @Inject constructor(
 
     // Context sizes to try in order — smaller = less KV-cache RAM
     private val CTX_LADDER = listOf(2048, 1024, 512, 256)
+
+    // Prevents Android from killing the process during heavy CPU prefill.
+    // Without this, the OOM killer terminates mid-decode with no Kotlin exception.
+    private val wakeLock: PowerManager.WakeLock by lazy {
+        (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "saarthi:llamacpp_inference")
+            .also { it.setReferenceCounted(false) }
+    }
 
     // ── Vulkan crash detection ───────────────────────────────────────────────
     // A commit()-persisted flag survives process kill. If it's set on startup,
@@ -215,6 +224,8 @@ class LlamaCppInferenceEngine @Inject constructor(
         val usingGpu = cfg.nGpuLayers > 0
         if (usingGpu) markGpuGenerationStarted()
 
+        runCatching { wakeLock.acquire(10 * 60 * 1000L) } // max 10 min for large GGUF
+
         DebugLogger.log("GENERATE", "Stream start (real-time)  handle=$handle  maxTokens=${cfg.maxTokens}  gpu=$usingGpu")
 
         // Capture ProducerScope so the anonymous object can reference isActive/trySend.
@@ -247,14 +258,15 @@ class LlamaCppInferenceEngine @Inject constructor(
                 }
             } finally {
                 if (usingGpu) markGpuGenerationEnded()
+                runCatching { if (wakeLock.isHeld) wakeLock.release() }
             }
             close()
         }
 
         awaitClose {
-            // Tell native layer to exit the decode loop at the next token boundary
             LlamaCppBridge.nativeCancelGeneration(handle)
             job.cancel()
+            runCatching { if (wakeLock.isHeld) wakeLock.release() }
             DebugLogger.log("GENERATE", "Stream cancelled — native cancel signalled")
         }
     }

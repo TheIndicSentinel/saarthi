@@ -373,9 +373,9 @@ class OnboardingViewModel @Inject constructor(
 
         val config = InferenceConfig(
             modelPath   = path,
-            maxTokens   = 1024,
+            maxTokens   = catalogEntry?.contextLength?.coerceAtMost(4096) ?: 2048,
             nCtx        = catalogEntry?.contextLength ?: 2048,
-            nThreads    = ((profile?.cpuCores ?: 4) / 2).coerceAtMost(2).coerceAtLeast(1),
+            nThreads    = ((profile?.cpuCores ?: 4) / 2).coerceIn(2, 4),
             nGpuLayers  = catalogEntry?.nGpuLayers ?: 0,
         )
 

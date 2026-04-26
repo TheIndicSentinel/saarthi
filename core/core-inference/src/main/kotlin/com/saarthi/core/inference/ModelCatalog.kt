@@ -72,10 +72,10 @@ class ModelCatalog @Inject constructor() {
         // ── Gemma 3 1B IT · LiteRT (ultra-compact, any phone) ─────────────────
 
         ModelEntry(
-            id            = "gemma3-1b-it-litert-int8",
-            displayName   = "Gemma 3 1B IT · LiteRT INT8  ⚡",
+            id            = "gemma3-1b-it-litert-int4",
+            displayName   = "Gemma 3 1B IT · LiteRT INT4  ⚡",
             description   = "Google Gemma 3 1B — smallest Gemma, GPU-accelerated. ~750 MB download. Works on any Android phone with ≥2 GB RAM. Great for budget devices.",
-            downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int8.task",
+            downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task",
             fileSizeBytes = 786_432_000L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
