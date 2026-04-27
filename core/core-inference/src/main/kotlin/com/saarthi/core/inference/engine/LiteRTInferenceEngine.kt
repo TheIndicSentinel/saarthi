@@ -21,8 +21,10 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.asCoroutineDispatcher
 import timber.log.Timber
 import java.io.File
+import java.util.concurrent.Executors
 import javax.inject.Inject
 
 /**
@@ -54,6 +56,11 @@ class LiteRTInferenceEngine @Inject constructor(
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
 
+    // Dedicated single-thread dispatcher for all MediaPipe calls.
+    // This ensures that native objects are never accessed concurrently and
+    // callbacks return to a stable, single thread context.
+    private val engineDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+
     // Crash detection: a synchronous SharedPrefs write survives process kill.
     // If 'litert_gen_pending' is true at startup, the previous generation never
     // completed cleanly → the C++ LlmInference state may be corrupted.
@@ -78,7 +85,7 @@ class LiteRTInferenceEngine @Inject constructor(
         _isReadyFlow.value = value
     }
 
-    override suspend fun initialize(config: InferenceConfig) = withContext(Dispatchers.IO) {
+    override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
         initMutex.withLock {
             // If we crashed mid-generation, the C++ state is corrupt — force full reinit.
             val crashedDuringGen = wasKilledDuringGeneration()
@@ -167,38 +174,41 @@ class LiteRTInferenceEngine @Inject constructor(
         // Capture ProducerScope so the lambda (called from MediaPipe's thread) can send/close.
         val producer = this
 
-        try {
-            generateMutex.withLock {
-                val completer = CompletableDeferred<Unit>()
-                var newTokenCount = 0
-                markGenerationStarted()
-                inference.generateResponseAsync(prompt) { partialResult: String?, done: Boolean ->
-                    if (!partialResult.isNullOrEmpty()) {
-                        producer.trySend(partialResult)
-                        newTokenCount++
-                        // Hard cutoff: stop after MAX_NEW_TOKENS to prevent Samsung watchdog kill
-                        if (newTokenCount >= MAX_NEW_TOKENS && !completer.isCompleted) {
-                            DebugLogger.log("LITERT", "Output cap reached ($MAX_NEW_TOKENS tokens) — closing stream")
+        // Move the block to the engineDispatcher to ensure serial execution
+        launch(engineDispatcher) {
+            try {
+                generateMutex.withLock {
+                    val completer = CompletableDeferred<Unit>()
+                    var newTokenCount = 0
+                    markGenerationStarted()
+                    inference.generateResponseAsync(prompt) { partialResult: String?, done: Boolean ->
+                        if (!partialResult.isNullOrEmpty()) {
+                            producer.trySend(partialResult)
+                            newTokenCount++
+                            // Hard cutoff: stop after MAX_NEW_TOKENS to prevent Samsung watchdog kill
+                            if (newTokenCount >= MAX_NEW_TOKENS && !completer.isCompleted) {
+                                DebugLogger.log("LITERT", "Output cap reached ($MAX_NEW_TOKENS tokens) — closing stream")
+                                completer.complete(Unit)
+                                producer.close()
+                            }
+                        }
+                        if (done && !completer.isCompleted) {
+                            DebugLogger.log("LITERT", "Stream complete")
                             completer.complete(Unit)
                             producer.close()
                         }
                     }
-                    if (done && !completer.isCompleted) {
-                        DebugLogger.log("LITERT", "Stream complete")
-                        completer.complete(Unit)
-                        producer.close()
-                    }
+                    // Wait for the async generation to actually FINISH before releasing mutex
+                    completer.await()
+                    markGenerationEnded()
                 }
-                // Wait for the async generation to actually FINISH before releasing mutex
-                completer.await()
+            } catch (e: Exception) {
                 markGenerationEnded()
-            }
-        } catch (e: Exception) {
-            markGenerationEnded()
-            if (e !is kotlinx.coroutines.CancellationException) {
-                val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
-                DebugLogger.log("LITERT", "Stream error: $msg")
-                close(RuntimeException(msg, e))
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
+                    DebugLogger.log("LITERT", "Stream error: $msg")
+                    close(RuntimeException(msg, e))
+                }
             }
         }
 
@@ -208,7 +218,7 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     override suspend fun generate(prompt: String, packType: PackType): String =
-        withContext(Dispatchers.IO) {
+        withContext(engineDispatcher) {
             val inference = llmInference
                 ?: throw IllegalStateException("LiteRT engine not initialised.")
             DebugLogger.log("LITERT", "Generate start  promptChars=${prompt.length}")
