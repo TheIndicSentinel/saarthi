@@ -124,7 +124,7 @@ class LiteRTInferenceEngine @Inject constructor(
 
         // Hold a WakeLock for the duration of the generation — without this, Android's
         // low-memory killer terminates the process mid-decode with no Kotlin exception.
-        // runCatching { wakeLock.acquire(5 * 60 * 1000L) } // Temporarily disabled for S23/S24 troubleshooting
+        runCatching { wakeLock.acquire(10 * 60 * 1000L) }
 
         // Capture ProducerScope so the lambda (called from MediaPipe's thread) can send/close.
         val producer = this
@@ -136,12 +136,12 @@ class LiteRTInferenceEngine @Inject constructor(
                 }
                 if (done) {
                     DebugLogger.log("LITERT", "Stream complete")
-                    // runCatching { if (wakeLock.isHeld) wakeLock.release() }
+                    runCatching { if (wakeLock.isHeld) wakeLock.release() }
                     producer.close()
                 }
             }
         } catch (e: Exception) {
-            // runCatching { if (wakeLock.isHeld) wakeLock.release() }
+            runCatching { if (wakeLock.isHeld) wakeLock.release() }
             if (e !is CancellationException) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
                 DebugLogger.log("LITERT", "Stream error: $msg")
@@ -150,7 +150,7 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         awaitClose {
-            // runCatching { if (wakeLock.isHeld) wakeLock.release() }
+            runCatching { if (wakeLock.isHeld) wakeLock.release() }
             DebugLogger.log("LITERT", "Stream cancelled (consumer closed)")
         }
     }

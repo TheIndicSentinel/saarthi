@@ -224,7 +224,7 @@ class LlamaCppInferenceEngine @Inject constructor(
         val usingGpu = cfg.nGpuLayers > 0
         if (usingGpu) markGpuGenerationStarted()
 
-        // runCatching { wakeLock.acquire(10 * 60 * 1000L) } // Temporarily disabled for S23/S24 troubleshooting
+        runCatching { wakeLock.acquire(10 * 60 * 1000L) }
 
         // CRITICAL: maxTokens must never exceed nCtx. If it does, llama.cpp tries to decode
         // past the end of the KV-cache buffer → immediate SIGSEGV / native crash.
@@ -262,7 +262,7 @@ class LlamaCppInferenceEngine @Inject constructor(
                 }
             } finally {
                 if (usingGpu) markGpuGenerationEnded()
-                // runCatching { if (wakeLock.isHeld) wakeLock.release() }
+                runCatching { if (wakeLock.isHeld) wakeLock.release() }
             }
             close()
         }
@@ -270,7 +270,7 @@ class LlamaCppInferenceEngine @Inject constructor(
         awaitClose {
             LlamaCppBridge.nativeCancelGeneration(handle)
             job.cancel()
-            // runCatching { if (wakeLock.isHeld) wakeLock.release() }
+            runCatching { if (wakeLock.isHeld) wakeLock.release() }
             DebugLogger.log("GENERATE", "Stream cancelled — native cancel signalled")
         }
     }
