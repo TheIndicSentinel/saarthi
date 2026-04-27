@@ -46,7 +46,7 @@ class ModelCatalog @Inject constructor() {
             displayName   = "Gemma 3n E2B IT · LiteRT INT4  ⚡ Recommended",
             description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated via LiteRT: 20–35 tok/s on Adreno 7xx/8xx. ~1.4 GB download. Best choice for mid-range and flagship phones.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task",
-            fileSizeBytes = 1_468_006_400L,
+            fileSizeBytes = 3_136_226_711L, // Actual download size from device log
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3n",
@@ -76,7 +76,7 @@ class ModelCatalog @Inject constructor() {
             displayName   = "Gemma 3 1B IT · LiteRT INT4  ⚡",
             description   = "Google Gemma 3 1B — smallest Gemma, GPU-accelerated. ~750 MB download. Works on any Android phone with ≥2 GB RAM. Great for budget devices.",
             downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task",
-            fileSizeBytes = 794_372_096L, // 757.5 MiB. Previous 786MB was an estimate.
+            fileSizeBytes = 554_661_243L, // Actual download: 529MB, not 757MB as estimated
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3",
@@ -112,7 +112,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3n",
-            contextLength = 1024,
+            contextLength = 512,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3n"),
         ),
 
@@ -125,7 +125,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.FLAGSHIP,
             modelFamily   = "gemma3n",
-            contextLength = 1024,
+            contextLength = 512,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3n"),
         ),
 
@@ -138,7 +138,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3",
-            contextLength = 1024,
+            contextLength = 512,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3"),
         ),
 
@@ -151,7 +151,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.FLAGSHIP,
             modelFamily   = "gemma3",
-            contextLength = 1024,
+            contextLength = 512,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3", "Max Quality"),
         ),
 
@@ -164,7 +164,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3",
-            contextLength = 2048,  // Lower ctx for 1B GGUF to ensure stability
+            contextLength = 512,  // Lower ctx for 1B GGUF — reduces KV cache to prevent crash
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3"),
         ),
 
@@ -177,7 +177,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma2",
-            contextLength = 2048,
+            contextLength = 512,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 2"),
         ),
 
@@ -190,7 +190,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.FLAGSHIP,
             modelFamily   = "gemma2",
-            contextLength = 2048,
+            contextLength = 512,
             tags          = listOf("GGUF", "CPU", "Google", "Gemma 2"),
         ),
 

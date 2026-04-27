@@ -101,11 +101,13 @@ Java_com_saarthi_core_inference_engine_LlamaCppBridge_nativeGetLastError(
 
 // ─── Shared model+context init ────────────────────────────────────────────────
 
-// use_mmap=false: load model tensors via read() into RAM rather than mmap().
-// On Samsung OneUI / Android 16, mmap-backed pages from /proc/self/fd/ paths
-// can be blocked by SELinux during the page-fault handling that occurs when GGML
-// first accesses a tensor during llama_decode → SIGSEGV in the compute thread.
-// With use_mmap=false all tensor data is in a malloc'd buffer before decode runs.
+// use_mmap behaviour:
+//   • Real filesystem paths (e.g. /storage/emulated/0/...): use_mmap=TRUE.
+//     mmap lets the kernel manage pages efficiently; avoids a 768 MB+ malloc
+//     spike that triggers the Android LMK during llama_decode.
+//   • /proc/self/fd/ paths (content-URI fallback): use_mmap=FALSE.
+//     Samsung OneUI / Android 16 SELinux blocks mmap page faults on these
+//     synthetic fd paths → SIGSEGV during the first tensor access.
 static jlong initModel(const char* modelPath, jint nCtx, jint nThreads, jint nGpuLayers) {
     {
         std::lock_guard<std::mutex> lock(g_error_mutex);
@@ -121,11 +123,14 @@ static jlong initModel(const char* modelPath, jint nCtx, jint nThreads, jint nGp
     NLOG("INIT", "initModel  path=%s  nCtx=%d  nThreads=%d  nGpuLayers=%d",
          modelPath, nCtx, nThreads, nGpuLayers);
 
+    bool is_fd_path = (strncmp(modelPath, "/proc/self/fd/", 14) == 0);
+    bool enable_mmap = !is_fd_path;  // mmap safe for real paths, not for fd paths
+
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = nGpuLayers;
-    mparams.use_mmap     = false;   // load into RAM — avoids mmap page-fault crash
+    mparams.use_mmap     = enable_mmap;
 
-    NLOG("INIT", "Loading model (use_mmap=false)...");
+    NLOG("INIT", "Loading model (use_mmap=%s)...", enable_mmap ? "true" : "false");
     llama_model* model = llama_model_load_from_file(modelPath, mparams);
     if (!model) {
         NLOGE("INIT", "Failed to load model  path=%s", modelPath);
@@ -137,8 +142,11 @@ static jlong initModel(const char* modelPath, jint nCtx, jint nThreads, jint nGp
     cparams.n_ctx           = (uint32_t)nCtx;
     cparams.n_threads       = nThreads;
     cparams.n_threads_batch = nThreads;
+    // Smaller ubatch size to prevent compute-graph memory spikes
+    // that trigger SIGSEGV on ARMv9 devices during prefill.
+    cparams.n_ubatch        = 64;
 
-    NLOG("INIT", "Creating context  nCtx=%d...", nCtx);
+    NLOG("INIT", "Creating context  nCtx=%d  n_ubatch=64...", nCtx);
     llama_context* ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
         NLOGE("INIT", "Failed to create context  nCtx=%d  nThreads=%d", nCtx, nThreads);
@@ -292,22 +300,31 @@ static std::string doGenerate(
     }
     lctx->generationCount++;
 
-    // Prefill: submit the entire prompt in one llama_decode call.
-    // llama.cpp internally splits it at n_ubatch (default 512) boundaries so
-    // the compute graph stays within its pre-allocated scratch buffers.
-    NLOG("GEN", "Prefilling %d tokens...", nTokens);
-    if (lctx->cancelled.load(std::memory_order_acquire)) {
-        NLOG("GEN", "Cancelled before prefill");
-        return "";
-    }
-    {
-        llama_batch prefill_batch = llama_batch_get_one(tokens.data(), nTokens);
-        int decode_ret = llama_decode(ctx, prefill_batch);
-        NLOG("GEN", "Prefill done  ret=%d", decode_ret);
-        if (decode_ret != 0) {
-            NLOGE("GEN", "llama_decode FAILED on prefill  ret=%d", decode_ret);
+    // Prefill: process tokens in batches of 64.
+    // Submitting 300+ tokens at once can cause memory spikes in the GGML compute graph
+    // that trigger SIGSEGV or OOM kills on high-dpi mobile devices.
+    NLOG("GEN", "Prefilling %d tokens (batch_size=64)...", nTokens);
+    int tokens_processed = 0;
+    while (tokens_processed < nTokens) {
+        if (lctx->cancelled.load(std::memory_order_acquire)) {
+            NLOG("GEN", "Cancelled during prefill");
             return "";
         }
+
+        int batch_size = std::min(64, nTokens - tokens_processed);
+        llama_batch batch = llama_batch_get_one(tokens.data() + tokens_processed, batch_size);
+        
+        // We only want to save the KV cache for the tokens we submit.
+        // batch.logits[last] = true isn't strictly needed for prefill unless we want 
+        // to sample the last token, which we do after the loop.
+        
+        int decode_ret = llama_decode(ctx, batch);
+        if (decode_ret != 0) {
+            NLOGE("GEN", "llama_decode FAILED on prefill batch  ret=%d  at=%d", decode_ret, tokens_processed);
+            return "";
+        }
+        
+        tokens_processed += batch_size;
     }
     NLOG("GEN", "Prefill complete — starting decode loop");
 
