@@ -104,23 +104,23 @@ class LiteRTInferenceEngine @Inject constructor(
                 // Currently Android 16 (API 36) has unstable Vulkan/OpenCL on Samsung S series
                 val isSafeForGpu = Build.VERSION.SDK_INT < 36 && !isSamsung && totalRamGb >= 4.0
                 
-                val preferredDelegate = if (isSafeForGpu) {
-                    LlmInference.LlmInferenceOptions.Delegate.GPU
+                val preferredBackend = if (isSafeForGpu) {
+                    LlmInference.Backend.GPU
                 } else {
-                    LlmInference.LlmInferenceOptions.Delegate.CPU
+                    LlmInference.Backend.CPU
                 }
 
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(config.modelPath)
                     .setMaxTokens(effectiveMaxTokens)
-                    .setPreferredDelegate(preferredDelegate)
+                    .setPreferredBackend(preferredBackend)
                     .build()
 
                 llmInference    = LlmInference.createFromOptions(context, options)
                 loadedModelPath = config.modelPath
                 loadedMaxTokens = config.maxTokens
                 setReady(true)
-                DebugLogger.log("LITERT", "Model ready (Smart Delegate: ${preferredDelegate.name} | RAM: ${"%.1f".format(totalRamGb)}GB)")
+                DebugLogger.log("LITERT", "Model ready (Smart Backend: ${preferredBackend.name} | RAM: ${"%.1f".format(totalRamGb)}GB)")
             } catch (e: Exception) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                 DebugLogger.log("LITERT", "Load failed: $msg")
