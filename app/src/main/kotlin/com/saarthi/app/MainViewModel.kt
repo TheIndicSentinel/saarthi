@@ -69,8 +69,10 @@ class MainViewModel @Inject constructor(
             val config = InferenceConfig(
                 modelPath  = modelPath,
                 maxTokens  = maxTokens,
-                nCtx       = catalogEntry?.contextLength ?: 2048,
-                nThreads   = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 2),
+                nCtx       = (catalogEntry?.contextLength ?: 2048).coerceAtLeast(1024),
+                // Use physical core count - 2 (leave headroom for OS + UI). Min 2, max 6.
+                // On S23 Ultra (8 cores): 6 threads. Mid-range (4 cores): 2 threads.
+                nThreads   = (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 6),
                 nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
 

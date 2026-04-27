@@ -2,6 +2,7 @@ package com.saarthi.core.inference.engine
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.PowerManager
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
@@ -53,6 +54,25 @@ class LiteRTInferenceEngine @Inject constructor(
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
 
+    // Crash detection: a synchronous SharedPrefs write survives process kill.
+    // If 'litert_gen_pending' is true at startup, the previous generation never
+    // completed cleanly → the C++ LlmInference state may be corrupted.
+    private val enginePrefs: SharedPreferences
+        get() = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE)
+
+    private fun wasKilledDuringGeneration(): Boolean =
+        enginePrefs.getBoolean("litert_gen_pending", false)
+
+    private fun markGenerationStarted() =
+        enginePrefs.edit().putBoolean("litert_gen_pending", true).commit()
+
+    private fun markGenerationEnded() =
+        enginePrefs.edit().putBoolean("litert_gen_pending", false).apply()
+
+    // Hard cap on output tokens. At 2-3 tok/s on CPU, 300 tokens = ~2 minutes max.
+    // This prevents Samsung's sustained-CPU watchdog from killing the process.
+    private val MAX_NEW_TOKENS = 300
+
     private fun setReady(value: Boolean) {
         isReady = value
         _isReadyFlow.value = value
@@ -60,8 +80,16 @@ class LiteRTInferenceEngine @Inject constructor(
 
     override suspend fun initialize(config: InferenceConfig) = withContext(Dispatchers.IO) {
         initMutex.withLock {
-            // maxTokens is baked into LlmInferenceOptions — must recreate if it changes
-            if (isReady &&
+            // If we crashed mid-generation, the C++ state is corrupt — force full reinit.
+            val crashedDuringGen = wasKilledDuringGeneration()
+            if (crashedDuringGen) {
+                DebugLogger.log("LITERT", "Crash recovery: forcing engine reinit")
+                markGenerationEnded()
+                closeInternal()
+            }
+
+            if (!crashedDuringGen &&
+                isReady &&
                 loadedModelPath == config.modelPath &&
                 loadedMaxTokens == config.maxTokens) {
                 DebugLogger.log("LITERT", "Already loaded — skipping: ${config.modelPath.substringAfterLast('/')}")
@@ -142,11 +170,20 @@ class LiteRTInferenceEngine @Inject constructor(
         try {
             generateMutex.withLock {
                 val completer = CompletableDeferred<Unit>()
+                var newTokenCount = 0
+                markGenerationStarted()
                 inference.generateResponseAsync(prompt) { partialResult: String?, done: Boolean ->
                     if (!partialResult.isNullOrEmpty()) {
                         producer.trySend(partialResult)
+                        newTokenCount++
+                        // Hard cutoff: stop after MAX_NEW_TOKENS to prevent Samsung watchdog kill
+                        if (newTokenCount >= MAX_NEW_TOKENS && !completer.isCompleted) {
+                            DebugLogger.log("LITERT", "Output cap reached ($MAX_NEW_TOKENS tokens) — closing stream")
+                            completer.complete(Unit)
+                            producer.close()
+                        }
                     }
-                    if (done) {
+                    if (done && !completer.isCompleted) {
                         DebugLogger.log("LITERT", "Stream complete")
                         completer.complete(Unit)
                         producer.close()
@@ -154,8 +191,10 @@ class LiteRTInferenceEngine @Inject constructor(
                 }
                 // Wait for the async generation to actually FINISH before releasing mutex
                 completer.await()
+                markGenerationEnded()
             }
         } catch (e: Exception) {
+            markGenerationEnded()
             if (e !is kotlinx.coroutines.CancellationException) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
                 DebugLogger.log("LITERT", "Stream error: $msg")
