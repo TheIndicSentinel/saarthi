@@ -47,9 +47,10 @@ class InferenceService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Mandated on Android 14+ for specialUse services. Without this, the system
-            // may kill the service in 5–10 seconds.
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            // Include both specialUse (AI) and dataSync (Processing) for maximum resilience.
+            val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or 
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            startForeground(NOTIFICATION_ID, notification, types)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -67,6 +68,12 @@ class InferenceService : Service() {
     }
 
     override fun onDestroy() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         DebugLogger.log("SERVICE", "Foreground inference service stopped")
@@ -78,7 +85,7 @@ class InferenceService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "AI Inference",
-                NotificationManager.IMPORTANCE_LOW, // Low = no sound, collapse in shade
+                NotificationManager.IMPORTANCE_DEFAULT, // Standard importance
             ).apply {
                 description = "Keeps Saarthi alive while the AI model is thinking."
                 setShowBadge(false)

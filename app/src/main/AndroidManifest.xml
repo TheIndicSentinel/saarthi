@@ -82,7 +82,7 @@
         <service
             android:name="com.saarthi.core.inference.InferenceService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|dataSync">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="On-device AI model inference (LLM text generation)" />

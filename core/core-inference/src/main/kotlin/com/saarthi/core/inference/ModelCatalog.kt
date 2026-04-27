@@ -50,7 +50,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3n",
-            contextLength = 1024,  // GPU KV-cache limit: 3n E2B INT4 + 4096 ctx = GPU OOM on mobile
+            contextLength = 512,  // Reduced to 512 for maximum stability on mobile GPU
             tags          = listOf("Recommended", "LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Fast"),
         ),
 
@@ -65,7 +65,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3n",
-            contextLength = 1024,  // GPU KV-cache limit: 3n E4B INT4 + 4096 ctx = GPU OOM on mobile
+            contextLength = 512,
             tags          = listOf("LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Best Quality"),
         ),
 
@@ -80,7 +80,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3",
-            contextLength = 1280,  // ~750MB model can handle 1280 safely on mobile GPU
+            contextLength = 512,
             tags          = listOf("LiteRT GPU", "Google", "Gemma 3", "Ultra-Compact", "Budget"),
         ),
 
