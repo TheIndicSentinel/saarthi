@@ -36,8 +36,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
 
-private const val MAX_HISTORY_TURNS = 6
-private const val MAX_PROMPT_CHARS = 4_096  // ~1:1 to tokens — fits within a 2K–4K context window
+private const val MAX_HISTORY_TURNS = 4
+// Prompt budget: 1280 maxTokens - ~300 system prompt tokens - ~100 slack = ~880 tokens = ~1800 chars
+private const val MAX_PROMPT_CHARS = 1_800
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(

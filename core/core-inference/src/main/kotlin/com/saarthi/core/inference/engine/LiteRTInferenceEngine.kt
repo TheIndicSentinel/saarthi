@@ -89,9 +89,10 @@ class LiteRTInferenceEngine @Inject constructor(
             if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
 
             val sizeMb = file.length() / 1_048_576
-            // Gemma models need a KV cache. Lowering this to 512 reduces GPU memory
-            // usage by ~300MB compared to 1280, significantly increasing stability.
-            val effectiveMaxTokens = config.maxTokens.coerceAtLeast(512)
+            // Gemma LiteRT .task models have a fixed KV cache compiled in. 1280 is the
+            // minimum that all official Google Gemma mobile models are compiled against.
+            // DO NOT lower below 1280 — it causes silent native crashes on overflow.
+            val effectiveMaxTokens = config.maxTokens.coerceAtLeast(1280)
             DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
             try {

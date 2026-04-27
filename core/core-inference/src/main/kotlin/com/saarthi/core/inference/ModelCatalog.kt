@@ -50,7 +50,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3n",
-            contextLength = 512,  // Reduced to 512 for maximum stability on mobile GPU
+            contextLength = 1280,  // Gemma LiteRT KV cache minimum — DO NOT lower below this
             tags          = listOf("Recommended", "LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Fast"),
         ),
 
@@ -65,7 +65,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3n",
-            contextLength = 512,
+            contextLength = 1280,  // Gemma LiteRT minimum — DO NOT lower
             tags          = listOf("LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Best Quality"),
         ),
 
@@ -80,7 +80,7 @@ class ModelCatalog @Inject constructor() {
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3",
-            contextLength = 512,
+            contextLength = 1280,  // Gemma LiteRT minimum — DO NOT lower
             tags          = listOf("LiteRT GPU", "Google", "Gemma 3", "Ultra-Compact", "Budget"),
         ),
 
