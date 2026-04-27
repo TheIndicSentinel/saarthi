@@ -1,6 +1,7 @@
 package com.saarthi.core.inference.engine
 
 import android.app.ActivityManager
+import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
