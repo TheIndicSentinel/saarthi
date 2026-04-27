@@ -46,13 +46,20 @@ class InferenceService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Include both specialUse (AI) and dataSync (Processing) for maximum resilience.
-            val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or 
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            startForeground(NOTIFICATION_ID, notification, types)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Include both specialUse (AI) and dataSync (Processing) for maximum resilience.
+                val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                startForeground(NOTIFICATION_ID, notification, types)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // Android 14+ is extremely strict about when an FGS can start.
+            // If it fails, log it and proceed as a background service.
+            // The WakeLock below will still provide some protection.
+            DebugLogger.log("SERVICE", "Failed to start as Foreground: ${e.message}")
         }
 
         // Acquire a partial wake lock to keep the CPU running during decode

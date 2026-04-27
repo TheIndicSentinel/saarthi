@@ -28,6 +28,7 @@
          Without this, Android 14+/Samsung OneUI kills the process in 2-10s. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Android 11+ package visibility: needed for SpeechRecognizer.isRecognitionAvailable()
          to correctly detect installed speech recognition services. Without this the API

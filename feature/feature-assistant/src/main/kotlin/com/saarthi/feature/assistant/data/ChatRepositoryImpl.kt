@@ -137,15 +137,16 @@ class ChatRepositoryImpl @Inject constructor(
         _history.update { it + placeholder }
 
         // Build prompt and run inference fully on IO — avoids blocking the main thread
+        // Start foreground service IMMEDIATELY — prevents Android from killing process.
+        // Doing this outside the flow builder ensures it's called on the main/caller thread.
+        InferenceService.start(appContext)
+        
         return flow {
             val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
             DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
             val startTime = System.currentTimeMillis()
             var tokenCount = 0
             val accumulated = StringBuilder()
-
-            // Start foreground service BEFORE inference — prevents Android from killing process
-            InferenceService.start(appContext)
 
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
