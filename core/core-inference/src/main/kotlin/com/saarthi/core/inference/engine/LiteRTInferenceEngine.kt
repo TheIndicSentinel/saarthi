@@ -1,6 +1,7 @@
 package com.saarthi.core.inference.engine
 
-import android.content.Context
+import android.app.ActivityManager
+import android.os.Build
 import android.os.PowerManager
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.saarthi.core.inference.DebugLogger
@@ -92,19 +93,33 @@ class LiteRTInferenceEngine @Inject constructor(
                 // tasks-genai >= 0.10.17: setTopK/setTemperature/setRandomSeed were moved
                 // out of LlmInferenceOptions.Builder into a per-request SamplingParams API.
                 // The builder now only accepts setModelPath and setMaxTokens.
+                // ── Smart Delegate Selection ──
+                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                val memInfo = ActivityManager.MemoryInfo()
+                am.getMemoryInfo(memInfo)
+                val totalRamGb = memInfo.totalMem / 1_073_741_824.0
+                val isSamsung = Build.MANUFACTURER.contains("samsung", ignoreCase = true)
+                
+                // Currently Android 16 (API 36) has unstable Vulkan/OpenCL on Samsung S series
+                val isSafeForGpu = Build.VERSION.SDK_INT < 36 && !isSamsung && totalRamGb >= 4.0
+                
+                val preferredDelegate = if (isSafeForGpu) {
+                    LlmInference.LlmInferenceOptions.Delegate.GPU
+                } else {
+                    LlmInference.LlmInferenceOptions.Delegate.CPU
+                }
+
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(config.modelPath)
                     .setMaxTokens(effectiveMaxTokens)
-                    // Force CPU on Android 16/Samsung to avoid fatal GPU driver crashes/watchdogs.
-                    // XNNPACK provides 10-20 tok/s on flagship ARM cores, which is stable and fast.
-                    .setPreferredDelegate(LlmInference.LlmInferenceOptions.Delegate.CPU)
+                    .setPreferredDelegate(preferredDelegate)
                     .build()
 
                 llmInference    = LlmInference.createFromOptions(context, options)
                 loadedModelPath = config.modelPath
                 loadedMaxTokens = config.maxTokens
                 setReady(true)
-                DebugLogger.log("LITERT", "Model ready (Forced CPU Delegate for stability)")
+                DebugLogger.log("LITERT", "Model ready (Smart Delegate: ${preferredDelegate.name} | RAM: ${"%.1f".format(totalRamGb)}GB)")
             } catch (e: Exception) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                 DebugLogger.log("LITERT", "Load failed: $msg")
