@@ -95,13 +95,16 @@ class LiteRTInferenceEngine @Inject constructor(
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(config.modelPath)
                     .setMaxTokens(effectiveMaxTokens)
+                    // Force CPU on Android 16/Samsung to avoid fatal GPU driver crashes/watchdogs.
+                    // XNNPACK provides 10-20 tok/s on flagship ARM cores, which is stable and fast.
+                    .setPreferredDelegate(LlmInference.LlmInferenceOptions.Delegate.CPU)
                     .build()
 
                 llmInference    = LlmInference.createFromOptions(context, options)
                 loadedModelPath = config.modelPath
                 loadedMaxTokens = config.maxTokens
                 setReady(true)
-                DebugLogger.log("LITERT", "Model ready (GPU/CPU auto-delegated)")
+                DebugLogger.log("LITERT", "Model ready (Forced CPU Delegate for stability)")
             } catch (e: Exception) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                 DebugLogger.log("LITERT", "Load failed: $msg")
