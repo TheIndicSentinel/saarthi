@@ -8,6 +8,7 @@ import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +38,7 @@ class LiteRTInferenceEngine @Inject constructor(
 ) : InferenceEngine {
 
     @Volatile private var llmInference: LlmInference? = null
+
     @Volatile private var loadedModelPath: String? = null
     @Volatile private var loadedMaxTokens: Int = 0
 
@@ -48,15 +50,6 @@ class LiteRTInferenceEngine @Inject constructor(
 
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
-
-    // Prevents Android from killing the process during heavy GPU/CPU inference.
-    // LiteRT can take 8–30 seconds for first token on large models; without this
-    // the low-memory killer may terminate us mid-decode.
-    private val wakeLock: PowerManager.WakeLock by lazy {
-        (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "saarthi:litert_inference")
-            .also { it.setReferenceCounted(false) }
-    }
 
     private fun setReady(value: Boolean) {
         isReady = value
@@ -124,29 +117,27 @@ class LiteRTInferenceEngine @Inject constructor(
 
         DebugLogger.log("LITERT", "Stream start  promptChars=${prompt.length}")
 
-        // Hold a WakeLock for the duration of the generation — without this, Android's
-        // low-memory killer terminates the process mid-decode with no Kotlin exception.
-        runCatching { wakeLock.acquire(10 * 60 * 1000L) }
-
         // Capture ProducerScope so the lambda (called from MediaPipe's thread) can send/close.
         val producer = this
 
         try {
             generateMutex.withLock {
+                val completer = CompletableDeferred<Unit>()
                 inference.generateResponseAsync(prompt) { partialResult: String?, done: Boolean ->
                     if (!partialResult.isNullOrEmpty()) {
                         producer.trySend(partialResult)
                     }
                     if (done) {
                         DebugLogger.log("LITERT", "Stream complete")
-                        runCatching { if (wakeLock.isHeld) wakeLock.release() }
+                        completer.complete(Unit)
                         producer.close()
                     }
                 }
+                // Wait for the async generation to actually FINISH before releasing mutex
+                completer.await()
             }
         } catch (e: Exception) {
-            runCatching { if (wakeLock.isHeld) wakeLock.release() }
-            if (e !is CancellationException) {
+            if (e !is kotlinx.coroutines.CancellationException) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
                 DebugLogger.log("LITERT", "Stream error: $msg")
                 close(RuntimeException(msg, e))
@@ -154,7 +145,6 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         awaitClose {
-            runCatching { if (wakeLock.isHeld) wakeLock.release() }
             DebugLogger.log("LITERT", "Stream cancelled (consumer closed)")
         }
     }
@@ -164,9 +154,10 @@ class LiteRTInferenceEngine @Inject constructor(
             val inference = llmInference
                 ?: throw IllegalStateException("LiteRT engine not initialised.")
             DebugLogger.log("LITERT", "Generate start  promptChars=${prompt.length}")
-            // runCatching { wakeLock.acquire(5 * 60 * 1000L) }
             try {
-                inference.generateResponse(prompt)
+                generateMutex.withLock {
+                    inference.generateResponse(prompt)
+                }
             } catch (e: Exception) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
                 Timber.e(e, "LiteRT generation failed")

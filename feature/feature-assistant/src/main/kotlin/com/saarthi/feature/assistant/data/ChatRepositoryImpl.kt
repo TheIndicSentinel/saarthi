@@ -18,6 +18,7 @@ import com.saarthi.feature.assistant.domain.ChatSession
 import com.saarthi.feature.assistant.domain.MessageRole
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +37,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
 
-private const val MAX_HISTORY_TURNS = 4
+private const val MAX_HISTORY_TURNS = 3
 // Prompt budget: 1280 maxTokens - ~300 system prompt tokens - ~100 slack = ~880 tokens = ~1800 chars
 private const val MAX_PROMPT_CHARS = 1_800
 
@@ -145,6 +146,10 @@ class ChatRepositoryImpl @Inject constructor(
         return flow {
             val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
             DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
+            
+            // Critical: Allow Foreground Service and OS priority manager to stabilize before GPU spike
+            delay(500)
+            
             val startTime = System.currentTimeMillis()
             var tokenCount = 0
             val accumulated = StringBuilder()
