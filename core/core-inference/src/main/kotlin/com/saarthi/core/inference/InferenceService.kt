@@ -90,12 +90,7 @@ class InferenceService : Service() {
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         
-        // Deterministic resource release: whenever the foreground processing
-        // task finishes, we release heavy native objects to stay 
-        // within system 'Safe Budgets'.
-        inferenceEngine.release()
-        
-        DebugLogger.log("SERVICE", "Foreground inference service stopped & resources released")
+        DebugLogger.log("SERVICE", "Foreground inference service stopped")
         super.onDestroy()
     }
 

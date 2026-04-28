@@ -182,16 +182,7 @@ fun AssistantScreen(
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHost) },
-            containerColor = SaarthiColors.DeepSpace,
-            contentWindowInsets = WindowInsets(0),
-        ) { innerPadding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .imePadding(),
-            ) {
+            topBar = {
                 ChatTopBar(
                     language = currentLanguage,
                     onBack = onBack,
@@ -202,7 +193,17 @@ fun AssistantScreen(
                     activeModelName = uiState.activeModelName,
                     onClearChat = viewModel::showClearDialog,
                 )
-
+            },
+            snackbarHost = { SnackbarHost(snackbarHost) },
+            containerColor = SaarthiColors.DeepSpace,
+            contentWindowInsets = WindowInsets(0),
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .imePadding(),
+            ) {
                 if (messages.isEmpty()) {
                     EmptyState(
                         language = currentLanguage,
@@ -427,12 +428,9 @@ private fun ChatTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(SaarthiColors.NavyDark, SaarthiColors.DeepSpace.copy(alpha = 0f))
-                )
-            )
-            .padding(horizontal = 4.dp, vertical = 6.dp),
+            .background(SaarthiColors.NavyDark)
+            .statusBarsPadding()
+            .padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
@@ -475,10 +473,18 @@ private fun ChatTopBar(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = SaarthiColors.Gold,
             )
+            val subColor = if (isStreaming) SaarthiColors.CyberTeal else SaarthiColors.TextMuted
+            val subText = when {
+                isStreaming -> language.thinkingText
+                modelReady -> activeModelName ?: "AI Assistant"
+                else -> language.chatOfflineSubtitle
+            }
             Text(
-                if (isStreaming) language.thinkingText else language.chatOfflineSubtitle,
+                subText,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (isStreaming) SaarthiColors.CyberTeal else SaarthiColors.TextMuted,
+                color = subColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 

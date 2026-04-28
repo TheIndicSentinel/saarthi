@@ -296,9 +296,10 @@ class LlamaCppInferenceEngine @Inject constructor(
     }
 
     override fun onTrimMemory(level: Int) {
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
-            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
-            DebugLogger.log("LLAMACPP", "System pressure (level=$level) — releasing engine memory")
+        // Only release on critical pressure. 
+        if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL || 
+            level == ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
+            DebugLogger.log("LLAMACPP", "CRITICAL system pressure (level=$level) — releasing engine memory")
             release()
         }
     }
