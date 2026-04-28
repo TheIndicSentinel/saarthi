@@ -51,6 +51,12 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile override var isReady: Boolean = false
         private set
 
+    private val _activeModelNameFlow = MutableStateFlow<String?>(null)
+    override val activeModelNameFlow: Flow<String?> = _activeModelNameFlow.asStateFlow()
+
+    @Volatile override var activeModelName: String? = null
+        private set
+
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
 
@@ -98,10 +104,15 @@ class LiteRTInferenceEngine @Inject constructor(
                 loadedModelPath == config.modelPath &&
                 loadedMaxTokens == config.maxTokens) {
                 DebugLogger.log("LITERT", "Already loaded — skipping: ${config.modelPath.substringAfterLast('/')}")
+                // Ensure model name is still correctly set if re-initialized with same path
+                activeModelName = config.modelName
+                _activeModelNameFlow.value = config.modelName
                 return@withLock
             }
 
             setReady(false)
+            activeModelName = null
+            _activeModelNameFlow.value = null
             closeInternal()
 
             // LiteRT's native layer calls stat() on the path — /proc/self/fd/N is not a real
@@ -134,8 +145,15 @@ class LiteRTInferenceEngine @Inject constructor(
                 val totalRamGb = memInfo.totalMem / 1_073_741_824.0
                 val isSamsung = Build.MANUFACTURER.contains("samsung", ignoreCase = true)
                 
-                // Currently Android 16 (API 36) has unstable Vulkan/OpenCL on Samsung S series
-                val isSafeForGpu = Build.VERSION.SDK_INT < 36 && !isSamsung && totalRamGb >= 4.0
+                // Android 16 (API 36) has stricter JNI/Vulkan rules.
+                // However, flagship devices (RAM > 8.5GB) have enough headroom to run LiteRT models
+                // on GPU stably if we use synchronous mode (which we now do).
+                val isSafeForGpu = when {
+                    totalRamGb >= 8.5 -> true // Flagships (S23/S24 Ultra) are usually safe
+                    Build.VERSION.SDK_INT >= 36 && isSamsung -> false // Budget/Mid-range Samsung + A16 is risky
+                    totalRamGb >= 4.0 -> true // Older stable devices
+                    else -> false
+                }
                 
                 val preferredBackend = if (isSafeForGpu) {
                     LlmInference.Backend.GPU
@@ -152,6 +170,8 @@ class LiteRTInferenceEngine @Inject constructor(
                 llmInference    = LlmInference.createFromOptions(context, options)
                 loadedModelPath = config.modelPath
                 loadedMaxTokens = config.maxTokens
+                activeModelName = config.modelName
+                _activeModelNameFlow.value = config.modelName
                 setReady(true)
                 DebugLogger.log("LITERT", "Model ready (Smart Backend: ${preferredBackend.name} | RAM: ${"%.1f".format(totalRamGb)}GB)")
             } catch (e: Exception) {
@@ -191,11 +211,17 @@ class LiteRTInferenceEngine @Inject constructor(
             return@flow
         }
 
-        DebugLogger.log("LITERT", "Generation complete  chars=${fullResponse.length}")
+        // Clean up the response (remove end of turn tokens)
+        val cleanedResponse = fullResponse
+            .replace("<end_of_turn>", "")
+            .replace("<eos>", "")
+            .trim()
+
+        DebugLogger.log("LITERT", "Generation complete  chars=${cleanedResponse.length}")
 
         // Simulate streaming by emitting word-by-word chunks.
         // This preserves the chat UI's typewriter effect.
-        val words = fullResponse.split(" ")
+        val words = cleanedResponse.split(" ")
         for (i in words.indices) {
             val chunk = if (i == 0) words[i] else " ${words[i]}"
             emit(chunk)
@@ -236,6 +262,8 @@ class LiteRTInferenceEngine @Inject constructor(
         llmInference    = null
         loadedModelPath = null
         loadedMaxTokens = 0
+        activeModelName = null
+        _activeModelNameFlow.value = null
         setReady(false)
     }
 }

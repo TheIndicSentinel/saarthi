@@ -32,6 +32,7 @@ fun ModelStatusChip(
     isStreaming: Boolean,
     tokensPerSecond: Float,
     modelReady: Boolean,
+    activeModelName: String?,
     modifier: Modifier = Modifier,
 ) {
     val dotColor by animateColorAsState(
@@ -69,7 +70,8 @@ fun ModelStatusChip(
                 !modelReady -> "Model not loaded"
                 isStreaming && tokensPerSecond > 0 -> "${"%.0f".format(tokensPerSecond)} tok/s"
                 isStreaming -> "Generating…"
-                else -> "Gemma 2B · Ready"
+                activeModelName != null -> "$activeModelName · Ready"
+                else -> "Gemma · Ready"
             },
             style = MaterialTheme.typography.labelMedium,
             color = SaarthiColors.TextMuted,

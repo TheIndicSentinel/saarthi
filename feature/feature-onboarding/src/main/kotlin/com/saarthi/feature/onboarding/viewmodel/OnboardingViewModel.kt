@@ -374,6 +374,7 @@ class OnboardingViewModel @Inject constructor(
         val contextLength = (catalogEntry?.contextLength ?: 2048).coerceAtLeast(1024)
         val config = InferenceConfig(
             modelPath   = path,
+            modelName   = catalogEntry?.displayName,
             maxTokens   = contextLength.coerceAtMost(4096),
             nCtx        = contextLength,
             // Use physical core count - 2 (leave headroom for OS + UI). Min 2, max 6.

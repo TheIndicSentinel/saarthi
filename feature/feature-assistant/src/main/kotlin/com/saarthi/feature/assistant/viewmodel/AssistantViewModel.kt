@@ -36,6 +36,7 @@ data class AssistantUiState(
     val isListening: Boolean = false,
     val tokensPerSecond: Float = 0f,
     val modelReady: Boolean = false,
+    val activeModelName: String? = null,
     val error: String? = null,
     val showAttachmentSheet: Boolean = false,
     val showClearDialog: Boolean = false,
@@ -78,6 +79,11 @@ class AssistantViewModel @Inject constructor(
         // Push-based isReady observation via StateFlow — no polling, no wakeup cost.
         inferenceEngine.isReadyFlow
             .onEach { ready -> _uiState.update { it.copy(modelReady = ready) } }
+            .launchIn(viewModelScope)
+
+        // Observe active model name changes
+        inferenceEngine.activeModelNameFlow
+            .onEach { name -> _uiState.update { it.copy(activeModelName = name) } }
             .launchIn(viewModelScope)
     }
 

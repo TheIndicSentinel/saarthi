@@ -68,6 +68,7 @@ class MainViewModel @Inject constructor(
             val maxTokens = catalogEntry?.contextLength ?: 1024
             val config = InferenceConfig(
                 modelPath  = modelPath,
+                modelName  = catalogEntry?.displayName,
                 maxTokens  = maxTokens,
                 nCtx       = (catalogEntry?.contextLength ?: 2048).coerceAtLeast(1024),
                 // Use physical core count - 2 (leave headroom for OS + UI). Min 2, max 6.

@@ -15,6 +15,13 @@ interface InferenceEngine {
     val isReadyFlow: Flow<Boolean>
         get() = kotlinx.coroutines.flow.flow { emit(isReady) }
 
+    /** The display name of the currently loaded model, or null if none. */
+    val activeModelName: String?
+
+    /** Hot flow that emits whenever the loaded model changes. */
+    val activeModelNameFlow: Flow<String?>
+        get() = kotlinx.coroutines.flow.flow { emit(activeModelName) }
+
     suspend fun initialize(config: InferenceConfig)
 
     /** Streams partial tokens as they are generated. */

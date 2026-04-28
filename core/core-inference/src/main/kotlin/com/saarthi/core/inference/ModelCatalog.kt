@@ -91,7 +91,7 @@ class ModelCatalog @Inject constructor() {
             displayName   = "Gemma 2 2B IT · LiteRT INT8  ⚡",
             description   = "Google Gemma 2 2B — proven previous-gen model, GPU-accelerated. ~1.3 GB download. Reliable for mid-range phones with 4–6 GB RAM.",
             downloadUrl   = "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/Gemma2-2B-IT_multi-prefill-seq_q8_ekv1280.task",
-            fileSizeBytes = 1_572_864_000L,
+            fileSizeBytes = 2_713_274_466L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma2",

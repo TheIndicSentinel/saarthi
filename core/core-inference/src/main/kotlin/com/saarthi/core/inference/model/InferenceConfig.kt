@@ -2,6 +2,7 @@ package com.saarthi.core.inference.model
 
 data class InferenceConfig(
     val modelPath: String,
+    val modelName: String? = null,
     val temperature: Float = 0.7f,
     val topK: Int = 40,
     val maxTokens: Int = 1024,

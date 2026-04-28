@@ -199,6 +199,7 @@ fun AssistantScreen(
                     isStreaming = uiState.isStreaming,
                     tokensPerSecond = uiState.tokensPerSecond,
                     modelReady = uiState.modelReady,
+                    activeModelName = uiState.activeModelName,
                     onClearChat = viewModel::showClearDialog,
                 )
 
@@ -418,6 +419,7 @@ private fun ChatTopBar(
     isStreaming: Boolean,
     tokensPerSecond: Float,
     modelReady: Boolean,
+    activeModelName: String?,
     onClearChat: () -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -484,6 +486,7 @@ private fun ChatTopBar(
             isStreaming = isStreaming,
             tokensPerSecond = tokensPerSecond,
             modelReady = modelReady,
+            activeModelName = activeModelName,
         )
 
         Box {

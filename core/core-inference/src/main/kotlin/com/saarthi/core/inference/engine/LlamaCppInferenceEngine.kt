@@ -40,6 +40,12 @@ class LlamaCppInferenceEngine @Inject constructor(
     @Volatile override var isReady: Boolean = false
         private set
 
+    private val _activeModelNameFlow = MutableStateFlow<String?>(null)
+    override val activeModelNameFlow: Flow<String?> = _activeModelNameFlow.asStateFlow()
+
+    @Volatile override var activeModelName: String? = null
+        private set
+
     private val initMutex = Mutex()
 
     private val nativeAvailable: Boolean by lazy { LlamaCppBridge.tryLoad() }
@@ -314,6 +320,7 @@ class LlamaCppInferenceEngine @Inject constructor(
     }
 
     override fun release() {
+        initMutex.tryLock() // avoid race during release
         val h = contextHandle
         if (h != -1L) {
             LlamaCppBridge.nativeRelease(h)
@@ -322,6 +329,9 @@ class LlamaCppInferenceEngine @Inject constructor(
         modelPfd?.close()
         modelPfd = null
         config = null
+        activeModelName = null
+        _activeModelNameFlow.value = null
         setReady(false)
+        initMutex.unlock()
     }
 }
