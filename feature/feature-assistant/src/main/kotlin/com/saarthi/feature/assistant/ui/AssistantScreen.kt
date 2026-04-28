@@ -35,10 +35,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -68,6 +68,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -229,9 +230,9 @@ fun AssistantScreen(
                         }
 
                         // Scroll-to-bottom FAB
-                        val showScrollFab = listState.firstVisibleItemIndex > 2
-                        AnimatedVisibility(
-                            visible = showScrollFab,
+                        val showScrollFab = remember { derivedStateOf { listState.firstVisibleItemIndex > 2 } }
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = showScrollFab.value,
                             enter = fadeIn(),
                             exit = fadeOut(),
                             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
@@ -245,7 +246,7 @@ fun AssistantScreen(
                                     .border(1.dp, SaarthiColors.Gold.copy(alpha = 0.4f), CircleShape)
                             ) {
                                 Icon(
-                                    androidx.compose.material.icons.filled.KeyboardArrowDown,
+                                    Icons.Default.ArrowDownward,
                                     null,
                                     tint = SaarthiColors.Gold
                                 )
