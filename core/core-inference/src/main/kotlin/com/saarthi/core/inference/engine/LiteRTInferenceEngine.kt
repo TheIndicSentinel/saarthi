@@ -38,6 +38,7 @@ import javax.inject.Inject
  */
 class LiteRTInferenceEngine @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val deviceProfiler: DeviceProfiler,
 ) : InferenceEngine {
 
     @Volatile private var llmInference: LlmInference? = null
@@ -138,24 +139,14 @@ class LiteRTInferenceEngine @Inject constructor(
                 // tasks-genai >= 0.10.17: setTopK/setTemperature/setRandomSeed were moved
                 // out of LlmInferenceOptions.Builder into a per-request SamplingParams API.
                 // The builder now only accepts setModelPath and setMaxTokens.
-                // ── Smart Delegate Selection ──
-                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                val memInfo = ActivityManager.MemoryInfo()
-                am.getMemoryInfo(memInfo)
-                val totalRamGb = memInfo.totalMem / 1_073_741_824.0
-                val isSamsung = Build.MANUFACTURER.contains("samsung", ignoreCase = true)
+                // ── Adaptive Hardware Profiling ──
+                val profile = deviceProfiler.profile()
+                val isSamsung = profile.manufacturer.contains("samsung", ignoreCase = true)
                 
-                // Android 16 (API 36) has stricter JNI/Vulkan rules.
-                // However, flagship devices (RAM > 8.5GB) have enough headroom to run LiteRT models
-                // on GPU stably if we use synchronous mode (which we now do).
-                val isSafeForGpu = when {
-                    totalRamGb >= 8.5 -> true // Flagships (S23/S24 Ultra) are usually safe
-                    Build.VERSION.SDK_INT >= 36 && isSamsung -> false // Budget/Mid-range Samsung + A16 is risky
-                    totalRamGb >= 4.0 -> true // Older stable devices
-                    else -> false
-                }
-                
-                val preferredBackend = if (isSafeForGpu) {
+                // Smart Backend Selection:
+                // 1. Only try GPU if the profiler says it's 'gpuSafe' (checks Vulkan + RAM).
+                // 2. Fall back to CPU if the model size exceeds the safe budget.
+                val preferredBackend = if (profile.gpuSafe && sizeMb <= profile.safeModelBudgetMb) {
                     LlmInference.Backend.GPU
                 } else {
                     LlmInference.Backend.CPU
@@ -173,7 +164,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 activeModelName = config.modelName
                 _activeModelNameFlow.value = config.modelName
                 setReady(true)
-                DebugLogger.log("LITERT", "Model ready (Smart Backend: ${preferredBackend.name} | RAM: ${"%.1f".format(totalRamGb)}GB)")
+                DebugLogger.log("LITERT", "Model ready ($profile | Backend: ${preferredBackend.name})")
             } catch (e: Exception) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                 DebugLogger.log("LITERT", "Load failed: $msg")

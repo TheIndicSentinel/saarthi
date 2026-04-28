@@ -33,6 +33,7 @@ class MainViewModel @Inject constructor(
     private val modelCatalog: ModelCatalog,
     private val packAdapterManager: PackAdapterManager,
     private val languageManager: LanguageManager,
+    private val deviceProfiler: DeviceProfiler,
 ) : ViewModel() {
 
     private val _startState = MutableStateFlow<AppStartState>(AppStartState.Loading)
@@ -66,14 +67,13 @@ class MainViewModel @Inject constructor(
                 modelPath.endsWith(it.fileName)
             }
             val maxTokens = catalogEntry?.contextLength ?: 1024
+            val profile = deviceProfiler.profile()
             val config = InferenceConfig(
                 modelPath  = modelPath,
                 modelName  = catalogEntry?.displayName,
                 maxTokens  = maxTokens,
                 nCtx       = (catalogEntry?.contextLength ?: 2048).coerceAtLeast(1024),
-                // Use physical core count - 2 (leave headroom for OS + UI). Min 2, max 6.
-                // On S23 Ultra (8 cores): 6 threads. Mid-range (4 cores): 2 threads.
-                nThreads   = (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 6),
+                nThreads   = profile.recommendedThreads,
                 nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
 

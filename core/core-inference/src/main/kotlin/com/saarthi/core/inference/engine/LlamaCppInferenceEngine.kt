@@ -28,6 +28,7 @@ import javax.inject.Inject
 
 class LlamaCppInferenceEngine @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val deviceProfiler: DeviceProfiler,
 ) : InferenceEngine {
 
     @Volatile private var contextHandle: Long = -1L
@@ -85,13 +86,6 @@ class LlamaCppInferenceEngine @Inject constructor(
             .commit()
     }
 
-    private fun availableRamMb(): Long {
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val mi = ActivityManager.MemoryInfo()
-        am.getMemoryInfo(mi)
-        return mi.availMem / 1_048_576
-    }
-
     private fun setReady(value: Boolean) {
         isReady = value
         _isReadyFlow.value = value
@@ -108,31 +102,17 @@ class LlamaCppInferenceEngine @Inject constructor(
                 release()
             }
 
-            val ramMb = availableRamMb()
-            val file = File(config.modelPath)
-            if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
+            // ── Adaptive Hardware Profiling ──
+            val profile = deviceProfiler.profile()
+            val fileSizeMb = File(config.modelPath).length() / 1_048_576
 
-            val fileSizeMb = file.length() / 1_048_576
-            DebugLogger.log("INIT", "initialize()  path=${config.modelPath} size=${fileSizeMb}MB  avail=${ramMb}MB")
-
-            if (ramMb < 400) {
-                throw RuntimeException(
-                    "Available RAM is critically low (${ramMb}MB).\n\nClose background apps and try again."
+            if (fileSizeMb > profile.safeModelBudgetMb) {
+                throw OutOfMemoryError(
+                    "This model (${fileSizeMb}MB) is too large for your device's current available memory.\n\n" +
+                    "Max safe size: ${profile.safeModelBudgetMb}MB\n" +
+                    "Available: ${profile.availableRamMb}MB\n\n" +
+                    "Try closing background apps or selecting a smaller model."
                 )
-            }
-
-            if (fileSizeMb > 0) {
-                val headroomMb = ramMb - fileSizeMb
-                when {
-                    headroomMb < 512 -> throw RuntimeException(
-                        "Not enough RAM to safely load this model.\n\n" +
-                        "Model: ${fileSizeMb}MB  Available: ${ramMb}MB  Headroom: ${headroomMb}MB\n\n" +
-                        "At least 512 MB headroom is required for the KV cache and UI. " +
-                        "Close background apps or choose a smaller model."
-                    )
-                    headroomMb < 1_000 ->
-                        DebugLogger.log("INIT", "RAM tight (${headroomMb}MB headroom) — nCtx will be reduced")
-                }
             }
 
             if (!nativeAvailable) {
@@ -182,10 +162,10 @@ class LlamaCppInferenceEngine @Inject constructor(
                     // pressure more efficiently than resident malloc allocations.
                     DebugLogger.log("INIT", "Using real-path init (mmap enabled): ${config.modelPath.substringAfterLast('/')}")
                     LlamaCppBridge.nativeInitFromPath(config.modelPath, ctx,
-                        config.nThreads, requestedGpuLayers)
+                        profile.recommendedThreads, requestedGpuLayers)
                 } else {
                     LlamaCppBridge.nativeInitFd(fd = fd, nCtx = ctx,
-                        nThreads = config.nThreads, nGpuLayers = requestedGpuLayers)
+                        nThreads = profile.recommendedThreads, nGpuLayers = requestedGpuLayers)
                 }
                 if (handle != -1L) { usedCtx = ctx; break }
             }
@@ -197,10 +177,10 @@ class LlamaCppInferenceEngine @Inject constructor(
                 for (ctx in ctxList) {
                     handle = if (useRealPath) {
                         LlamaCppBridge.nativeInitFromPath(config.modelPath, ctx,
-                            config.nThreads, 0)
+                            profile.recommendedThreads, 0)
                     } else {
                         LlamaCppBridge.nativeInitFd(fd = fd, nCtx = ctx,
-                            nThreads = config.nThreads, nGpuLayers = 0)
+                            nThreads = profile.recommendedThreads, nGpuLayers = 0)
                     }
                     if (handle != -1L) { usedCtx = ctx; break }
                 }

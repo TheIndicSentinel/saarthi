@@ -12,6 +12,22 @@ import javax.inject.Singleton
 @Singleton
 class ModelCatalog @Inject constructor() {
 
+    /**
+     * Snapshots the device's runtime state and returns only the models that are
+     * safe to run within the current memory budget.
+     */
+    fun recommendedFor(profile: DeviceProfile): List<ModelEntry> {
+        return allModels.filter { it.isSafeFor(profile) }
+    }
+
+    /**
+     * Models that exceed the safe budget but might still run if the user
+     * closes all background apps.
+     */
+    fun riskyFor(profile: DeviceProfile): List<ModelEntry> {
+        return allModels.filter { !it.isSafeFor(profile) && (it.fileSizeBytes / 1_048_576) < profile.availableRamMb }
+    }
+
     // ── Model catalog ─────────────────────────────────────────────────────────
     //
     // Primary backend: Google AI Edge LiteRT (.task bundles via MediaPipe Tasks GenAI).

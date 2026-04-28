@@ -25,4 +25,13 @@ data class ModelEntry(
 ) {
     val fileSizeMb: Int get() = (fileSizeBytes / 1_048_576).toInt()
     val fileName: String get() = downloadUrl.substringAfterLast('/')
+
+    /**
+     * Checks if this model is safe to load based on the current [DeviceProfile].
+     * Account for the model size plus a fixed 300MB overhead for the KV-cache and UI.
+     */
+    fun isSafeFor(profile: DeviceProfile): Boolean {
+        val requiredMb = fileSizeMb + 300
+        return requiredMb <= profile.safeModelBudgetMb
+    }
 }
