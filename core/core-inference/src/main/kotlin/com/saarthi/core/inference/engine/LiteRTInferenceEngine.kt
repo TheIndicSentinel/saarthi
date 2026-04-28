@@ -21,9 +21,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.asCoroutineDispatcher
 import timber.log.Timber
+import com.saarthi.core.inference.DeviceProfiler
 import java.io.File
 import java.util.concurrent.Executors
 import javax.inject.Inject
+import android.content.ComponentCallbacks2
+import android.content.res.Configuration
 
 /**
  * Inference engine backed by Google MediaPipe LLM Inference (LiteRT).
@@ -39,7 +42,11 @@ import javax.inject.Inject
 class LiteRTInferenceEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val deviceProfiler: DeviceProfiler,
-) : InferenceEngine {
+) : InferenceEngine, ComponentCallbacks2 {
+
+    init {
+        context.registerComponentCallbacks(this)
+    }
 
     @Volatile private var llmInference: LlmInference? = null
 
@@ -256,5 +263,19 @@ class LiteRTInferenceEngine @Inject constructor(
         activeModelName = null
         _activeModelNameFlow.value = null
         setReady(false)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
+            DebugLogger.log("LITERT", "System pressure (level=$level) — releasing engine memory")
+            release()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {}
+    override fun onLowMemory() {
+        DebugLogger.log("LITERT", "CRITICAL LOW MEMORY — emergency release")
+        release()
     }
 }

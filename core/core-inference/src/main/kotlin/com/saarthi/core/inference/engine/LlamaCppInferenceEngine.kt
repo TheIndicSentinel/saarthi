@@ -22,14 +22,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import com.saarthi.core.inference.DeviceProfiler
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
+import android.content.ComponentCallbacks2
+import android.content.res.Configuration
 
 class LlamaCppInferenceEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val deviceProfiler: DeviceProfiler,
-) : InferenceEngine {
+) : InferenceEngine, ComponentCallbacks2 {
+
+    init {
+        context.registerComponentCallbacks(this)
+    }
 
     @Volatile private var contextHandle: Long = -1L
     @Volatile private var config: InferenceConfig? = null
@@ -313,5 +320,19 @@ class LlamaCppInferenceEngine @Inject constructor(
         _activeModelNameFlow.value = null
         setReady(false)
         initMutex.unlock()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
+            DebugLogger.log("LLAMACPP", "System pressure (level=$level) — releasing engine memory")
+            release()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {}
+    override fun onLowMemory() {
+        DebugLogger.log("LLAMACPP", "CRITICAL LOW MEMORY — emergency release")
+        release()
     }
 }
