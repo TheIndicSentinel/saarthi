@@ -222,11 +222,19 @@ class LlamaCppInferenceEngine @Inject constructor(
 
         val job = launch(Dispatchers.IO) {
             try {
-                LlamaCppBridge.nativeGenerate(handle, prompt) { token ->
-                    if (isActive) {
-                        trySend(token)
+                LlamaCppBridge.nativeGenerateStream(
+                    handle, prompt, 
+                    inferenceConfig.maxTokens, 0.7f, 40,
+                    object : LlamaCppBridge.TokenCallback {
+                        override fun onToken(token: String): Boolean {
+                            if (isActive) {
+                                trySend(token)
+                                return true
+                            }
+                            return false
+                        }
                     }
-                }
+                )
                 DebugLogger.log("ENGINE", "Native generation finished")
             } catch (e: Exception) {
                 DebugLogger.log("ENGINE", "Native generation error: ${e.message}")
@@ -239,6 +247,7 @@ class LlamaCppInferenceEngine @Inject constructor(
 
         awaitClose {
             DebugLogger.log("ENGINE", "Closing stream flow")
+            LlamaCppBridge.nativeCancelGeneration(handle)
             job.cancel()
         }
     }
@@ -246,12 +255,12 @@ class LlamaCppInferenceEngine @Inject constructor(
     override suspend fun generate(prompt: String, packType: PackType): String = withContext(Dispatchers.IO) {
         val handle = contextHandle
         if (handle == -1L) throw IllegalStateException("LlamaCpp engine not initialised.")
+        val inferenceConfig = config ?: throw IllegalStateException("LlamaCpp engine not ready.")
         
-        val sb = StringBuilder()
-        LlamaCppBridge.nativeGenerate(handle, prompt) { token ->
-            sb.append(token)
-        }
-        sb.toString()
+        LlamaCppBridge.nativeGenerate(
+            handle, prompt, 
+            inferenceConfig.maxTokens, 0.7f, 40
+        )
     }
 
     override suspend fun loadLoraAdapter(adapterPath: String, scale: Float) =
