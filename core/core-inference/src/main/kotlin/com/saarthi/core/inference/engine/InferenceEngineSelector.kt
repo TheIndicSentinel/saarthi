@@ -37,6 +37,9 @@ class InferenceEngineSelector @Inject constructor(
     override val isReady: Boolean get() = activeEngine.isReady
     override val isReadyFlow: Flow<Boolean> get() = activeEngine.isReadyFlow
 
+    override val activeModelName: String? get() = activeEngine.activeModelName
+    override val activeModelNameFlow: Flow<String?> get() = activeEngine.activeModelNameFlow
+
     override suspend fun initialize(config: InferenceConfig) {
         val path = config.modelPath
         when {

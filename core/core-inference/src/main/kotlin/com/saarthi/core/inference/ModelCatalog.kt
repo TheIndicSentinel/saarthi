@@ -48,6 +48,7 @@ class ModelCatalog @Inject constructor() {
     //
     // LiteRT models require HuggingFace token + accepted Google licence on the model page.
     // The app's embedded HF token handles auth automatically.
+    //
 
     val allModels: List<ModelEntry> = listOf(
 
@@ -149,7 +150,7 @@ class ModelCatalog @Inject constructor() {
             id            = "gemma3-4b-it-q4",
             displayName   = "Gemma 3 4B IT · GGUF Q4_K_M  (CPU fallback)",
             description   = "Google Gemma 3 4B in GGUF format. ~2.4 GB. CPU-only on Android. Solid multilingual quality for mid-range phones if LiteRT is unavailable.",
-            downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf",
+            downloadUrl = "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf",
             fileSizeBytes = 2_489_348_096L,
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.MID,
@@ -176,11 +177,11 @@ class ModelCatalog @Inject constructor() {
             displayName   = "Gemma 3 1B IT · GGUF Q4_K_M  (CPU fallback)",
             description   = "Gemma 3 1B in GGUF format. ~770 MB. CPU-only fallback for entry-level phones. Use the LiteRT version above for better speed.",
             downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q4_K_M.gguf",
-            fileSizeBytes = 806_058_496L, // Exact size from curl
+            fileSizeBytes = 806_058_496L,
             engineType    = EngineType.LLAMA_CPP,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3",
-            contextLength = 512,  // Lower ctx for 1B GGUF — reduces KV cache to prevent crash
+            contextLength = 512,
             tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3"),
         ),
 
@@ -213,17 +214,15 @@ class ModelCatalog @Inject constructor() {
     )
 
     // ── LoRA adapters ─────────────────────────────────────────────────────────
-    // LoRA is supported only by llama.cpp. LiteRT adapters are no-ops at runtime.
 
     val loraEntries: List<LoraEntry> = listOf(
 
-        // ── Gemma 3 adapters ──────────────────────────────────────────────────
         LoraEntry(
             id          = "knowledge-gemma3",
             packType    = PackType.KNOWLEDGE,
             modelFamily = "gemma3",
             displayName = "Knowledge Pack · Gemma 3",
-            description = "NCERT + competitive exam knowledge layer for Indian students.",
+            description = "NCERT + competitive exam knowledge layer.",
             downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/knowledge_gemma3_q4.gguf",
             fileSizeBytes = 78_643_200L,
         ),
@@ -232,7 +231,7 @@ class ModelCatalog @Inject constructor() {
             packType    = PackType.MONEY,
             modelFamily = "gemma3",
             displayName = "Money Mentor · Gemma 3",
-            description = "Indian finance, banking and government scheme knowledge layer.",
+            description = "Indian finance knowledge layer.",
             downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/money_gemma3_q4.gguf",
             fileSizeBytes = 52_428_800L,
         ),
@@ -241,75 +240,13 @@ class ModelCatalog @Inject constructor() {
             packType    = PackType.KISAN,
             modelFamily = "gemma3",
             displayName = "Kisan Saarthi · Gemma 3",
-            description = "Indian agriculture, crop and mandi knowledge layer.",
+            description = "Indian agriculture knowledge layer.",
             downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/kisan_gemma3_q4.gguf",
-            fileSizeBytes = 52_428_800L,
-        ),
-
-        // ── Gemma 3n adapters ─────────────────────────────────────────────────
-        LoraEntry(
-            id          = "knowledge-gemma3n",
-            packType    = PackType.KNOWLEDGE,
-            modelFamily = "gemma3n",
-            displayName = "Knowledge Pack · Gemma 3n",
-            description = "NCERT + competitive exam knowledge layer for Indian students.",
-            downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/knowledge_gemma3n_q4.gguf",
-            fileSizeBytes = 78_643_200L,
-        ),
-        LoraEntry(
-            id          = "money-gemma3n",
-            packType    = PackType.MONEY,
-            modelFamily = "gemma3n",
-            displayName = "Money Mentor · Gemma 3n",
-            description = "Indian finance knowledge layer.",
-            downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/money_gemma3n_q4.gguf",
-            fileSizeBytes = 52_428_800L,
-        ),
-
-        // ── Gemma 2 adapters ──────────────────────────────────────────────────
-        LoraEntry(
-            id          = "knowledge-gemma2",
-            packType    = PackType.KNOWLEDGE,
-            modelFamily = "gemma2",
-            displayName = "Knowledge Pack · Gemma 2",
-            description = "NCERT + competitive exam knowledge layer.",
-            downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/knowledge_gemma2_q4.gguf",
-            fileSizeBytes = 78_643_200L,
-        ),
-        LoraEntry(
-            id          = "money-gemma2",
-            packType    = PackType.MONEY,
-            modelFamily = "gemma2",
-            displayName = "Money Mentor · Gemma 2",
-            description = "Indian finance knowledge layer.",
-            downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/money_gemma2_q4.gguf",
             fileSizeBytes = 52_428_800L,
         ),
     )
 
     // ── Lookup helpers ────────────────────────────────────────────────────────
-
-    /**
-     * Returns models ordered best-first for this device.
-     * LiteRT models are always shown before GGUF fallbacks.
-     * Filters by tier, available storage (90% limit), and minimum RAM headroom (1.5 GB).
-     */
-    fun recommendedFor(profile: DeviceProfile): List<ModelEntry> {
-        val storageLimitMb   = (profile.availableStorageMb * 0.90).toLong()
-        val minRemainingRamMb = 1_500L
-        return allModels.filter { model ->
-            val modelSizeMb = model.fileSizeBytes / 1_048_576
-            model.requiredTier.ordinal <= profile.tier.ordinal &&
-            modelSizeMb <= storageLimitMb &&
-            (profile.availableRamMb - modelSizeMb) >= minRemainingRamMb
-        }.sortedWith(
-            compareBy(
-                { if (it.engineType == EngineType.LLAMA_CPP) 1 else 0 },
-                { it.fileSizeBytes }
-            )
-        )
-    }
-
 
     fun findById(id: String): ModelEntry? = allModels.find { it.id == id }
 
