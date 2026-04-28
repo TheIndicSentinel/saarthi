@@ -113,26 +113,26 @@ fun MessageBubble(
                             Modifier.background(
                                 Brush.linearGradient(
                                     listOf(
-                                        SaarthiColors.Gold.copy(alpha = 0.30f),
-                                        SaarthiColors.Gold.copy(alpha = 0.18f),
+                                        SaarthiColors.Gold.copy(alpha = 0.22f),
+                                        SaarthiColors.Gold.copy(alpha = 0.08f),
                                     )
                                 )
                             ).border(
                                 1.dp,
-                                SaarthiColors.Gold.copy(alpha = 0.35f),
+                                SaarthiColors.Gold.copy(alpha = 0.25f),
                                 RoundedCornerShape(
-                                    topStart = 20.dp, topEnd = 20.dp,
-                                    bottomStart = 20.dp, bottomEnd = 4.dp,
+                                    topStart = 18.dp, topEnd = 18.dp,
+                                    bottomStart = 18.dp, bottomEnd = 2.dp,
                                 )
                             )
                         } else {
-                            Modifier.background(SaarthiColors.NavyLight)
+                            Modifier.background(SaarthiColors.NavyMid)
                                 .border(
                                     1.dp,
-                                    SaarthiColors.GlassBorder,
+                                    SaarthiColors.GlassBorder.copy(alpha = 0.5f),
                                     RoundedCornerShape(
-                                        topStart = 20.dp, topEnd = 20.dp,
-                                        bottomStart = 4.dp, bottomEnd = 20.dp,
+                                        topStart = 18.dp, topEnd = 18.dp,
+                                        bottomStart = 2.dp, bottomEnd = 18.dp,
                                     )
                                 )
                         }
@@ -214,10 +214,10 @@ private fun AssistantAvatar(label: String, modifier: Modifier = Modifier) {
             .clip(CircleShape)
             .background(
                 Brush.linearGradient(
-                    listOf(SaarthiColors.Gold.copy(0.25f), SaarthiColors.CyberTeal.copy(0.15f))
+                    listOf(SaarthiColors.Gold.copy(0.3f), SaarthiColors.CyberTeal.copy(0.2f))
                 )
             )
-            .border(1.dp, SaarthiColors.Gold.copy(0.4f), CircleShape),
+            .border(1.dp, SaarthiColors.Gold.copy(0.5f), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(

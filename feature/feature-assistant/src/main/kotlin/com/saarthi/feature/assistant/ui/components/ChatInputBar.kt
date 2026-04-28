@@ -98,7 +98,7 @@ fun ChatInputBar(
                     )
                 )
             )
-            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)
+            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp)
             .navigationBarsPadding(),
     ) {
         // Pending attachments

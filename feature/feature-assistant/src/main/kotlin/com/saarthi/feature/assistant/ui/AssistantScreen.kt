@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -191,7 +192,6 @@ fun AssistantScreen(
                     tokensPerSecond = uiState.tokensPerSecond,
                     modelReady = uiState.modelReady,
                     activeModelName = uiState.activeModelName,
-                    hasMessages = messages.isNotEmpty(),
                     onClearChat = viewModel::showClearDialog,
                 )
             },
@@ -211,20 +211,46 @@ fun AssistantScreen(
                         onSuggestionTap = { text -> viewModel.onInputChange(text) },
                     )
                 } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        items(messages, key = { it.id }) { msg ->
-                            MessageBubble(
-                                message = msg,
-                                onDelete = { viewModel.deleteMessage(msg.id) },
-                                avatarLabel = currentLanguage.firstLetter,
-                            )
+                    Box(modifier = Modifier.weight(1f)) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(messages, key = { it.id }) { msg ->
+                                MessageBubble(
+                                    message = msg,
+                                    onDelete = { viewModel.deleteMessage(msg.id) },
+                                    avatarLabel = currentLanguage.firstLetter,
+                                )
+                            }
+                            item { Spacer(Modifier.height(8.dp)) }
                         }
-                        item { Spacer(Modifier.height(8.dp)) }
+
+                        // Scroll-to-bottom FAB
+                        val showScrollFab = listState.firstVisibleItemIndex > 2
+                        AnimatedVisibility(
+                            visible = showScrollFab,
+                            enter = fadeIn(),
+                            exit = fadeOut(),
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+                        ) {
+                            IconButton(
+                                onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(SaarthiColors.NavyLight.copy(alpha = 0.9f))
+                                    .border(1.dp, SaarthiColors.Gold.copy(alpha = 0.4f), CircleShape)
+                            ) {
+                                Icon(
+                                    androidx.compose.material.icons.filled.KeyboardArrowDown,
+                                    null,
+                                    tint = SaarthiColors.Gold
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -421,7 +447,6 @@ private fun ChatTopBar(
     tokensPerSecond: Float,
     modelReady: Boolean,
     activeModelName: String?,
-    hasMessages: Boolean,
     onClearChat: () -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -429,8 +454,10 @@ private fun ChatTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SaarthiColors.NavyDark)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+            .background(SaarthiColors.NavyDark.copy(alpha = 0.95f))
+            .statusBarsPadding()
+            .height(56.dp)
+            .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
@@ -494,12 +521,6 @@ private fun ChatTopBar(
             modelReady = modelReady,
             activeModelName = activeModelName,
         )
-
-        if (hasMessages) {
-            IconButton(onClick = onClearChat) {
-                Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.TextSecondary)
-            }
-        }
 
         Box {
             IconButton(onClick = { showMenu = true }) {
