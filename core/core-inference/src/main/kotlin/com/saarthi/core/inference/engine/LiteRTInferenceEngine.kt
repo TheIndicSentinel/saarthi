@@ -11,18 +11,15 @@ import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.io.File
 import java.util.concurrent.Executors
@@ -77,9 +74,9 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun markGenerationEnded() =
         enginePrefs.edit().putBoolean("litert_gen_pending", false).apply()
 
-    // Hard cap on output tokens. At 2-3 tok/s on CPU, 300 tokens = ~2 minutes max.
-    // This prevents Samsung's sustained-CPU watchdog from killing the process.
-    private val MAX_NEW_TOKENS = 300
+    // Hard cap on output tokens. Prevents Samsung sustained-CPU watchdog from killing the process.
+    // 512 tokens at 0.4-3 tok/s = 2-21 minutes max per response — safe and useful.
+    private val MAX_NEW_TOKENS = 512
 
     private fun setReady(value: Boolean) {
         isReady = value
@@ -166,56 +163,45 @@ class LiteRTInferenceEngine @Inject constructor(
         }
     }
 
-    override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow {
+    override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
         val inference = llmInference
             ?: throw IllegalStateException("LiteRT engine not initialised.")
 
-        DebugLogger.log("LITERT", "Stream start  promptChars=${prompt.length}")
+        DebugLogger.log("LITERT", "Stream start (sync mode)  promptChars=${prompt.length}")
 
-        // Capture ProducerScope so the lambda (called from MediaPipe's thread) can send/close.
-        val producer = this
-
-        // Move the block to the engineDispatcher to ensure serial execution
-        launch(engineDispatcher) {
-            try {
-                generateMutex.withLock {
-                    val completer = CompletableDeferred<Unit>()
-                    var newTokenCount = 0
-                    markGenerationStarted()
-                    inference.generateResponseAsync(prompt) { partialResult: String?, done: Boolean ->
-                        if (!partialResult.isNullOrEmpty()) {
-                            producer.trySend(partialResult)
-                            newTokenCount++
-                            // Hard cutoff: stop after MAX_NEW_TOKENS to prevent Samsung watchdog kill
-                            if (newTokenCount >= MAX_NEW_TOKENS && !completer.isCompleted) {
-                                DebugLogger.log("LITERT", "Output cap reached ($MAX_NEW_TOKENS tokens) — closing stream")
-                                completer.complete(Unit)
-                                producer.close()
-                            }
-                        }
-                        if (done && !completer.isCompleted) {
-                            DebugLogger.log("LITERT", "Stream complete")
-                            completer.complete(Unit)
-                            producer.close()
-                        }
-                    }
-                    // Wait for the async generation to actually FINISH before releasing mutex
-                    completer.await()
+        val fullResponse = withContext(engineDispatcher) {
+            generateMutex.withLock {
+                markGenerationStarted()
+                try {
+                    // SYNC generation: single blocking call, no native async callbacks.
+                    // This eliminates the cross-thread JNI callback crash on Android 16/Samsung.
+                    inference.generateResponse(prompt)
+                } catch (e: Exception) {
                     markGenerationEnded()
-                }
-            } catch (e: Exception) {
-                markGenerationEnded()
-                if (e !is kotlinx.coroutines.CancellationException) {
-                    val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
-                    DebugLogger.log("LITERT", "Stream error: $msg")
-                    close(RuntimeException(msg, e))
+                    throw e
+                } finally {
+                    markGenerationEnded()
                 }
             }
         }
 
-        awaitClose {
-            DebugLogger.log("LITERT", "Stream cancelled (consumer closed)")
+        if (fullResponse.isNullOrBlank()) {
+            DebugLogger.log("LITERT", "Empty response from model")
+            emit("I couldn't generate a response. Please try again.")
+            return@flow
         }
+
+        DebugLogger.log("LITERT", "Generation complete  chars=${fullResponse.length}")
+
+        // Simulate streaming by emitting word-by-word chunks.
+        // This preserves the chat UI's typewriter effect.
+        val words = fullResponse.split(" ")
+        for (i in words.indices) {
+            val chunk = if (i == 0) words[i] else " ${words[i]}"
+            emit(chunk)
+        }
+
+        DebugLogger.log("LITERT", "Stream emission complete")
     }
 
     override suspend fun generate(prompt: String, packType: PackType): String =
