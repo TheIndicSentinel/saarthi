@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.PackAdapterManager
 import com.saarthi.core.inference.engine.InferenceEngine
