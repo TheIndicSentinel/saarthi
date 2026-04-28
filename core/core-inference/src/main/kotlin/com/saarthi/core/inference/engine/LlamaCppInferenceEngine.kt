@@ -158,9 +158,10 @@ class LlamaCppInferenceEngine @Inject constructor(
 
             for (ctx in ctxList) {
                 handle = if (useRealPath) {
-                    // Re-enabling mmap for real paths. This allows the OS to manage memory 
-                    // pressure more efficiently than resident malloc allocations.
-                    DebugLogger.log("INIT", "Using real-path init (mmap enabled): ${config.modelPath.substringAfterLast('/')}")
+                    // DISABLING mmap for Android 16 stability. 
+                    // While mmap is faster to load, it triggers hard SIGSEGVs on ARMv9 
+                    // when the OS page-faults GGML weights during compute-heavy prefill.
+                    DebugLogger.log("INIT", "Using real-path init (mmap DISABLED for stability): ${config.modelPath.substringAfterLast('/')}")
                     LlamaCppBridge.nativeInitFromPath(config.modelPath, ctx,
                         profile.recommendedThreads, requestedGpuLayers)
                 } else {

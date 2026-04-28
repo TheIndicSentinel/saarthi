@@ -261,6 +261,8 @@ class ModelDownloadManager @Inject constructor(
                 setDestinationUri(Uri.fromFile(destFile))
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(true)
+                // Explicitly allow all network types for background robustness
+                setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
 
                 // All HuggingFace repos in the catalog are gated (google/, litert-community/)
                 // or accept Bearer tokens gracefully (bartowski/).  Always attach the token

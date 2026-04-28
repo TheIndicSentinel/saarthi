@@ -69,5 +69,8 @@ object ResponseMarkerParser {
         .replace(MEMORY_REGEX, "")
         .replace(REMINDER_ABS_REGEX, "")
         .replace(REMINDER_REL_REGEX, "")
-        .trimEnd()
+        .replace("<end_of_turn>", "")
+        .replace("<eos>", "")
+        .replace("<start_of_turn>", "")
+        .trim()
 }

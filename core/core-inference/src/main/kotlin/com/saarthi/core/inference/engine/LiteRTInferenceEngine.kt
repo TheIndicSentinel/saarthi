@@ -223,6 +223,8 @@ class LiteRTInferenceEngine @Inject constructor(
         for (i in words.indices) {
             val chunk = if (i == 0) words[i] else " ${words[i]}"
             emit(chunk)
+            // 15ms delay per word: industry-standard smooth delivery feel
+            if (cleanedResponse.length > 50) kotlinx.coroutines.delay(15)
         }
 
         DebugLogger.log("LITERT", "Stream emission complete")

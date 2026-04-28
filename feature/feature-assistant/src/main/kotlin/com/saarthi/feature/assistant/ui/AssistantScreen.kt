@@ -191,12 +191,12 @@ fun AssistantScreen(
                     tokensPerSecond = uiState.tokensPerSecond,
                     modelReady = uiState.modelReady,
                     activeModelName = uiState.activeModelName,
+                    hasMessages = messages.isNotEmpty(),
                     onClearChat = viewModel::showClearDialog,
                 )
             },
             snackbarHost = { SnackbarHost(snackbarHost) },
             containerColor = SaarthiColors.DeepSpace,
-            contentWindowInsets = WindowInsets(0),
         ) { innerPadding ->
             Column(
                 modifier = Modifier
@@ -421,6 +421,7 @@ private fun ChatTopBar(
     tokensPerSecond: Float,
     modelReady: Boolean,
     activeModelName: String?,
+    hasMessages: Boolean,
     onClearChat: () -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -429,8 +430,7 @@ private fun ChatTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(SaarthiColors.NavyDark)
-            .statusBarsPadding()
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+            .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
@@ -494,6 +494,12 @@ private fun ChatTopBar(
             modelReady = modelReady,
             activeModelName = activeModelName,
         )
+
+        if (hasMessages) {
+            IconButton(onClick = onClearChat) {
+                Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.TextSecondary)
+            }
+        }
 
         Box {
             IconButton(onClick = { showMenu = true }) {
