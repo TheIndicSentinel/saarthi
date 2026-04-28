@@ -76,13 +76,17 @@ class DeviceProfiler @Inject constructor(
         val apiLevel = Build.VERSION.SDK_INT
         val isSamsung = manufacturer.contains("samsung", ignoreCase = true)
 
+        // ── Stability Gating (Industry Standard) ───────────────────────────
+        // Android 16 (API 36) is currently a 'Preview' or 'New' OS.
+        // Industry practice is to gate experimental native ML (Vulkan)
+        // on preview versions until vendor SDKs are stabilized.
+        val isExperimentalAllowed = apiLevel < 36 || !isSamsung
+
         // GPU is safe when:
         //   1. Vulkan is available
         //   2. There's enough free RAM for GPU shared-memory overhead (~500MB)
-        //   3. Platform is stable (avoid Samsung + Android 16 on low/mid-range)
-        val gpuSafe = hasVulkan && when {
-            // Budget/mid-range Samsung on Android 16: unstable Vulkan driver
-            isSamsung && apiLevel >= 36 && availRamMb < 6_000 -> false
+        //   3. Stability Gate passes
+        val gpuSafe = hasVulkan && isExperimentalAllowed && when {
             // Any device with < 3GB free: GPU overhead risks OOM
             availRamMb < 3_000 -> false
             // Everything else with Vulkan: safe to try

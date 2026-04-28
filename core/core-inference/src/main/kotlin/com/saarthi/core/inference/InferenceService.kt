@@ -11,6 +11,9 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import com.saarthi.core.inference.engine.InferenceEngine
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Foreground Service that keeps the process alive during heavy AI inference.
@@ -28,7 +31,10 @@ import android.os.PowerManager
  * This service does NOT host the inference engine itself — it only holds
  * the foreground wakelocks. The engine is a Hilt singleton injected elsewhere.
  */
+@AndroidEntryPoint
 class InferenceService : Service() {
+
+    @Inject lateinit var inferenceEngine: InferenceEngine
 
     private val binder = LocalBinder()
     private var wakeLock: PowerManager.WakeLock? = null
@@ -83,7 +89,13 @@ class InferenceService : Service() {
         }
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
-        DebugLogger.log("SERVICE", "Foreground inference service stopped")
+        
+        // Deterministic resource release: whenever the foreground processing
+        // task finishes, we release heavy native objects to stay 
+        // within system 'Safe Budgets'.
+        inferenceEngine.release()
+        
+        DebugLogger.log("SERVICE", "Foreground inference service stopped & resources released")
         super.onDestroy()
     }
 
