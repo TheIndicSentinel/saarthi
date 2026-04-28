@@ -350,7 +350,6 @@ class OnboardingViewModel @Inject constructor(
                 return
             }
 
-        val profile = _uiState.value.deviceProfile
         val catalogEntry = modelCatalog.allModels.find {
             downloadManager.localPathFor(it).absolutePath == path || it.fileName == path.substringAfterLast("/")
         }

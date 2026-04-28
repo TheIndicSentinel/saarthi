@@ -303,11 +303,13 @@ private fun ModelPickStep(
                 DeviceTier.FLAGSHIP -> "Flagship · ${deviceProfile.totalRamMb / 1024}GB RAM · ${if (deviceProfile.hasVulkan) "Vulkan GPU" else "CPU"}"
                 DeviceTier.MID      -> "Mid-range · ${deviceProfile.totalRamMb / 1024}GB RAM"
                 DeviceTier.LOW      -> "Entry-level · ${deviceProfile.totalRamMb / 1024}GB RAM"
+                DeviceTier.MINIMAL  -> "Ultra-low · ${deviceProfile.totalRamMb / 1024}GB RAM"
             }
             val tierColor = when (deviceProfile.tier) {
                 DeviceTier.FLAGSHIP -> SaarthiColors.Gold
                 DeviceTier.MID      -> SaarthiColors.CyberTeal
                 DeviceTier.LOW      -> SaarthiColors.TextSecondary
+                DeviceTier.MINIMAL  -> SaarthiColors.Warning
             }
             Row(
                 modifier = Modifier
