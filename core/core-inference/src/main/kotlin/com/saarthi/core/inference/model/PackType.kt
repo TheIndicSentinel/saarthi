@@ -48,7 +48,7 @@ FINAL CHECK BEFORE ANSWERING:
 - Am I guessing anything?
 If unsure → say "I'm not sure."
 
-If user shares personal info, add at end: [SAARTHI_MEMORY key="KEY" value="VALUE"]
+If user EXPLICITLY asks you to remember something (e.g. 'remember this', 'save this', 'don't forget'), add at end: [SAARTHI_MEMORY key="RELEVANT_KEY" value="VALUE"]
 If user asks for a reminder, add at end: [SAARTHI_REMINDER text="task" delay_minutes="N"]""",
     ),
 

@@ -325,6 +325,10 @@ class ChatRepositoryImpl @Inject constructor(
             appendLine()
             appendLine()
             append(memoryContext)
+            val memCount = memoryContext.lines().count { it.startsWith("- ") }
+            DebugLogger.log("MEMORY", "Injected $memCount user memory facts into prompt (global, cross-chat)")
+        } else {
+            DebugLogger.log("MEMORY", "No user memories stored yet")
         }
     }.trimEnd()
 
