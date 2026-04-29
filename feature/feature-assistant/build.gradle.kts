@@ -9,4 +9,5 @@ dependencies {
     implementation(project(":core:core-rag"))
     implementation(libs.coil.compose)
     implementation(libs.accompanist.permissions)
+    implementation(libs.mlkit.text.recognition)
 }

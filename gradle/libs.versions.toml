@@ -20,6 +20,7 @@ activity-compose = "1.9.1"
 core-ktx = "1.13.1"
 accompanist = "0.34.0"
 mediapipe-genai = "0.10.33"
+mlkit-text-recognition = "16.0.0"
 
 [libraries]
 # AndroidX Core
@@ -77,6 +78,9 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 
 # MediaPipe LLM Inference (LiteRT backend for Gemma)
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipe-genai" }
+
+# ML Kit (OCR)
+mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkit-text-recognition" }
 
 # Logging
 timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }

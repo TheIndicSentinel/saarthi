@@ -4,7 +4,11 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.saarthi.feature.assistant.domain.AttachedFile
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.tasks.await
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -36,6 +40,7 @@ class FileContentExtractor @Inject constructor(
         val extractedText = when {
             isText -> readTextContent(uri, MAX_RAG_FILE_CHARS)
             mime == "application/pdf" -> extractPdfText(uri)
+            isImage -> extractImageText(uri)
             else -> null
         }
 
@@ -141,6 +146,18 @@ class FileContentExtractor @Inject constructor(
                 "Text extraction from PDF is not yet supported. " +
                 "Copy-paste the relevant text into the chat for best results.]"
     }
+
+    private suspend fun extractImageText(uri: Uri): String? = runCatching {
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val image = InputImage.fromFilePath(context, uri)
+        val result = recognizer.process(image).await()
+        
+        if (result.text.isNotBlank()) {
+            "[Extracted from image]:\n${result.text.take(MAX_DIRECT_CHARS)}"
+        } else {
+            "[Image: No text detected in this image]"
+        }
+    }.onFailure { Timber.e(it, "OCR failed") }.getOrNull()
 
     private fun String.endsWithAny(vararg suffixes: String) =
         suffixes.any { this.lowercase().endsWith(it) }

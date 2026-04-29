@@ -332,24 +332,38 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }.trimEnd()
 
+    /**
+     * Intelligent Sliding Window: Handles context overflow when approaching compiled KV limits.
+     * 1. ALWAYS preserves the first turn (System Instructions + Global Memory).
+     * 2. Drops middle turns one by one until budget is met.
+     * 3. ALWAYS preserves the last 2 turns (Current query context).
+     */
     private fun trimPrompt(prompt: String): String {
-        val turns = prompt.split("<start_of_turn>").filter { it.isNotBlank() }
-        if (turns.size <= 3) return prompt // system + user + model — nothing to trim
+        val marker = "<start_of_turn>"
+        val turns = prompt.split(marker).filter { it.isNotBlank() }.map { marker + it }
+        if (turns.size <= 3) return prompt
 
-        // ALWAYS preserve the first turn (contains [SYSTEM_DIRECTIVE]) and the last 2 turns
-        // (current user message + model reply marker). Drop middle history turns.
         val systemTurn = turns.first()
-        val remainingTurns = turns.drop(1)
-        val kept = remainingTurns.takeLast(6) // last 3 pairs of user+model
+        val latestTurns = turns.takeLast(2)
+        val middleTurns = turns.drop(1).dropLast(2).toMutableList()
 
-        return buildString {
-            append("<start_of_turn>")
+        var currentPrompt = buildString {
             append(systemTurn)
-            kept.forEach { turn ->
-                append("<start_of_turn>")
-                append(turn)
+            middleTurns.forEach { append(it) }
+            latestTurns.forEach { append(it) }
+        }
+
+        // Proactively drop middle turns until we are under budget
+        while (currentPrompt.length > MAX_PROMPT_CHARS && middleTurns.isNotEmpty()) {
+            middleTurns.removeAt(0)
+            currentPrompt = buildString {
+                append(systemTurn)
+                middleTurns.forEach { append(it) }
+                latestTurns.forEach { append(it) }
             }
         }
+
+        return currentPrompt
     }
 
     // ── Mapping ───────────────────────────────────────────────────────────────
