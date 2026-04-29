@@ -41,6 +41,8 @@ data class AssistantUiState(
     val showAttachmentSheet: Boolean = false,
     val showClearDialog: Boolean = false,
     val showDrawer: Boolean = false,
+    val isSearchMode: Boolean = false,
+    val searchQuery: String = "",
 )
 
 @HiltViewModel
@@ -52,8 +54,19 @@ class AssistantViewModel @Inject constructor(
     private val languageManager: LanguageManager,
 ) : AndroidViewModel(application) {
 
-    val messages: StateFlow<List<ChatMessage>> = chatRepository.getHistory()
+    private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
+    val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
+
+    private val allMessages: StateFlow<List<ChatMessage>> = chatRepository.getHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val messages: StateFlow<List<ChatMessage>> = kotlinx.coroutines.flow.combine(
+        allMessages,
+        _uiState.map { it.searchQuery }.distinctUntilChanged()
+    ) { msgs, query ->
+        if (query.isBlank()) msgs
+        else msgs.filter { it.content.contains(query, ignoreCase = true) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val sessions: StateFlow<List<ChatSession>> = chatRepository.getSessions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -61,13 +74,8 @@ class AssistantViewModel @Inject constructor(
     val currentSessionId: StateFlow<String> = chatRepository.getCurrentSessionId()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "default")
 
-    // selectedLanguage is already a StateFlow — use its current value as the initial
-    // state so we never show HINDI for one frame when the user selected another language.
     val currentLanguage: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
         .stateIn(viewModelScope, SharingStarted.Eagerly, languageManager.selectedLanguage.value)
-
-    private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
-    val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
 
     private var speechRecognizer: SpeechRecognizer? = null
 
@@ -159,6 +167,12 @@ class AssistantViewModel @Inject constructor(
         speechRecognizer?.stopListening()
         _uiState.update { it.copy(isListening = false) }
     }
+
+    // ── Search ────────────────────────────────────────────────────────────────
+    fun toggleSearch() = _uiState.update { 
+        it.copy(isSearchMode = !it.isSearchMode, searchQuery = if (it.isSearchMode) "" else it.searchQuery)
+    }
+    fun onSearchQueryChange(query: String) = _uiState.update { it.copy(searchQuery = query) }
 
     // ── Conversation actions ──────────────────────────────────────────────────
     fun showClearDialog() = _uiState.update { it.copy(showClearDialog = true) }

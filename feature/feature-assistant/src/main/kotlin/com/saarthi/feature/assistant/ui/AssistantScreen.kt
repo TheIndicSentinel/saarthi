@@ -40,7 +40,11 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
@@ -194,6 +198,10 @@ fun AssistantScreen(
                     modelReady = uiState.modelReady,
                     activeModelName = uiState.activeModelName,
                     onClearChat = viewModel::showClearDialog,
+                    isSearchMode = uiState.isSearchMode,
+                    searchQuery = uiState.searchQuery,
+                    onSearchToggle = viewModel::toggleSearch,
+                    onSearchQueryChange = viewModel::onSearchQueryChange,
                 )
             },
             snackbarHost = { SnackbarHost(snackbarHost) },
@@ -439,6 +447,7 @@ private fun SessionItem(
 
 // ── Top Bar ──────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatTopBar(
     language: SupportedLanguage,
@@ -449,6 +458,10 @@ private fun ChatTopBar(
     modelReady: Boolean,
     activeModelName: String?,
     onClearChat: () -> Unit,
+    isSearchMode: Boolean,
+    searchQuery: String,
+    onSearchToggle: () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -461,81 +474,115 @@ private fun ChatTopBar(
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (onBack != null) {
-            IconButton(onClick = onBack) {
+        if (isSearchMode) {
+            IconButton(onClick = onSearchToggle) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = SaarthiColors.TextSecondary)
             }
-        } else {
-            IconButton(onClick = onOpenDrawer) {
-                Icon(Icons.Default.Menu, null, tint = SaarthiColors.TextSecondary)
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(SaarthiColors.Gold.copy(0.2f), SaarthiColors.CyberTeal.copy(0.1f))
-                    )
-                )
-                .border(1.dp, SaarthiColors.Gold.copy(0.4f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                language.avatarLabel,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
+            TextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Search...", color = SaarthiColors.TextMuted) },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    cursorColor = SaarthiColors.Gold,
+                    focusedTextColor = SaarthiColors.TextPrimary,
+                    unfocusedTextColor = SaarthiColors.TextPrimary,
                 ),
-                color = SaarthiColors.Gold,
+                singleLine = true,
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
+                            Icon(Icons.Default.Close, null, tint = SaarthiColors.TextMuted)
+                        }
+                    }
+                }
             )
-        }
-
-        Spacer(Modifier.width(10.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                language.appName,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = SaarthiColors.Gold,
-            )
-            val subColor = if (isStreaming) SaarthiColors.CyberTeal else SaarthiColors.TextMuted
-            val subText = when {
-                isStreaming -> language.thinkingText
-                modelReady -> activeModelName ?: "AI Assistant"
-                else -> language.chatOfflineSubtitle
+        } else {
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = SaarthiColors.TextSecondary)
+                }
+            } else {
+                IconButton(onClick = onOpenDrawer) {
+                    Icon(Icons.Default.Menu, null, tint = SaarthiColors.TextSecondary)
+                }
             }
-            Text(
-                subText,
-                style = MaterialTheme.typography.labelSmall,
-                color = subColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
 
-        ModelStatusChip(
-            isStreaming = isStreaming,
-            tokensPerSecond = tokensPerSecond,
-            modelReady = modelReady,
-            activeModelName = activeModelName,
-        )
-
-        Box {
-            IconButton(onClick = { showMenu = true }) {
-                Icon(Icons.Default.MoreVert, null, tint = SaarthiColors.TextSecondary)
-            }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false },
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(SaarthiColors.Gold.copy(0.2f), SaarthiColors.CyberTeal.copy(0.1f))
+                        )
+                    )
+                    .border(1.dp, SaarthiColors.Gold.copy(0.4f), CircleShape),
+                contentAlignment = Alignment.Center,
             ) {
-                DropdownMenuItem(
-                    text = { Text("Clear chat", color = SaarthiColors.Error) },
-                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.Error) },
-                    onClick = { onClearChat(); showMenu = false },
+                Text(
+                    language.avatarLabel,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                    ),
+                    color = SaarthiColors.Gold,
                 )
+            }
+
+            Spacer(Modifier.width(10.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    language.appName,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = SaarthiColors.Gold,
+                )
+                val subColor = if (isStreaming) SaarthiColors.CyberTeal else SaarthiColors.TextMuted
+                val subText = when {
+                    isStreaming -> language.thinkingText
+                    modelReady -> activeModelName ?: "AI Assistant"
+                    else -> language.chatOfflineSubtitle
+                }
+                Text(
+                    subText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = subColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            ModelStatusChip(
+                isStreaming = isStreaming,
+                tokensPerSecond = tokensPerSecond,
+                modelReady = modelReady,
+                activeModelName = activeModelName,
+            )
+
+            IconButton(onClick = onSearchToggle) {
+                Icon(Icons.Default.Search, null, tint = SaarthiColors.TextSecondary)
+            }
+
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(Icons.Default.MoreVert, null, tint = SaarthiColors.TextSecondary)
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Clear chat", color = SaarthiColors.Error) },
+                        leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.Error) },
+                        onClick = { onClearChat(); showMenu = false },
+                    )
+                }
             }
         }
     }

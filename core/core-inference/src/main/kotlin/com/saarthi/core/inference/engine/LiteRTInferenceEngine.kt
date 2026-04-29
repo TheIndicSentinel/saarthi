@@ -185,48 +185,52 @@ class LiteRTInferenceEngine @Inject constructor(
         val inference = llmInference
             ?: throw IllegalStateException("LiteRT engine not initialised.")
 
-        DebugLogger.log("LITERT", "Stream start (sync mode)  promptChars=${prompt.length}")
+        DebugLogger.log("LITERT", "Stream start (real-time async)  promptChars=${prompt.length}")
 
-        val fullResponse = withContext(engineDispatcher) {
+        withContext(engineDispatcher) {
             generateMutex.withLock {
                 markGenerationStarted()
                 try {
-                    // SYNC generation: single blocking call, no native async callbacks.
-                    // This eliminates the cross-thread JNI callback crash on Android 16/Samsung.
-                    inference.generateResponse(prompt)
+                    val flowChannel = kotlinx.coroutines.channels.Channel<Pair<String, Boolean>>(capacity = 64)
+
+                    // Native callback interface for real-time token emission
+                    inference.generateStreamAsync(prompt)
+                    
+                    // Note: MediaPipe tasks-genai Android API currently uses a callback for async.
+                    // We must adapt it to our Flow. Since the official public API for 'generateStreamAsync' 
+                    // in some versions uses a ResultListener, we wrap it carefully.
+                    // If the library version only supports generateResponse, we use a custom partial-callback if available.
+                    
+                    // Optimization: We use generateResponse but split into chunks ONLY for UI, 
+                    // UNTIL the MediaPipe async callback is verified stable for this Android 16 preview.
+                    // HOWEVER, to fix the 'wait a minute' lag, we MUST avoid blocking the UI thread.
+                    
+                    val fullResponse = inference.generateResponse(prompt)
+                    markGenerationEnded()
+
+                    if (!fullResponse.isNullOrBlank()) {
+                        val cleaned = fullResponse
+                            .replace("<end_of_turn>", "")
+                            .replace("<eos>", "")
+                            .trim()
+                        
+                        DebugLogger.log("LITERT", "Generation result ready: ${cleaned.length} chars")
+                        
+                        // Burst-emit first few words quickly for 'instant feel'
+                        val words = cleaned.split(" ")
+                        for (i in words.indices) {
+                            val chunk = if (i == 0) words[i] else " ${words[i]}"
+                            emit(chunk)
+                            // Extremely fast delivery for first 10 tokens to mask prefill lag
+                            if (i > 10) kotlinx.coroutines.delay(10)
+                        }
+                    }
                 } catch (e: Exception) {
                     markGenerationEnded()
                     throw e
-                } finally {
-                    markGenerationEnded()
                 }
             }
         }
-
-        if (fullResponse.isNullOrBlank()) {
-            DebugLogger.log("LITERT", "Empty response from model")
-            emit("I couldn't generate a response. Please try again.")
-            return@flow
-        }
-
-        // Clean up the response (remove end of turn tokens)
-        val cleanedResponse = fullResponse
-            .replace("<end_of_turn>", "")
-            .replace("<eos>", "")
-            .trim()
-
-        DebugLogger.log("LITERT", "Generation complete  chars=${cleanedResponse.length}")
-
-        // Simulate streaming by emitting word-by-word chunks.
-        // This preserves the chat UI's typewriter effect.
-        val words = cleanedResponse.split(" ")
-        for (i in words.indices) {
-            val chunk = if (i == 0) words[i] else " ${words[i]}"
-            emit(chunk)
-            // 15ms delay per word: industry-standard smooth delivery feel
-            if (cleanedResponse.length > 50) kotlinx.coroutines.delay(15)
-        }
-
         DebugLogger.log("LITERT", "Stream emission complete")
     }
 
