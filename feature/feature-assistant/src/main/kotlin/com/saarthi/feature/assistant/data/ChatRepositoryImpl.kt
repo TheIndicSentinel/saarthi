@@ -37,10 +37,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
 
-private const val MAX_HISTORY_TURNS = 4
+private const val MAX_HISTORY_TURNS = 6
 // Prompt budget: Gemma .task models have 1280 compiled KV cache tokens.
-// 1 token ≈ 3.5 chars → ~4480 chars. Reserve ~1000 for system prompt + slack.
-private const val MAX_PROMPT_CHARS = 3_500
+// 1 token ≈ 3.5 chars → ~4480 chars. System prompt is ~1200 chars now.
+private const val MAX_PROMPT_CHARS = 4_000
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
@@ -148,8 +148,8 @@ class ChatRepositoryImpl @Inject constructor(
             val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
             DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
             
-            // Critical: Allow Foreground Service and OS priority manager to stabilize before GPU spike
-            delay(500)
+            // Brief stabilization delay — lets Foreground Service register before GPU spike
+            delay(200)
             
             val startTime = System.currentTimeMillis()
             var tokenCount = 0
@@ -255,6 +255,8 @@ class ChatRepositoryImpl @Inject constructor(
         val memoryContext = runCatching { memoryRepository.buildContextSummary() }.getOrDefault("")
         val systemInstructions = buildSystemPrompt(memoryContext)
 
+        DebugLogger.log("PROMPT", "System prompt built  chars=${systemInstructions.length}  lang=${currentLanguage.code}  memory=${memoryContext.isNotEmpty()}")
+
         // Exclude the currently-streaming placeholder and any other streaming messages
         // using a content-based filter rather than positional dropLast, which is fragile
         // when messages are deleted or the order changes.
@@ -266,6 +268,8 @@ class ChatRepositoryImpl @Inject constructor(
         val fileContext = if (attachments.isNotEmpty())
             fileContentExtractor.buildRagContext(attachments, userMessage)
         else ""
+
+        DebugLogger.log("PROMPT", "History turns=${history.size}  attachments=${attachments.size}")
 
         return buildString {
             // Strong System Block — Prepending instructions to the very first turn is the most
@@ -295,12 +299,19 @@ class ChatRepositoryImpl @Inject constructor(
                 append("<start_of_turn>user\n")
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
-                append("\n\n(Respond in ${currentLanguage.nativeName} only. Be factual and accurate.)")
+                append("\n\nIMPORTANT: Follow all system rules strictly. Do not hallucinate. Answer only what is known and verified. Respond in ${currentLanguage.nativeName} only.")
                 append("<end_of_turn>\n")
                 append("<start_of_turn>model\n")
             }
         }.let { prompt ->
-            if (prompt.length > MAX_PROMPT_CHARS) trimPrompt(prompt) else prompt
+            val needsTrim = prompt.length > MAX_PROMPT_CHARS
+            val finalPrompt = if (needsTrim) trimPrompt(prompt) else prompt
+            val hasDirective = finalPrompt.contains("[SYSTEM_DIRECTIVE]")
+            DebugLogger.log("PROMPT", "Final prompt  chars=${finalPrompt.length}  trimmed=$needsTrim  systemDirectivePresent=$hasDirective")
+            if (!hasDirective) {
+                DebugLogger.log("PROMPT", "WARNING: System directive was lost during trimming!")
+            }
+            finalPrompt
         }
     }
 
@@ -325,7 +336,7 @@ class ChatRepositoryImpl @Inject constructor(
         // (current user message + model reply marker). Drop middle history turns.
         val systemTurn = turns.first()
         val remainingTurns = turns.drop(1)
-        val kept = remainingTurns.takeLast(4) // last 2 pairs of user+model
+        val kept = remainingTurns.takeLast(6) // last 3 pairs of user+model
 
         return buildString {
             append("<start_of_turn>")
