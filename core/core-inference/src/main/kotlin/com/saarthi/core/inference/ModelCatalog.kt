@@ -61,13 +61,13 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3n-e2b-it-litert-int4",
             displayName   = "Gemma 3n E2B IT · LiteRT INT4  ⚡ Recommended",
-            description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated via LiteRT: 20–35 tok/s on Adreno 7xx/8xx. ~1.4 GB download. Best choice for mid-range and flagship phones.",
+            description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated: 20–35 tok/s. ~1.4 GB download. Best choice for mid-range and flagship phones.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task",
-            fileSizeBytes = 3_136_226_711L, // Actual download size from device log
+            fileSizeBytes = 3_136_226_711L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3n",
-            contextLength = 1280,  // Gemma LiteRT KV cache minimum — DO NOT lower below this
+            contextLength = 1280,
             tags          = listOf("Recommended", "LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Fast"),
         ),
 
@@ -76,13 +76,13 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3n-e4b-it-litert-int4",
             displayName   = "Gemma 3n E4B IT · LiteRT INT4  ⚡",
-            description   = "Google Gemma 3n E4B — mobile-first MatFormer, same quality as 4B at lower cost. GPU-accelerated: 15–25 tok/s. ~2.6 GB download. Best quality on flagship phones.",
+            description   = "Google Gemma 3n E4B — mobile-first MatFormer. GPU-accelerated: 15–25 tok/s. ~2.6 GB download. Best quality on flagship phones.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task",
             fileSizeBytes = 2_684_354_560L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3n",
-            contextLength = 1280,  // Gemma LiteRT minimum — DO NOT lower
+            contextLength = 1280,
             tags          = listOf("LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Best Quality"),
         ),
 
@@ -91,13 +91,13 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3-1b-it-litert-int4",
             displayName   = "Gemma 3 1B IT · LiteRT INT4  ⚡",
-            description   = "Google Gemma 3 1B — smallest Gemma, GPU-accelerated. ~750 MB download. Works on any Android phone with ≥2 GB RAM. Great for budget devices.",
+            description   = "Google Gemma 3 1B — smallest Gemma, GPU-accelerated. ~750 MB download. Works on any phone with ≥2 GB RAM.",
             downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task",
-            fileSizeBytes = 554_661_243L, // Actual download: 529MB, not 757MB as estimated
+            fileSizeBytes = 554_661_243L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3",
-            contextLength = 1280,  // Gemma LiteRT minimum — DO NOT lower
+            contextLength = 1280,
             tags          = listOf("LiteRT GPU", "Google", "Gemma 3", "Ultra-Compact", "Budget"),
         ),
 
@@ -106,7 +106,7 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma2-2b-it-litert-int8",
             displayName   = "Gemma 2 2B IT · LiteRT INT8  ⚡",
-            description   = "Google Gemma 2 2B — proven previous-gen model, GPU-accelerated. ~1.3 GB download. Reliable for mid-range phones with 4–6 GB RAM.",
+            description   = "Google Gemma 2 2B — proven previous-gen model, GPU-accelerated. ~1.3 GB download. Reliable for mid-range phones.",
             downloadUrl   = "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/Gemma2-2B-IT_multi-prefill-seq_q8_ekv1280.task",
             fileSizeBytes = 2_713_274_466L,
             engineType    = EngineType.LITERT,
@@ -115,143 +115,17 @@ class ModelCatalog @Inject constructor() {
             contextLength = 2048,
             tags          = listOf("LiteRT GPU", "Google", "Gemma 2", "Stable"),
         ),
-
-        // ══════════════════════════════════════════════════════════════════════
-        //  GGUF — FALLBACK (CPU-only, community / custom models)
-        // ══════════════════════════════════════════════════════════════════════
-
-        ModelEntry(
-            id            = "gemma3n-e2b-it-q4",
-            displayName   = "Gemma 3n E2B IT · GGUF Q4_K_M  (CPU fallback)",
-            description   = "Gemma 3n E2B in GGUF format for llama.cpp. CPU-only on most Android devices: ~5 tok/s. Use this only if LiteRT models above are unavailable. ~2.6 GB.",
-            downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3n-E2B-it-GGUF/resolve/main/google_gemma-3n-E2B-it-Q4_K_M.gguf",
-            fileSizeBytes = 2_787_213_312L,
-            engineType    = EngineType.LLAMA_CPP,
-            requiredTier  = DeviceTier.MID,
-            modelFamily   = "gemma3n",
-            contextLength = 512,
-            tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3n"),
-        ),
-
-        ModelEntry(
-            id            = "gemma3n-e4b-it-q4",
-            displayName   = "Gemma 3n E4B IT · GGUF Q4_K_M  (CPU fallback)",
-            description   = "Gemma 3n E4B in GGUF format for llama.cpp. CPU-only. ~4 GB. Use only if LiteRT is unavailable. Requires flagship phone with ≥8 GB RAM.",
-            downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3n-E4B-it-GGUF/resolve/main/google_gemma-3n-E4B-it-Q4_K_M.gguf",
-            fileSizeBytes = 4_236_509_184L,
-            engineType    = EngineType.LLAMA_CPP,
-            requiredTier  = DeviceTier.FLAGSHIP,
-            modelFamily   = "gemma3n",
-            contextLength = 512,
-            tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3n"),
-        ),
-
-        ModelEntry(
-            id            = "gemma3-4b-it-q4",
-            displayName   = "Gemma 3 4B IT · GGUF Q4_K_M  (CPU fallback)",
-            description   = "Google Gemma 3 4B in GGUF format. ~2.4 GB. CPU-only on Android. Solid multilingual quality for mid-range phones if LiteRT is unavailable.",
-            downloadUrl = "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf",
-            fileSizeBytes = 2_489_348_096L,
-            engineType    = EngineType.LLAMA_CPP,
-            requiredTier  = DeviceTier.MID,
-            modelFamily   = "gemma3",
-            contextLength = 512,
-            tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3"),
-        ),
-
-        ModelEntry(
-            id            = "gemma3-12b-it-q4",
-            displayName   = "Gemma 3 12B IT · GGUF Q4_K_M  (CPU fallback)",
-            description   = "Google Gemma 3 12B — maximum quality in GGUF format. ~7.7 GB, flagship only. CPU-only; very slow (~2 tok/s). Only for power users who need peak accuracy.",
-            downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3-12b-it-GGUF/resolve/main/google_gemma-3-12b-it-Q4_K_M.gguf",
-            fileSizeBytes = 7_730_941_952L,
-            engineType    = EngineType.LLAMA_CPP,
-            requiredTier  = DeviceTier.FLAGSHIP,
-            modelFamily   = "gemma3",
-            contextLength = 512,
-            tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3", "Max Quality"),
-        ),
-
-        ModelEntry(
-            id            = "gemma3-1b-it-q4",
-            displayName   = "Gemma 3 1B IT · GGUF Q4_K_M  (CPU fallback)",
-            description   = "Gemma 3 1B in GGUF format. ~770 MB. CPU-only fallback for entry-level phones. Use the LiteRT version above for better speed.",
-            downloadUrl   = "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q4_K_M.gguf",
-            fileSizeBytes = 806_058_496L,
-            engineType    = EngineType.LLAMA_CPP,
-            requiredTier  = DeviceTier.LOW,
-            modelFamily   = "gemma3",
-            contextLength = 512,
-            tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 3"),
-        ),
-
-        ModelEntry(
-            id            = "gemma2-2b-it-q4",
-            displayName   = "Gemma 2 2B IT · GGUF Q4_K_M  (CPU fallback)",
-            description   = "Gemma 2 2B in GGUF format. ~1.7 GB. CPU-only fallback. Use the LiteRT version for 4–6× faster inference.",
-            downloadUrl   = "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
-            fileSizeBytes = 1_708_582_752L,
-            engineType    = EngineType.LLAMA_CPP,
-            requiredTier  = DeviceTier.LOW,
-            modelFamily   = "gemma2",
-            contextLength = 512,
-            tags          = listOf("GGUF", "CPU", "Fallback", "Google", "Gemma 2"),
-        ),
-
-        ModelEntry(
-            id            = "gemma2-9b-it-q4",
-            displayName   = "Gemma 2 9B IT · GGUF Q4_K_M  (CPU fallback)",
-            description   = "Google Gemma 2 9B in GGUF format. ~5.9 GB, flagship only. Strong multilingual quality but very slow on CPU. No LiteRT version available.",
-            downloadUrl   = "https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf",
-            fileSizeBytes = 5_905_580_032L,
-            engineType    = EngineType.LLAMA_CPP,
-            requiredTier  = DeviceTier.FLAGSHIP,
-            modelFamily   = "gemma2",
-            contextLength = 512,
-            tags          = listOf("GGUF", "CPU", "Google", "Gemma 2"),
-        ),
-
     )
 
     // ── LoRA adapters ─────────────────────────────────────────────────────────
 
-    val loraEntries: List<LoraEntry> = listOf(
-
-        LoraEntry(
-            id          = "knowledge-gemma3",
-            packType    = PackType.KNOWLEDGE,
-            modelFamily = "gemma3",
-            displayName = "Knowledge Pack · Gemma 3",
-            description = "NCERT + competitive exam knowledge layer.",
-            downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/knowledge_gemma3_q4.gguf",
-            fileSizeBytes = 78_643_200L,
-        ),
-        LoraEntry(
-            id          = "money-gemma3",
-            packType    = PackType.MONEY,
-            modelFamily = "gemma3",
-            displayName = "Money Mentor · Gemma 3",
-            description = "Indian finance knowledge layer.",
-            downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/money_gemma3_q4.gguf",
-            fileSizeBytes = 52_428_800L,
-        ),
-        LoraEntry(
-            id          = "kisan-gemma3",
-            packType    = PackType.KISAN,
-            modelFamily = "gemma3",
-            displayName = "Kisan Saarthi · Gemma 3",
-            description = "Indian agriculture knowledge layer.",
-            downloadUrl = "https://huggingface.co/saarthi-ai/adapters/resolve/main/kisan_gemma3_q4.gguf",
-            fileSizeBytes = 52_428_800L,
-        ),
-    )
+    val loraEntries: List<LoraEntry> = emptyList()
 
     // ── Lookup helpers ────────────────────────────────────────────────────────
 
     fun findById(id: String): ModelEntry? = allModels.find { it.id == id }
 
-    fun loraForPack(packType: PackType, modelFamily: String): LoraEntry? =
-        loraEntries.find { it.packType == packType && it.modelFamily == modelFamily }
+    fun loraForPack(packType: PackType, modelFamily: String): LoraEntry? = null
 
-    fun loraById(id: String): LoraEntry? = loraEntries.find { it.id == id }
+    fun loraById(id: String): LoraEntry? = null
 }
