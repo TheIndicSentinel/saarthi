@@ -109,9 +109,10 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
+import com.saarthi.feature.assistant.ui.KnowledgeScreen
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.saarthi.core.ui.components.ShimmerMessagePlaceholder
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
@@ -120,6 +121,7 @@ fun AssistantScreen(
     // Passed from SaarthiNavHost where MainViewModel already has the stored language loaded.
     // Avoids showing HINDI for one frame while AssistantViewModel's fresh StateFlow catches up.
     initialLanguage: SupportedLanguage = SupportedLanguage.HINDI,
+    onNavigateToKnowledge: () -> Unit = {},
     viewModel: AssistantViewModel = hiltViewModel(),
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -137,6 +139,8 @@ fun AssistantScreen(
     val density = LocalDensity.current
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
+    val haptic = LocalHapticFeedback.current
+
     // Sync drawer open/close with VM state
     LaunchedEffect(uiState.showDrawer) {
         if (uiState.showDrawer) drawerState.open() else drawerState.close()
@@ -149,6 +153,14 @@ fun AssistantScreen(
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
+
+    // Immersive Haptic Feedback during streaming
+    LaunchedEffect(messages) {
+        val lastMsg = messages.lastOrNull()
+        if (lastMsg?.isStreaming == true && lastMsg.content.isNotEmpty()) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
     }
 
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
@@ -179,10 +191,13 @@ fun AssistantScreen(
             ConversationsDrawer(
                 language = currentLanguage,
                 sessions = sessions,
-                currentSessionId = currentSessionId,
                 onNewChat = { viewModel.newChat() },
                 onSelectSession = { viewModel.switchSession(it) },
                 onDeleteSession = { viewModel.deleteSession(it) },
+                onNavigateToKnowledge = { 
+                    viewModel.closeDrawer()
+                    onNavigateToKnowledge() 
+                }
             )
         },
         scrimColor = Color.Black.copy(alpha = 0.5f),
@@ -233,6 +248,9 @@ fun AssistantScreen(
                                     onDelete = { viewModel.deleteMessage(msg.id) },
                                     avatarLabel = currentLanguage.firstLetter,
                                 )
+                            }
+                            if (uiState.isStreaming && messages.any { it.isStreaming && it.content.isEmpty() }) {
+                                item { ShimmerMessagePlaceholder() }
                             }
                             item { Spacer(Modifier.height(8.dp)) }
                         }
@@ -333,6 +351,7 @@ private fun ConversationsDrawer(
     onNewChat: () -> Unit,
     onSelectSession: (String) -> Unit,
     onDeleteSession: (String) -> Unit,
+    onNavigateToKnowledge: () -> Unit,
 ) {
     ModalDrawerSheet(
         modifier = Modifier.fillMaxHeight().width(300.dp),
@@ -385,6 +404,25 @@ private fun ConversationsDrawer(
                     )
                 }
             }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                color = SaarthiColors.GlassBorder,
+            )
+
+            NavigationDrawerItem(
+                label = { Text("Saarthi Knowledge", color = SaarthiColors.TextPrimary) },
+                selected = false,
+                onClick = onNavigateToKnowledge,
+                icon = { Icon(Icons.Default.Psychology, null, tint = SaarthiColors.Gold) },
+                colors = NavigationDrawerItemDefaults.colors(
+                    unselectedContainerColor = Color.Transparent,
+                    selectedContainerColor = Color.Transparent,
+                ),
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+
+            Spacer(Modifier.height(12.dp))
         }
     }
 }

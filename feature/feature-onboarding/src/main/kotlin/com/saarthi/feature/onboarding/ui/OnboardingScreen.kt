@@ -622,12 +622,24 @@ private fun ModelInitStep(isLoading: Boolean, error: String?) {
         verticalArrangement = Arrangement.Center,
     ) {
         if (isLoading) {
-            CircularProgressIndicator(color = SaarthiColors.Gold)
-            Spacer(Modifier.height(24.dp))
-            Text("Loading AI model…", style = MaterialTheme.typography.bodyLarge, color = SaarthiColors.TextSecondary)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                com.saarthi.core.ui.components.ShimmerLoading(
+                    width = Modifier.width(180.dp),
+                    height = 24.dp,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(Modifier.height(16.dp))
+                com.saarthi.core.ui.components.ShimmerLoading(
+                    width = Modifier.width(240.dp),
+                    height = 16.dp,
+                    shape = RoundedCornerShape(8.dp)
+                )
+                Spacer(Modifier.height(32.dp))
+            }
+            Text("Initializing Neural Engine…", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), color = SaarthiColors.Gold)
             Spacer(Modifier.height(8.dp))
             Text(
-                "This may take 30–60 seconds on first load.",
+                "Loading weights into GPU memory — please wait a moment.",
                 style = MaterialTheme.typography.bodySmall,
                 color = SaarthiColors.TextMuted,
                 textAlign = TextAlign.Center,

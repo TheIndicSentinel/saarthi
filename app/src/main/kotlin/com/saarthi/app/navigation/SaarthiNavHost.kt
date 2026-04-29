@@ -153,6 +153,7 @@ fun SaarthiNavHost(
             AssistantScreen(
                 onBack = { navController.popBackStack() },
                 initialLanguage = currentLanguage,
+                onNavigateToKnowledge = { navController.navigate(Route.Knowledge.path) }
             )
         }
 
@@ -165,7 +166,7 @@ fun SaarthiNavHost(
         }
 
         composable(Route.Knowledge.path) {
-            KnowledgePlaceholder(onBack = { navController.popBackStack() })
+            com.saarthi.feature.assistant.ui.KnowledgeScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Route.FieldExpert.path) {

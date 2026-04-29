@@ -17,6 +17,9 @@ import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.ChatRepository
 import com.saarthi.feature.assistant.domain.ChatSession
+import com.saarthi.core.memory.domain.MemoryRepository
+import com.saarthi.core.memory.domain.MemoryEntry
+import kotlinx.coroutines.flow.Flow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -55,6 +58,7 @@ class AssistantViewModel @Inject constructor(
     private val inferenceEngine: InferenceEngine,
     private val fileExtractor: FileContentExtractor,
     private val languageManager: LanguageManager,
+    private val memoryRepository: MemoryRepository,
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
@@ -79,6 +83,8 @@ class AssistantViewModel @Inject constructor(
 
     val currentLanguage: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
         .stateIn(viewModelScope, SharingStarted.Eagerly, languageManager.selectedLanguage.value)
+
+    val allMemories: Flow<List<MemoryEntry>> = memoryRepository.observeAll()
 
     private var speechRecognizer: SpeechRecognizer? = null
 
@@ -203,6 +209,10 @@ class AssistantViewModel @Inject constructor(
 
     fun deleteSession(sessionId: String) = viewModelScope.launch {
         chatRepository.deleteSession(sessionId)
+    }
+
+    fun deleteMemory(key: String) = viewModelScope.launch {
+        memoryRepository.delete(key)
     }
 
     override fun onCleared() {
