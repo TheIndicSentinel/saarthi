@@ -37,9 +37,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
 
-private const val MAX_HISTORY_TURNS = 5
-// Prompt budget: 1280 maxTokens - ~300 system prompt tokens - ~100 slack = ~880 tokens = ~1800 chars
-private const val MAX_PROMPT_CHARS = 1_800
+private const val MAX_HISTORY_TURNS = 4
+// Prompt budget: Gemma .task models have 1280 compiled KV cache tokens.
+// 1 token ≈ 3.5 chars → ~4480 chars. Reserve ~1000 for system prompt + slack.
+private const val MAX_PROMPT_CHARS = 3_500
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
@@ -318,7 +319,22 @@ class ChatRepositoryImpl @Inject constructor(
 
     private fun trimPrompt(prompt: String): String {
         val turns = prompt.split("<start_of_turn>").filter { it.isNotBlank() }
-        return turns.takeLast(5).joinToString("<start_of_turn>", prefix = "<start_of_turn>")
+        if (turns.size <= 3) return prompt // system + user + model — nothing to trim
+
+        // ALWAYS preserve the first turn (contains [SYSTEM_DIRECTIVE]) and the last 2 turns
+        // (current user message + model reply marker). Drop middle history turns.
+        val systemTurn = turns.first()
+        val remainingTurns = turns.drop(1)
+        val kept = remainingTurns.takeLast(4) // last 2 pairs of user+model
+
+        return buildString {
+            append("<start_of_turn>")
+            append(systemTurn)
+            kept.forEach { turn ->
+                append("<start_of_turn>")
+                append(turn)
+            }
+        }
     }
 
     // ── Mapping ───────────────────────────────────────────────────────────────
