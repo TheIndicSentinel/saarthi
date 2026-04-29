@@ -254,14 +254,9 @@ private fun LanguagePickerDialog(
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                lang.nativeName,
-                                style = MaterialTheme.typography.bodyMedium,
+                                "${lang.nativeName}  •  ${lang.englishName}",
+                                style = MaterialTheme.typography.titleMedium,
                                 color = if (isSelected) SaarthiColors.Gold else SaarthiColors.TextPrimary,
-                            )
-                            Text(
-                                lang.englishName,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = SaarthiColors.TextMuted,
                             )
                         }
                         if (isSelected) {

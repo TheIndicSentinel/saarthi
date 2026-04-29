@@ -37,7 +37,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
 
-private const val MAX_HISTORY_TURNS = 3
+private const val MAX_HISTORY_TURNS = 5
 // Prompt budget: 1280 maxTokens - ~300 system prompt tokens - ~100 slack = ~880 tokens = ~1800 chars
 private const val MAX_PROMPT_CHARS = 1_800
 
@@ -267,19 +267,19 @@ class ChatRepositoryImpl @Inject constructor(
         else ""
 
         return buildString {
+            // Strong System Block — Prepending instructions to the very first turn is the most
+            // effective way to align Gemma 3 without a dedicated 'system' role.
+            val systemPrefix = "<start_of_turn>user\n[SYSTEM_DIRECTIVE]\n$systemInstructions\n[/SYSTEM_DIRECTIVE]\n"
+
             if (history.isEmpty()) {
-                append("<start_of_turn>user\n")
-                append(systemInstructions)
-                append("\n\n")
+                append(systemPrefix)
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
                 append("<end_of_turn>\n")
                 append("<start_of_turn>model\n")
             } else {
+                append(systemPrefix)
                 val firstUser = history.first()
-                append("<start_of_turn>user\n")
-                append(systemInstructions)
-                append("\n\n")
                 append(firstUser.content)
                 append("<end_of_turn>\n")
 
@@ -290,9 +290,11 @@ class ChatRepositoryImpl @Inject constructor(
                     append("<end_of_turn>\n")
                 }
 
+                // Re-assert language and accuracy constraints for 'Gemma 3n' drift prevention
                 append("<start_of_turn>user\n")
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
+                append("\n\n(Respond in ${currentLanguage.nativeName} only. Be factual and accurate.)")
                 append("<end_of_turn>\n")
                 append("<start_of_turn>model\n")
             }

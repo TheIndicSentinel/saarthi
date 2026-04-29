@@ -187,40 +187,40 @@ class LiteRTInferenceEngine @Inject constructor(
 
         DebugLogger.log("LITERT", "Stream start (real-time async)  promptChars=${prompt.length}")
 
-        withContext(engineDispatcher) {
-            generateMutex.withLock {
-                markGenerationStarted()
-                try {
-                    // Standard synchronous call for stability.
-                    // Prefill/generation speed is now handled by GPU acceleration (enabled in DeviceProfiler).
-                    val fullResponse = inference.generateResponse(prompt)
-                    markGenerationEnded()
+        generateMutex.withLock {
+            markGenerationStarted()
+            try {
+                // Standard synchronous call for stability.
+                // Prefill/generation speed is now handled by GPU acceleration (enabled in DeviceProfiler).
+                val fullResponse = inference.generateResponse(prompt)
+                markGenerationEnded()
 
-                    if (!fullResponse.isNullOrBlank()) {
-                        val cleaned = fullResponse
-                            .replace("<end_of_turn>", "")
-                            .replace("<eos>", "")
-                            .trim()
-                        
-                        DebugLogger.log("LITERT", "Generation result ready: ${cleaned.length} chars")
-                        
-                        // Burst-emit first few words quickly for 'instant feel'
-                        val words = cleaned.split(" ")
-                        for (i in words.indices) {
-                            val chunk = if (i == 0) words[i] else " ${words[i]}"
-                            emit(chunk)
-                            // Extremely fast delivery for first 10 tokens to mask prefill lag
-                            if (i > 10) kotlinx.coroutines.delay(10)
-                        }
+                if (!fullResponse.isNullOrBlank()) {
+                    val cleaned = fullResponse
+                        .replace("<end_of_turn>", "")
+                        .replace("<eos>", "")
+                        .trim()
+
+                    DebugLogger.log("LITERT", "Generation result ready: ${cleaned.length} chars")
+
+                    // Burst-emit first few words quickly for 'instant feel'
+                    val words = cleaned.split(" ")
+                    for (i in words.indices) {
+                        val chunk = if (i == 0) words[i] else " ${words[i]}"
+                        emit(chunk)
+                        // Extremely fast delivery for first 10 tokens to mask prefill lag
+                        if (i > 10) kotlinx.coroutines.delay(10)
                     }
-                } catch (e: Exception) {
-                    markGenerationEnded()
-                    throw e
+                } else {
+                    DebugLogger.log("LITERT", "Empty response from engine")
                 }
+            } catch (e: Exception) {
+                markGenerationEnded()
+                throw e
             }
         }
         DebugLogger.log("LITERT", "Stream emission complete")
-    }
+    }.flowOn(engineDispatcher)
 
     override suspend fun generate(prompt: String, packType: PackType): String =
         withContext(engineDispatcher) {
