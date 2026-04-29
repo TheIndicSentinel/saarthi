@@ -8,7 +8,9 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -150,8 +152,11 @@ class FileContentExtractor @Inject constructor(
     private suspend fun extractImageText(uri: Uri): String? = runCatching {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val image = InputImage.fromFilePath(context, uri)
-        val result = recognizer.process(image).await()
-        
+        val result = suspendCancellableCoroutine { cont ->
+            recognizer.process(image)
+                .addOnSuccessListener { cont.resume(it) }
+                .addOnFailureListener { cont.resumeWithException(it) }
+        }
         if (result.text.isNotBlank()) {
             "[Extracted from image]:\n${result.text.take(MAX_DIRECT_CHARS)}"
         } else {
