@@ -245,7 +245,7 @@ private fun LanguageSelectStep(
                     onClick = { onSelect(lang) },
                 ) {
                     Text(
-                        "${lang.flag}  ${lang.nativeName}  •  ${lang.englishName}",
+                        "${lang.nativeName}  •  ${lang.englishName}",
                         style = MaterialTheme.typography.titleMedium,
                         color = if (lang == selectedLanguage) SaarthiColors.Gold else SaarthiColors.TextPrimary,
                     )

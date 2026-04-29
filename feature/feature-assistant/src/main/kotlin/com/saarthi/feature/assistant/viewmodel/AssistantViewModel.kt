@@ -22,7 +22,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -60,7 +63,7 @@ class AssistantViewModel @Inject constructor(
     private val allMessages: StateFlow<List<ChatMessage>> = chatRepository.getHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val messages: StateFlow<List<ChatMessage>> = kotlinx.coroutines.flow.combine(
+    val messages: StateFlow<List<ChatMessage>> = combine(
         allMessages,
         _uiState.map { it.searchQuery }.distinctUntilChanged()
     ) { msgs, query ->
