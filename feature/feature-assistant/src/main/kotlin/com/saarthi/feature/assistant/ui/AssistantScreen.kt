@@ -193,12 +193,13 @@ fun AssistantScreen(
             ConversationsDrawer(
                 language = currentLanguage,
                 sessions = sessions,
+                currentSessionId = currentSessionId,
                 onNewChat = { viewModel.newChat() },
                 onSelectSession = { viewModel.switchSession(it) },
                 onDeleteSession = { viewModel.deleteSession(it) },
-                onNavigateToKnowledge = { 
+                onNavigateToKnowledge = {
                     viewModel.closeDrawer()
-                    onNavigateToKnowledge() 
+                    onNavigateToKnowledge()
                 }
             )
         },
@@ -416,7 +417,7 @@ private fun ConversationsDrawer(
                 label = { Text("Saarthi Knowledge", color = SaarthiColors.TextPrimary) },
                 selected = false,
                 onClick = onNavigateToKnowledge,
-                icon = { Icon(Icons.Default.Psychology, null, tint = SaarthiColors.Gold) },
+                icon = { Icon(Icons.Default.AutoAwesome, null, tint = SaarthiColors.Gold) },
                 colors = NavigationDrawerItemDefaults.colors(
                     unselectedContainerColor = Color.Transparent,
                     selectedContainerColor = Color.Transparent,

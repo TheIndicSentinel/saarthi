@@ -624,13 +624,13 @@ private fun ModelInitStep(isLoading: Boolean, error: String?) {
         if (isLoading) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 com.saarthi.core.ui.components.ShimmerLoading(
-                    width = Modifier.width(180.dp),
+                    width = Modifier.fillMaxWidth(0.5f),
                     height = 24.dp,
                     shape = RoundedCornerShape(12.dp)
                 )
                 Spacer(Modifier.height(16.dp))
                 com.saarthi.core.ui.components.ShimmerLoading(
-                    width = Modifier.width(240.dp),
+                    width = Modifier.fillMaxWidth(0.7f),
                     height = 16.dp,
                     shape = RoundedCornerShape(8.dp)
                 )
