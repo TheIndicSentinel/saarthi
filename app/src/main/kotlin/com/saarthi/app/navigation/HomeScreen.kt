@@ -237,7 +237,20 @@ private fun LanguagePickerDialog(
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(lang.flag, style = MaterialTheme.typography.titleSmall)
+                        // Removed flag icon for a cleaner, text-pure interface.
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(SaarthiColors.NavyDark),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                lang.nativeName.take(1),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (isSelected) SaarthiColors.Gold else SaarthiColors.TextMuted
+                            )
+                        }
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
