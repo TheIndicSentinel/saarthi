@@ -134,6 +134,12 @@ class LiteRTInferenceEngine @Inject constructor(
 
             val file = File(config.modelPath)
             if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
+            
+            if (file.length() <= 1024) { // Guard against 0-byte or tiny corrupted files
+                DebugLogger.log("LITERT", "Corrupted model detected (size=${file.length()}b) — cleaning up")
+                file.delete()
+                throw IllegalArgumentException("Model file is corrupted or incomplete. Please delete and download it again.")
+            }
 
             val sizeMb = file.length() / 1_048_576
             // Gemma LiteRT .task models have a fixed KV cache compiled in. 1280 is the
