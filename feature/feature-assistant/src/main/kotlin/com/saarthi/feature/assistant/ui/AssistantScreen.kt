@@ -109,7 +109,9 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import com.saarthi.feature.assistant.ui.KnowledgeScreen
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.saarthi.core.ui.components.ShimmerMessagePlaceholder
