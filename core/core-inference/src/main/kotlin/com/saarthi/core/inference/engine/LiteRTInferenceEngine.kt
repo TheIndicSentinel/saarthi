@@ -191,20 +191,8 @@ class LiteRTInferenceEngine @Inject constructor(
             generateMutex.withLock {
                 markGenerationStarted()
                 try {
-                    val flowChannel = kotlinx.coroutines.channels.Channel<Pair<String, Boolean>>(capacity = 64)
-
-                    // Native callback interface for real-time token emission
-                    inference.generateStreamAsync(prompt)
-                    
-                    // Note: MediaPipe tasks-genai Android API currently uses a callback for async.
-                    // We must adapt it to our Flow. Since the official public API for 'generateStreamAsync' 
-                    // in some versions uses a ResultListener, we wrap it carefully.
-                    // If the library version only supports generateResponse, we use a custom partial-callback if available.
-                    
-                    // Optimization: We use generateResponse but split into chunks ONLY for UI, 
-                    // UNTIL the MediaPipe async callback is verified stable for this Android 16 preview.
-                    // HOWEVER, to fix the 'wait a minute' lag, we MUST avoid blocking the UI thread.
-                    
+                    // Standard synchronous call for stability.
+                    // Prefill/generation speed is now handled by GPU acceleration (enabled in DeviceProfiler).
                     val fullResponse = inference.generateResponse(prompt)
                     markGenerationEnded()
 
