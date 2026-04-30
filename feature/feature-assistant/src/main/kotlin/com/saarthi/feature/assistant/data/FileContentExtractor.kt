@@ -1,7 +1,10 @@
 package com.saarthi.feature.assistant.data
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.google.mlkit.vision.common.InputImage
@@ -86,9 +89,9 @@ class FileContentExtractor @Inject constructor(
                         }
                     }
                     file.isImage ->
-                        appendLine("[Image: ${file.name} — describe what you want to know about it]")
+                        appendLine("[Image: ${file.name} — text was extracted if available. If the image contains no readable text, ask the user to describe what they want to know.]")
                     else ->
-                        appendLine("[Binary file: ${file.name} — content not extractable]")
+                        appendLine("[Binary file: ${file.name} — content not extractable. Ask the user to provide the relevant text or a brief description of what they need from this file.]")
                 }
             }
             appendLine("--- End of Files ---")
@@ -143,10 +146,52 @@ class FileContentExtractor @Inject constructor(
         }
     }.onFailure { Timber.w(it, "Failed to read text content") }.getOrNull()
 
-    private fun extractPdfText(uri: Uri): String {
-        return "[PDF: ${runCatching { queryMetadata(uri).first }.getOrDefault("file")}. " +
-                "Text extraction from PDF is not yet supported. " +
-                "Copy-paste the relevant text into the chat for best results.]"
+    private suspend fun extractPdfText(uri: Uri): String {
+        return runCatching {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                PdfRenderer(descriptor).use { renderer ->
+                    val pagesToScan = minOf(renderer.pageCount, 2)
+                    if (pagesToScan == 0) throw IllegalStateException("PDF has no pages")
+
+                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                    val extracted = StringBuilder()
+                    var shouldStop = false
+
+                    for (pageIndex in 0 until pagesToScan) {
+                        if (shouldStop) break
+                        renderer.openPage(pageIndex).use { page ->
+                            val targetWidth = minOf(page.width * 2, 1200)
+                            val targetHeight = maxOf((targetWidth.toFloat() / page.width * page.height).toInt(), 1)
+                            val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+
+                            val result = suspendCancellableCoroutine<com.google.mlkit.vision.text.Text> { cont ->
+                                val image = InputImage.fromBitmap(bitmap, 0)
+                                recognizer.process(image)
+                                    .addOnSuccessListener { cont.resume(it) }
+                                    .addOnFailureListener { cont.resumeWithException(it) }
+                            }
+
+                            if (result.text.isNotBlank()) {
+                                if (extracted.isNotEmpty()) extracted.appendLine()
+                                extracted.appendLine("Page ${pageIndex + 1}:")
+                                extracted.appendLine(result.text.take(MAX_DIRECT_CHARS - extracted.length))
+                                if (extracted.length >= MAX_DIRECT_CHARS) shouldStop = true
+                            }
+                        }
+                    }
+
+                    val text = extracted.toString().trim()
+                    if (text.isBlank()) {
+                        "[PDF: ${queryMetadata(uri).first}. No readable text was found. Please provide the relevant text or a short summary of what you need from this file.]"
+                    } else {
+                        text
+                    }
+                }
+            } ?: "[PDF: ${queryMetadata(uri).first}. Could not open file. Please provide relevant text or a short summary.]"
+        }.onFailure {
+            Timber.w(it, "PDF extraction failed")
+        }.getOrNull() ?: "[PDF: ${runCatching { queryMetadata(uri).first }.getOrDefault("file")}. Extraction failed. Please provide the relevant text or a short summary.]"
     }
 
     private suspend fun extractImageText(uri: Uri): String? = runCatching {

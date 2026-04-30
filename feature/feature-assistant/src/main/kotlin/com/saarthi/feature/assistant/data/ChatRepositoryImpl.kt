@@ -284,22 +284,16 @@ class ChatRepositoryImpl @Inject constructor(
                 append("<start_of_turn>model\n")
             } else {
                 append(systemPrefix)
-                val firstUser = history.first()
-                append(firstUser.content)
-                append("<end_of_turn>\n")
-
-                history.drop(1).forEach { msg ->
+                history.forEach { msg ->
                     val role = if (msg.role == MessageRole.USER) "user" else "model"
                     append("<start_of_turn>$role\n")
                     append(msg.content)
                     append("<end_of_turn>\n")
                 }
 
-                // Re-assert language and accuracy constraints for 'Gemma 3n' drift prevention
                 append("<start_of_turn>user\n")
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
-                append("\n\nIMPORTANT: Follow all system rules strictly. Do not hallucinate. Answer only what is known and verified. Respond in ${currentLanguage.nativeName} only.")
                 append("<end_of_turn>\n")
                 append("<start_of_turn>model\n")
             }
@@ -321,6 +315,8 @@ class ChatRepositoryImpl @Inject constructor(
         appendLine()
         // Critical: tell the model exactly which language to respond in
         append(currentLanguage.systemPromptInstruction)
+        appendLine()
+        append("If attachments are included, use only readable extracted text and do not guess from unsupported files.")
         if (memoryContext.isNotEmpty()) {
             appendLine()
             appendLine()

@@ -99,10 +99,11 @@ class InferenceService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "AI Inference",
-                NotificationManager.IMPORTANCE_DEFAULT, // Standard importance
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Keeps Saarthi alive while the AI model is thinking."
+                description = "Keeps Saarthi alive while the AI model is generating a response."
                 setShowBadge(false)
+                setSound(null, null)
             }
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)
@@ -117,10 +118,11 @@ class InferenceService : Service() {
             Notification.Builder(this)
         }
         return builder
-            .setContentTitle("Saarthi is thinking…")
-            .setContentText("AI model is generating a response.")
+            .setContentTitle("Saarthi is processing your message")
+            .setContentText("AI response generation is in progress.")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .build()
     }
 

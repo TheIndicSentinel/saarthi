@@ -55,15 +55,29 @@ object ResponseMarkerParser {
             }
         }
 
+        val cleaned = normalizeFormatting(stripAll(raw))
         return ParseResult(
-            cleanText = stripAll(raw),
+            cleanText = cleaned,
             memories = memories,
             reminders = reminders,
         )
     }
 
     /** Strip complete markers from text shown in the streaming bubble. */
-    fun stripForDisplay(raw: String): String = stripAll(raw)
+    fun stripForDisplay(raw: String): String = normalizeFormatting(stripAll(raw))
+
+    private fun normalizeFormatting(text: String): String = text
+        .lines()
+        .joinToString("\n") { line ->
+            val trimmed = line.trimStart()
+            when {
+                trimmed.startsWith("* ") -> line.replaceFirst("* ", "- ")
+                trimmed.startsWith("• ") -> line.replaceFirst("• ", "- ")
+                else -> line
+            }
+        }
+        .replace(Regex("\n{3,}"), "\n\n")
+        .trim()
 
     private fun stripAll(text: String): String = text
         .replace(MEMORY_REGEX, "")
