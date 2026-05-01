@@ -38,6 +38,12 @@ data class DeviceProfile(
     val abi: String,
     val apiLevel: Int,
     val manufacturer: String,
+
+    // ── SoC ───────────────────────────────────────────────────────────────────
+    /** Raw SoC model string from Build.SOC_MODEL (e.g. "SM8550", "kalama"). */
+    val socModel: String = "",
+    /** Classified SoC family for device-specific model file selection. */
+    val socFamily: SocFamily = SocFamily.GENERIC,
 ) {
     /**
      * Stable tier derived from the *safe budget*, not total RAM.
@@ -56,7 +62,9 @@ data class DeviceProfile(
 
     override fun toString(): String =
         "DeviceProfile(tier=$tier, totalRam=${totalRamMb}MB, avail=${availableRamMb}MB, " +
-        "budget=${safeModelBudgetMb}MB, threads=$recommendedThreads, gpu=$gpuSafe)"
+        "budget=${safeModelBudgetMb}MB, threads=$recommendedThreads, gpu=$gpuSafe, " +
+        "soc=$socModel/$socFamily)"
+
 }
 
 enum class DeviceTier { MINIMAL, LOW, MID, FLAGSHIP }

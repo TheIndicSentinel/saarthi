@@ -6,6 +6,7 @@ import com.saarthi.core.inference.model.EngineType
 import com.saarthi.core.inference.model.LoraEntry
 import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.model.SocFamily
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -13,11 +14,36 @@ import javax.inject.Singleton
 class ModelCatalog @Inject constructor() {
 
     /**
-     * Snapshots the device's runtime state and returns only the models that are
-     * safe to run within the current memory budget.
+     * Returns the optimal model list for a given device profile.
+     *
+     * Official approach (Google AI Edge Gallery pattern):
+     *   1. Prefer device-specific model files (Qualcomm QNN/Hexagon NPU) when the
+     *      SoC matches — these are compiled against the hardware NPU for maximum speed.
+     *   2. Fall back to the generic file for all other devices.
+     *   3. Filter by memory safety budget.
+     *
+     * The MediaPipe LlmInference API then handles GPU/CPU backend selection
+     * internally based on what the model file supports.
      */
     fun recommendedFor(profile: DeviceProfile): List<ModelEntry> {
-        return allModels.filter { it.isSafeFor(profile) }
+        // Build a set of base model IDs that have a device-specific variant
+        // available for this SoC. Those base IDs are excluded in favour of
+        // the hardware-optimised entry.
+        val socOptimisedBaseIds = allModels
+            .filter { it.socTarget == profile.socFamily && it.socTarget != SocFamily.GENERIC }
+            .map { it.baseModelId }
+            .toSet()
+
+        return allModels.filter { model ->
+            val isVisible = when {
+                // Show device-specific entry only if SoC matches
+                model.socTarget != SocFamily.GENERIC -> model.socTarget == profile.socFamily
+                // Hide the generic entry when a better SoC-specific one is available
+                model.baseModelId in socOptimisedBaseIds -> false
+                else -> true
+            }
+            isVisible && model.isSafeFor(profile)
+        }
     }
 
     /**
@@ -30,16 +56,13 @@ class ModelCatalog @Inject constructor() {
 
     // ── Model catalog ─────────────────────────────────────────────────────────
     //
-    // Primary backend: Google AI Edge LiteRT (.task bundles via MediaPipe Tasks GenAI).
-    //   • GPU-accelerated via OpenCL / Vulkan delegates — 20–50 tok/s on modern Adreno/Mali.
-    //   • Google's official distribution format for Gemma mobile models.
-    //   • Gemma 3n MatFormer kernels are co-designed for LiteRT INT8 — NOT for GGUF.
-    //   • Automatic CPU fallback (XNNPACK NEON) when GPU delegate unavailable.
-    //
-    // Fallback backend: llama.cpp (.gguf files).
-    //   • CPU-only on this device (Vulkan crashes confirmed on Samsung Android 16).
-    //   • 3–8 tok/s — functional but slow. Shown as "offline / fallback" options.
-    //   • Community models or devices where LiteRT delegates are unavailable.
+    // Official approach (matches Google AI Edge Gallery architecture):
+    //   • Each base model may have multiple entries: one generic + device-specific.
+    //   • Device-specific entries (socTarget != GENERIC) use QNN/Hexagon NPU delegates
+    //     compiled into the .litertlm bundle — fastest on matched hardware.
+    //   • Generic entries use CPU + OpenCL GPU path with automatic CPU fallback.
+    //   • recommendedFor(profile) selects the best entry per SoC automatically.
+    //   • MediaPipe LlmInference handles all backend negotiation internally.
     //
     // Tier mapping:
     //   FLAGSHIP : ≥ 8 GB total RAM + Vulkan  (e.g. Samsung S23/S24, Pixel 8 Pro)
@@ -53,41 +76,60 @@ class ModelCatalog @Inject constructor() {
     val allModels: List<ModelEntry> = listOf(
 
         // ══════════════════════════════════════════════════════════════════════
-        //  LITERT — PRIMARY (GPU-accelerated, Google official)
+        //  GEMMA 4 — LITERT-LM (MediaPipe 0.10.14+ | Google official)
         // ══════════════════════════════════════════════════════════════════════
+        //  Each model has a GENERIC entry (all devices) and optionally a
+        //  device-specific entry (Qualcomm SM8750) with QNN/Hexagon NPU.
+        //  recommendedFor() picks the best match automatically.
 
-        // ── GEMMA 4 MODELS ───────────────────────────────────────────────────
-        //    Frontier-level reasoning + audio/image support + 128K context
-        //    Official Google LiteRT-LM bundles (.litertlm) — MediaPipe 0.10.14+
-        //    Apache 2.0 License: https://ai.google.dev/gemma/docs/gemma_4_license
+        // ── Gemma 4 E2B ─────────────────────────────────────────────────────
 
-        // Gemma 4 E2B IT · LiteRT-LM (Recommended for most devices, ~2.6 GB)
+        // Gemma 4 E2B · Qualcomm SM8750 (Snapdragon 8 Elite) — QNN/Hexagon NPU
+        ModelEntry(
+            id            = "gemma4-e2b-it-qualcomm-sm8750",
+            displayName   = "Gemma 4 E2B IT · Qualcomm NPU  🚀 New",
+            description   = "Gemma 4 E2B optimised for Snapdragon 8 Elite (SM8750). Uses QNN/Hexagon NPU for maximum on-device speed. ~3.0 GB download.",
+            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it_qualcomm_sm8750.litertlm",
+            fileSizeBytes = 3_242_086_400L,
+            engineType    = EngineType.LITERT,
+            requiredTier  = DeviceTier.MID,
+            modelFamily   = "gemma4-e2b",
+            contextLength = 128_000,
+            tags          = listOf("New", "QNN NPU", "Qualcomm", "Gemma 4", "Fastest"),
+            socTarget     = SocFamily.QUALCOMM_SM8750,
+            baseModelId   = "gemma4-e2b-it-litert-int8",
+        ),
+
+        // Gemma 4 E2B · Generic (all devices) — CPU + OpenCL with auto fallback
         ModelEntry(
             id            = "gemma4-e2b-it-litert-int8",
             displayName   = "Gemma 4 E2B IT · LiteRT  🚀 New",
-            description   = "Google's latest Gemma 4. Frontier reasoning + audio/vision. GPU-accelerated via MediaPipe. ~2.6 GB download.",
+            description   = "Google's latest Gemma 4. Frontier reasoning + audio/vision. Auto-selects best backend (GPU/CPU) per device. ~2.6 GB download.",
             downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
             fileSizeBytes = 2_772_434_944L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma4-e2b",
             contextLength = 128_000,
-            tags          = listOf("New", "LiteRT GPU", "Google", "Gemma 4", "Reasoning", "Audio", "Vision"),
+            tags          = listOf("New", "LiteRT", "Google", "Gemma 4", "Reasoning", "Audio", "Vision"),
         ),
 
-        // Gemma 4 E4B IT · LiteRT-LM (For high-end devices, ~3.5 GB)
+        // ── Gemma 4 E4B ─────────────────────────────────────────────────────
+
+        // Gemma 4 E4B · Generic (all devices) — CPU + OpenCL with auto fallback
         ModelEntry(
             id            = "gemma4-e4b-it-litert-int8",
             displayName   = "Gemma 4 E4B IT · LiteRT  🚀 New",
-            description   = "High-performance Gemma 4. Superior reasoning and multimodal capabilities. GPU-accelerated via MediaPipe. ~3.5 GB download.",
+            description   = "High-performance Gemma 4. Superior reasoning and multimodal capabilities. Auto-selects best backend. ~3.5 GB download.",
             downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
             fileSizeBytes = 3_758_096_384L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma4-e4b",
             contextLength = 128_000,
-            tags          = listOf("New", "LiteRT GPU", "Google", "Gemma 4", "Best Quality", "Audio", "Vision"),
+            tags          = listOf("New", "LiteRT", "Google", "Gemma 4", "Best Quality", "Audio", "Vision"),
         ),
+
 
         // ── Gemma 3n E2B IT · LiteRT (mobile-first MatFormer, recommended LOW/MID) ─
 

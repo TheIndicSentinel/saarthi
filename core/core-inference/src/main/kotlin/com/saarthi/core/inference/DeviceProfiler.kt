@@ -4,8 +4,10 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+
 import android.os.StatFs
 import com.saarthi.core.inference.model.DeviceProfile
+import com.saarthi.core.inference.model.SocFamily
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -93,6 +95,12 @@ class DeviceProfiler @Inject constructor(
 
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
 
+        // ── SoC Family Detection (for device-specific model selection) ────────
+        // Official approach: read Build.SOC_MODEL (API 31+) to identify the chipset
+        // and select the optimal model file (e.g., Qualcomm QNN/Hexagon NPU variants).
+        val socModel = detectSocModel()
+        val socFamily = classifySoc(socModel)
+
         return DeviceProfile(
             totalRamMb        = totalRamMb,
             availableRamMb    = availRamMb,
@@ -106,7 +114,49 @@ class DeviceProfiler @Inject constructor(
             abi               = abi,
             apiLevel          = apiLevel,
             manufacturer      = manufacturer,
+            socModel          = socModel,
+            socFamily         = socFamily,
         )
+    }
+
+    /**
+     * Reads the SoC model string using the official Android API (API 31+)
+     * with a fallback to hardware/board strings for older devices.
+     */
+    private fun detectSocModel(): String {
+        // Official API: Build.SOC_MODEL available since API 31 (Android 12)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val soc = Build.SOC_MODEL
+            if (soc.isNotBlank() && soc != Build.UNKNOWN) return soc
+        }
+        // Fallback: BOARD string often contains chipset name (e.g., "kalama" for SM8550)
+        if (Build.BOARD.isNotBlank() && Build.BOARD != Build.UNKNOWN) return Build.BOARD
+        return Build.HARDWARE.orEmpty()
+    }
+
+    /**
+     * Maps a raw SoC model string to a high-level SoC family for model selection.
+     * Pattern matches against known Qualcomm (Snapdragon) naming.
+     */
+    private fun classifySoc(socModel: String): SocFamily {
+        val s = socModel.lowercase()
+        return when {
+            // Snapdragon 8 Gen 3 and newer flagship (SM8750+)
+            s.contains("sm8750") || s.contains("8gen3") -> SocFamily.QUALCOMM_SM8750
+            // Snapdragon 8 Gen 2 (SM8550)
+            s.contains("sm8550") || s.contains("8gen2") || s.contains("kalama") -> SocFamily.QUALCOMM_SM8550
+            // Snapdragon 8 Gen 1 / 8+ Gen 1 (SM8450/SM8475)
+            s.contains("sm8450") || s.contains("sm8475") || s.contains("waipio") -> SocFamily.QUALCOMM_GENERIC
+            // Any other Qualcomm
+            s.contains("sm") || s.contains("qcs") || s.contains("snapdragon") -> SocFamily.QUALCOMM_GENERIC
+            // MediaTek
+            s.contains("mt") || s.contains("dimensity") -> SocFamily.MEDIATEK
+            // Google Tensor
+            s.contains("tensor") || s.contains("gs") -> SocFamily.GOOGLE_TENSOR
+            // Samsung Exynos
+            s.contains("exynos") -> SocFamily.SAMSUNG_EXYNOS
+            else -> SocFamily.GENERIC
+        }
     }
 
     private fun getVulkanVersion(): String? = runCatching {
