@@ -159,10 +159,12 @@ class LiteRTInferenceEngine @Inject constructor(
             }
 
             val sizeMb = file.length() / 1_048_576
-            // Gemma LiteRT .task models have a fixed KV cache compiled in. 1280 is the
-            // minimum that all official Google Gemma mobile models are compiled against.
-            // DO NOT lower below 1280 — it causes silent native crashes on overflow.
-            val effectiveMaxTokens = config.maxTokens.coerceAtLeast(1280)
+            // Gemma LiteRT .task models have a fixed KV cache compiled in.
+            // Minimum: 1280 (all official Gemma mobile models compiled against this).
+            // Maximum cap: 4096 — prevents accidental massive pre-allocation.
+            // DO NOT set this from contextLength (128K) — that triggers a ~4-8GB KV cache
+            // allocation which silently OOM-kills the process on first generation.
+            val effectiveMaxTokens = config.maxTokens.coerceIn(1280, 4096)
             DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
             // Mark init as started BEFORE calling createFromOptions.
@@ -192,8 +194,9 @@ class LiteRTInferenceEngine @Inject constructor(
                 loadedMaxTokens = config.maxTokens
                 activeModelName = config.modelName
                 _activeModelNameFlow.value = config.modelName
-                usingGpu = (preferredBackend == LlmInference.Backend.GPU)
-                markInitEnded() // ← clear the crash flag on success
+                // NOTE: usingGpu is set INSIDE tryLoadWithFallback because GPU may fail
+                // and fall back to CPU — the actual backend must be tracked, not the requested one.
+                markInitEnded()
                 setReady(true)
                 DebugLogger.log("LITERT", "Model ready ($profile | Backend: ${if (usingGpu) "GPU" else "CPU"})")
             } catch (e: Throwable) {

@@ -71,16 +71,24 @@ class MainViewModel @Inject constructor(
             val catalogEntry = modelCatalog.allModels.find {
                 modelPath.endsWith(it.fileName)
             }
-            val maxTokens = catalogEntry?.contextLength ?: 1024
+
+            // CRITICAL: maxTokens tells MediaPipe how much KV cache to pre-allocate.
+            // contextLength (128K for Gemma 4) is the TRAINING context, NOT the allocation size.
+            // Setting maxTokens=128000 causes MediaPipe to allocate ~4-8GB of memory
+            // instantly, which silently OOM-kills the process during first generation.
+            // 2048 is the correct production value: long enough for any conversational
+            // response, small enough to load in under 1 second.
+            val maxTokens = 2048
             val profile = deviceProfiler.profile()
             val config = InferenceConfig(
                 modelPath  = modelPath,
                 modelName  = catalogEntry?.displayName,
                 maxTokens  = maxTokens,
-                nCtx       = (catalogEntry?.contextLength ?: 2048).coerceAtLeast(1024),
+                nCtx       = maxTokens,
                 nThreads   = profile.recommendedThreads,
                 nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
+
 
             // Background initialization
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {

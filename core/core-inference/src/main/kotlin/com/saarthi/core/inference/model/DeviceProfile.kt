@@ -46,15 +46,20 @@ data class DeviceProfile(
     val socFamily: SocFamily = SocFamily.GENERIC,
 ) {
     /**
-     * Stable tier derived from the *safe budget*, not total RAM.
-     * A device with 12GB total but 2GB free should not be treated as FLAGSHIP
-     * for inference purposes.
+     * Stable device tier derived from TOTAL RAM — not runtime available RAM.
+     *
+     * Available RAM fluctuates constantly (background apps, kernel caches) and
+     * using it for tier would flip a 12GB phone between MID and FLAGSHIP on every
+     * app launch. Total RAM is a fixed hardware spec that never changes.
+     *
+     * The runtime [safeModelBudgetMb] is still used for the actual load-safety
+     * check — this tier is only for model *compatibility* filtering in the catalog.
      */
     val tier: DeviceTier get() = when {
-        safeModelBudgetMb >= 5_500 -> DeviceTier.FLAGSHIP   // Can run 4B models comfortably
-        safeModelBudgetMb >= 2_500 -> DeviceTier.MID        // Handles 2B models
-        safeModelBudgetMb >= 1_000 -> DeviceTier.LOW        // 1B models only
-        else                       -> DeviceTier.MINIMAL    // Extremely constrained
+        totalRamMb >= 10_000 -> DeviceTier.FLAGSHIP  // 10GB+ (S23 Ultra, Pixel 8 Pro, etc.)
+        totalRamMb >= 6_000  -> DeviceTier.MID       // 6-10GB (A54, Pixel 7a, etc.)
+        totalRamMb >= 3_500  -> DeviceTier.LOW       // 3.5-6GB (budget phones)
+        else                 -> DeviceTier.MINIMAL   // <3.5GB (ultra-budget)
     }
 
     /** Maximum model file size (bytes) that we can safely attempt to load. */
