@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.asCoroutineDispatcher
 import timber.log.Timber
@@ -321,8 +323,8 @@ class LiteRTInferenceEngine @Inject constructor(
                 // Watchdog: if the native layer stalls (e.g. partial GPU driver crash
                 // that doesn't kill the process), the UI would hang forever. This closes
                 // the flow with a user-visible error after the timeout.
-                val watchdog = kotlinx.coroutines.launch {
-                    kotlinx.coroutines.delay(timeoutMs)
+                val watchdog = launch {
+                    delay(timeoutMs)
                     if (!isClosedForSend) {
                         markGenerationEnded()
                         DebugLogger.log("LITERT", "Watchdog: generation timed out after ${timeoutMs/1000}s")
