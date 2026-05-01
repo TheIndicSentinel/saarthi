@@ -212,9 +212,10 @@ class ModelDownloadManager @Inject constructor(
         if (!file.exists()) return false
         val size = file.length()
         if (size < 1_000_000L) return false
-        // Threshold lowered to 90%. Some filesystems or compressed downloads result in 
-        // slight size variations. This prevents "99% stuck" UI states.
-        if (expectedBytes > 0L && size < (expectedBytes * 0.90).toLong()) {
+        // Threshold tightened to 99.5%. LiteRT models (.task/.litertlm) are 
+        // deterministic in size. 90% was too loose and allowed corrupted 
+        // partial files to attempt to load, causing native crashes.
+        if (expectedBytes > 0L && size < (expectedBytes * 0.995).toLong()) {
             Timber.w("File ${file.name}: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected — incomplete")
             return false
         }

@@ -70,6 +70,8 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile override var activeModelName: String? = null
         private set
 
+    private var usingGpu: Boolean = false
+    private var isGenerating: Boolean = false
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
 
@@ -147,11 +149,6 @@ class LiteRTInferenceEngine @Inject constructor(
     /** Was GPU the active backend when the process last crashed? Survives process kills. */
     private fun wasUsingGpuAtCrash(): Boolean =
         enginePrefs.getBoolean("litert_was_using_gpu", false)
-
-    // Hard cap on output tokens per response.
-    private val MAX_NEW_TOKENS_CPU = 512
-    private val MAX_NEW_TOKENS_GPU = 512
-    @Volatile private var usingGpu: Boolean = false
 
     private fun setReady(value: Boolean) {
         isReady = value
@@ -361,22 +358,19 @@ class LiteRTInferenceEngine @Inject constructor(
         DebugLogger.log("LITERT", "Stream start  backend=${if (usingGpu) "GPU" else "CPU"}  timeout=${timeoutMs/1000}s  promptChars=${prompt.length}")
 
         generateMutex.withLock {
+            isGenerating = true
             markGenerationStarted()
             var tokenCount = 0
+            var isFinished = false
             try {
-                // Watchdog: if the native layer stalls (e.g. partial GPU driver crash
-                // that doesn't kill the process), the UI would hang forever. This closes
-                // the flow with a user-visible error after the timeout.
                 val watchdog = launch {
                     delay(timeoutMs)
-                    if (!isClosedForSend) {
-                        markGenerationEnded()
+                    if (!isFinished) {
                         DebugLogger.log("LITERT", "Watchdog: generation timed out after ${timeoutMs/1000}s")
                         close(RuntimeException("Response timed out. Please try again."))
                     }
                 }
-                // generateResponseAsync delivers each partial result token-by-token.
-                // 'done' is true on the final callback invocation.
+
                 inference.generateResponseAsync(prompt) { partialResult, done ->
                     val chunk = partialResult
                         .replace("<end_of_turn>", "")
@@ -388,17 +382,20 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
 
                     if (done) {
+                        isFinished = true
                         watchdog.cancel()
-                        markGenerationEnded()
                         DebugLogger.log("LITERT", "Stream complete  tokens≈$tokenCount")
                         close()
                     }
                 }
+
                 awaitClose {
                     watchdog.cancel()
+                    isGenerating = false
                     markGenerationEnded()
                 }
             } catch (e: Throwable) {
+                isGenerating = false
                 markGenerationEnded()
                 if (e is CancellationException) throw e
                 close(RuntimeException("Generation failed: ${e.message}", e))
@@ -413,14 +410,19 @@ class LiteRTInferenceEngine @Inject constructor(
             DebugLogger.log("LITERT", "Generate start  promptChars=${prompt.length}")
             try {
                 generateMutex.withLock {
-                    inference.generateResponse(prompt)
+                    isGenerating = true
+                    markGenerationStarted()
+                    try {
+                        inference.generateResponse(prompt)
+                    } finally {
+                        isGenerating = false
+                        markGenerationEnded()
+                    }
                 }
             } catch (e: Exception) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
                 Timber.e(e, "LiteRT generation failed")
                 throw RuntimeException(msg, e)
-            } finally {
-                // runCatching { if (wakeLock.isHeld) wakeLock.release() }
             }
         }
 
@@ -433,6 +435,11 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     private fun closeInternal() {
+        if (isGenerating) {
+            DebugLogger.log("LITERT", "Close deferred: generation in progress")
+            return
+        }
+        setReady(false)
         runCatching { llmInference?.close() }
             .onFailure { Timber.w(it, "LiteRT close warning") }
         llmInference    = null
@@ -440,7 +447,7 @@ class LiteRTInferenceEngine @Inject constructor(
         loadedMaxTokens = 0
         activeModelName = null
         _activeModelNameFlow.value = null
-        setReady(false)
+        DebugLogger.log("LITERT", "Engine closed")
     }
 
     override fun onTrimMemory(level: Int) {
