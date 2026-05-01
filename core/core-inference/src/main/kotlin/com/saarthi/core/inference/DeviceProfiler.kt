@@ -78,28 +78,36 @@ class DeviceProfiler @Inject constructor(
         val apiLevel = Build.VERSION.SDK_INT
         val isSamsung = manufacturer.contains("samsung", ignoreCase = true)
 
-        // Android 16 (API 36) is currently a 'Preview' or 'New' OS.
-        // We allow Vulkan for high-end devices with enough RAM headroom.
-        val isExperimentalAllowed = apiLevel < 36 || !isSamsung || availRamMb > 4_000
+        // ── SoC Family Detection (must precede GPU safety check) ──────────────
+        val socModel = detectSocModel()
+        val socFamily = classifySoc(socModel)
 
-        // GPU is safe when:
-        //   1. Vulkan is available
-        //   2. There's enough free RAM for GPU shared-memory overhead (~500MB)
-        //   3. Stability Gate passes
-        val gpuSafe = hasVulkan && isExperimentalAllowed && when {
-            // Any device with < 3GB free: GPU overhead risks OOM
-            availRamMb < 3_000 -> false
-            // Everything else with Vulkan: safe to try
-            else -> true
+        // ── GPU Safety: SoC-aware backend policy ─────────────────────────────
+        //
+        // Each SoC family has different GPU driver maturity. Policy follows
+        // Google AI Edge Gallery's internal tiering:
+        //
+        //  QUALCOMM (Adreno)     — Primary OpenCL. Best GPU support. Safe on API < 36.
+        //                          API 36 Samsung: known OpenCL compute crash → ban GPU.
+        //  GOOGLE_TENSOR (Pixel) — Stable OpenCL on all API levels.
+        //  SAMSUNG_EXYNOS        — OpenCL unstable on API 34+. CPU preferred.
+        //  MEDIATEK              — OpenCL driver-dependent. CPU preferred unless FLAGSHIP.
+        //  GENERIC               — Unknown. Safe default with generous RAM check.
+        val gpuSafe: Boolean = when {
+            availRamMb < 3_000 -> false          // GPU shared-memory overhead risks LMK
+            !hasVulkan -> false                  // No Vulkan = no GPU backend
+            else -> when (socFamily) {
+                SocFamily.QUALCOMM_SM8750 -> true                          // Top-tier Adreno — always GPU
+                SocFamily.QUALCOMM_SM8550 -> !(isSamsung && apiLevel >= 36) // Samsung A16 OpenCL crash
+                SocFamily.QUALCOMM_GENERIC -> !(isSamsung && apiLevel >= 36)
+                SocFamily.GOOGLE_TENSOR -> true                            // Pixel: stable OpenCL
+                SocFamily.SAMSUNG_EXYNOS -> apiLevel < 34                  // Exynos OpenCL unreliable 34+
+                SocFamily.MEDIATEK -> totalRamMb >= 8_000 && availRamMb >= 4_000  // Dimensity: GPU only on FLAGSHIP
+                SocFamily.GENERIC -> availRamMb >= 4_000                   // Unknown SoC: generous RAM check
+            }
         }
 
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-
-        // ── SoC Family Detection (for device-specific model selection) ────────
-        // Official approach: read Build.SOC_MODEL (API 31+) to identify the chipset
-        // and select the optimal model file (e.g., Qualcomm QNN/Hexagon NPU variants).
-        val socModel = detectSocModel()
-        val socFamily = classifySoc(socModel)
 
         return DeviceProfile(
             totalRamMb        = totalRamMb,

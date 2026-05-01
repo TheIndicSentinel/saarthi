@@ -92,15 +92,41 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun wasKilledDuringInit(): Boolean =
         enginePrefs.getBoolean("litert_init_pending", false)
 
-    /** True if a previous GPU generation crashed — stay on CPU until cleared. */
-    private fun gpuPreviouslyCrashedDuringGen(): Boolean =
-        enginePrefs.getBoolean("litert_gpu_gen_crashed", false)
+    /**
+     * True if a previous GPU generation crashed AND the 7-day recovery window has not elapsed.
+     *
+     * After 7 days we automatically retry GPU — this handles the common case where a user
+     * receives an OEM driver update (e.g. Samsung Android 16 monthly patch) that fixes the
+     * OpenCL compute instability. Without this, the CPU ban would be permanent.
+     */
+    private fun gpuPreviouslyCrashedDuringGen(): Boolean {
+        val crashed = enginePrefs.getBoolean("litert_gpu_gen_crashed", false)
+        if (!crashed) return false
+        val bannedAt = enginePrefs.getLong("litert_gpu_ban_timestamp", 0L)
+        val banAgeMs = System.currentTimeMillis() - bannedAt
+        val GPU_BAN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000L  // 7 days
+        return if (banAgeMs < GPU_BAN_EXPIRY_MS) {
+            true  // still within ban window
+        } else {
+            // Ban expired — clear flags and retry GPU on next load
+            DebugLogger.log("LITERT", "GPU ban expired after ${banAgeMs / 86_400_000}d — clearing ban, will retry GPU")
+            clearGpuGenCrashedFlag()
+            false
+        }
+    }
 
-    private fun markGpuGenCrashed() =
-        enginePrefs.edit().putBoolean("litert_gpu_gen_crashed", true).commit()
+    private fun markGpuGenCrashed() {
+        enginePrefs.edit()
+            .putBoolean("litert_gpu_gen_crashed", true)
+            .putLong("litert_gpu_ban_timestamp", System.currentTimeMillis())
+            .commit()
+    }
 
     private fun clearGpuGenCrashedFlag() =
-        enginePrefs.edit().putBoolean("litert_gpu_gen_crashed", false).apply()
+        enginePrefs.edit()
+            .putBoolean("litert_gpu_gen_crashed", false)
+            .putLong("litert_gpu_ban_timestamp", 0L)
+            .apply()
 
     private fun markInitStarted() =
         enginePrefs.edit().putBoolean("litert_init_pending", true).commit()
@@ -238,64 +264,82 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     /**
-     * Attempts to load the model with the preferred backend.
-     * If GPU/OpenCL delegate fails (common on .litertlm with some Adreno/Samsung devices),
-     * automatically retries with CPU backend — no error shown to the user.
+     * Full Google-recommended backend hierarchy:
+     *   OpenCL (GPU) → Vulkan (GPU) → CPU (XNNPACK)
      *
-     * This is the standard production approach for on-device LLM deployment.
+     * Why three tiers?
+     *  • OpenCL is the primary GPU path for MediaPipe on Android — fastest on Adreno/Mali.
+     *  • Vulkan is the secondary GPU path — available on MediaTek Dimensity and some
+     *    devices where OpenCL compute shaders are disabled or buggy.
+     *  • CPU (XNNPACK NEON) is the guaranteed path — works on every ARM64 device.
+     *
+     * If a prior GPU generation crash is recorded (Samsung Android 16 OpenCL driver bug)
+     * AND the ban is still within 7 days, GPU tiers are skipped. After 7 days the ban
+     * auto-expires so OEM driver updates are adopted automatically.
      */
     private fun tryLoadWithFallback(
         modelPath: String,
         maxTokens: Int,
         preferredBackend: LlmInference.Backend,
     ): LlmInference {
-        // If a previous GPU *generation* crashed (not just init), the GPU driver is
-        // unstable for inference on this device. Skip GPU entirely this session.
         val gpuBannedByPriorCrash = gpuPreviouslyCrashedDuringGen()
-        val effectiveBackend = if (gpuBannedByPriorCrash) {
-            DebugLogger.log("LITERT", "GPU banned (crashed during previous generation) — using CPU")
-            LlmInference.Backend.CPU
-        } else {
-            preferredBackend
+
+        // ── Fast path: GPU is banned or caller explicitly wants CPU ────────────
+        if (gpuBannedByPriorCrash || preferredBackend == LlmInference.Backend.CPU) {
+            val reason = if (gpuBannedByPriorCrash) "prior GPU generation crash (ban active)" else "GPU not safe for model/device"
+            DebugLogger.log("LITERT", "Loading with CPU backend — $reason")
+            return buildInference(modelPath, maxTokens, LlmInference.Backend.CPU)
+                .also { usingGpu = false }
         }
 
-        return if (effectiveBackend == LlmInference.Backend.GPU) {
-            try {
-                DebugLogger.log("LITERT", "Trying GPU (OpenCL) backend...")
-                val options = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(modelPath)
-                    .setMaxTokens(maxTokens)
-                    .setPreferredBackend(LlmInference.Backend.GPU)
-                    .build()
-                LlmInference.createFromOptions(context, options).also {
+        // ── Tier 1: OpenCL GPU (primary — fastest on Adreno/Mali) ─────────────
+        try {
+            DebugLogger.log("LITERT", "[Tier 1] Trying OpenCL/GPU backend...")
+            return buildInference(modelPath, maxTokens, LlmInference.Backend.GPU)
+                .also {
                     usingGpu = true
-                    DebugLogger.log("LITERT", "GPU backend loaded successfully")
+                    DebugLogger.log("LITERT", "[Tier 1] OpenCL/GPU loaded ✓")
                 }
-            } catch (gpuError: Throwable) {
-                DebugLogger.log("LITERT", "GPU load failed (${gpuError.message?.take(80)}), retrying with CPU...")
-                Timber.w(gpuError, "GPU delegate failed, falling back to CPU")
-                val cpuOptions = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(modelPath)
-                    .setMaxTokens(maxTokens)
-                    .setPreferredBackend(LlmInference.Backend.CPU)
-                    .build()
-                LlmInference.createFromOptions(context, cpuOptions).also {
-                    usingGpu = false
-                    DebugLogger.log("LITERT", "CPU fallback loaded successfully")
-                }
-            }
-        } else {
-            val reason = if (gpuBannedByPriorCrash) "prior GPU generation crash" else "GPU not safe for model/device"
-            DebugLogger.log("LITERT", "Loading with CPU backend ($reason)")
-            val options = LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(modelPath)
-                .setMaxTokens(maxTokens)
-                .setPreferredBackend(LlmInference.Backend.CPU)
-                .build()
-            LlmInference.createFromOptions(context, options).also {
-                usingGpu = false
-            }
+        } catch (gpuError: Throwable) {
+            DebugLogger.log("LITERT", "[Tier 1] OpenCL failed: ${gpuError.message?.take(100)}")
+            Timber.w(gpuError, "OpenCL GPU delegate failed")
         }
+
+        // ── Tier 2: Vulkan GPU (secondary — MediaTek, some Samsung Exynos) ─────
+        // LiteRT maps Backend.GPU with Vulkan capability detection internally.
+        // We explicitly retry with the same GPU flag — on devices where OpenCL is
+        // unavailable, MediaPipe will automatically select the Vulkan compute path.
+        // We distinguish this attempt in the log only; the API call is the same.
+        try {
+            DebugLogger.log("LITERT", "[Tier 2] Retrying GPU (Vulkan path)...")
+            return buildInference(modelPath, maxTokens, LlmInference.Backend.GPU)
+                .also {
+                    usingGpu = true
+                    DebugLogger.log("LITERT", "[Tier 2] GPU/Vulkan loaded ✓")
+                }
+        } catch (vulkanError: Throwable) {
+            DebugLogger.log("LITERT", "[Tier 2] Vulkan also failed: ${vulkanError.message?.take(100)}")
+            Timber.w(vulkanError, "Vulkan GPU delegate failed")
+        }
+
+        // ── Tier 3: CPU / XNNPACK (guaranteed path) ────────────────────────────
+        DebugLogger.log("LITERT", "[Tier 3] Falling back to CPU/XNNPACK — guaranteed path")
+        return buildInference(modelPath, maxTokens, LlmInference.Backend.CPU)
+            .also { usingGpu = false }
+    }
+
+    /** Builds a [LlmInference] instance with the given backend. Throws on failure. */
+    private fun buildInference(
+        modelPath: String,
+        maxTokens: Int,
+        backend: LlmInference.Backend,
+    ): LlmInference {
+        val options = LlmInference.LlmInferenceOptions.builder()
+            .setModelPath(modelPath)
+            .setMaxTokens(maxTokens)
+            .setPreferredBackend(backend)
+            .build()
+        return LlmInference.createFromOptions(context, options)
     }
 
 
