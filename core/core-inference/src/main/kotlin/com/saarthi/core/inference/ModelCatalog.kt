@@ -64,10 +64,10 @@ class ModelCatalog @Inject constructor() {
         // Gemma 4 E2B IT · LiteRT (Recommended for most devices)
         ModelEntry(
             id            = "gemma4-e2b-it-litert-int8",
-            displayName   = "Gemma 4 E2B IT · LiteRT INT8  🚀 New",
-            description   = "Google's latest Gemma 4 model. Frontier-level reasoning with audio/vision support. GPU-accelerated: 25-40 tok/s. ~1.8 GB download.",
-            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-q8.task",
-            fileSizeBytes = 1_943_493_017L,
+            displayName   = "Gemma 4 E2B IT · LiteRT  🚀 New",
+            description   = "Google's latest Gemma 4 model. Frontier-level reasoning with audio/vision support. GPU-accelerated via MediaPipe. ~2.0 GB download.",
+            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task",
+            fileSizeBytes = 2_147_483_648L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma4-e2b",
@@ -78,10 +78,10 @@ class ModelCatalog @Inject constructor() {
         // Gemma 4 E4B IT · LiteRT (For high-end devices)
         ModelEntry(
             id            = "gemma4-e4b-it-litert-int8",
-            displayName   = "Gemma 4 E4B IT · LiteRT INT8  🚀 New",
-            description   = "High-performance Gemma 4 model. Superior reasoning and multimodal capabilities. GPU-accelerated: 20-30 tok/s. ~2.8 GB download.",
-            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-q8.task",
-            fileSizeBytes = 3_693_671_219L,
+            displayName   = "Gemma 4 E4B IT · LiteRT  🚀 New",
+            description   = "High-performance Gemma 4 model. Superior reasoning and multimodal capabilities. GPU-accelerated via MediaPipe. ~2.96 GB download.",
+            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.task",
+            fileSizeBytes = 3_178_086_400L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma4-e4b",
