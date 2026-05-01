@@ -108,7 +108,7 @@ class ModelCatalog @Inject constructor() {
             downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
             fileSizeBytes = 2_772_434_944L,
             engineType    = EngineType.LITERT,
-            requiredTier  = DeviceTier.LOW,
+            requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma4-e2b",
             contextLength = 128_000,
             tags          = listOf("New", "LiteRT", "Google", "Gemma 4", "Reasoning", "Audio", "Vision"),
@@ -117,18 +117,20 @@ class ModelCatalog @Inject constructor() {
         // ── Gemma 4 E4B ─────────────────────────────────────────────────────
 
         // Gemma 4 E4B · Generic (all devices) — CPU + OpenCL with auto fallback
+        // NOTE: Requires FLAGSHIP tier — 3.5GB model needs 4GB+ RAM headroom on CPU.
         ModelEntry(
             id            = "gemma4-e4b-it-litert-int8",
             displayName   = "Gemma 4 E4B IT · LiteRT  🚀 New",
-            description   = "High-performance Gemma 4. Superior reasoning and multimodal capabilities. Auto-selects best backend. ~3.5 GB download.",
+            description   = "High-performance Gemma 4. Superior reasoning and multimodal capabilities. Auto-selects best backend. ~3.5 GB download. Requires flagship device.",
             downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
             fileSizeBytes = 3_758_096_384L,
             engineType    = EngineType.LITERT,
-            requiredTier  = DeviceTier.MID,
+            requiredTier  = DeviceTier.FLAGSHIP,
             modelFamily   = "gemma4-e4b",
             contextLength = 128_000,
-            tags          = listOf("New", "LiteRT", "Google", "Gemma 4", "Best Quality", "Audio", "Vision"),
+            tags          = listOf("New", "LiteRT", "Google", "Gemma 4", "Best Quality", "Audio", "Vision", "Flagship Only"),
         ),
+
 
 
         // ── Gemma 3n E2B IT · LiteRT (mobile-first MatFormer, recommended LOW/MID) ─
@@ -138,13 +140,14 @@ class ModelCatalog @Inject constructor() {
             displayName   = "Gemma 3n E2B IT · LiteRT INT4  ⭐ Recommended",
             description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated: 20–35 tok/s. ~1.4 GB download. Best choice for LOW/MID phones. Proven stable & fast.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task",
-            fileSizeBytes = 3_136_226_711L,
+            fileSizeBytes = 1_474_354_560L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3n",
             contextLength = 1280,
             tags          = listOf("Recommended", "LiteRT GPU", "Google", "Gemma 3n", "Mobile-First", "Fast", "Stable"),
         ),
+
 
         ModelEntry(
             id            = "gemma3n-e4b-it-litert-int4",

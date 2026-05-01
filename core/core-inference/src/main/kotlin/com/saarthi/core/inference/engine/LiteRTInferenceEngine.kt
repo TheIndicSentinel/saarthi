@@ -12,9 +12,11 @@ import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
@@ -75,13 +77,23 @@ class LiteRTInferenceEngine @Inject constructor(
     private val engineDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
     // Crash detection: a synchronous SharedPrefs write survives process kill.
-    // If 'litert_gen_pending' is true at startup, the previous generation never
-    // completed cleanly → the C++ LlmInference state may be corrupted.
+    // Two flags:
+    //   litert_gen_pending  — set during generation; if true at startup → crash mid-response
+    //   litert_init_pending — set during model init; if true at startup → crash mid-load (OOM etc)
     private val enginePrefs: SharedPreferences
         get() = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE)
 
     private fun wasKilledDuringGeneration(): Boolean =
         enginePrefs.getBoolean("litert_gen_pending", false)
+
+    private fun wasKilledDuringInit(): Boolean =
+        enginePrefs.getBoolean("litert_init_pending", false)
+
+    private fun markInitStarted() =
+        enginePrefs.edit().putBoolean("litert_init_pending", true).commit()
+
+    private fun markInitEnded() =
+        enginePrefs.edit().putBoolean("litert_init_pending", false).apply()
 
     private fun markGenerationStarted() =
         enginePrefs.edit().putBoolean("litert_gen_pending", true).commit()
@@ -89,9 +101,12 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun markGenerationEnded() =
         enginePrefs.edit().putBoolean("litert_gen_pending", false).apply()
 
-    // Hard cap on output tokens. Prevents Samsung sustained-CPU watchdog from killing the process.
-    // 512 tokens at 0.4-3 tok/s = 2-21 minutes max per response — safe and useful.
-    private val MAX_NEW_TOKENS = 512
+    // Hard cap on output tokens.
+    // CPU mode: 256 tokens at 1-3 tok/s = 85-256 seconds max. Keeps responses snappy.
+    // GPU mode: 512 tokens at 20-40 tok/s = 13-26 seconds. Fast enough to allow more.
+    private val MAX_NEW_TOKENS_CPU = 256
+    private val MAX_NEW_TOKENS_GPU = 512
+    @Volatile private var usingGpu: Boolean = false
 
     private fun setReady(value: Boolean) {
         isReady = value
@@ -100,20 +115,21 @@ class LiteRTInferenceEngine @Inject constructor(
 
     override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
         initMutex.withLock {
-            // If we crashed mid-generation, the C++ state is corrupt — force full reinit.
-            val crashedDuringGen = wasKilledDuringGeneration()
-            if (crashedDuringGen) {
-                DebugLogger.log("LITERT", "Crash recovery: forcing engine reinit")
+            // Recover from crash during generation OR during previous model init (e.g., OOM on E4B).
+            val crashedDuringGen  = wasKilledDuringGeneration()
+            val crashedDuringInit = wasKilledDuringInit()
+            if (crashedDuringGen || crashedDuringInit) {
+                DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit — forcing reinit")
                 markGenerationEnded()
+                markInitEnded()
                 closeInternal()
             }
 
-            if (!crashedDuringGen &&
+            if (!crashedDuringGen && !crashedDuringInit &&
                 isReady &&
                 loadedModelPath == config.modelPath &&
                 loadedMaxTokens == config.maxTokens) {
                 DebugLogger.log("LITERT", "Already loaded — skipping: ${config.modelPath.substringAfterLast('/')}")
-                // Ensure model name is still correctly set if re-initialized with same path
                 activeModelName = config.modelName
                 _activeModelNameFlow.value = config.modelName
                 return@withLock
@@ -149,7 +165,13 @@ class LiteRTInferenceEngine @Inject constructor(
             val effectiveMaxTokens = config.maxTokens.coerceAtLeast(1280)
             DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
+            // Mark init as started BEFORE calling createFromOptions.
+            // If the process is OOM-killed during model loading (e.g., E4B on CPU),
+            // this flag survives the restart and triggers crash recovery on next open.
+            markInitStarted()
+
             try {
+
                 // tasks-genai >= 0.10.17: setTopK/setTemperature/setRandomSeed were moved
                 // out of LlmInferenceOptions.Builder into a per-request SamplingParams API.
                 // The builder now only accepts setModelPath and setMaxTokens.
@@ -170,11 +192,18 @@ class LiteRTInferenceEngine @Inject constructor(
                 loadedMaxTokens = config.maxTokens
                 activeModelName = config.modelName
                 _activeModelNameFlow.value = config.modelName
+                usingGpu = (preferredBackend == LlmInference.Backend.GPU)
+                markInitEnded() // ← clear the crash flag on success
                 setReady(true)
-                val actualBackend = if (llmInference != null && preferredBackend == LlmInference.Backend.GPU) "GPU" else "CPU"
-                DebugLogger.log("LITERT", "Model ready ($profile | Backend: $actualBackend)")
-            } catch (e: Exception) {
-                val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                DebugLogger.log("LITERT", "Model ready ($profile | Backend: ${if (usingGpu) "GPU" else "CPU"})")
+            } catch (e: Throwable) {
+                // Catch Throwable (not just Exception) to handle OutOfMemoryError
+                // which is thrown when the model is too large for available RAM (e.g. E4B on CPU).
+                markInitEnded() // clear flag so recovery doesn't loop
+                val msg = when (e) {
+                    is OutOfMemoryError -> "Not enough RAM to load this model. Close background apps and try again, or choose a smaller model."
+                    else -> e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                }
                 DebugLogger.log("LITERT", "Load failed: $msg")
                 Timber.e(e, "LiteRT model load failed")
                 throw RuntimeException("LiteRT failed to load model: $msg", e)
@@ -203,10 +232,11 @@ class LiteRTInferenceEngine @Inject constructor(
                     .setPreferredBackend(LlmInference.Backend.GPU)
                     .build()
                 LlmInference.createFromOptions(context, options).also {
+                    usingGpu = true
                     DebugLogger.log("LITERT", "GPU backend loaded successfully")
                 }
-            } catch (gpuError: Exception) {
-                // GPU/OpenCL delegate failed — this is common on .litertlm with Samsung/Adreno.
+            } catch (gpuError: Throwable) {
+                // GPU/OpenCL delegate failed — common on .litertlm with Samsung/Adreno.
                 // Automatically fall back to CPU without surfacing the error to the user.
                 DebugLogger.log("LITERT", "GPU failed (${gpuError.message?.take(80)}), retrying with CPU...")
                 Timber.w(gpuError, "GPU delegate failed, falling back to CPU")
@@ -216,6 +246,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     .setPreferredBackend(LlmInference.Backend.CPU)
                     .build()
                 LlmInference.createFromOptions(context, cpuOptions).also {
+                    usingGpu = false
                     DebugLogger.log("LITERT", "CPU fallback loaded successfully")
                 }
             }
@@ -226,50 +257,63 @@ class LiteRTInferenceEngine @Inject constructor(
                 .setMaxTokens(maxTokens)
                 .setPreferredBackend(LlmInference.Backend.CPU)
                 .build()
-            LlmInference.createFromOptions(context, options)
+            LlmInference.createFromOptions(context, options).also {
+                usingGpu = false
+            }
         }
     }
 
 
-    override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
+    /**
+     * Real token-by-token streaming using MediaPipe's [LlmInference.generateResponseAsync].
+     *
+     * Each token is emitted as it is produced by the model — users see output appear
+     * immediately rather than waiting for the full response (which can take 60–120 s
+     * on CPU). This matches the behaviour of Google AI Edge Gallery.
+     *
+     * The [callbackFlow] bridges the callback-based async API into Kotlin coroutines.
+     */
+    override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow<String> {
         val inference = llmInference
             ?: throw IllegalStateException("LiteRT engine not initialised.")
 
-        DebugLogger.log("LITERT", "Stream start (real-time async)  promptChars=${prompt.length}")
+        val maxTokens = if (usingGpu) MAX_NEW_TOKENS_GPU else MAX_NEW_TOKENS_CPU
+        DebugLogger.log("LITERT", "Stream start  backend=${if (usingGpu) "GPU" else "CPU"}  maxTokens=$maxTokens  promptChars=${prompt.length}")
 
         generateMutex.withLock {
             markGenerationStarted()
+            var tokenCount = 0
             try {
-                // Standard synchronous call for stability.
-                // Prefill/generation speed is now handled by GPU acceleration (enabled in DeviceProfiler).
-                val fullResponse = inference.generateResponse(prompt)
-                markGenerationEnded()
-
-                if (!fullResponse.isNullOrBlank()) {
-                    val cleaned = fullResponse
+                // generateResponseAsync delivers each partial result token-by-token.
+                // 'done' is true on the final callback invocation.
+                inference.generateResponseAsync(prompt) { partialResult, done ->
+                    val chunk = partialResult
                         .replace("<end_of_turn>", "")
                         .replace("<eos>", "")
-                        .trim()
 
-                    DebugLogger.log("LITERT", "Generation result ready: ${cleaned.length} chars")
-
-                    // Burst-emit first few words quickly for 'instant feel'
-                    val words = cleaned.split(" ")
-                    for (i in words.indices) {
-                        val chunk = if (i == 0) words[i] else " ${words[i]}"
-                        emit(chunk)
-                        // Extremely fast delivery for first 10 tokens to mask prefill lag
-                        if (i > 10) kotlinx.coroutines.delay(10)
+                    if (chunk.isNotEmpty()) {
+                        trySend(chunk)
+                        tokenCount++
                     }
-                } else {
-                    DebugLogger.log("LITERT", "Empty response from engine")
+
+                    if (done) {
+                        markGenerationEnded()
+                        DebugLogger.log("LITERT", "Stream complete  tokens≈$tokenCount")
+                        close() // closes the callbackFlow normally
+                    }
                 }
-            } catch (e: Exception) {
+                // Suspend until the callback calls close() or an error is sent
+                awaitClose {
+                    // Cancellation: attempt to stop generation gracefully
+                    runCatching { inference.cancelGenerateResponseAsync() }
+                    markGenerationEnded()
+                }
+            } catch (e: Throwable) {
                 markGenerationEnded()
-                throw e
+                if (e is CancellationException) throw e
+                close(RuntimeException("Generation failed: ${e.message}", e))
             }
         }
-        DebugLogger.log("LITERT", "Stream emission complete")
     }.flowOn(engineDispatcher)
 
     override suspend fun generate(prompt: String, packType: PackType): String =

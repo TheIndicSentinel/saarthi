@@ -293,10 +293,15 @@ class OnboardingViewModel @Inject constructor(
         downloadManager.startDownload(model)
     }
 
+    fun restartDownload(model: ModelEntry) {
+        downloadManager.restartDownload(model)
+    }
+
     fun cancelDownload(model: ModelEntry) {
         downloadManager.cancelDownload(model)
         refreshDownloadedModels()
     }
+
 
     fun deleteModel(model: ModelEntry) {
         val file = downloadManager.localPathFor(model)

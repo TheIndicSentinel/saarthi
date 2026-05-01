@@ -124,16 +124,20 @@ class ChatRepositoryImpl @Inject constructor(
         val sessionId = _currentSessionId.value
         val userMsg = ChatMessage(content = userMessage, role = MessageRole.USER, attachments = attachments)
         _history.update { it + userMsg }
-        scope.launch { conversationDao.insert(userMsg.toEntity(sessionId)) }
-
-        // Update session title from first user message
+        
         scope.launch {
-            val session = chatSessionDao.getAll().find { it.id == sessionId }
-            if (session != null) {
-                val title = if (session.title == "New Chat") userMessage.take(40).trimEnd() else session.title
-                chatSessionDao.updateTitleAndTimestamp(sessionId, title, System.currentTimeMillis())
+            withContext(kotlinx.coroutines.NonCancellable) {
+                conversationDao.insert(userMsg.toEntity(sessionId))
+                
+                // Update session title from first user message
+                val session = chatSessionDao.getAll().find { it.id == sessionId }
+                if (session != null) {
+                    val title = if (session.title == "New Chat") userMessage.take(40).trimEnd() else session.title
+                    chatSessionDao.updateTitleAndTimestamp(sessionId, title, System.currentTimeMillis())
+                }
             }
         }
+
 
         val streamingId = UUID.randomUUID().toString()
         val placeholder = ChatMessage(id = streamingId, content = "", role = MessageRole.ASSISTANT, isStreaming = true)
@@ -141,11 +145,21 @@ class ChatRepositoryImpl @Inject constructor(
 
         // Build prompt and run inference fully on IO — avoids blocking the main thread
         // Start foreground service IMMEDIATELY — prevents Android from killing process.
-        // Doing this outside the flow builder ensures it's called on the main/caller thread.
         InferenceService.start(appContext)
         
         return flow {
+            // Check readiness first
+            if (!inferenceEngine.isReady) {
+                emit("AI model is still loading or not initialized. Please wait a moment.")
+                InferenceService.stop(appContext)
+                _history.update { history ->
+                    history.map { if (it.id == streamingId) it.copy(content = "Model not ready.", isStreaming = false) else it }
+                }
+                return@flow
+            }
+
             val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
+
             DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
             
             // Brief stabilization delay — lets Foreground Service register before GPU spike

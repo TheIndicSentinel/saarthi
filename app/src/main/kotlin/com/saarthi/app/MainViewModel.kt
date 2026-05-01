@@ -64,6 +64,10 @@ class MainViewModel @Inject constructor(
                 return@launch
             }
 
+            // Move to Home INSTANTLY if we have a model path.
+            // Initialization happens in the background.
+            _startState.value = AppStartState.GoToHome
+
             val catalogEntry = modelCatalog.allModels.find {
                 modelPath.endsWith(it.fileName)
             }
@@ -78,22 +82,26 @@ class MainViewModel @Inject constructor(
                 nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
 
-            runCatching {
-                inferenceEngine.initialize(config)
-                restoreModelFamily(modelPath)
-                _startState.value = AppStartState.GoToHome
-            }.onFailure { e ->
-                val msg = when {
-                    e is OutOfMemoryError ->
-                        "Not enough RAM to load the saved model.\n\nClose background apps and retry, or select a smaller model."
-                    e.message?.isNotBlank() == true -> e.message!!
-                    else -> "Failed to load AI model (${e.javaClass.simpleName})"
+            // Background initialization
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    inferenceEngine.initialize(config)
+                    restoreModelFamily(modelPath)
+                }.onFailure { e ->
+                    val msg = when {
+                        e is OutOfMemoryError ->
+                            "Not enough RAM to load the saved model.\n\nClose background apps and retry, or select a smaller model."
+                        e.message?.isNotBlank() == true -> e.message!!
+                        else -> "Failed to load AI model (${e.javaClass.simpleName})"
+                    }
+                    com.saarthi.core.inference.DebugLogger.log("MAIN", "Background init failed: $msg")
+                    // We don't change _startState here because the user is already on Home.
+                    // The InferenceEngine will remain !isReady, which AssistantViewModel handles.
                 }
-                com.saarthi.core.inference.DebugLogger.log("MAIN", "Startup init failed: $msg")
-                _startState.value = AppStartState.ModelError(msg)
             }
         }
     }
+
 
     private fun restoreModelFamily(modelPath: String) {
         val family = modelCatalog.allModels

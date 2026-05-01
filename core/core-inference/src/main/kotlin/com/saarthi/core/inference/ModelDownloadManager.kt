@@ -176,8 +176,18 @@ class ModelDownloadManager @Inject constructor(
         _allProgress.update { it - modelId }
     }
 
+    /** 
+     * Force-restarts a download. Useful if DownloadManager is stuck in a 
+     * 'Will retry shortly' loop due to transient network issues.
+     */
+    fun restartDownload(model: ModelEntry) {
+        cancelDownload(model)
+        startDownload(model)
+    }
+
     /**
      * Called on ViewModel init — reattaches progress polling for any model
+
      * whose download is still active in Android DownloadManager.
      */
     fun reattachActiveDownloads(models: List<ModelEntry>) {

@@ -231,11 +231,20 @@ fun AssistantScreen(
                     .padding(innerPadding)
                     .imePadding(),
             ) {
+                // Background loading indicator
+                if (!uiState.modelReady && !uiState.isStreaming) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = SaarthiColors.Gold,
+                        trackColor = Color.Transparent,
+                    )
+                }
+
                 if (messages.isEmpty()) {
                     EmptyState(
                         language = currentLanguage,
                         modifier = Modifier.weight(1f),
-                        onSuggestionTap = { text -> viewModel.onInputChange(text) },
+                        onSuggestionTap = { viewModel.onInputChange(it) }
                     )
                 } else {
                     Box(modifier = Modifier.weight(1f)) {
@@ -249,7 +258,7 @@ fun AssistantScreen(
                                 MessageBubble(
                                     message = msg,
                                     onDelete = { viewModel.deleteMessage(msg.id) },
-                                    avatarLabel = currentLanguage.firstLetter,
+                                    avatarLabel = currentLanguage.avatarLabel,
                                 )
                             }
                             if (uiState.isStreaming && messages.any { it.isStreaming && it.content.isEmpty() }) {
@@ -257,6 +266,7 @@ fun AssistantScreen(
                             }
                             item { Spacer(Modifier.height(8.dp)) }
                         }
+
 
                         // Scroll-to-bottom FAB
                         val showScrollFab = remember { derivedStateOf { listState.firstVisibleItemIndex > 2 } }

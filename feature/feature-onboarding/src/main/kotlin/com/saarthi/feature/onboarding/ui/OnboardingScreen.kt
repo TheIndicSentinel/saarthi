@@ -597,13 +597,27 @@ private fun CatalogModelCard(
         if (progress is DownloadProgress.Paused) {
             Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
+                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(4.dp)),
                 color = SaarthiColors.Gold.copy(alpha = 0.5f),
                 trackColor = SaarthiColors.GlassBorder,
             )
-            Spacer(Modifier.height(3.dp))
-            Text(progress.reason, color = SaarthiColors.Gold, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    progress.reason, 
+                    color = SaarthiColors.Gold, 
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(
+                    onClick = { onDownload() /* calling onDownload again re-enqueues or restarts polling */ },
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text("Retry Now", color = SaarthiColors.Gold, style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
+
 
         if (progress is DownloadProgress.Failed) {
             Spacer(Modifier.height(4.dp))
