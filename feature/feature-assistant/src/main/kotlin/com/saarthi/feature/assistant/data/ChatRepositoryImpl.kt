@@ -37,10 +37,15 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
 
-private const val MAX_HISTORY_TURNS = 6
-// Prompt budget: Gemma .task models have 1280 compiled KV cache tokens.
-// 1 token ≈ 3.5 chars → ~4480 chars. System prompt is ~1200 chars now.
-private const val MAX_PROMPT_CHARS = 4_000
+private const val MAX_HISTORY_TURNS = 6  // reduced adaptively for small-context models
+// Prompt budget guard: ensures total prompt chars fit within the model's compiled KV cache.
+// Formula: (contextLength - maxOutputTokens) * avgCharsPerToken
+// For 1280-ctx models: (1280 - 512) * 3.0 = ~2304 chars
+// For 2048-ctx models: (2048 - 512) * 3.0 = ~4608 chars
+// We use 3.0 chars/token (conservative) because Gemma tokenizer uses sub-word BPE.
+private const val MAX_PROMPT_CHARS_1280 = 2_200  // 1280-ctx models (Gemma 3/3n)
+private const val MAX_PROMPT_CHARS_2048 = 4_500  // 2048-ctx models (Gemma 2)
+private const val MAX_PROMPT_CHARS_LARGE = 8_000 // Large-ctx models (Gemma 4)
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
@@ -158,16 +163,14 @@ class ChatRepositoryImpl @Inject constructor(
                 return@flow
             }
 
-            val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
 
-            DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
-            
-            // Brief stabilization delay — lets Foreground Service register before GPU spike
-            delay(200)
-            
-            val startTime = System.currentTimeMillis()
-            var tokenCount = 0
-            val accumulated = StringBuilder()
+        // Build prompt using adaptive budget based on model's context length
+        val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
+        DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
+
+        val startTime = System.currentTimeMillis()
+        var tokenCount = 0
+        val accumulated = StringBuilder()
 
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
@@ -276,8 +279,8 @@ class ChatRepositoryImpl @Inject constructor(
         // when messages are deleted or the order changes.
         val history = _history.value
             .filter { it.content.isNotBlank() && !it.isStreaming }
-            .dropLast(1)  // exclude the just-added user message (already appended to _history)
-            .takeLast(MAX_HISTORY_TURNS)
+            .dropLast(1)
+            .takeLast(maxHistoryTurns)  // adaptive: 2 for 1280-ctx, 4 for 2048-ctx, 6 for large
 
         val fileContext = if (attachments.isNotEmpty())
             fileContentExtractor.buildRagContext(attachments, userMessage)
@@ -312,10 +315,11 @@ class ChatRepositoryImpl @Inject constructor(
                 append("<start_of_turn>model\n")
             }
         }.let { prompt ->
-            val needsTrim = prompt.length > MAX_PROMPT_CHARS
-            val finalPrompt = if (needsTrim) trimPrompt(prompt) else prompt
+            val budget = maxPromptChars
+            val needsTrim = prompt.length > budget
+            val finalPrompt = if (needsTrim) trimPrompt(prompt, budget) else prompt
             val hasDirective = finalPrompt.contains("[SYSTEM_DIRECTIVE]")
-            DebugLogger.log("PROMPT", "Final prompt  chars=${finalPrompt.length}  trimmed=$needsTrim  systemDirectivePresent=$hasDirective")
+            DebugLogger.log("PROMPT", "Final prompt  chars=${finalPrompt.length}  budget=$budget  trimmed=$needsTrim  systemDirectivePresent=$hasDirective")
             if (!hasDirective) {
                 DebugLogger.log("PROMPT", "WARNING: System directive was lost during trimming!")
             }
@@ -348,7 +352,7 @@ class ChatRepositoryImpl @Inject constructor(
      * 2. Drops middle turns one by one until budget is met.
      * 3. ALWAYS preserves the last 2 turns (Current query context).
      */
-    private fun trimPrompt(prompt: String): String {
+    private fun trimPrompt(prompt: String, budget: Int = MAX_PROMPT_CHARS_1280): String {
         val marker = "<start_of_turn>"
         val turns = prompt.split(marker).filter { it.isNotBlank() }.map { marker + it }
         if (turns.size <= 3) return prompt
@@ -363,8 +367,7 @@ class ChatRepositoryImpl @Inject constructor(
             latestTurns.forEach { append(it) }
         }
 
-        // Proactively drop middle turns until we are under budget
-        while (currentPrompt.length > MAX_PROMPT_CHARS && middleTurns.isNotEmpty()) {
+        while (currentPrompt.length > budget && middleTurns.isNotEmpty()) {
             middleTurns.removeAt(0)
             currentPrompt = buildString {
                 append(systemTurn)

@@ -310,13 +310,25 @@ class LiteRTInferenceEngine @Inject constructor(
         val inference = llmInference
             ?: throw IllegalStateException("LiteRT engine not initialised.")
 
-        val maxTokens = if (usingGpu) MAX_NEW_TOKENS_GPU else MAX_NEW_TOKENS_CPU
-        DebugLogger.log("LITERT", "Stream start  backend=${if (usingGpu) "GPU" else "CPU"}  maxTokens=$maxTokens  promptChars=${prompt.length}")
+        // Adaptive timeout: GPU at ~30 tok/s → 90s = ~2700 tokens. CPU at ~5 tok/s → 180s.
+        val timeoutMs = if (usingGpu) 90_000L else 180_000L
+        DebugLogger.log("LITERT", "Stream start  backend=${if (usingGpu) "GPU" else "CPU"}  timeout=${timeoutMs/1000}s  promptChars=${prompt.length}")
 
         generateMutex.withLock {
             markGenerationStarted()
             var tokenCount = 0
             try {
+                // Watchdog: if the native layer stalls (e.g. partial GPU driver crash
+                // that doesn't kill the process), the UI would hang forever. This closes
+                // the flow with a user-visible error after the timeout.
+                val watchdog = kotlinx.coroutines.launch {
+                    kotlinx.coroutines.delay(timeoutMs)
+                    if (!isClosedForSend) {
+                        markGenerationEnded()
+                        DebugLogger.log("LITERT", "Watchdog: generation timed out after ${timeoutMs/1000}s")
+                        close(RuntimeException("Response timed out. Please try again."))
+                    }
+                }
                 // generateResponseAsync delivers each partial result token-by-token.
                 // 'done' is true on the final callback invocation.
                 inference.generateResponseAsync(prompt) { partialResult, done ->
@@ -330,16 +342,14 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
 
                     if (done) {
+                        watchdog.cancel()
                         markGenerationEnded()
                         DebugLogger.log("LITERT", "Stream complete  tokens≈$tokenCount")
-                        close() // closes the callbackFlow normally
+                        close()
                     }
                 }
-                // Suspend until the callback calls close() or an error is sent
                 awaitClose {
-                    // Note: cancelGenerateResponseAsync() only exists on LlmInference.Session,
-                    // not on the top-level LlmInference object. Coroutine cancellation
-                    // propagates naturally when the collecting scope is cancelled.
+                    watchdog.cancel()
                     markGenerationEnded()
                 }
             } catch (e: Throwable) {
