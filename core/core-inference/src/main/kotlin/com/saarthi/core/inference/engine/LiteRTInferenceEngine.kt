@@ -304,8 +304,9 @@ class LiteRTInferenceEngine @Inject constructor(
                 }
                 // Suspend until the callback calls close() or an error is sent
                 awaitClose {
-                    // Cancellation: attempt to stop generation gracefully
-                    runCatching { inference.cancelGenerateResponseAsync() }
+                    // Note: cancelGenerateResponseAsync() only exists on LlmInference.Session,
+                    // not on the top-level LlmInference object. Coroutine cancellation
+                    // propagates naturally when the collecting scope is cancelled.
                     markGenerationEnded()
                 }
             } catch (e: Throwable) {
