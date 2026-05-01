@@ -72,13 +72,12 @@ class MainViewModel @Inject constructor(
                 modelPath.endsWith(it.fileName)
             }
 
-            // CRITICAL: maxTokens tells MediaPipe how much KV cache to pre-allocate.
-            // contextLength (128K for Gemma 4) is the TRAINING context, NOT the allocation size.
-            // Setting maxTokens=128000 causes MediaPipe to allocate ~4-8GB of memory
-            // instantly, which silently OOM-kills the process during first generation.
-            // 2048 is the correct production value: long enough for any conversational
-            // response, small enough to load in under 1 second.
-            val maxTokens = 2048
+            // maxTokens = the KV-cache size MediaPipe pre-allocates AND the model's
+            // maximum total sequence (input + output). Must match the model's compiled-in
+            // context length for .task models (Gemma 3/3n = 1280, Gemma 2 = 2048).
+            // For .litertlm models (Gemma 4 with 128K training context) cap at 2048
+            // to avoid massive pre-allocation.
+            val maxTokens = (catalogEntry?.contextLength ?: 1280).coerceIn(1280, 2048)
             val profile = deviceProfiler.profile()
             val config = InferenceConfig(
                 modelPath  = modelPath,

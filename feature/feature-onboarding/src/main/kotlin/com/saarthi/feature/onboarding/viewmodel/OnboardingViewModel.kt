@@ -375,11 +375,9 @@ class OnboardingViewModel @Inject constructor(
             }
         }
 
-        // CRITICAL: maxTokens = KV cache pre-allocation size in MediaPipe.
-        // contextLength is the model's training context (128K for Gemma 4),
-        // NOT what we should allocate. 128K tokens = ~4-8GB memory = silent OOM crash.
-        // 2048 tokens is enough for any conversational response on mobile.
-        val maxTokens = 2048
+        // maxTokens must match the model's compiled-in context for .task models.
+        // Gemma 3/3n = 1280, Gemma 2 = 2048, Gemma 4 .litertlm (128K) → capped at 2048.
+        val maxTokens = (catalogEntry?.contextLength ?: 1280).coerceIn(1280, 2048)
         val profile = deviceProfiler.profile()
         val config = InferenceConfig(
             modelPath   = path,

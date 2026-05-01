@@ -76,10 +76,11 @@ class LiteRTInferenceEngine @Inject constructor(
     // callbacks return to a stable, single thread context.
     private val engineDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
-    // Crash detection: a synchronous SharedPrefs write survives process kill.
-    // Two flags:
-    //   litert_gen_pending  — set during generation; if true at startup → crash mid-response
-    //   litert_init_pending — set during model init; if true at startup → crash mid-load (OOM etc)
+    // Crash detection: synchronous SharedPrefs writes survive process kills.
+    // Three flags:
+    //   litert_gen_pending     — set during generation; true at startup → crashed mid-response
+    //   litert_init_pending    — set during model init; true at startup → crashed mid-load (OOM)
+    //   litert_gpu_gen_crashed — GPU crashed during inference; force CPU on next launch
     private val enginePrefs: SharedPreferences
         get() = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE)
 
@@ -89,22 +90,38 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun wasKilledDuringInit(): Boolean =
         enginePrefs.getBoolean("litert_init_pending", false)
 
+    /** True if a previous GPU generation crashed — stay on CPU until cleared. */
+    private fun gpuPreviouslyCrashedDuringGen(): Boolean =
+        enginePrefs.getBoolean("litert_gpu_gen_crashed", false)
+
+    private fun markGpuGenCrashed() =
+        enginePrefs.edit().putBoolean("litert_gpu_gen_crashed", true).commit()
+
+    private fun clearGpuGenCrashedFlag() =
+        enginePrefs.edit().putBoolean("litert_gpu_gen_crashed", false).apply()
+
     private fun markInitStarted() =
         enginePrefs.edit().putBoolean("litert_init_pending", true).commit()
 
     private fun markInitEnded() =
         enginePrefs.edit().putBoolean("litert_init_pending", false).apply()
 
-    private fun markGenerationStarted() =
-        enginePrefs.edit().putBoolean("litert_gen_pending", true).commit()
+    private fun markGenerationStarted() {
+        enginePrefs.edit()
+            .putBoolean("litert_gen_pending", true)
+            .putBoolean("litert_was_using_gpu", usingGpu)  // persist so crash recovery knows the backend
+            .commit()
+    }
 
     private fun markGenerationEnded() =
         enginePrefs.edit().putBoolean("litert_gen_pending", false).apply()
 
-    // Hard cap on output tokens.
-    // CPU mode: 256 tokens at 1-3 tok/s = 85-256 seconds max. Keeps responses snappy.
-    // GPU mode: 512 tokens at 20-40 tok/s = 13-26 seconds. Fast enough to allow more.
-    private val MAX_NEW_TOKENS_CPU = 256
+    /** Was GPU the active backend when the process last crashed? Survives process kills. */
+    private fun wasUsingGpuAtCrash(): Boolean =
+        enginePrefs.getBoolean("litert_was_using_gpu", false)
+
+    // Hard cap on output tokens per response.
+    private val MAX_NEW_TOKENS_CPU = 512
     private val MAX_NEW_TOKENS_GPU = 512
     @Volatile private var usingGpu: Boolean = false
 
@@ -115,11 +132,15 @@ class LiteRTInferenceEngine @Inject constructor(
 
     override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
         initMutex.withLock {
-            // Recover from crash during generation OR during previous model init (e.g., OOM on E4B).
             val crashedDuringGen  = wasKilledDuringGeneration()
             val crashedDuringInit = wasKilledDuringInit()
             if (crashedDuringGen || crashedDuringInit) {
-                DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit — forcing reinit")
+                val wasGpu = wasUsingGpuAtCrash()  // read PERSISTED backend, not volatile field
+                DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit gpu=$wasGpu — forcing reinit")
+                if (crashedDuringGen && wasGpu) {
+                    markGpuGenCrashed()
+                    DebugLogger.log("LITERT", "GPU crashed during generation — forcing CPU for future loads")
+                }
                 markGenerationEnded()
                 markInitEnded()
                 closeInternal()
@@ -226,7 +247,17 @@ class LiteRTInferenceEngine @Inject constructor(
         maxTokens: Int,
         preferredBackend: LlmInference.Backend,
     ): LlmInference {
-        return if (preferredBackend == LlmInference.Backend.GPU) {
+        // If a previous GPU *generation* crashed (not just init), the GPU driver is
+        // unstable for inference on this device. Skip GPU entirely this session.
+        val gpuBannedByPriorCrash = gpuPreviouslyCrashedDuringGen()
+        val effectiveBackend = if (gpuBannedByPriorCrash) {
+            DebugLogger.log("LITERT", "GPU banned (crashed during previous generation) — using CPU")
+            LlmInference.Backend.CPU
+        } else {
+            preferredBackend
+        }
+
+        return if (effectiveBackend == LlmInference.Backend.GPU) {
             try {
                 DebugLogger.log("LITERT", "Trying GPU (OpenCL) backend...")
                 val options = LlmInference.LlmInferenceOptions.builder()
@@ -239,9 +270,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "GPU backend loaded successfully")
                 }
             } catch (gpuError: Throwable) {
-                // GPU/OpenCL delegate failed — common on .litertlm with Samsung/Adreno.
-                // Automatically fall back to CPU without surfacing the error to the user.
-                DebugLogger.log("LITERT", "GPU failed (${gpuError.message?.take(80)}), retrying with CPU...")
+                DebugLogger.log("LITERT", "GPU load failed (${gpuError.message?.take(80)}), retrying with CPU...")
                 Timber.w(gpuError, "GPU delegate failed, falling back to CPU")
                 val cpuOptions = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelPath)
@@ -254,7 +283,8 @@ class LiteRTInferenceEngine @Inject constructor(
                 }
             }
         } else {
-            DebugLogger.log("LITERT", "Loading with CPU backend (GPU not safe for this model/device)")
+            val reason = if (gpuBannedByPriorCrash) "prior GPU generation crash" else "GPU not safe for model/device"
+            DebugLogger.log("LITERT", "Loading with CPU backend ($reason)")
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(maxTokens)
