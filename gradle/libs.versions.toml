@@ -21,6 +21,7 @@ core-ktx = "1.13.1"
 accompanist = "0.34.0"
 mediapipe-genai = "0.10.33"
 mlkit-text-recognition = "16.0.0"
+pdfbox = "2.0.27.0"
 
 [libraries]
 # AndroidX Core
@@ -81,6 +82,9 @@ mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", 
 
 # ML Kit (OCR)
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkit-text-recognition" }
+
+# PDF Extraction
+pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfbox" }
 
 # Logging
 timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }

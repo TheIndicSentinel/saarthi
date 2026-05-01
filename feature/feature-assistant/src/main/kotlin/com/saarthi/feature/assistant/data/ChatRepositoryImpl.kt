@@ -310,18 +310,17 @@ class ChatRepositoryImpl @Inject constructor(
         DebugLogger.log("PROMPT", "History turns=${history.size}  attachments=${attachments.size}")
 
         return buildString {
-            // Strong System Block — Prepending instructions to the very first turn is the most
-            // effective way to align Gemma 3 without a dedicated 'system' role.
-            val systemPrefix = "<start_of_turn>user\n[SYSTEM_DIRECTIVE]\n$systemInstructions\n[/SYSTEM_DIRECTIVE]\n"
+            // High-Importance Context: Instructions + Identity
+            append("<start_of_turn>user\n")
+            append(systemInstructions)
+            append("\n\n")
 
             if (history.isEmpty()) {
-                append(systemPrefix)
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
                 append("<end_of_turn>\n")
                 append("<start_of_turn>model\n")
             } else {
-                append(systemPrefix)
                 history.forEach { msg ->
                     val role = if (msg.role == MessageRole.USER) "user" else "model"
                     append("<start_of_turn>$role\n")

@@ -206,11 +206,9 @@ class LiteRTInferenceEngine @Inject constructor(
 
             val sizeMb = file.length() / 1_048_576
             // Gemma LiteRT .task models have a fixed KV cache compiled in.
-            // Minimum: 1280 (all official Gemma mobile models compiled against this).
-            // Maximum cap: 4096 — prevents accidental massive pre-allocation.
-            // DO NOT set this from contextLength (128K) — that triggers a ~4-8GB KV cache
-            // allocation which silently OOM-kills the process on first generation.
-            val effectiveMaxTokens = config.maxTokens.coerceIn(1280, 4096)
+            // Minimum: 2048 — prevents native crashes on overflow for long prompts.
+            // Maximum cap: 8192 — safe budget for flagship devices.
+            val effectiveMaxTokens = config.maxTokens.coerceIn(2048, 8192)
             DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
             // Mark init as started BEFORE calling createFromOptions.

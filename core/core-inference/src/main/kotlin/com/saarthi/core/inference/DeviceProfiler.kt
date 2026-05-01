@@ -98,8 +98,8 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false                  // No Vulkan = no GPU backend
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750 -> true                          // Top-tier Adreno — always GPU
-                SocFamily.QUALCOMM_SM8550 -> !(isSamsung && apiLevel >= 36) // Samsung A16 OpenCL crash
-                SocFamily.QUALCOMM_GENERIC -> !(isSamsung && apiLevel >= 36)
+                SocFamily.QUALCOMM_SM8550 -> if (isSamsung && apiLevel >= 36) availRamMb >= 4000 else true
+                SocFamily.QUALCOMM_GENERIC -> if (isSamsung && apiLevel >= 36) availRamMb >= 4000 else true
                 SocFamily.GOOGLE_TENSOR -> true                            // Pixel: stable OpenCL
                 SocFamily.SAMSUNG_EXYNOS -> apiLevel < 34                  // Exynos OpenCL unreliable 34+
                 SocFamily.MEDIATEK -> totalRamMb >= 8_000 && availRamMb >= 4_000  // Dimensity: GPU only on FLAGSHIP

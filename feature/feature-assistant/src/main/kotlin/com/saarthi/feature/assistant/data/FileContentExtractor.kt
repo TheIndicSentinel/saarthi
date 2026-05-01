@@ -10,6 +10,9 @@ import com.saarthi.feature.assistant.domain.AttachedFile
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.tomroush.pdfbox.android.PDFBoxResourceLoader
+import com.tomroush.pdfbox.pdmodel.PDDocument
+import com.tomroush.pdfbox.text.PDFTextStripper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
