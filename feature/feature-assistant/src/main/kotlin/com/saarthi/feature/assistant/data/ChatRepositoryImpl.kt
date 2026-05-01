@@ -368,26 +368,37 @@ class ChatRepositoryImpl @Inject constructor(
     }.trimEnd()
 
     /**
-     * Intelligent Sliding Window: Handles context overflow when approaching compiled KV limits.
-     * 1. ALWAYS preserves the first turn (System Instructions + Global Memory).
-     * 2. Drops middle turns one by one until budget is met.
-     * 3. ALWAYS preserves the last 2 turns (Current query context).
+     * Intelligent Sliding Window: Handles context overflow for the model's compiled KV limits.
+     *
+     * Strategy (in priority order):
+     * 1. Fast path: already within budget, return immediately.
+     * 2. Drop middle history turns one-by-one until budget is met.
+     * 3. If still over budget (e.g. system prompt alone overflows), hard-truncate
+     *    the system turn as a last resort.
+     *
+     * FIXED: removed `if (turns.size <= 3) return prompt` which caused every
+     * first message to bypass trimming and return the full over-budget prompt.
      */
     private fun trimPrompt(prompt: String, budget: Int = MAX_PROMPT_CHARS_1280): String {
+        if (prompt.length <= budget) return prompt
+
         val marker = "<start_of_turn>"
         val turns = prompt.split(marker).filter { it.isNotBlank() }.map { marker + it }
-        if (turns.size <= 3) return prompt
 
-        val systemTurn = turns.first()
-        val latestTurns = turns.takeLast(2)
-        val middleTurns = turns.drop(1).dropLast(2).toMutableList()
+        if (turns.size < 2) {
+            DebugLogger.log("PROMPT", "WARN: single-turn prompt (${prompt.length}c) exceeds budget ($budget) — hard truncating")
+            return prompt.take(budget)
+        }
+
+        val systemTurn  = turns.first()
+        val latestTurns = turns.takeLast(minOf(2, turns.size - 1))
+        val middleTurns = turns.drop(1).dropLast(latestTurns.size).toMutableList()
 
         var currentPrompt = buildString {
             append(systemTurn)
             middleTurns.forEach { append(it) }
             latestTurns.forEach { append(it) }
         }
-
         while (currentPrompt.length > budget && middleTurns.isNotEmpty()) {
             middleTurns.removeAt(0)
             currentPrompt = buildString {
@@ -395,6 +406,15 @@ class ChatRepositoryImpl @Inject constructor(
                 middleTurns.forEach { append(it) }
                 latestTurns.forEach { append(it) }
             }
+        }
+
+        // Phase 2: system prompt itself exceeds budget — hard truncate as last resort.
+        if (currentPrompt.length > budget) {
+            val latestBlock = buildString { latestTurns.forEach { append(it) } }
+            val systemBudget = budget - latestBlock.length
+            val truncatedSystem = if (systemBudget > 0) systemTurn.take(systemBudget) else ""
+            currentPrompt = truncatedSystem + latestBlock
+            DebugLogger.log("PROMPT", "WARN: system turn truncated to ${truncatedSystem.length}c to meet budget ($budget)")
         }
 
         return currentPrompt
