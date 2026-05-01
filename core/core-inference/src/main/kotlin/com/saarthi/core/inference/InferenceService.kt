@@ -122,7 +122,6 @@ class InferenceService : Service() {
             .setContentText("Processing your message offline.")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
-            .setSilent(true)
             .setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_SECRET)
             .build()
