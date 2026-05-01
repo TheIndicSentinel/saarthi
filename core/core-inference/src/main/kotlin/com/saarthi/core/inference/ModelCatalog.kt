@@ -56,12 +56,42 @@ class ModelCatalog @Inject constructor() {
         //  LITERT — PRIMARY (GPU-accelerated, Google official)
         // ══════════════════════════════════════════════════════════════════════
 
-        // ── Gemma 3n E2B IT · LiteRT (mobile-first MatFormer, recommended LOW/MID) ─
+        // ── GEMMA 4 MODELS (Latest, April 2026) ──────────────────────────────────
+        //    Frontier-level reasoning + audio/image support + 128K context
+        //    Apache 2.0 License: https://ai.google.dev/gemma/docs/gemma_4_license
+
+        ModelEntry(
+            id            = "gemma4-e2b-it-litert-int8",
+            displayName   = "Gemma 4 E2B IT · LiteRT INT8  ⭐ Latest",
+            description   = "Google Gemma 4 E2B (April 2026) — Frontier reasoning + audio/image support. 2.3B effective parameters. GPU-accelerated: 25–40 tok/s. ~1.8 GB download. Best all-around choice for LOW/MID phones.",
+            downloadUrl   = "https://huggingface.co/google/gemma-4-E2B-it/resolve/main/gemma-4-e2b-it-q8.task",
+            fileSizeBytes = 1_887_436_135L,
+            engineType    = EngineType.LITERT,
+            requiredTier  = DeviceTier.LOW,
+            modelFamily   = "gemma4",
+            contextLength = 128_000,
+            tags          = listOf("Recommended", "LiteRT GPU", "Google", "Gemma 4", "Frontier", "Audio", "Vision", "Latest"),
+        ),
+
+        ModelEntry(
+            id            = "gemma4-e4b-it-litert-int8",
+            displayName   = "Gemma 4 E4B IT · LiteRT INT8  ⭐ Latest",
+            description   = "Google Gemma 4 E4B (April 2026) — Frontier reasoning with enhanced capabilities. 4.5B effective parameters. GPU-accelerated: 20–30 tok/s. ~2.8 GB download. Best quality for MID/FLAGSHIP phones.",
+            downloadUrl   = "https://huggingface.co/google/gemma-4-E4B-it/resolve/main/gemma-4-e4b-it-q8.task",
+            fileSizeBytes = 2_872_905_728L,
+            engineType    = EngineType.LITERT,
+            requiredTier  = DeviceTier.MID,
+            modelFamily   = "gemma4",
+            contextLength = 128_000,
+            tags          = listOf("LiteRT GPU", "Google", "Gemma 4", "Frontier", "Audio", "Vision", "Best Quality", "Latest"),
+        ),
+
+        // ── Gemma 3n E2B IT · LiteRT (mobile-first MatFormer, fallback LOW/MID) ─
 
         ModelEntry(
             id            = "gemma3n-e2b-it-litert-int4",
-            displayName   = "Gemma 3n E2B IT · LiteRT INT4  ⚡ Recommended",
-            description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated: 20–35 tok/s. ~1.4 GB download. Best choice for mid-range and flagship phones.",
+            displayName   = "Gemma 3n E2B IT · LiteRT INT4  ⚡ Fallback",
+            description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated: 20–35 tok/s. ~1.4 GB download. Fallback choice for stable inference on older devices.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task",
             fileSizeBytes = 3_136_226_711L,
             engineType    = EngineType.LITERT,

@@ -374,7 +374,8 @@ class ModelDownloadManager @Inject constructor(
                     // Polling loop reaches here when download completes. The BroadcastReceiver
                     // handles the "official" completion event, but returning null here causes
                     // the UI to stick at 99%. Emit Completed to break the loop cleanly.
-                    val localUri = cursor.getString(cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI))
+                    val columnIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                    val localUri = if (columnIndex >= 0) cursor.getString(columnIndex) else null
                     val path = localUri?.let { Uri.parse(it).path } ?: ""
                     DebugLogger.log("DOWNLOAD", "queryProgress: STATUS_SUCCESSFUL  path=$path  size=${downloaded}B")
                     null // Exit the polling loop — the BroadcastReceiver handles the Completed emit
