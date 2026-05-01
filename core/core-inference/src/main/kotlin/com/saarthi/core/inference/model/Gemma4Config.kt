@@ -19,26 +19,28 @@ object Gemma4Config {
 
     /** Whether audio input is supported (E2B and E4B only). */
     fun supportsAudio(modelFamily: String): Boolean {
-        return modelFamily == "gemma4" && 
+        return modelFamily.startsWith("gemma4", ignoreCase = true) && 
                (modelFamily.contains("e2b", ignoreCase = true) || 
                 modelFamily.contains("e4b", ignoreCase = true))
     }
 
     /** Whether vision/image input is supported (all Gemma 4 variants). */
     fun supportsVision(modelFamily: String): Boolean {
-        return modelFamily == "gemma4"
+        return modelFamily.startsWith("gemma4", ignoreCase = true)
     }
 
     /** Maximum context length for the model. */
     fun getContextLength(modelFamily: String): Int {
+        val family = modelFamily.lowercase()
         return when {
-            modelFamily == "gemma4" && modelFamily.contains("e2b", ignoreCase = true) -> 128_000
-            modelFamily == "gemma4" && modelFamily.contains("e4b", ignoreCase = true) -> 128_000
-            modelFamily == "gemma4" && modelFamily.contains("26b", ignoreCase = true) -> 256_000
-            modelFamily == "gemma4" && modelFamily.contains("31b", ignoreCase = true) -> 256_000
-            modelFamily == "gemma3n" -> 1_280
-            modelFamily == "gemma3" -> 8_192
-            modelFamily == "gemma2" -> 8_192
+            family.startsWith("gemma4") && family.contains("e2b") -> 128_000
+            family.startsWith("gemma4") && family.contains("e4b") -> 128_000
+            family.startsWith("gemma4") && family.contains("26b") -> 256_000
+            family.startsWith("gemma4") && family.contains("31b") -> 256_000
+            family.startsWith("gemma4") -> 128_000 // Default for Gemma 4
+            family == "gemma3n" -> 1_280
+            family == "gemma3" -> 8_192
+            family == "gemma2" -> 8_192
             else -> 2_048
         }
     }
@@ -110,7 +112,7 @@ object Gemma4Config {
     }
 
     fun isLatestGeneration(modelFamily: String): Boolean {
-        return modelFamily == "gemma4"
+        return modelFamily.startsWith("gemma4", ignoreCase = true)
     }
 
     // ─── Sampling Parameters (Standardized across all models) ──────────────────
