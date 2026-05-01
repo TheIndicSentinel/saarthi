@@ -268,6 +268,27 @@ class ChatRepositoryImpl @Inject constructor(
     // ── Prompt builder ────────────────────────────────────────────────────────
     // Always called on IO thread from streamResponse.
 
+    private val maxPromptChars: Int
+        get() {
+            // Derive safe prompt char limit from the engine's loaded model context.
+            // We read the active model name from the engine and look it up in the catalog.
+            // Falls back to the most conservative budget (1280-ctx) if unknown.
+            val modelName = inferenceEngine.activeModelName ?: return MAX_PROMPT_CHARS_1280
+            return when {
+                modelName.contains("gemma4", ignoreCase = true) ||
+                modelName.contains("Gemma 4", ignoreCase = true) -> MAX_PROMPT_CHARS_LARGE
+                modelName.contains("Gemma 2", ignoreCase = true) -> MAX_PROMPT_CHARS_2048
+                else -> MAX_PROMPT_CHARS_1280  // Gemma 3/3n default
+            }
+        }
+
+    private val maxHistoryTurns: Int
+        get() = when (maxPromptChars) {
+            MAX_PROMPT_CHARS_1280 -> 2   // only 2 turns fit safely in 1280-ctx
+            MAX_PROMPT_CHARS_2048 -> 4   // 4 turns for 2048-ctx
+            else -> MAX_HISTORY_TURNS    // 6 for large-ctx models
+        }
+
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
         val memoryContext = runCatching { memoryRepository.buildContextSummary() }.getOrDefault("")
         val systemInstructions = buildSystemPrompt(memoryContext)
