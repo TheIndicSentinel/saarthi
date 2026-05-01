@@ -144,7 +144,7 @@ class ModelDownloadManager @Inject constructor(
             // it might not yet have. Check the file directly and emit Completed if valid.
             // This prevents the UI from staying stuck at 99%.
             delay(500) // Small delay to let DownloadManager flush to disk
-            if (isFileComplete(destFile, model.fileSizeBytes)) {
+            if (isFileComplete(destFile, model.fileSizeBytes, trustOS = true)) {
                 DebugLogger.log("DOWNLOAD", "Success (poll-exit): ${destFile.name}  ${destFile.length() / 1_048_576}MB")
                 _allProgress.update { it + (model.id to DownloadProgress.Completed(destFile.absolutePath)) }
             } else {
@@ -208,17 +208,24 @@ class ModelDownloadManager @Inject constructor(
 
     // ── File validation ───────────────────────────────────────────────────────
 
-    fun isFileComplete(file: File, expectedBytes: Long = 0L): Boolean {
+    /**
+     * Checks if a file is complete. 
+     * If [trustOS] is true (e.g. DownloadManager just finished), we are more lenient.
+     */
+    fun isFileComplete(file: File, expectedBytes: Long = 0L, trustOS: Boolean = false): Boolean {
         if (!file.exists()) return false
         val size = file.length()
         if (size < 1_000_000L) return false
-        // Threshold tightened to 99.5%. LiteRT models (.task/.litertlm) are 
-        // deterministic in size. 90% was too loose and allowed corrupted 
-        // partial files to attempt to load, causing native crashes.
-        if (expectedBytes > 0L && size < (expectedBytes * 0.995).toLong()) {
-            Timber.w("File ${file.name}: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected — incomplete")
+
+        // Industry standard: if the OS just reported a successful download, 
+        // trust the OS unless the file is clearly tiny/truncated (<95%).
+        val threshold = if (trustOS) 0.95 else 0.98
+
+        if (expectedBytes > 0L && size < (expectedBytes * threshold).toLong()) {
+            Timber.w("File ${file.name}: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected — incomplete (threshold: $threshold)")
             return false
         }
+
         if (file.name.endsWith(".gguf", ignoreCase = true)) {
             return runCatching {
                 file.inputStream().use { s ->
@@ -313,8 +320,10 @@ class ModelDownloadManager @Inject constructor(
                 scope.launch {
                     runCatching { ctx.unregisterReceiver(receiver) }
 
-                    val progress = if (queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL &&
-                                       isFileComplete(destFile, expectedBytes)) {
+                    val osSuccess = queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL
+                    val isActuallyComplete = isFileComplete(destFile, expectedBytes, trustOS = osSuccess)
+
+                    val progress = if (osSuccess && isActuallyComplete) {
                         DebugLogger.log("DOWNLOAD", "Complete: ${destFile.name}  ${destFile.length() / 1_048_576}MB")
                         DownloadProgress.Completed(destFile.absolutePath)
                     } else {
