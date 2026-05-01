@@ -58,16 +58,16 @@ class ModelCatalog @Inject constructor() {
 
         // ── GEMMA 4 MODELS ───────────────────────────────────────────────────
         //    Frontier-level reasoning + audio/image support + 128K context
-        //    Official Google LiteRT bundles (.task)
+        //    Official Google LiteRT-LM bundles (.litertlm) — MediaPipe 0.10.14+
         //    Apache 2.0 License: https://ai.google.dev/gemma/docs/gemma_4_license
 
-        // Gemma 4 E2B IT · LiteRT (Recommended for most devices)
+        // Gemma 4 E2B IT · LiteRT-LM (Recommended for most devices, ~2.6 GB)
         ModelEntry(
             id            = "gemma4-e2b-it-litert-int8",
             displayName   = "Gemma 4 E2B IT · LiteRT  🚀 New",
-            description   = "Google's latest Gemma 4 model. Frontier-level reasoning with audio/vision support. GPU-accelerated via MediaPipe. ~2.0 GB download.",
-            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task",
-            fileSizeBytes = 2_147_483_648L,
+            description   = "Google's latest Gemma 4. Frontier reasoning + audio/vision. GPU-accelerated via MediaPipe. ~2.6 GB download.",
+            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+            fileSizeBytes = 2_772_434_944L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma4-e2b",
@@ -75,13 +75,13 @@ class ModelCatalog @Inject constructor() {
             tags          = listOf("New", "LiteRT GPU", "Google", "Gemma 4", "Reasoning", "Audio", "Vision"),
         ),
 
-        // Gemma 4 E4B IT · LiteRT (For high-end devices)
+        // Gemma 4 E4B IT · LiteRT-LM (For high-end devices, ~3.5 GB)
         ModelEntry(
             id            = "gemma4-e4b-it-litert-int8",
             displayName   = "Gemma 4 E4B IT · LiteRT  🚀 New",
-            description   = "High-performance Gemma 4 model. Superior reasoning and multimodal capabilities. GPU-accelerated via MediaPipe. ~2.96 GB download.",
-            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.task",
-            fileSizeBytes = 3_178_086_400L,
+            description   = "High-performance Gemma 4. Superior reasoning and multimodal capabilities. GPU-accelerated via MediaPipe. ~3.5 GB download.",
+            downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
+            fileSizeBytes = 3_758_096_384L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma4-e4b",
