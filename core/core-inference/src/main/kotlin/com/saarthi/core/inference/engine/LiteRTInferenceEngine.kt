@@ -439,6 +439,7 @@ class LiteRTInferenceEngine @Inject constructor(
             DebugLogger.log("LITERT", "Close deferred: generation in progress")
             return
         }
+        if (llmInference == null) return
         setReady(false)
         runCatching { llmInference?.close() }
             .onFailure { Timber.w(it, "LiteRT close warning") }

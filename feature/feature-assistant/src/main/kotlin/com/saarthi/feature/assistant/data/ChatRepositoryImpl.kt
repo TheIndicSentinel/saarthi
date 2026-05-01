@@ -43,7 +43,7 @@ private const val MAX_HISTORY_TURNS = 6  // reduced adaptively for small-context
 // For 1280-ctx models: (1280 - 512) * 3.0 = ~2304 chars
 // For 2048-ctx models: (2048 - 512) * 3.0 = ~4608 chars
 // We use 3.0 chars/token (conservative) because Gemma tokenizer uses sub-word BPE.
-private const val MAX_PROMPT_CHARS_1280 = 2_200  // 1280-ctx models (Gemma 3/3n)
+private const val MAX_PROMPT_CHARS_1280 = 1_800  // 1280-ctx models (Gemma 3/3n) - tightened for stability
 private const val MAX_PROMPT_CHARS_2048 = 4_500  // 2048-ctx models (Gemma 2)
 private const val MAX_PROMPT_CHARS_LARGE = 8_000 // Large-ctx models (Gemma 4)
 

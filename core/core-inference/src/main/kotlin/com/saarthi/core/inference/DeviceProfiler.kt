@@ -67,7 +67,7 @@ class DeviceProfiler @Inject constructor(
         val cpuCores = Runtime.getRuntime().availableProcessors()
         // Leave 2 cores for UI + OS. Min 2 threads (even on dual-core).
         // Max 6 threads (beyond this, ARM big.LITTLE thermal-throttles).
-        val recommendedThreads = (cpuCores - 2).coerceIn(2, 6)
+        val recommendedThreads = (cpuCores - 2).coerceIn(2, 4)
 
         // ── GPU / Vulkan ─────────────────────────────────────────────────────
         val hasVulkan = context.packageManager
