@@ -155,8 +155,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 // The builder now only accepts setModelPath and setMaxTokens.
                 // ── Adaptive Hardware Profiling ──
                 val profile = deviceProfiler.profile()
-                val isSamsung = profile.manufacturer.contains("samsung", ignoreCase = true)
-                
+
                 // Smart Backend Selection:
                 // 1. Only try GPU if the profiler says it's 'gpuSafe' (checks Vulkan + RAM).
                 // 2. Fall back to CPU if the model size exceeds the safe budget.
@@ -166,19 +165,14 @@ class LiteRTInferenceEngine @Inject constructor(
                     LlmInference.Backend.CPU
                 }
 
-                val options = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(config.modelPath)
-                    .setMaxTokens(effectiveMaxTokens)
-                    .setPreferredBackend(preferredBackend)
-                    .build()
-
-                llmInference    = LlmInference.createFromOptions(context, options)
+                llmInference = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, preferredBackend)
                 loadedModelPath = config.modelPath
                 loadedMaxTokens = config.maxTokens
                 activeModelName = config.modelName
                 _activeModelNameFlow.value = config.modelName
                 setReady(true)
-                DebugLogger.log("LITERT", "Model ready ($profile | Backend: ${preferredBackend.name})")
+                val actualBackend = if (llmInference != null && preferredBackend == LlmInference.Backend.GPU) "GPU" else "CPU"
+                DebugLogger.log("LITERT", "Model ready ($profile | Backend: $actualBackend)")
             } catch (e: Exception) {
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                 DebugLogger.log("LITERT", "Load failed: $msg")
@@ -187,6 +181,55 @@ class LiteRTInferenceEngine @Inject constructor(
             }
         }
     }
+
+    /**
+     * Attempts to load the model with the preferred backend.
+     * If GPU/OpenCL delegate fails (common on .litertlm with some Adreno/Samsung devices),
+     * automatically retries with CPU backend — no error shown to the user.
+     *
+     * This is the standard production approach for on-device LLM deployment.
+     */
+    private fun tryLoadWithFallback(
+        modelPath: String,
+        maxTokens: Int,
+        preferredBackend: LlmInference.Backend,
+    ): LlmInference {
+        return if (preferredBackend == LlmInference.Backend.GPU) {
+            try {
+                DebugLogger.log("LITERT", "Trying GPU (OpenCL) backend...")
+                val options = LlmInference.LlmInferenceOptions.builder()
+                    .setModelPath(modelPath)
+                    .setMaxTokens(maxTokens)
+                    .setPreferredBackend(LlmInference.Backend.GPU)
+                    .build()
+                LlmInference.createFromOptions(context, options).also {
+                    DebugLogger.log("LITERT", "GPU backend loaded successfully")
+                }
+            } catch (gpuError: Exception) {
+                // GPU/OpenCL delegate failed — this is common on .litertlm with Samsung/Adreno.
+                // Automatically fall back to CPU without surfacing the error to the user.
+                DebugLogger.log("LITERT", "GPU failed (${gpuError.message?.take(80)}), retrying with CPU...")
+                Timber.w(gpuError, "GPU delegate failed, falling back to CPU")
+                val cpuOptions = LlmInference.LlmInferenceOptions.builder()
+                    .setModelPath(modelPath)
+                    .setMaxTokens(maxTokens)
+                    .setPreferredBackend(LlmInference.Backend.CPU)
+                    .build()
+                LlmInference.createFromOptions(context, cpuOptions).also {
+                    DebugLogger.log("LITERT", "CPU fallback loaded successfully")
+                }
+            }
+        } else {
+            DebugLogger.log("LITERT", "Loading with CPU backend (GPU not safe for this model/device)")
+            val options = LlmInference.LlmInferenceOptions.builder()
+                .setModelPath(modelPath)
+                .setMaxTokens(maxTokens)
+                .setPreferredBackend(LlmInference.Backend.CPU)
+                .build()
+            LlmInference.createFromOptions(context, options)
+        }
+    }
+
 
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = flow {
         val inference = llmInference
