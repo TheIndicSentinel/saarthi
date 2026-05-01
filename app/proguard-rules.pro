@@ -22,5 +22,9 @@
 -keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite { <fields>; }
 -dontwarn com.google.protobuf.**
 
+# TensorFlow Lite GPU delegate
+-keep class org.tensorflow.lite.gpu.** { *; }
+-dontwarn org.tensorflow.lite.gpu.**
+
 # Timber
 -dontwarn org.slf4j.**
