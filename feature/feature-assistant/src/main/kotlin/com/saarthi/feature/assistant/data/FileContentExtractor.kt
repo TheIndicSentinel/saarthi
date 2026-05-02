@@ -186,7 +186,7 @@ class FileContentExtractor @Inject constructor(
                     if (finalResult.isBlank()) "[PDF: No readable text found]" 
                     else finalResult.take(MAX_RAG_FILE_CHARS)
                 }
-            }
+            } ?: "[PDF: Could not open file descriptor]"
         }.getOrElse { e ->
             Timber.e(e, "PDF OCR failed")
             "[PDF: Could not read file contents]"
