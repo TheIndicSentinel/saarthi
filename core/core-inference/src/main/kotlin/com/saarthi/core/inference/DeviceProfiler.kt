@@ -87,8 +87,15 @@ class DeviceProfiler @Inject constructor(
         // Each SoC family has different GPU driver maturity. Policy follows
         // Google AI Edge Gallery's internal tiering:
         //
-        //  QUALCOMM (Adreno)     — Primary OpenCL. Best GPU support. Safe on API < 36.
-        //                          API 36 Samsung: known OpenCL compute crash → ban GPU.
+        //  QUALCOMM (Adreno)     — Primary OpenCL. Best GPU support on all tested API levels.
+        //                          NOTE: A previous policy banned GPU for Samsung+SM8550+API36
+        //                          due to suspected OpenCL instability. However, CPU inference
+        //                          on Android 16 Samsung is killed by the kernel within ~8–14s
+        //                          every time (100% failure rate), making the CPU ban far worse
+        //                          than the risk of occasional GPU instability.
+        //                          GPU is now enabled for all Qualcomm SoCs. The engine's
+        //                          markGpuGenCrashed() / 7-day ban mechanism handles any
+        //                          real runtime GPU failures automatically at the call site.
         //  GOOGLE_TENSOR (Pixel) — Stable OpenCL on all API levels.
         //  SAMSUNG_EXYNOS        — OpenCL unstable on API 34+. CPU preferred.
         //  MEDIATEK              — OpenCL driver-dependent. CPU preferred unless FLAGSHIP.
@@ -97,13 +104,13 @@ class DeviceProfiler @Inject constructor(
             availRamMb < 3_000 -> false          // GPU shared-memory overhead risks LMK
             !hasVulkan -> false                  // No Vulkan = no GPU backend
             else -> when (socFamily) {
-                SocFamily.QUALCOMM_SM8750 -> true                          // Top-tier Adreno — always GPU
-                SocFamily.QUALCOMM_SM8550 -> if (isSamsung && apiLevel >= 36) false else true
-                SocFamily.QUALCOMM_GENERIC -> if (isSamsung && apiLevel >= 36) false else true
-                SocFamily.GOOGLE_TENSOR -> true                            // Pixel: stable OpenCL
-                SocFamily.SAMSUNG_EXYNOS -> apiLevel < 34                  // Exynos OpenCL unreliable 34+
-                SocFamily.MEDIATEK -> totalRamMb >= 8_000 && availRamMb >= 4_000  // Dimensity: GPU only on FLAGSHIP
-                SocFamily.GENERIC -> availRamMb >= 4_000                   // Unknown SoC: generous RAM check
+                SocFamily.QUALCOMM_SM8750  -> true  // Adreno 830 — always GPU
+                SocFamily.QUALCOMM_SM8550  -> true  // Adreno 740 — GPU enabled; engine bans if it crashes
+                SocFamily.QUALCOMM_GENERIC -> true  // Other Adreno — GPU enabled; engine bans if it crashes
+                SocFamily.GOOGLE_TENSOR    -> true  // Pixel: stable OpenCL
+                SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34  // Exynos OpenCL unreliable on API 34+
+                SocFamily.MEDIATEK         -> totalRamMb >= 8_000 && availRamMb >= 4_000
+                SocFamily.GENERIC          -> availRamMb >= 4_000
             }
         }
 

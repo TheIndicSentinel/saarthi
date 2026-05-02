@@ -209,17 +209,29 @@ class ModelDownloadManager @Inject constructor(
     // ── File validation ───────────────────────────────────────────────────────
 
     /**
-     * Checks if a file is complete. 
-     * If [trustOS] is true (e.g. DownloadManager just finished), we are more lenient.
+     * Checks if a file is complete.
+     *
+     * When [trustOS] is true (Android DownloadManager reported STATUS_SUCCESSFUL),
+     * we use a very generous threshold (80%). Rationale:
+     *   • HuggingFace model file sizes change across revisions without URL changes.
+     *   • Our catalog `fileSizeBytes` is a best-effort estimate, NOT a contract.
+     *   • The OS completed the HTTP transfer successfully, including content-length
+     *     verification. If the OS says done, the file is almost certainly valid.
+     *   • The 80% floor still catches severely truncated files (e.g. 0-byte, HTML
+     *     error pages served instead of the binary, or interrupted partial writes).
+     *
+     * When [trustOS] is false (manual scan, user-picked file), we use a tighter 90%
+     * threshold to avoid loading corrupted/partial files that weren't downloaded
+     * through DownloadManager.
      */
     fun isFileComplete(file: File, expectedBytes: Long = 0L, trustOS: Boolean = false): Boolean {
         if (!file.exists()) return false
         val size = file.length()
         if (size < 1_000_000L) return false
 
-        // Industry standard: if the OS just reported a successful download, 
-        // trust the OS unless the file is clearly tiny/truncated (<95%).
-        val threshold = if (trustOS) 0.95 else 0.98
+        // If the actual file is LARGER than expected, it's valid — the catalog estimate
+        // was simply outdated. Only flag files that are significantly SMALLER than expected.
+        val threshold = if (trustOS) 0.80 else 0.90
 
         if (expectedBytes > 0L && size < (expectedBytes * threshold).toLong()) {
             Timber.w("File ${file.name}: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected — incomplete (threshold: $threshold)")

@@ -104,9 +104,9 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma4-e2b-it-litert-int8",
             displayName   = "Gemma 4 E2B IT · LiteRT  🚀 New",
-            description   = "Google's latest Gemma 4. Frontier reasoning + audio/vision. Auto-selects best backend (GPU/CPU) per device. ~2.6 GB download.",
+            description   = "Google's latest Gemma 4. Frontier reasoning + audio/vision. Auto-selects best backend (GPU/CPU) per device. ~2.5 GB download.",
             downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
-            fileSizeBytes = 2_772_434_944L,
+            fileSizeBytes = 2_583_085_056L,  // verified from DownloadManager STATUS_SUCCESSFUL log
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma4-e2b",
@@ -138,9 +138,9 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3n-e2b-it-litert-int4",
             displayName   = "Gemma 3n E2B IT · LiteRT INT4  ⭐ Recommended",
-            description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated: 20–35 tok/s. ~1.4 GB download. Best choice for LOW/MID phones. Proven stable & fast.",
+            description   = "Google Gemma 3n E2B — mobile-first MatFormer architecture. GPU-accelerated: 20–35 tok/s. ~3.0 GB download. Best choice for LOW/MID phones. Proven stable & fast.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task",
-            fileSizeBytes = 1_474_354_560L,
+            fileSizeBytes = 3_136_226_711L,  // verified from DownloadManager STATUS_SUCCESSFUL log
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             modelFamily   = "gemma3n",
@@ -152,9 +152,9 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3n-e4b-it-litert-int4",
             displayName   = "Gemma 3n E4B IT · LiteRT INT4  ⭐ Best Quality",
-            description   = "Google Gemma 3n E4B — mobile-first MatFormer. GPU-accelerated: 15–25 tok/s. ~2.6 GB download. Best quality on MID/FLAGSHIP phones. Proven & reliable.",
+            description   = "Google Gemma 3n E4B — mobile-first MatFormer. GPU-accelerated: 15–25 tok/s. ~4.2 GB download. Best quality on MID/FLAGSHIP phones. Proven & reliable.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task",
-            fileSizeBytes = 2_684_354_560L,
+            fileSizeBytes = 4_405_655_031L,  // verified from DownloadManager STATUS_SUCCESSFUL log
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             modelFamily   = "gemma3n",
