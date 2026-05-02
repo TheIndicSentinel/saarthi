@@ -370,12 +370,16 @@ class LiteRTInferenceEngine @Inject constructor(
                 }
 
                 inference.generateResponseAsync(prompt) { partialResult, done ->
-                    val chunk = partialResult
+                    // MediaPipe's partialResult can sometimes contain the full accumulated text.
+                    // We only want the new part to keep the UI smooth.
+                    val cleaned = partialResult
+                        .replace("<start_of_turn>", "")
                         .replace("<end_of_turn>", "")
                         .replace("<eos>", "")
+                        .replace("<bos>", "")
 
-                    if (chunk.isNotEmpty()) {
-                        trySend(chunk)
+                    if (cleaned.isNotEmpty()) {
+                        trySend(cleaned)
                         tokenCount++
                     }
 

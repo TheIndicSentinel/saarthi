@@ -338,11 +338,7 @@ class ChatRepositoryImpl @Inject constructor(
             val budget = maxPromptChars
             val needsTrim = prompt.length > budget
             val finalPrompt = if (needsTrim) trimPrompt(prompt, budget) else prompt
-            val hasDirective = finalPrompt.contains("[SYSTEM_DIRECTIVE]")
-            DebugLogger.log("PROMPT", "Final prompt  chars=${finalPrompt.length}  budget=$budget  trimmed=$needsTrim  systemDirectivePresent=$hasDirective")
-            if (!hasDirective) {
-                DebugLogger.log("PROMPT", "WARNING: System directive was lost during trimming!")
-            }
+            DebugLogger.log("PROMPT", "Final prompt  chars=${finalPrompt.length}  budget=$budget  trimmed=$needsTrim")
             finalPrompt
         }
     }
