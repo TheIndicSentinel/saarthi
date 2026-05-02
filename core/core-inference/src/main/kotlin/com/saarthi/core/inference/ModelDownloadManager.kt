@@ -186,13 +186,44 @@ class ModelDownloadManager @Inject constructor(
     }
 
     /**
-     * Called on ViewModel init — reattaches progress polling for any model
+     * Restores [DownloadProgress.Completed] state for every model whose file is
+     * already on disk and complete.  Call this on ViewModel init to populate the
+     * "downloaded" badge in the model picker.
+     *
+     * This is intentionally SEPARATE from [reattachActiveDownloads] so it does NOT
+     * trigger the "newlyCompleted" auto-select logic in OnboardingViewModel — those
+     * models are already downloaded, not freshly completed.
+     */
+    fun restoreCompletedStates(models: List<ModelEntry>) {
+        models.forEach { model ->
+            val file = resolveLocalFile(model)
+            if (isFileComplete(file, model.fileSizeBytes)) {
+                // Only update if not already tracked — avoids stomping an active download
+                if (_allProgress.value[model.id] == null) {
+                    _allProgress.update { it + (model.id to DownloadProgress.Completed(file.absolutePath)) }
+                }
+            }
+        }
+    }
 
-     * whose download is still active in Android DownloadManager.
+    /**
+     * Reattaches progress polling ONLY for models whose download is genuinely still
+     * in-progress in Android DownloadManager (STATUS_PENDING / RUNNING / PAUSED).
+     *
+     * Does NOT call startDownload for files that already exist on disk — that
+     * would immediately emit Completed and trigger the auto-select path in the UI.
+     * Use [restoreCompletedStates] to populate the UI for already-finished downloads.
      */
     fun reattachActiveDownloads(models: List<ModelEntry>) {
         val activePaths = activeDownloadingPaths()
         models.forEach { model ->
+            val destFile = resolveLocalFile(model)
+            // Guard: if the file is already complete, do NOT call startDownload —
+            // startDownload() immediately emits Completed for existing files, which
+            // triggers auto-select in the ViewModel and can load a 2nd model into RAM
+            // while another model is already active, causing OOM kills mid-inference.
+            if (isFileComplete(destFile, model.fileSizeBytes)) return@forEach
+
             val modelPath = localPathFor(model).absolutePath
             if (activePaths.any { it == modelPath } && activeJobs[model.id]?.isActive != true) {
                 DebugLogger.log("DOWNLOAD", "Reattaching to in-progress download: ${model.id}")

@@ -27,6 +27,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.asCoroutineDispatcher
 import timber.log.Timber
 import com.saarthi.core.inference.DeviceProfiler
+import com.saarthi.core.inference.SocFamily
 import java.io.File
 import java.util.concurrent.Executors
 import javax.inject.Inject
@@ -276,10 +277,22 @@ class LiteRTInferenceEngine @Inject constructor(
                 // Smart Backend Selection:
                 // 1. Only try GPU if the profiler says it's 'gpuSafe' (checks Vulkan + RAM).
                 // 2. Fall back to CPU if the model size exceeds the safe budget.
-                val preferredBackend = if (profile.gpuSafe && sizeMb <= profile.safeModelBudgetMb) {
-                    LlmInference.Backend.GPU
-                } else {
-                    LlmInference.Backend.CPU
+                // 3. PERMANENT RULE: .task format on SM8550 (Adreno 740) crashes 100% of
+                //    the time with the OpenCL backend — skip GPU entirely. This is a known
+                //    MediaPipe Tasks GenAI driver incompatibility on Samsung Android 16.
+                //    The .litertlm format (Gemma 4 E2B) uses a different runtime that IS
+                //    compatible with GPU on this chip.
+                val isTaskFormat = config.modelPath.endsWith(".task", ignoreCase = true)
+                val isSm8550 = profile.socModel.contains("SM8550", ignoreCase = true) ||
+                               profile.socFamily == SocFamily.QUALCOMM_SM8550
+                val forceTaskCpu = isTaskFormat && isSm8550
+                if (forceTaskCpu) {
+                    DebugLogger.log("LITERT", ".task format on SM8550 — forcing CPU (GPU incompatible with this model format on Adreno 740)")
+                }
+                val preferredBackend = when {
+                    forceTaskCpu -> LlmInference.Backend.CPU
+                    profile.gpuSafe && sizeMb <= profile.safeModelBudgetMb -> LlmInference.Backend.GPU
+                    else -> LlmInference.Backend.CPU
                 }
 
                 llmInference = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, preferredBackend)

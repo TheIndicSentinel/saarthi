@@ -103,11 +103,24 @@ class OnboardingViewModel @Inject constructor(
         val catalog = modelCatalog.recommendedFor(profile)
         _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
 
+        // PRE-POPULATE handledCompletions with all already-downloaded models BEFORE
+        // the allProgress collector starts.  restoreCompletedStates() will emit
+        // Completed for every file on disk — without this guard those events would
+        // look like "new" completions and trigger auto-select, causing a second model
+        // to be loaded into RAM while another is already active (OOM kill).
+        viewModelScope.launch(Dispatchers.IO) {
+            modelCatalog.allModels.forEach { model ->
+                if (downloadManager.isDownloaded(model)) {
+                    handledCompletions += model.id
+                }
+            }
+        }
+
         // Mirror app-lifetime download progress into UI state.
         viewModelScope.launch {
             downloadManager.allProgress.collect { progressMap ->
                 _uiState.update { it.copy(downloadProgress = progressMap) }
-                // Collect newly-completed downloads outside forEach (forEach is non-suspend).
+                // Only react to NEWLY completed downloads (not restored-from-disk ones).
                 val newlyCompleted = progressMap.entries.filter { (modelId, progress) ->
                     progress is DownloadProgress.Completed && modelId !in handledCompletions
                 }
@@ -123,9 +136,6 @@ class OnboardingViewModel @Inject constructor(
                             error = null,
                         )
                     }
-                    // If user is still on MODEL_PICK with no model chosen, auto-select this one.
-                    // They still have to tap "Use Model" to actually load it — we don't auto-init
-                    // because loading takes time and we want the user to see the progress screen.
                     val s = _uiState.value
                     if (s.step == OnboardingStep.MODEL_PICK && s.selectedModelPath == path) {
                         DebugLogger.log("DOWNLOAD", "Model auto-selected: ${path.substringAfterLast('/')}")
@@ -140,6 +150,10 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 refreshDownloadedModels()
+                // restoreCompletedStates: silently populates UI badges for already-downloaded
+                // models WITHOUT triggering the newlyCompleted auto-select path above.
+                downloadManager.restoreCompletedStates(modelCatalog.allModels)
+                // reattachActiveDownloads: only polls models genuinely still downloading.
                 downloadManager.reattachActiveDownloads(modelCatalog.allModels)
             }
 
