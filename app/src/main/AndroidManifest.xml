@@ -24,11 +24,21 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Keep alarms alive through Doze mode -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- Foreground service keeps the app alive during heavy AI inference.
-         Without this, Android 14+/Samsung OneUI kills the process in 2-10s. -->
+    <!--
+        Foreground service keeps the app alive during heavy AI inference.
+        Without this, Android 14+/Samsung OneUI kills the process within 2–10 s.
+
+        ⚠️  ANDROID 16 (API 36) BREAKING CHANGE:
+        FOREGROUND_SERVICE_DATA_SYNC and its associated permission were removed in API 36.
+        Declaring them causes startForeground() to throw SecurityException, which is
+        silently caught, leaving the app with NO foreground service protection.
+        The Android LMK then kills the CPU-heavy process in ~10 s — this was the
+        root cause of the crashes seen in the logs.
+
+        Only FOREGROUND_SERVICE_SPECIAL_USE is declared and safe on API 29–36+.
+    -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Android 11+ package visibility: needed for SpeechRecognizer.isRecognitionAvailable()
          to correctly detect installed speech recognition services. Without this the API
@@ -79,11 +89,20 @@
             </intent-filter>
         </receiver>
 
-        <!-- Foreground service that keeps the process alive during AI model inference -->
+        <!--
+            Foreground service that keeps the process alive during AI model inference.
+
+            foregroundServiceType="specialUse" — the correct type for on-device LLM
+            inference on Android 10+ (API 29+) through Android 16 (API 36+).
+
+            DO NOT add "dataSync" here. FOREGROUND_SERVICE_TYPE_DATA_SYNC was removed
+            in Android 16 (API 36). Including it causes startForeground() to throw
+            SecurityException → FGS silently degrades → LMK kills the process mid-inference.
+        -->
         <service
             android:name="com.saarthi.core.inference.InferenceService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|dataSync">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="On-device AI model inference (LLM text generation)" />

@@ -54,18 +54,26 @@ class InferenceService : Service() {
         val notification = buildNotification()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Include both specialUse (AI) and dataSync (Processing) for maximum resilience.
-                val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                startForeground(NOTIFICATION_ID, notification, types)
+                // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is the correct and only type for
+                // on-device AI inference. DATA_SYNC was removed in Android 16 (API 36) —
+                // passing it here causes SecurityException on API 36+ devices (e.g. Samsung
+                // SM-S918B), which was silently caught below, leaving us with NO foreground
+                // service protection and the LMK killing the process in ~10 seconds.
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                )
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: Exception) {
             // Android 14+ is extremely strict about when an FGS can start.
-            // If it fails, log it and proceed as a background service.
-            // The WakeLock below will still provide some protection.
-            DebugLogger.log("SERVICE", "Failed to start as Foreground: ${e.message}")
+            // If it fails, log the reason prominently — silent failure here is the #1
+            // crash source (process gets killed mid-inference with no stack trace).
+            DebugLogger.log("SERVICE", "WARN: startForeground failed (${e.javaClass.simpleName}): ${e.message}")
+            // Attempt graceful fallback: try without an explicit type (API < Q behaviour)
+            runCatching { startForeground(NOTIFICATION_ID, notification) }
         }
 
         // Acquire a partial wake lock to keep the CPU running during decode

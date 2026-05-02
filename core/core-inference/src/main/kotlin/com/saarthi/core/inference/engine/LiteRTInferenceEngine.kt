@@ -70,8 +70,11 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile override var activeModelName: String? = null
         private set
 
-    private var usingGpu: Boolean = false
-    private var isGenerating: Boolean = false
+    @Volatile private var usingGpu: Boolean = false
+    // @Volatile ensures reads from main/IO threads see the value set by engineDispatcher.
+    // Without @Volatile the JIT can cache stale false → closeInternal() closes the engine
+    // mid-generation, causing a native crash or IllegalStateException on the next token.
+    @Volatile private var isGenerating: Boolean = false
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
 
@@ -205,10 +208,14 @@ class LiteRTInferenceEngine @Inject constructor(
             }
 
             val sizeMb = file.length() / 1_048_576
-            // Gemma LiteRT .task models have a fixed KV cache compiled in.
-            // Minimum: 2048 — prevents native crashes on overflow for long prompts.
-            // Maximum cap: 8192 — safe budget for flagship devices.
-            val effectiveMaxTokens = config.maxTokens.coerceIn(2048, 8192)
+            // Trust the caller's maxTokens — it is set from the model catalog's contextLength.
+            // For .task models (Gemma 3/3n = 1280, Gemma 2 = 2048), setMaxTokens IS the
+            // total KV-cache size (input + output). Forcing 2048 on a 1280-context model
+            // causes the native layer to over-run its pre-allocated buffer on long
+            // conversations — a native SIGABRT / process kill.
+            // Floor at 1024 only to reject clearly broken configs (e.g. 0 from a bad catalog entry).
+            // Ceiling at 8192 to prevent runaway memory allocation on edge cases.
+            val effectiveMaxTokens = config.maxTokens.coerceIn(1024, 8192)
             DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
             // Mark init as started BEFORE calling createFromOptions.
@@ -356,12 +363,16 @@ class LiteRTInferenceEngine @Inject constructor(
         DebugLogger.log("LITERT", "Stream start  backend=${if (usingGpu) "GPU" else "CPU"}  timeout=${timeoutMs/1000}s  promptChars=${prompt.length}")
 
         generateMutex.withLock {
-            isGenerating = true
-            markGenerationStarted()
             var tokenCount = 0
             var isFinished = false
+            var watchdog: kotlinx.coroutines.Job? = null
             try {
-                val watchdog = launch {
+                // Set state BEFORE calling generateResponseAsync so the crash-recovery
+                // prefs are written even if the native call itself blocks or throws.
+                isGenerating = true
+                markGenerationStarted()
+
+                watchdog = launch {
                     delay(timeoutMs)
                     if (!isFinished) {
                         DebugLogger.log("LITERT", "Watchdog: generation timed out after ${timeoutMs/1000}s")
@@ -385,22 +396,25 @@ class LiteRTInferenceEngine @Inject constructor(
 
                     if (done) {
                         isFinished = true
-                        watchdog.cancel()
+                        watchdog?.cancel()
                         DebugLogger.log("LITERT", "Stream complete  tokens≈$tokenCount")
                         close()
                     }
                 }
 
-                awaitClose {
-                    watchdog.cancel()
-                    isGenerating = false
-                    markGenerationEnded()
-                }
+                awaitClose { watchdog?.cancel() }
+
             } catch (e: Throwable) {
-                isGenerating = false
-                markGenerationEnded()
+                watchdog?.cancel()
                 if (e is CancellationException) throw e
                 close(RuntimeException("Generation failed: ${e.message}", e))
+            } finally {
+                // ALWAYS clear the generation flag — covers normal completion, timeout,
+                // exception, AND coroutine cancellation (e.g. user navigates away).
+                // Previously this was only in awaitClose{} which does not fire when the
+                // collecting scope is cancelled before awaitClose is reached.
+                isGenerating = false
+                markGenerationEnded()
             }
         }
     }.flowOn(engineDispatcher)
