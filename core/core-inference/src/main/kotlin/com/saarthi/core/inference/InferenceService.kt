@@ -134,7 +134,7 @@ class InferenceService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setVisibility(Notification.VISIBILITY_SECRET)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .build()
     }
 
