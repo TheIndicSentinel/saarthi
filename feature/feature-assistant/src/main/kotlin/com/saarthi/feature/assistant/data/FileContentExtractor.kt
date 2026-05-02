@@ -14,7 +14,9 @@ import com.tomroush.pdfbox.android.PDFBoxResourceLoader
 import com.tomroush.pdfbox.pdmodel.PDDocument
 import com.tomroush.pdfbox.text.PDFTextStripper
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import timber.log.Timber
@@ -149,52 +151,25 @@ class FileContentExtractor @Inject constructor(
         }
     }.onFailure { Timber.w(it, "Failed to read text content") }.getOrNull()
 
-    private suspend fun extractPdfText(uri: Uri): String {
-        return runCatching {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
-                PdfRenderer(descriptor).use { renderer ->
-                    val pagesToScan = minOf(renderer.pageCount, 2)
-                    if (pagesToScan == 0) throw IllegalStateException("PDF has no pages")
-
-                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                    val extracted = StringBuilder()
-                    var shouldStop = false
-
-                    for (pageIndex in 0 until pagesToScan) {
-                        if (shouldStop) break
-                        renderer.openPage(pageIndex).use { page ->
-                            val targetWidth = minOf(page.width * 2, 1200)
-                            val targetHeight = maxOf((targetWidth.toFloat() / page.width * page.height).toInt(), 1)
-                            val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-
-                            val result = suspendCancellableCoroutine<com.google.mlkit.vision.text.Text> { cont ->
-                                val image = InputImage.fromBitmap(bitmap, 0)
-                                recognizer.process(image)
-                                    .addOnSuccessListener { cont.resume(it) }
-                                    .addOnFailureListener { cont.resumeWithException(it) }
-                            }
-
-                            if (result.text.isNotBlank()) {
-                                if (extracted.isNotEmpty()) extracted.appendLine()
-                                extracted.appendLine("Page ${pageIndex + 1}:")
-                                extracted.appendLine(result.text.take(MAX_DIRECT_CHARS - extracted.length))
-                                if (extracted.length >= MAX_DIRECT_CHARS) shouldStop = true
-                            }
-                        }
-                    }
-
-                    val text = extracted.toString().trim()
-                    if (text.isBlank()) {
-                        "[PDF: ${queryMetadata(uri).first}. No readable text was found. Please provide the relevant text or a short summary of what you need from this file.]"
+    private suspend fun extractPdfText(uri: Uri): String = withContext(Dispatchers.IO) {
+        runCatching {
+            PDFBoxResourceLoader.init(context)
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                PDDocument.load(inputStream).use { document ->
+                    val stripper = PDFTextStripper()
+                    // Limit to first 10 pages to prevent context drowning or OOM
+                    stripper.endPage = 10
+                    val text = stripper.getText(document)
+                    if (text.isNotBlank()) {
+                        "[Extracted from PDF]:\n${text.take(MAX_RAG_FILE_CHARS)}"
                     } else {
-                        text
+                        "[PDF: No readable text found in this document]"
                     }
                 }
-            } ?: "[PDF: ${queryMetadata(uri).first}. Could not open file. Please provide relevant text or a short summary.]"
-        }.onFailure {
-            Timber.w(it, "PDF extraction failed")
-        }.getOrNull() ?: "[PDF: ${runCatching { queryMetadata(uri).first }.getOrDefault("file")}. Extraction failed. Please provide the relevant text or a short summary.]"
+            }
+        }.onFailure { 
+            Timber.e(it, "PDF extraction failed") 
+        }.getOrDefault("[PDF: Error reading file]")
     }
 
     private suspend fun extractImageText(uri: Uri): String? = runCatching {
