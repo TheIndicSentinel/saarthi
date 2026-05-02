@@ -10,9 +10,6 @@ import com.saarthi.feature.assistant.domain.AttachedFile
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import com.tomroush.pdfbox.android.PDFBoxResourceLoader
-import com.tomroush.pdfbox.pdmodel.PDDocument
-import com.tomroush.pdfbox.text.PDFTextStripper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -151,25 +148,49 @@ class FileContentExtractor @Inject constructor(
         }
     }.onFailure { Timber.w(it, "Failed to read text content") }.getOrNull()
 
-    private suspend fun extractPdfText(uri: Uri): String = withContext(Dispatchers.IO) {
+    private suspend fun extractPdfText(uri: Uri): String = withContext(Dispatchers.Default) {
         runCatching {
-            PDFBoxResourceLoader.init(context)
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                PDDocument.load(inputStream).use { document ->
-                    val stripper = PDFTextStripper()
-                    // Limit to first 10 pages to prevent context drowning or OOM
-                    stripper.endPage = 10
-                    val text = stripper.getText(document)
-                    if (text.isNotBlank()) {
-                        "[Extracted from PDF]:\n${text.take(MAX_RAG_FILE_CHARS)}"
-                    } else {
-                        "[PDF: No readable text found in this document]"
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                android.graphics.pdf.PdfRenderer(descriptor).use { renderer ->
+                    val pagesToScan = minOf(renderer.pageCount, 5)
+                    if (pagesToScan == 0) throw IllegalStateException("PDF has no pages")
+
+                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                    val extracted = StringBuilder()
+
+                    for (pageIndex in 0 until pagesToScan) {
+                        renderer.openPage(pageIndex).use { page ->
+                            // Render page at 2x scale for better OCR accuracy
+                            val bitmap = android.graphics.Bitmap.createBitmap(
+                                page.width * 2, page.height * 2, android.graphics.Bitmap.Config.ARGB_8888
+                            )
+                            page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+
+                            val result = suspendCancellableCoroutine<com.google.mlkit.vision.text.Text> { cont ->
+                                val image = InputImage.fromBitmap(bitmap, 0)
+                                recognizer.process(image)
+                                    .addOnSuccessListener { cont.resume(it) }
+                                    .addOnFailureListener { cont.resumeWithException(it) }
+                            }
+
+                            if (result.text.isNotBlank()) {
+                                if (extracted.isNotEmpty()) extracted.appendLine()
+                                extracted.appendLine("--- Page ${pageIndex + 1} ---")
+                                extracted.append(result.text)
+                            }
+                        }
+                        if (extracted.length >= MAX_RAG_FILE_CHARS) break
                     }
+                    
+                    val finalResult = extracted.toString()
+                    if (finalResult.isBlank()) "[PDF: No readable text found]" 
+                    else finalResult.take(MAX_RAG_FILE_CHARS)
                 }
             }
-        }.onFailure { 
-            Timber.e(it, "PDF extraction failed") 
-        }.getOrDefault("[PDF: Error reading file]")
+        }.getOrElse { e ->
+            Timber.e(e, "PDF OCR failed")
+            "[PDF: Could not read file contents]"
+        }
     }
 
     private suspend fun extractImageText(uri: Uri): String? = runCatching {
