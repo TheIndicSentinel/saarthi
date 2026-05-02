@@ -107,7 +107,7 @@ class InferenceService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "AI Inference",
-                NotificationManager.IMPORTANCE_MIN,
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
                 description = "Keeps Saarthi alive while the AI model is generating a response."
                 setShowBadge(false)

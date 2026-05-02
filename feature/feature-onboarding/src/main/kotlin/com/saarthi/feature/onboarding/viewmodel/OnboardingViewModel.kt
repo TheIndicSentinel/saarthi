@@ -116,8 +116,9 @@ class OnboardingViewModel @Inject constructor(
                     val path = (progress as DownloadProgress.Completed).filePath
                     DebugLogger.log("DOWNLOAD", "Success: $path")
                     _uiState.update {
+                        val currentPath = it.selectedModelPath
                         it.copy(
-                            selectedModelPath = it.selectedModelPath ?: path,
+                            selectedModelPath = currentPath ?: path,
                             modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
                             error = null,
                         )

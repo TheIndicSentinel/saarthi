@@ -77,16 +77,18 @@ class OnboardingRepositoryImpl @Inject constructor(
         val searchRoots = listOfNotNull(
             context.getExternalFilesDir("models"),
             context.getExternalFilesDir(null),
+            File(context.getExternalFilesDir(null), "models"),
             File(context.filesDir, "models"),
             context.filesDir,
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
         )
 
         for (root in searchRoots) {
-            if (root == null || !root.canRead()) continue
+            if (root == null || !root.exists()) continue
             root.listFiles()?.forEach { f ->
                 if (f.isFile && isModelFile(f)) candidates += f
                 else if (f.isDirectory) {
+                    // One level of recursion for 'models' subdirectories
                     f.listFiles()?.forEach { sub ->
                         if (sub.isFile && isModelFile(sub)) candidates += sub
                     }
@@ -102,7 +104,8 @@ class OnboardingRepositoryImpl @Inject constructor(
     private fun isModelFile(f: File): Boolean {
         val name = f.name.lowercase()
         val hasExt = MODEL_EXTENSIONS.any { name.endsWith(it) }
+        // Lower threshold to 10MB to be safer. Some test/quantized models are small.
         val hasHint = MODEL_NAME_HINTS.any { name.contains(it) }
-        return hasExt && (hasHint || f.length() > 50_000_000L)
+        return hasExt && (hasHint || f.length() > 10_000_000L)
     }
 }

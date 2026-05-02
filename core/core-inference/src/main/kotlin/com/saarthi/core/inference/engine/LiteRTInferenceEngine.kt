@@ -98,26 +98,62 @@ class LiteRTInferenceEngine @Inject constructor(
         enginePrefs.getBoolean("litert_init_pending", false)
 
     /**
-     * True if a previous GPU generation crashed AND the 7-day recovery window has not elapsed.
+     * True if a previous GPU generation crashed AND the 24-hour recovery window has not elapsed.
      *
-     * After 7 days we automatically retry GPU — this handles the common case where a user
-     * receives an OEM driver update (e.g. Samsung Android 16 monthly patch) that fixes the
-     * OpenCL compute instability. Without this, the CPU ban would be permanent.
+     * Reduced from 7 days to 24 hours because on Samsung Android 16, BOTH GPU and CPU
+     * crash during inference. A long GPU ban just locks the user into CPU crashes.
+     * 24 hours is enough to prompt a retry after an app restart while still handling
+     * the case where an OEM driver update fixes the issue overnight.
      */
     private fun gpuPreviouslyCrashedDuringGen(): Boolean {
         val crashed = enginePrefs.getBoolean("litert_gpu_gen_crashed", false)
         if (!crashed) return false
         val bannedAt = enginePrefs.getLong("litert_gpu_ban_timestamp", 0L)
         val banAgeMs = System.currentTimeMillis() - bannedAt
-        val GPU_BAN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000L  // 7 days
+        val GPU_BAN_EXPIRY_MS = 24 * 60 * 60 * 1000L  // 24 hours (was 7 days)
         return if (banAgeMs < GPU_BAN_EXPIRY_MS) {
             true  // still within ban window
         } else {
-            // Ban expired — clear flags and retry GPU on next load
-            DebugLogger.log("LITERT", "GPU ban expired after ${banAgeMs / 86_400_000}d — clearing ban, will retry GPU")
+            DebugLogger.log("LITERT", "GPU ban expired after ${banAgeMs / 3_600_000}h — clearing ban, will retry GPU")
             clearGpuGenCrashedFlag()
             false
         }
+    }
+
+    // ── Crash loop detection ──────────────────────────────────────────────────
+    // If the app crashes 3+ times in a row during generation, both GPU and CPU are
+    // failing. Clear all flags to give a clean slate and let the UI show an error
+    // instead of endlessly crash-looping.
+    private fun getCrashCount(): Int = enginePrefs.getInt("litert_crash_count", 0)
+
+    private fun incrementCrashCount() {
+        val count = getCrashCount() + 1
+        enginePrefs.edit().putInt("litert_crash_count", count).commit()
+        DebugLogger.log("LITERT", "Crash count: $count")
+    }
+
+    private fun resetCrashCount() =
+        enginePrefs.edit().putInt("litert_crash_count", 0).apply()
+
+    /**
+     * If crash count >= 3, both GPU and CPU are crashing. Clear all flags to break
+     * the crash loop. The engine will still load and isReady will be true, but the
+     * next generation may crash again. The UI should detect repeated failures.
+     */
+    private fun breakCrashLoopIfNeeded(): Boolean {
+        val count = getCrashCount()
+        if (count >= 3) {
+            DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes) — clearing all flags for clean slate")
+            enginePrefs.edit()
+                .putBoolean("litert_gen_pending", false)
+                .putBoolean("litert_init_pending", false)
+                .putBoolean("litert_gpu_gen_crashed", false)
+                .putLong("litert_gpu_ban_timestamp", 0L)
+                .putInt("litert_crash_count", 0)
+                .commit()
+            return true
+        }
+        return false
     }
 
     private fun markGpuGenCrashed() {
@@ -160,10 +196,16 @@ class LiteRTInferenceEngine @Inject constructor(
 
     override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
         initMutex.withLock {
+            // ── Crash loop breaker ────────────────────────────────────────────
+            // Must run BEFORE normal crash recovery to prevent infinite loops
+            // where both GPU and CPU crash on every launch.
+            val loopBroken = breakCrashLoopIfNeeded()
+
             val crashedDuringGen  = wasKilledDuringGeneration()
             val crashedDuringInit = wasKilledDuringInit()
-            if (crashedDuringGen || crashedDuringInit) {
-                val wasGpu = wasUsingGpuAtCrash()  // read PERSISTED backend, not volatile field
+            if (!loopBroken && (crashedDuringGen || crashedDuringInit)) {
+                incrementCrashCount()
+                val wasGpu = wasUsingGpuAtCrash()
                 DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit gpu=$wasGpu — forcing reinit")
                 if (crashedDuringGen && wasGpu) {
                     markGpuGenCrashed()
@@ -397,6 +439,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     if (done) {
                         isFinished = true
                         watchdog?.cancel()
+                        resetCrashCount()  // successful generation — break crash loop counter
                         DebugLogger.log("LITERT", "Stream complete  tokens≈$tokenCount")
                         close()
                     }

@@ -59,6 +59,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Saarthi.SplashScreen"
         android:enableOnBackInvokedCallback="true"
+        android:largeHeap="true"
+        android:hasFragileUserData="true"
+        android:allowNativeHeapPointerTagging="false"
         android:memtagMode="off">
         <!--
             memtagMode="off": Disables ARM MTE (Memory Tagging Extension) for this process.
