@@ -102,8 +102,6 @@ class MainViewModel @Inject constructor(
                         else -> "Failed to load AI model (${e.javaClass.simpleName})"
                     }
                     com.saarthi.core.inference.DebugLogger.log("MAIN", "Background init failed: $msg")
-                    // We don't change _startState here because the user is already on Home.
-                    // The InferenceEngine will remain !isReady, which AssistantViewModel handles.
                 }
             }
         }

@@ -1,5 +1,7 @@
 package com.saarthi.core.inference.engine
 
+import com.saarthi.core.inference.InferenceService
+
 import android.app.ActivityManager
 import android.content.Context
 import android.content.SharedPreferences
@@ -71,10 +73,14 @@ class LiteRTInferenceEngine @Inject constructor(
         private set
 
     @Volatile private var usingGpu: Boolean = false
-    // @Volatile ensures reads from main/IO threads see the value set by engineDispatcher.
-    // Without @Volatile the JIT can cache stale false → closeInternal() closes the engine
-    // mid-generation, causing a native crash or IllegalStateException on the next token.
+    // isGenerating: tracks whether our *coroutine* is inside a generation block.
+    // isNativeGenerating: tracks whether MediaPipe's *native thread* is still computing.
+    // These are separate because cancelling the coroutine (e.g., user navigates away) sets
+    // isGenerating=false immediately, but the MediaPipe native thread keeps running until
+    // the 'done' callback fires. Calling llmInference.close() while the native thread is
+    // active causes a SIGABRT (native use-after-free). closeInternal() checks BOTH flags.
     @Volatile private var isGenerating: Boolean = false
+    @Volatile private var isNativeGenerating: Boolean = false
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
 
@@ -196,7 +202,8 @@ class LiteRTInferenceEngine @Inject constructor(
 
     override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
         initMutex.withLock {
-            // ── Crash loop breaker ────────────────────────────────────────────
+            generateMutex.withLock {
+                // ── Crash loop breaker ────────────────────────────────────────────
             // Must run BEFORE normal crash recovery to prevent infinite loops
             // where both GPU and CPU crash on every launch.
             val loopBroken = breakCrashLoopIfNeeded()
@@ -225,6 +232,13 @@ class LiteRTInferenceEngine @Inject constructor(
                 _activeModelNameFlow.value = config.modelName
                 return@withLock
             }
+
+            // Start FGS BEFORE any heavy work. Model loading allocates 500MB–3GB
+            // and burns 100% CPU for 4–10s. Without FGS, Samsung OneUI 7 (Android 16)
+            // kills the process before loading completes. The FGS stays active through
+            // model init AND the first inference — ChatRepositoryImpl stops it after
+            // generation completes.
+            InferenceService.start(context)
 
             setReady(false)
             activeModelName = null
@@ -314,7 +328,9 @@ class LiteRTInferenceEngine @Inject constructor(
                 }
                 DebugLogger.log("LITERT", "Load failed: $msg")
                 Timber.e(e, "LiteRT model load failed")
+                InferenceService.stop(context)  // release FGS on failure
                 throw RuntimeException("LiteRT failed to load model: $msg", e)
+            }
             }
         }
     }
@@ -434,9 +450,11 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                 }
 
+                // Mark native generation active BEFORE the async call.
+                // This flag stays true until 'done=true' fires on the native thread,
+                // even if the collecting coroutine is cancelled before that.
+                isNativeGenerating = true
                 inference.generateResponseAsync(prompt) { partialResult, done ->
-                    // MediaPipe's partialResult can sometimes contain the full accumulated text.
-                    // We only want the new part to keep the UI smooth.
                     val cleaned = partialResult
                         .replace("<start_of_turn>", "")
                         .replace("<end_of_turn>", "")
@@ -449,6 +467,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
 
                     if (done) {
+                        isNativeGenerating = false  // native thread finished — safe to close engine now
                         isFinished = true
                         watchdog?.cancel()
                         resetCrashCount()  // successful generation — break crash loop counter
@@ -461,14 +480,14 @@ class LiteRTInferenceEngine @Inject constructor(
 
             } catch (e: Throwable) {
                 watchdog?.cancel()
+                isNativeGenerating = false
                 if (e is CancellationException) throw e
                 close(RuntimeException("Generation failed: ${e.message}", e))
             } finally {
-                // ALWAYS clear the generation flag — covers normal completion, timeout,
-                // exception, AND coroutine cancellation (e.g. user navigates away).
-                // Previously this was only in awaitClose{} which does not fire when the
-                // collecting scope is cancelled before awaitClose is reached.
                 isGenerating = false
+                // Note: isNativeGenerating is cleared inside the native 'done' callback.
+                // If we get here WITHOUT a done callback (e.g. exception), clear it now.
+                isNativeGenerating = false
                 markGenerationEnded()
             }
         }
@@ -506,8 +525,8 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     private fun closeInternal() {
-        if (isGenerating) {
-            DebugLogger.log("LITERT", "Close deferred: generation in progress")
+        if (isGenerating || isNativeGenerating) {
+            DebugLogger.log("LITERT", "Close deferred: native generation still in progress (isGenerating=$isGenerating, isNativeGenerating=$isNativeGenerating)")
             return
         }
         if (llmInference == null) return

@@ -77,12 +77,15 @@ class InferenceService : Service() {
         }
 
         // Acquire a partial wake lock to keep the CPU running during decode
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "saarthi:inference_fg")
-            .also {
-                it.setReferenceCounted(false)
-                it.acquire(10 * 60 * 1000L) // 10 min max safety timeout
+        if (wakeLock == null) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "saarthi:inference_fg").apply {
+                setReferenceCounted(false)
             }
+        }
+        if (!wakeLock!!.isHeld) {
+            wakeLock!!.acquire(10 * 60 * 1000L) // 10 min max safety timeout
+        }
 
         DebugLogger.log("SERVICE", "Foreground inference service started")
         return START_NOT_STICKY
