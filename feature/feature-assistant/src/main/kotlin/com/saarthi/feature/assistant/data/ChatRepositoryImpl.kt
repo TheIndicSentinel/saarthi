@@ -49,14 +49,15 @@ private const val MAX_PROMPT_CHARS_LARGE = 8_000 // Large-ctx models (Gemma 4)
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
-    @ApplicationContext private val appContext: Context,
-    private val inferenceEngine: InferenceEngine,
-    private val memoryRepository: MemoryRepository,
+    @ApplicationContext private val context: Context,
     private val conversationDao: ConversationDao,
     private val chatSessionDao: ChatSessionDao,
+    private val memoryRepository: MemoryRepository,
     private val fileContentExtractor: FileContentExtractor,
     private val languageManager: LanguageManager,
+    private val inferenceEngine: InferenceEngine,
     private val reminderManager: ReminderManager,
+    private val deviceProfiler: DeviceProfiler,
 ) : ChatRepository {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -150,13 +151,13 @@ class ChatRepositoryImpl @Inject constructor(
 
         // Build prompt and run inference fully on IO — avoids blocking the main thread
         // Start foreground service IMMEDIATELY — prevents Android from killing process.
-        InferenceService.start(appContext)
+        InferenceService.start(context)
         
         return flow {
             // Check readiness first
             if (!inferenceEngine.isReady) {
                 emit("AI model is still loading or not initialized. Please wait a moment.")
-                InferenceService.stop(appContext)
+                InferenceService.stop(context)
                 _history.update { history ->
                     history.map { if (it.id == streamingId) it.copy(content = "Model not ready.", isStreaming = false) else it }
                 }
@@ -175,7 +176,7 @@ class ChatRepositoryImpl @Inject constructor(
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
                     // Stop foreground service on error
-                    InferenceService.stop(appContext)
+                    InferenceService.stop(context)
                     // Surface engine errors as a visible assistant message — never crash the app.
                     val errMsg = e.message?.takeIf { it.isNotBlank() }
                         ?: "Something went wrong. Please try again."
@@ -206,7 +207,7 @@ class ChatRepositoryImpl @Inject constructor(
                 }
                 .onCompletion { throwable ->
                     // Stop foreground service when generation is done
-                    InferenceService.stop(appContext)
+                    InferenceService.stop(context)
                     val elapsed = (System.currentTimeMillis() - startTime) / 1000f
                     val tps = if (elapsed > 0) tokenCount / elapsed else 0f
                     DebugLogger.log("CHAT", "streamResponse done  tokens=$tokenCount  elapsed=${elapsed.toInt()}s  tps=${"%.1f".format(tps)}  error=${throwable?.message}")
@@ -270,12 +271,8 @@ class ChatRepositoryImpl @Inject constructor(
 
     private val maxPromptChars: Int
         get() {
-            // Derive safe prompt char limit from the engine's loaded model context.
-            // We read the active model name from the engine and look it up in the catalog.
-            // Falls back to the most conservative budget (1280-ctx) if unknown.
-            val modelName = inferenceEngine.activeModelName ?: return MAX_PROMPT_CHARS_1280
+            val modelName = inferenceEngine.activeModelName ?: ""
             return when {
-                modelName.contains("gemma4", ignoreCase = true) ||
                 modelName.contains("Gemma 4", ignoreCase = true) -> MAX_PROMPT_CHARS_LARGE
                 modelName.contains("Gemma 2", ignoreCase = true) -> MAX_PROMPT_CHARS_2048
                 else -> MAX_PROMPT_CHARS_1280  // Gemma 3/3n default
@@ -283,10 +280,26 @@ class ChatRepositoryImpl @Inject constructor(
         }
 
     private val maxHistoryTurns: Int
-        get() = when (maxPromptChars) {
-            MAX_PROMPT_CHARS_1280 -> 2   // only 2 turns fit safely in 1280-ctx
-            MAX_PROMPT_CHARS_2048 -> 4   // 4 turns for 2048-ctx
-            else -> MAX_HISTORY_TURNS    // 6 for large-ctx models
+        get() {
+            val budget = maxPromptChars
+            val profile = deviceProfiler.profile()
+            
+            // Tiered history scaling:
+            // 1. If RAM is low (< 4GB available), drop history aggressively to save KV memory.
+            // 2. Otherwise, use the model's full safe capacity.
+            return if (profile.availableRamMb < 3500) {
+                when (budget) {
+                    MAX_PROMPT_CHARS_1280 -> 1 // bare minimum on low-RAM
+                    MAX_PROMPT_CHARS_2048 -> 2
+                    else -> 3
+                }
+            } else {
+                when (budget) {
+                    MAX_PROMPT_CHARS_1280 -> 2   
+                    MAX_PROMPT_CHARS_2048 -> 4   
+                    else -> MAX_HISTORY_TURNS    
+                }
+            }
         }
 
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
