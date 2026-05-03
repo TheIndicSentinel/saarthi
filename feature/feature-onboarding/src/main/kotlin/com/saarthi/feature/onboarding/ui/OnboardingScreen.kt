@@ -121,7 +121,6 @@ fun OnboardingScreen(
                     selectedPath = state.selectedModelPath,
                     isScanning = state.isScanning,
                     error = state.error,
-                    showBatteryOptimizationWarning = state.showBatteryOptimizationWarning,
                     onDownload = viewModel::downloadModel,
                     onCancelDownload = viewModel::cancelDownload,
                     onSelectDownloaded = viewModel::selectDownloadedModel,
@@ -131,8 +130,6 @@ fun OnboardingScreen(
                     onConfirm = viewModel::confirmModelAndInit,
                     onGrantAllFiles = { viewModel.openAllFilesAccessSettings(context) },
                     onRescan = viewModel::rescanAfterPermissionGrant,
-                    onGrantBatteryOptimization = { viewModel.requestBatteryOptimization(context) },
-                    onDismissBatteryWarning = viewModel::dismissBatteryOptimizationWarning,
                 )
                 OnboardingStep.MODEL_INIT -> ModelInitStep(
                     isLoading = state.isLoading,
@@ -273,7 +270,6 @@ private fun ModelPickStep(
     selectedPath: String?,
     isScanning: Boolean,
     error: String?,
-    showBatteryOptimizationWarning: Boolean = false,
     onDownload: (ModelEntry) -> Unit,
     onCancelDownload: (ModelEntry) -> Unit,
     onSelectDownloaded: (ModelEntry) -> Unit,
@@ -283,8 +279,6 @@ private fun ModelPickStep(
     onConfirm: () -> Unit,
     onGrantAllFiles: () -> Unit,
     onRescan: () -> Unit,
-    onGrantBatteryOptimization: () -> Unit = {},
-    onDismissBatteryWarning: () -> Unit = {},
 ) {
     var showLocalSection by remember { mutableStateOf(false) }
 
@@ -449,53 +443,12 @@ private fun ModelPickStep(
             )
         }
 
-        if (showBatteryOptimizationWarning) {
-            Spacer(Modifier.height(10.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFFF8F00).copy(alpha = 0.10f))
-                    .border(1.dp, Color(0xFFFF8F00).copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-            ) {
-                Text(
-                    "⚡ Battery Restriction Detected",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = Color(0xFFFFB300),
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Samsung's power watchdog may kill the AI after 13–60 s of generation. " +
-                    "Tap \"Enable Now\" → set Saarthi to Unrestricted battery usage, then return here.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SaarthiColors.TextSecondary,
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SaarthiPrimaryButton(
-                        text = "Enable Now",
-                        onClick = onGrantBatteryOptimization,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedButton(
-                        onClick = onDismissBatteryWarning,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Skip & Load", color = SaarthiColors.TextMuted)
-                    }
-                }
-            }
-        }
-
         Spacer(Modifier.height(16.dp))
-        if (!showBatteryOptimizationWarning) {
-            SaarthiPrimaryButton(
-                text = if (selectedPath != null) "Load Selected Model" else "Select or download a model",
-                onClick = onConfirm,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        SaarthiPrimaryButton(
+            text = if (selectedPath != null) "Load Selected Model" else "Select or download a model",
+            onClick = onConfirm,
+            modifier = Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(24.dp))
     }
 }

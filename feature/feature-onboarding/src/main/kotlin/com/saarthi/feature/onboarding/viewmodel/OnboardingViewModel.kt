@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.ParcelFileDescriptor
-import android.os.PowerManager
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
@@ -30,7 +29,6 @@ import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -60,8 +58,6 @@ data class OnboardingUiState(
     val manualPathInput: String = "",
     val needsAllFilesPermission: Boolean = false,
     val downloadedModelIds: Set<String> = emptySet(),
-    // true when battery optimization is active (Samsung may kill CPU inference after 30-60s)
-    val showBatteryOptimizationWarning: Boolean = false,
 )
 
 enum class OnboardingStep { WELCOME, LANGUAGE_SELECT, MODEL_PICK, MODEL_INIT, CHAT_TEST, DONE }
@@ -69,7 +65,6 @@ enum class OnboardingStep { WELCOME, LANGUAGE_SELECT, MODEL_PICK, MODEL_INIT, CH
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
-    @ApplicationContext private val appContext: Context,
     private val languageManager: LanguageManager,
     private val inferenceEngine: InferenceEngine,
     private val repository: OnboardingRepository,
@@ -103,8 +98,6 @@ class OnboardingViewModel @Inject constructor(
     /** Tracks completed downloads we've already acted on (set selectedModelPath). */
     private val handledCompletions = mutableSetOf<String>()
 
-    // Shown once per session — after the user dismisses (grant or skip), don't show again.
-    private var batteryWarningShown = false
 
     init {
         val profile = deviceProfiler.profile()
@@ -369,49 +362,9 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    // ── Battery optimization ──────────────────────────────────────────────────
-
-    /**
-     * Requests battery optimization exemption by launching the system settings dialog.
-     * Must be called with an Activity context (not Application) to start the Activity.
-     * After granting, the user returns to the app and can tap "Load Model" again.
-     */
-    fun requestBatteryOptimization(activityContext: Context) {
-        runCatching {
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:${appContext.packageName}")
-            }
-            activityContext.startActivity(intent)
-        }.onFailure {
-            DebugLogger.log("VMODEL", "Could not open battery settings: ${it.message}")
-        }
-        batteryWarningShown = true
-        _uiState.update { it.copy(showBatteryOptimizationWarning = false) }
-    }
-
-    /** Dismiss the battery warning and proceed with model init anyway. */
-    fun dismissBatteryOptimizationWarning() {
-        batteryWarningShown = true
-        _uiState.update { it.copy(showBatteryOptimizationWarning = false) }
-        confirmModelAndInit()
-    }
-
     // ── Model init ────────────────────────────────────────────────────────────
 
     fun confirmModelAndInit() {
-        // On Samsung OneUI 6/7 (Android 13-16), processes consuming sustained CPU/GPU
-        // are killed by the power watchdog in 13–60s even with FOREGROUND_SERVICE running,
-        // UNLESS the app has battery optimization exemption ("Unrestricted" mode).
-        // Show a one-time warning before the first init; user can grant or proceed anyway.
-        if (!batteryWarningShown) {
-            val pm = appContext.getSystemService(PowerManager::class.java)
-            if (!pm.isIgnoringBatteryOptimizations(appContext.packageName)) {
-                DebugLogger.log("VMODEL", "Battery optimization active — inference may be killed by Samsung power watchdog")
-                _uiState.update { it.copy(showBatteryOptimizationWarning = true) }
-                return
-            }
-        }
-
         val path = _uiState.value.selectedModelPath
             ?: _uiState.value.modelCandidates.firstOrNull()
             ?: run {

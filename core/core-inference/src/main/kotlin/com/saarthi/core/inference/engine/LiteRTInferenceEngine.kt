@@ -484,8 +484,11 @@ class LiteRTInferenceEngine @Inject constructor(
         val inference = llmInference
             ?: throw IllegalStateException(
                 if (crashLoopBlocked)
-                    "This model has crashed repeatedly and is not compatible with your device. " +
-                    "Please return to the model selection screen and choose a different model."
+                    "The app was closed several times during AI generation.\n\n" +
+                    "On Samsung devices, Android can terminate heavy processes unless " +
+                    "battery optimization is disabled for this app.\n\n" +
+                    "Go to Settings → Apps → Saarthi → Battery → set to Unrestricted, " +
+                    "then return here and try again."
                 else
                     "LiteRT engine not initialised."
             )
