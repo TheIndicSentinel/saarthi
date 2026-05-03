@@ -41,6 +41,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!--
+        Required to request battery optimization exemption at runtime.
+        Without this, Samsung OneUI 7 (Android 16) kills CPU-heavy processes in 13–60s
+        even when a FOREGROUND_SERVICE_SPECIAL_USE is running. Once the user grants
+        "Unrestricted" battery usage, the process is shielded from the power watchdog.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!--
         Remove FOREGROUND_SERVICE_DATA_SYNC that MediaPipe's AAR injects via manifest merge.
         This permission was removed in Android 16 (API 36); keeping it in the merged manifest
         causes startForeground() to throw SecurityException on API 36 devices (e.g. SM-S918B),

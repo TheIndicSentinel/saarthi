@@ -194,20 +194,27 @@ class ModelDownloadManager @Inject constructor(
      * trigger the "newlyCompleted" auto-select logic in OnboardingViewModel — those
      * models are already downloaded, not freshly completed.
      *
-     * Crucially: if DownloadManager STILL has an active download for this model, we
-     * do NOT emit Completed — the file on disk is still being written. Previously this
-     * caused "shows completed while actually downloading" when the app was backgrounded
-     * and resumed: the partial file (≥99% done due to HF file-size estimate drift) would
-     * pass isFileComplete(), falsely marking the download as finished.
+     * Three cases handled:
+     *  • DM still active (PENDING/RUNNING/PAUSED) → skip; [reattachActiveDownloads] handles it.
+     *  • DM reported FAILED → skip; the file on disk is partial. Do NOT mark as complete
+     *    even if it passes the 99% size threshold — a failed download near the end produces
+     *    a file that looks complete by size but is truncated at the last few bytes.
+     *  • DM reported SUCCESSFUL → trustOS=true (90% threshold) to tolerate HF file-size drift.
+     *  • No DM record (old download, manually placed file) → trustOS=false (99% threshold).
      */
     fun restoreCompletedStates(models: List<ModelEntry>) {
         models.forEach { model ->
             if (_allProgress.value[model.id] != null) return@forEach  // already tracked
-            // If DownloadManager is still writing to this file, don't mark it as complete
-            // even if the file looks large enough — the download is still in progress.
-            if (findActiveDownloadId(model.downloadUrl) != null) return@forEach
+            val dmStatus = findDownloadStatus(model.downloadUrl)
+            // Still downloading — will be handled by reattachActiveDownloads
+            if (dmStatus == DownloadManager.STATUS_PENDING ||
+                dmStatus == DownloadManager.STATUS_RUNNING ||
+                dmStatus == DownloadManager.STATUS_PAUSED) return@forEach
+            // Failed download — file on disk is partial, never safe to use as "complete"
+            if (dmStatus == DownloadManager.STATUS_FAILED) return@forEach
             val file = resolveLocalFile(model)
-            if (isFileComplete(file, model.fileSizeBytes)) {
+            val trustOS = dmStatus == DownloadManager.STATUS_SUCCESSFUL
+            if (isFileComplete(file, model.fileSizeBytes, trustOS = trustOS)) {
                 _allProgress.update { it + (model.id to DownloadProgress.Completed(file.absolutePath)) }
             }
         }
@@ -416,6 +423,23 @@ class ModelDownloadManager @Inject constructor(
             val uriCol = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
             while (cursor.moveToNext()) {
                 if (cursor.getString(uriCol) == url) return cursor.getLong(idCol)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Returns the DownloadManager status code for [url], or null if no record exists.
+     * Unlike [findActiveDownloadId], this queries ALL statuses including SUCCESSFUL and FAILED.
+     * Used by [restoreCompletedStates] to distinguish a completed download from a failed one —
+     * both leave the partial/complete file on disk, but only SUCCESSFUL is safe to mark as done.
+     */
+    private fun findDownloadStatus(url: String): Int? {
+        dm.query(DownloadManager.Query())?.use { cursor ->
+            val uriCol    = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
+            val statusCol = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+            while (cursor.moveToNext()) {
+                if (cursor.getString(uriCol) == url) return cursor.getInt(statusCol)
             }
         }
         return null

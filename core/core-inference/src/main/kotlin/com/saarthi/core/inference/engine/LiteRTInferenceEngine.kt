@@ -121,62 +121,74 @@ class LiteRTInferenceEngine @Inject constructor(
         enginePrefs.getBoolean("litert_init_pending", false)
 
     /**
-     * True if a previous GPU generation crashed AND the 24-hour recovery window has not elapsed.
+     * True if a previous GPU generation for [modelPath] crashed AND the 24-hour recovery
+     * window has not elapsed.  Per-model: a GPU crash on Gemma 3 1B does not ban GPU for
+     * Gemma 4 E2B — each model's GPU compatibility is tracked independently.
      *
-     * Reduced from 7 days to 24 hours because on Samsung Android 16, BOTH GPU and CPU
-     * crash during inference. A long GPU ban just locks the user into CPU crashes.
-     * 24 hours is enough to prompt a retry after an app restart while still handling
-     * the case where an OEM driver update fixes the issue overnight.
+     * 24-hour window: short enough that an OEM driver update overnight is adopted
+     * automatically on next use.
      */
-    private fun gpuPreviouslyCrashedDuringGen(): Boolean {
-        val crashed = enginePrefs.getBoolean("litert_gpu_gen_crashed", false)
+    private fun gpuPreviouslyCrashedDuringGen(modelPath: String): Boolean {
+        val key = modelKey(modelPath)
+        val crashed = enginePrefs.getBoolean("litert_gpu_ban_$key", false)
         if (!crashed) return false
-        val bannedAt = enginePrefs.getLong("litert_gpu_ban_timestamp", 0L)
+        val bannedAt = enginePrefs.getLong("litert_gpu_ban_ts_$key", 0L)
         val banAgeMs = System.currentTimeMillis() - bannedAt
-        val GPU_BAN_EXPIRY_MS = 24 * 60 * 60 * 1000L  // 24 hours (was 7 days)
         return if (banAgeMs < GPU_BAN_EXPIRY_MS) {
-            true  // still within ban window
+            true
         } else {
-            DebugLogger.log("LITERT", "GPU ban expired after ${banAgeMs / 3_600_000}h — clearing ban, will retry GPU")
-            clearGpuGenCrashedFlag()
+            DebugLogger.log("LITERT", "GPU ban expired for $key after ${banAgeMs / 3_600_000}h — will retry GPU")
+            clearGpuGenCrashedFlag(modelPath)
             false
         }
     }
 
-    // ── Crash loop detection ──────────────────────────────────────────────────
-    // If the app crashes 3+ times in a row during generation, both GPU and CPU are
-    // failing. Clear all flags to give a clean slate and let the UI show an error
-    // instead of endlessly crash-looping.
-    private fun getCrashCount(): Int = enginePrefs.getInt("litert_crash_count", 0)
-
-    private fun incrementCrashCount() {
-        val count = getCrashCount() + 1
-        enginePrefs.edit().putInt("litert_crash_count", count).commit()
-        DebugLogger.log("LITERT", "Crash count: $count")
+    companion object {
+        private const val GPU_BAN_EXPIRY_MS = 24 * 60 * 60 * 1000L  // 24 hours
     }
 
-    private fun resetCrashCount() =
-        enginePrefs.edit().putInt("litert_crash_count", 0).apply()
+    // ── Crash loop detection (per-model) ─────────────────────────────────────
+    // Crash state is tracked per model file (using the filename as key suffix).
+    // This prevents one model's GPU/CPU crash from poisoning the crash counter
+    // of other models — e.g., Gemma 3 1B's OpenCL crash should not count against
+    // Gemma 4 E2B's independent CPU generation attempts.
+    //
+    // Key scheme:
+    //   litert_crash_count_<filename>  — int, per-model consecutive crash count
+    //   litert_gpu_ban_<filename>      — bool, per-model GPU ban flag
+    //   litert_gpu_ban_ts_<filename>   — long, per-model GPU ban timestamp
+    //   litert_crash_model_path        — string, which model was generating at crash
+
+    private fun modelKey(modelPath: String): String = modelPath.substringAfterLast('/')
+
+    private fun getCrashCount(modelPath: String): Int =
+        enginePrefs.getInt("litert_crash_count_${modelKey(modelPath)}", 0)
+
+    private fun incrementCrashCount(modelPath: String) {
+        val count = getCrashCount(modelPath) + 1
+        enginePrefs.edit().putInt("litert_crash_count_${modelKey(modelPath)}", count).commit()
+        DebugLogger.log("LITERT", "Crash count for ${modelKey(modelPath)}: $count")
+    }
+
+    private fun resetCrashCount(modelPath: String) =
+        enginePrefs.edit().putInt("litert_crash_count_${modelKey(modelPath)}", 0).apply()
 
     /**
-     * If crash count >= 3, inference is crashing on every attempt (both GPU and CPU
-     * fail on this device/model combination). Clear all flags, block future generation,
-     * and return true so initialize() can exit early without loading the model.
-     *
-     * The caller should show the user a model-incompatibility error instead of retrying.
-     * crashLoopBlocked is reset at the top of initialize() so selecting a different
-     * model from the UI gets a fresh slate.
+     * Per-model crash loop guard: if THIS model has crashed 3+ consecutive times,
+     * block further generation and show the user a model-incompatibility error.
+     * Other models are unaffected — their counts remain independent.
      */
-    private fun breakCrashLoopIfNeeded(): Boolean {
-        val count = getCrashCount()
+    private fun breakCrashLoopIfNeeded(modelPath: String): Boolean {
+        val count = getCrashCount(modelPath)
         if (count >= 3) {
-            DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes) — model incompatible with this device, blocking generation")
+            val key = modelKey(modelPath)
+            DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes for $key) — model incompatible with this device, blocking generation")
             enginePrefs.edit()
                 .putBoolean("litert_gen_pending", false)
                 .putBoolean("litert_init_pending", false)
-                .putBoolean("litert_gpu_gen_crashed", false)
-                .putLong("litert_gpu_ban_timestamp", 0L)
-                .putInt("litert_crash_count", 0)
+                .putBoolean("litert_gpu_ban_$key", false)
+                .putLong("litert_gpu_ban_ts_$key", 0L)
+                .putInt("litert_crash_count_$key", 0)
                 .commit()
             crashLoopBlocked = true
             return true
@@ -184,18 +196,21 @@ class LiteRTInferenceEngine @Inject constructor(
         return false
     }
 
-    private fun markGpuGenCrashed() {
+    private fun markGpuGenCrashed(modelPath: String) {
+        val key = modelKey(modelPath)
         enginePrefs.edit()
-            .putBoolean("litert_gpu_gen_crashed", true)
-            .putLong("litert_gpu_ban_timestamp", System.currentTimeMillis())
+            .putBoolean("litert_gpu_ban_$key", true)
+            .putLong("litert_gpu_ban_ts_$key", System.currentTimeMillis())
             .commit()
     }
 
-    private fun clearGpuGenCrashedFlag() =
+    private fun clearGpuGenCrashedFlag(modelPath: String) {
+        val key = modelKey(modelPath)
         enginePrefs.edit()
-            .putBoolean("litert_gpu_gen_crashed", false)
-            .putLong("litert_gpu_ban_timestamp", 0L)
+            .putBoolean("litert_gpu_ban_$key", false)
+            .putLong("litert_gpu_ban_ts_$key", 0L)
             .apply()
+    }
 
     private fun markInitStarted() =
         enginePrefs.edit().putBoolean("litert_init_pending", true).commit()
@@ -206,7 +221,8 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun markGenerationStarted() {
         enginePrefs.edit()
             .putBoolean("litert_gen_pending", true)
-            .putBoolean("litert_was_using_gpu", usingGpu)  // persist so crash recovery knows the backend
+            .putBoolean("litert_was_using_gpu", usingGpu)
+            .putString("litert_crash_model_path", loadedModelPath ?: "")  // which model was running at crash
             .commit()
     }
 
@@ -229,13 +245,11 @@ class LiteRTInferenceEngine @Inject constructor(
                 // a different (working) model after seeing the crash loop error.
                 crashLoopBlocked = false
 
-                // ── Crash loop breaker ────────────────────────────────────────────
-                // Must run BEFORE normal crash recovery to prevent infinite loops
-                // where both GPU and CPU crash on every launch.
-                val loopBroken = breakCrashLoopIfNeeded()
+                // ── Crash loop breaker (per-model) ───────────────────────────────
+                // Must run BEFORE normal crash recovery. Only blocks the specific model
+                // that has failed 3+ times — other models remain available.
+                val loopBroken = breakCrashLoopIfNeeded(config.modelPath)
                 if (loopBroken) {
-                    // Model is incompatible — close any loaded instance and leave
-                    // isReady=false so the UI shows "model not ready".
                     markGenerationEnded()
                     markInitEnded()
                     closeInternal()
@@ -246,12 +260,25 @@ class LiteRTInferenceEngine @Inject constructor(
                 val crashedDuringGen  = wasKilledDuringGeneration()
                 val crashedDuringInit = wasKilledDuringInit()
                 if (crashedDuringGen || crashedDuringInit) {
-                    incrementCrashCount()
                     val wasGpu = wasUsingGpuAtCrash()
-                    DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit gpu=$wasGpu — forcing reinit")
-                    if (crashedDuringGen && wasGpu) {
-                        markGpuGenCrashed()
-                        DebugLogger.log("LITERT", "GPU crashed during generation — banning GPU for 24h")
+                    // Only penalise THIS model if it was the one generating at crash.
+                    // A crash from a different model (e.g., Gemma 3 1B OpenCL) should not
+                    // increment the crash count or ban GPU for the NEW model being initialised.
+                    val crashedModelPath = enginePrefs.getString("litert_crash_model_path", "") ?: ""
+                    val crashWasThisModel = crashedDuringGen &&
+                        (crashedModelPath == config.modelPath || crashedModelPath.isEmpty())
+                    DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit gpu=$wasGpu sameModel=$crashWasThisModel — forcing reinit")
+                    if (crashWasThisModel) {
+                        incrementCrashCount(config.modelPath)
+                        if (wasGpu) {
+                            markGpuGenCrashed(config.modelPath)
+                            DebugLogger.log("LITERT", "GPU crashed during generation — banning GPU for ${modelKey(config.modelPath)}")
+                        }
+                    }
+                    if (crashedDuringInit && !crashWasThisModel) {
+                        // Init crash (OOM) always attributed to this model.
+                        // Skip if crashWasThisModel to avoid double-counting when both flags are set.
+                        incrementCrashCount(config.modelPath)
                     }
                     markGenerationEnded()
                     markInitEnded()
@@ -383,7 +410,7 @@ class LiteRTInferenceEngine @Inject constructor(
         maxTokens: Int,
         preferredBackend: LlmInference.Backend,
     ): LlmInference {
-        val gpuBannedByPriorCrash = gpuPreviouslyCrashedDuringGen()
+        val gpuBannedByPriorCrash = gpuPreviouslyCrashedDuringGen(modelPath)
 
         // ── Fast path: GPU is banned or caller explicitly wants CPU ────────────
         if (gpuBannedByPriorCrash || preferredBackend == LlmInference.Backend.CPU) {
@@ -522,7 +549,7 @@ class LiteRTInferenceEngine @Inject constructor(
                         isNativeGenerating = false
                         isFinished = true
                         watchdog?.cancel()
-                        resetCrashCount()
+                        resetCrashCount(loadedModelPath ?: "")
                         markGenerationEnded()
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                         val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
