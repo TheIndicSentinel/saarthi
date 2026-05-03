@@ -273,11 +273,28 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "  wasUsingGpu=$wasGpu  crashedModel=${crashedModelPath.substringAfterLast('/')}")
                     DebugLogger.log("LITERT", "  currentModel=${config.modelPath.substringAfterLast('/')}  sameModel=$crashWasThisModel")
                     DebugLogger.log("LITERT", "  crashCount=${getCrashCount(config.modelPath)}  gpuBanned=${gpuPreviouslyCrashedDuringGen(config.modelPath)}")
-                    runCatching {
+                    val batteryExempt = runCatching {
                         val pm = context.getSystemService(PowerManager::class.java)
-                        val exempt = pm.isIgnoringBatteryOptimizations(context.packageName)
-                        DebugLogger.log("LITERT", "  batteryOptExempt=$exempt  (false = Samsung watchdog may have caused the kill)")
+                        pm.isIgnoringBatteryOptimizations(context.packageName)
+                    }.getOrDefault(true)
+                    DebugLogger.log("LITERT", "  batteryOptExempt=$batteryExempt")
+                    // Pinpoint the most likely cause so the log is self-explanatory.
+                    val likelyCause = when {
+                        crashWasThisModel && wasGpu ->
+                            "GPU_FAULT: generateResponseAsync caused SIGKILL on GPU — " +
+                            "likely MediaPipe regression on this SoC/API level. GPU banned for 24h."
+                        crashWasThisModel && !wasGpu && !batteryExempt ->
+                            "OEM_WATCHDOG: CPU inference killed by battery watchdog (no exemption). " +
+                            "Grant 'Unrestricted' battery in Settings → Apps → Saarthi → Battery."
+                        crashWasThisModel && !wasGpu && batteryExempt ->
+                            "CPU_CRASH_UNKNOWN: Process killed during CPU generation despite battery exemption. " +
+                            "Possible OOM or native MediaPipe bug."
+                        crashedDuringInit ->
+                            "INIT_CRASH: Killed during model load — likely OOM. " +
+                            "Close background apps and retry, or choose a smaller model."
+                        else -> "UNKNOWN"
                     }
+                    DebugLogger.log("LITERT", "  likelyCause=$likelyCause")
                     DebugLogger.log("LITERT", "=== END CRASH RECOVERY ===")
                     if (crashWasThisModel) {
                         incrementCrashCount(config.modelPath)
@@ -423,10 +440,19 @@ class LiteRTInferenceEngine @Inject constructor(
     ): LlmInference {
         val gpuBannedByPriorCrash = gpuPreviouslyCrashedDuringGen(modelPath)
 
-        // ── Fast path: GPU is banned or caller explicitly wants CPU ────────────
+        // ── Fast path: GPU is banned or DeviceProfiler says CPU is safer ────────
         if (gpuBannedByPriorCrash || preferredBackend == LlmInference.Backend.CPU) {
-            val reason = if (gpuBannedByPriorCrash) "prior GPU generation crash (ban active)" else "GPU not safe for model/device"
-            DebugLogger.log("LITERT", "Loading with CPU backend — $reason")
+            val reason = when {
+                gpuBannedByPriorCrash ->
+                    "prior GPU crash ban active for ${modelKey(modelPath)}"
+                Build.VERSION.SDK_INT >= 36 ->
+                    "gpuSafe=false — SoC=${Build.SOC_MODEL} API=${Build.VERSION.SDK_INT} " +
+                    "(MediaPipe 0.10.33 GPU regression on this SoC/API combination)"
+                else ->
+                    "gpuSafe=false — SoC=${if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else Build.HARDWARE} " +
+                    "API=${Build.VERSION.SDK_INT}"
+            }
+            DebugLogger.log("LITERT", "[BACKEND] CPU — $reason")
             return buildInference(modelPath, maxTokens, LlmInference.Backend.CPU)
                 .also { usingGpu = false }
         }

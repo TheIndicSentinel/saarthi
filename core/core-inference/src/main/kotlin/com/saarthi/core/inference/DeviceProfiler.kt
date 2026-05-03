@@ -82,39 +82,56 @@ class DeviceProfiler @Inject constructor(
         val socModel = detectSocModel()
         val socFamily = classifySoc(socModel)
 
-        // ── GPU Safety: SoC-aware backend policy ─────────────────────────────
+        // ── GPU Safety: SoC-aware backend policy (Google AI Edge tiering) ──────
         //
-        // Each SoC family has different GPU driver maturity. Policy follows
-        // Google AI Edge Gallery's internal tiering:
+        // Google's official recommendation: prefer GPU via OpenCL/Vulkan for performance;
+        // fall back to CPU (XNNPACK NEON) as the guaranteed path. Response QUALITY is
+        // identical on CPU and GPU — only TOKEN SPEED differs (~3-8 tok/s CPU vs ~25-40 GPU).
         //
-        //  QUALCOMM (Adreno)     — Primary OpenCL. Best GPU support on all tested API levels.
-        //                          NOTE: A previous policy banned GPU for Samsung+SM8550+API36
-        //                          due to suspected OpenCL instability. However, CPU inference
-        //                          on Android 16 Samsung is killed by the kernel within ~8–14s
-        //                          every time (100% failure rate), making the CPU ban far worse
-        //                          than the risk of occasional GPU instability.
-        //                          GPU is now enabled for all Qualcomm SoCs. The engine's
-        //                          markGpuGenCrashed() / 7-day ban mechanism handles any
-        //                          real runtime GPU failures automatically at the call site.
-        //  GOOGLE_TENSOR (Pixel) — Stable OpenCL on all API levels.
-        //  SAMSUNG_EXYNOS        — OpenCL unstable on API 34+. CPU preferred.
-        //  MEDIATEK              — OpenCL driver-dependent. CPU preferred unless FLAGSHIP.
-        //  GENERIC               — Unknown. Safe default with generous RAM check.
+        // Per-chip policy and reasoning:
+        //
+        //  QUALCOMM Adreno 830 (SM8750) — GPU always. Best-in-class OpenCL, no known issues.
+        //  QUALCOMM Adreno 740 (SM8550) — GPU on API <36 only. MediaPipe 0.10.33 regression:
+        //                                  generateResponseAsync causes GPU fault → SIGKILL with
+        //                                  zero tokens on Android 16. Confirmed vs 0.10.22 which
+        //                                  worked. Force CPU on API 36 until MediaPipe fixes it.
+        //  QUALCOMM other Adreno         — GPU enabled. Engine bans per-model if a crash occurs.
+        //  GOOGLE TENSOR (Pixel)         — GPU always. Stable OpenCL on all API levels.
+        //  SAMSUNG EXYNOS                — CPU on API 34+. OpenCL driver regression from API 34.
+        //  MEDIATEK Dimensity (flagship) — GPU on ≥8GB RAM. Mali OpenCL stable on flagship tier.
+        //  MEDIATEK mid-range/Helio      — CPU. OpenCL driver quality too variable for production.
+        //  GENERIC / unknown             — GPU if 4GB+ avail RAM; unknown driver = conservative.
         val gpuSafe: Boolean = when {
-            availRamMb < 3_000 -> false          // GPU shared-memory overhead risks LMK
-            !hasVulkan -> false                  // No Vulkan = no GPU backend
+            availRamMb < 3_000 -> false  // GPU VRAM overhead risks LMK on low-RAM devices
+            !hasVulkan -> false           // No Vulkan = no GPU delegate in MediaPipe
             else -> when (socFamily) {
-                SocFamily.QUALCOMM_SM8750  -> true  // Adreno 830 — always GPU
-                SocFamily.QUALCOMM_SM8550  -> true  // Adreno 740 — GPU enabled; engine bans if it crashes
-                SocFamily.QUALCOMM_GENERIC -> true  // Other Adreno — GPU enabled; engine bans if it crashes
-                SocFamily.GOOGLE_TENSOR    -> true  // Pixel: stable OpenCL
-                SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34  // Exynos OpenCL unreliable on API 34+
+                SocFamily.QUALCOMM_SM8750  -> true
+                SocFamily.QUALCOMM_SM8550  -> apiLevel < 36  // MediaPipe 0.10.33 GPU regression on API 36
+                SocFamily.QUALCOMM_GENERIC -> true
+                SocFamily.GOOGLE_TENSOR    -> true
+                SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
                 SocFamily.MEDIATEK         -> totalRamMb >= 8_000 && availRamMb >= 4_000
                 SocFamily.GENERIC          -> availRamMb >= 4_000
             }
         }
 
+        val gpuSafeReason = when {
+            availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
+            !hasVulkan         -> "no Vulkan support"
+            socFamily == SocFamily.QUALCOMM_SM8550 && apiLevel >= 36 ->
+                "SM8550+API36: MediaPipe 0.10.33 GPU generation regression"
+            socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
+                "Exynos+API34+: OpenCL driver regression"
+            socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->
+                "MediaTek: insufficient RAM for reliable GPU"
+            else -> if (gpuSafe) "OK" else "GENERIC: avail RAM < 4GB"
+        }
+
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+
+        DebugLogger.log("PROFILER",
+            "GPU policy: gpuSafe=$gpuSafe  reason=$gpuSafeReason  " +
+            "soc=$socModel  api=$apiLevel  manufacturer=$manufacturer")
 
         return DeviceProfile(
             totalRamMb        = totalRamMb,
