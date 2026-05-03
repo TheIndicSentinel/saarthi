@@ -77,11 +77,10 @@ android {
 }
 
 // litertlm-android:0.10.0 was compiled with Kotlin 2.3.x (metadata version 2.3.0).
-// The project uses Kotlin 2.0.0. This flag tells the compiler to accept the version
-// mismatch — safe because we only call the public API (no ABI-breaking changes).
+// Keep this flag in case a future litertlm release bumps to 2.4.x before we follow.
 tasks.withType<KotlinCompile>().configureEach {
-    kotlinOptions {
-        freeCompilerArgs += "-Xskip-metadata-version-check"
+    compilerOptions {
+        freeCompilerArgs.add("-Xskip-metadata-version-check")
     }
 }
 
