@@ -54,6 +54,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -93,6 +96,28 @@ fun OnboardingScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) viewModel.onModelUriPicked(context, uri)
+    }
+
+    // Launch the standard Android battery optimization dialog when the ViewModel signals it.
+    // On return (grant or deny), call onReturnFromBatterySettings() which logs the result
+    // and proceeds to model init either way.
+    val batteryOptLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        viewModel.onReturnFromBatterySettings()
+    }
+    LaunchedEffect(state.showBatteryOptimizationWarning) {
+        if (state.showBatteryOptimizationWarning) {
+            runCatching {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                batteryOptLauncher.launch(intent)
+            }.onFailure {
+                // Settings intent unavailable (restricted device) — proceed without exemption.
+                viewModel.onReturnFromBatterySettings()
+            }
+        }
     }
 
     Box(

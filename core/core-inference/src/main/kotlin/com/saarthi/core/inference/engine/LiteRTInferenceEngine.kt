@@ -267,7 +267,18 @@ class LiteRTInferenceEngine @Inject constructor(
                     val crashedModelPath = enginePrefs.getString("litert_crash_model_path", "") ?: ""
                     val crashWasThisModel = crashedDuringGen &&
                         (crashedModelPath == config.modelPath || crashedModelPath.isEmpty())
-                    DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit gpu=$wasGpu sameModel=$crashWasThisModel — forcing reinit")
+                    // Detailed crash dump — every field logged so we can reconstruct exactly what happened.
+                    DebugLogger.log("LITERT", "=== CRASH RECOVERY ===")
+                    DebugLogger.log("LITERT", "  crashedDuringGen=$crashedDuringGen  crashedDuringInit=$crashedDuringInit")
+                    DebugLogger.log("LITERT", "  wasUsingGpu=$wasGpu  crashedModel=${crashedModelPath.substringAfterLast('/')}")
+                    DebugLogger.log("LITERT", "  currentModel=${config.modelPath.substringAfterLast('/')}  sameModel=$crashWasThisModel")
+                    DebugLogger.log("LITERT", "  crashCount=${getCrashCount(config.modelPath)}  gpuBanned=${gpuPreviouslyCrashedDuringGen(config.modelPath)}")
+                    runCatching {
+                        val pm = context.getSystemService(PowerManager::class.java)
+                        val exempt = pm.isIgnoringBatteryOptimizations(context.packageName)
+                        DebugLogger.log("LITERT", "  batteryOptExempt=$exempt  (false = Samsung watchdog may have caused the kill)")
+                    }
+                    DebugLogger.log("LITERT", "=== END CRASH RECOVERY ===")
                     if (crashWasThisModel) {
                         incrementCrashCount(config.modelPath)
                         if (wasGpu) {
@@ -500,17 +511,41 @@ class LiteRTInferenceEngine @Inject constructor(
         val genStartTimeMs = System.currentTimeMillis()
         DebugLogger.log("LITERT", "Stream start  backend=${if (usingGpu) "GPU" else "CPU"}  timeout=${timeoutMs/1000}s  promptChars=${prompt.length}")
         logDeviceState("GEN")
+        // Log battery optimization state — critical for diagnosing Samsung watchdog kills.
+        // If batteryOptExempt=false and the process is killed mid-generation, that is why.
+        runCatching {
+            val pm = context.getSystemService(PowerManager::class.java)
+            val exempt = pm.isIgnoringBatteryOptimizations(context.packageName)
+            DebugLogger.log("LITERT", "[GEN] batteryOptExempt=$exempt  model=${loadedModelPath?.substringAfterLast('/') ?: "?"}")
+        }.onFailure { DebugLogger.log("LITERT", "[GEN] batteryOptExempt=unavailable") }
 
         generateMutex.withLock {
             var tokenCount = 0
             var isFinished = false
             var watchdog: kotlinx.coroutines.Job? = null
+            var heartbeat: kotlinx.coroutines.Job? = null
             // Tracks whether generateResponseAsync was actually called so catch/finally
             // know whether the native thread is running and must NOT be considered done.
             var nativeCallStarted = false
             try {
                 isGenerating = true
                 markGenerationStarted()
+
+                // Periodic heartbeat — fires every 10 s during generation.
+                // Each line records elapsed time, token count, backend, RAM, and thermal.
+                // If the process is killed (SIGKILL), the last heartbeat before silence
+                // tells us exactly how far generation reached and what the system state was.
+                heartbeat = launch {
+                    var tick = 0
+                    while (!isFinished) {
+                        delay(10_000L)
+                        if (isFinished) break
+                        tick++
+                        val elapsedS = (System.currentTimeMillis() - genStartTimeMs) / 1000
+                        DebugLogger.log("LITERT", "[HEARTBEAT $tick] elapsed=${elapsedS}s  tokens=$tokenCount  backend=${if (usingGpu) "GPU" else "CPU"}")
+                        logDeviceState("HB$tick")
+                    }
+                }
 
                 watchdog = launch {
                     delay(timeoutMs)
@@ -552,6 +587,7 @@ class LiteRTInferenceEngine @Inject constructor(
                         isNativeGenerating = false
                         isFinished = true
                         watchdog?.cancel()
+                        heartbeat?.cancel()
                         resetCrashCount(loadedModelPath ?: "")
                         markGenerationEnded()
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
@@ -574,10 +610,14 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                 }
 
-                awaitClose { watchdog?.cancel() }
+                awaitClose {
+                    watchdog?.cancel()
+                    heartbeat?.cancel()
+                }
 
             } catch (e: Throwable) {
                 watchdog?.cancel()
+                heartbeat?.cancel()
                 // Only clear isNativeGenerating if native was never started —
                 // otherwise the 'done' callback is responsible for clearing it.
                 // Clearing it prematurely while the native thread is active allows
