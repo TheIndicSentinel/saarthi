@@ -537,7 +537,7 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 conversation.sendMessageAsync(prompt, object : MessageCallback {
                     override fun onMessage(message: Message) {
-                        val cleaned = message.text.filterSpecialTokens()
+                        val cleaned = message.toString().filterSpecialTokens()
                         if (cleaned.isNotEmpty()) {
                             trySend(cleaned)
                             tokenCount++
@@ -627,7 +627,7 @@ class LiteRTInferenceEngine @Inject constructor(
                         val sb = StringBuilder()
                         conv.sendMessageAsync(prompt, object : MessageCallback {
                             override fun onMessage(m: Message) {
-                                sb.append(m.text.filterSpecialTokens())
+                                sb.append(m.toString().filterSpecialTokens())
                             }
                             override fun onDone() { deferred.complete(sb.toString()) }
                             override fun onError(e: Throwable) { deferred.completeExceptionally(e) }
