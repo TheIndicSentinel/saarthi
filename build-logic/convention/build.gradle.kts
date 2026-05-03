@@ -14,6 +14,9 @@ java {
 kotlin {
     compilerOptions {
         jvmTarget = JvmTarget.JVM_17
+        // Gradle 8.9 bundles Kotlin 1.9.24 for kotlin-dsl. KSP 2.3.7 on the classpath
+        // has metadata 2.3.0 — suppress the version check so convention code can compile.
+        freeCompilerArgs.add("-Xskip-metadata-version-check")
     }
 }
 
