@@ -157,10 +157,10 @@ class ChatRepositoryImpl @Inject constructor(
         return flow {
             // Check readiness first
             if (!inferenceEngine.isReady) {
-                emit("AI model is still loading or not initialized. Please wait a moment.")
+                val errMsg = "⚠️ Model not ready. If this model keeps crashing, please go back to setup and select a different model."
                 InferenceService.stop(context)
                 _history.update { history ->
-                    history.map { if (it.id == streamingId) it.copy(content = "Model not ready.", isStreaming = false) else it }
+                    history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false) else it }
                 }
                 return@flow
             }
@@ -309,13 +309,13 @@ class ChatRepositoryImpl @Inject constructor(
 
         DebugLogger.log("PROMPT", "System prompt built  chars=${systemInstructions.length}  lang=${currentLanguage.code}  memory=${memoryContext.isNotEmpty()}")
 
-        // Exclude the currently-streaming placeholder and any other streaming messages
-        // using a content-based filter rather than positional dropLast, which is fragile
-        // when messages are deleted or the order changes.
-        val history = _history.value
+        // Filter history: non-empty, non-streaming, drop current user message, keep only
+        // complete user→model pairs (orphaned user messages from prior crashes are excluded).
+        val rawHistory = _history.value
             .filter { it.content.isNotBlank() && !it.isStreaming }
-            .dropLast(1)
-            .takeLast(maxHistoryTurns)  // adaptive: 2 for 1280-ctx, 4 for 2048-ctx, 6 for large
+            .dropLast(1)  // drop the just-added current user message
+        val history = buildCompleteHistoryPairs(rawHistory)
+            .takeLast(maxHistoryTurns)
 
         val fileContext = if (attachments.isNotEmpty())
             fileContentExtractor.buildRagContext(attachments, userMessage)
@@ -324,24 +324,34 @@ class ChatRepositoryImpl @Inject constructor(
         DebugLogger.log("PROMPT", "History turns=${history.size}  attachments=${attachments.size}")
 
         return buildString {
-            // High-Importance Context: Instructions + Identity
-            append("<start_of_turn>user\n")
-            append(systemInstructions)
-            append("\n\n")
-
             if (history.isEmpty()) {
+                // Single turn: system instructions + user message in one user turn.
+                // Gemma instruct format: <start_of_turn>user\nSYSTEM\n\nUSER<end_of_turn>
+                append("<start_of_turn>user\n")
+                append(systemInstructions)
+                append("\n\n")
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
                 append("<end_of_turn>\n")
                 append("<start_of_turn>model\n")
             } else {
+                // Multi-turn: system instructions are prepended to the FIRST history user
+                // turn only. All subsequent turns follow the plain user/model alternation.
+                // This matches the Gemma 3 instruct chat template exactly and avoids
+                // nested <start_of_turn> tags that confuse the native tokeniser.
+                var systemInjected = false
                 history.forEach { msg ->
                     val role = if (msg.role == MessageRole.USER) "user" else "model"
                     append("<start_of_turn>$role\n")
+                    if (!systemInjected && msg.role == MessageRole.USER) {
+                        append(systemInstructions)
+                        append("\n\n")
+                        systemInjected = true
+                    }
                     append(msg.content)
                     append("<end_of_turn>\n")
                 }
-
+                // Current user message (system never appears here)
                 append("<start_of_turn>user\n")
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
@@ -355,6 +365,30 @@ class ChatRepositoryImpl @Inject constructor(
             DebugLogger.log("PROMPT", "Final prompt  chars=${finalPrompt.length}  budget=$budget  trimmed=$needsTrim")
             finalPrompt
         }
+    }
+
+    /**
+     * Returns only complete user→model pairs from [history].
+     * Orphaned user messages (no following model response) are dropped — they appear
+     * after a crash where the assistant never finished generating a reply, and including
+     * them creates consecutive same-role turns that violate Gemma's chat template.
+     */
+    private fun buildCompleteHistoryPairs(history: List<ChatMessage>): List<ChatMessage> {
+        val result = mutableListOf<ChatMessage>()
+        var i = 0
+        while (i < history.size) {
+            val msg = history[i]
+            if (msg.role == MessageRole.USER &&
+                i + 1 < history.size &&
+                history[i + 1].role == MessageRole.ASSISTANT) {
+                result.add(history[i])
+                result.add(history[i + 1])
+                i += 2
+            } else {
+                i++  // skip orphaned user message or lone assistant message
+            }
+        }
+        return result
     }
 
     private fun buildSystemPrompt(memoryContext: String): String = buildString {

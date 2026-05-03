@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Model downloads + any future network calls -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -39,6 +40,14 @@
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!--
+        Remove FOREGROUND_SERVICE_DATA_SYNC that MediaPipe's AAR injects via manifest merge.
+        This permission was removed in Android 16 (API 36); keeping it in the merged manifest
+        causes startForeground() to throw SecurityException on API 36 devices (e.g. SM-S918B),
+        silently leaving the app with no foreground protection and the LMK killing it in ~10s.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+        tools:node="remove" />
 
     <!-- Android 11+ package visibility: needed for SpeechRecognizer.isRecognitionAvailable()
          to correctly detect installed speech recognition services. Without this the API
@@ -102,10 +111,16 @@
             in Android 16 (API 36). Including it causes startForeground() to throw
             SecurityException → FGS silently degrades → LMK kills the process mid-inference.
         -->
+        <!--
+            tools:replace prevents the manifest merger from appending "|dataSync" from
+            MediaPipe's AAR manifest. Without this, the merged type becomes "specialUse|dataSync"
+            which fails validation on Android 16 (API 36) where dataSync was removed.
+        -->
         <service
             android:name="com.saarthi.core.inference.InferenceService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse"
+            tools:replace="android:foregroundServiceType">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="On-device AI model inference (LLM text generation)" />

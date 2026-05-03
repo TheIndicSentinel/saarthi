@@ -57,6 +57,11 @@ class LiteRTInferenceEngine @Inject constructor(
 
     @Volatile private var llmInference: LlmInference? = null
 
+    // When closeInternal() is called while a native generation is in progress,
+    // we can't close llmInference immediately (SIGABRT). Save it here; the native
+    // 'done' callback closes it once the native thread finishes.
+    @Volatile private var closingLlmInference: LlmInference? = null
+
     @Volatile private var loadedModelPath: String? = null
     @Volatile private var loadedMaxTokens: Int = 0
 
@@ -83,6 +88,11 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile private var isNativeGenerating: Boolean = false
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
+
+    // Set when the crash loop detector fires (≥3 consecutive inference crashes).
+    // generateStream() throws a user-visible error instead of crashing again.
+    // Cleared at the start of every initialize() so a fresh model pick gets a clean slate.
+    @Volatile private var crashLoopBlocked: Boolean = false
 
     // Dedicated single-thread dispatcher for all MediaPipe calls.
     // This ensures that native objects are never accessed concurrently and
@@ -142,14 +152,18 @@ class LiteRTInferenceEngine @Inject constructor(
         enginePrefs.edit().putInt("litert_crash_count", 0).apply()
 
     /**
-     * If crash count >= 3, both GPU and CPU are crashing. Clear all flags to break
-     * the crash loop. The engine will still load and isReady will be true, but the
-     * next generation may crash again. The UI should detect repeated failures.
+     * If crash count >= 3, inference is crashing on every attempt (both GPU and CPU
+     * fail on this device/model combination). Clear all flags, block future generation,
+     * and return true so initialize() can exit early without loading the model.
+     *
+     * The caller should show the user a model-incompatibility error instead of retrying.
+     * crashLoopBlocked is reset at the top of initialize() so selecting a different
+     * model from the UI gets a fresh slate.
      */
     private fun breakCrashLoopIfNeeded(): Boolean {
         val count = getCrashCount()
         if (count >= 3) {
-            DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes) — clearing all flags for clean slate")
+            DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes) — model incompatible with this device, blocking generation")
             enginePrefs.edit()
                 .putBoolean("litert_gen_pending", false)
                 .putBoolean("litert_init_pending", false)
@@ -157,6 +171,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 .putLong("litert_gpu_ban_timestamp", 0L)
                 .putInt("litert_crash_count", 0)
                 .commit()
+            crashLoopBlocked = true
             return true
         }
         return false
@@ -203,35 +218,48 @@ class LiteRTInferenceEngine @Inject constructor(
     override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
         initMutex.withLock {
             generateMutex.withLock {
+                // Always give a fresh model pick a clean slate — user may have selected
+                // a different (working) model after seeing the crash loop error.
+                crashLoopBlocked = false
+
                 // ── Crash loop breaker ────────────────────────────────────────────
-            // Must run BEFORE normal crash recovery to prevent infinite loops
-            // where both GPU and CPU crash on every launch.
-            val loopBroken = breakCrashLoopIfNeeded()
-
-            val crashedDuringGen  = wasKilledDuringGeneration()
-            val crashedDuringInit = wasKilledDuringInit()
-            if (!loopBroken && (crashedDuringGen || crashedDuringInit)) {
-                incrementCrashCount()
-                val wasGpu = wasUsingGpuAtCrash()
-                DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit gpu=$wasGpu — forcing reinit")
-                if (crashedDuringGen && wasGpu) {
-                    markGpuGenCrashed()
-                    DebugLogger.log("LITERT", "GPU crashed during generation — forcing CPU for future loads")
+                // Must run BEFORE normal crash recovery to prevent infinite loops
+                // where both GPU and CPU crash on every launch.
+                val loopBroken = breakCrashLoopIfNeeded()
+                if (loopBroken) {
+                    // Model is incompatible — close any loaded instance and leave
+                    // isReady=false so the UI shows "model not ready".
+                    markGenerationEnded()
+                    markInitEnded()
+                    closeInternal()
+                    DebugLogger.log("LITERT", "Crash loop: aborting init — model not loaded")
+                    return@withLock
                 }
-                markGenerationEnded()
-                markInitEnded()
-                closeInternal()
-            }
 
-            if (!crashedDuringGen && !crashedDuringInit &&
-                isReady &&
-                loadedModelPath == config.modelPath &&
-                loadedMaxTokens == config.maxTokens) {
-                DebugLogger.log("LITERT", "Already loaded — skipping: ${config.modelPath.substringAfterLast('/')}")
-                activeModelName = config.modelName
-                _activeModelNameFlow.value = config.modelName
-                return@withLock
-            }
+                val crashedDuringGen  = wasKilledDuringGeneration()
+                val crashedDuringInit = wasKilledDuringInit()
+                if (crashedDuringGen || crashedDuringInit) {
+                    incrementCrashCount()
+                    val wasGpu = wasUsingGpuAtCrash()
+                    DebugLogger.log("LITERT", "Crash recovery: gen=$crashedDuringGen init=$crashedDuringInit gpu=$wasGpu — forcing reinit")
+                    if (crashedDuringGen && wasGpu) {
+                        markGpuGenCrashed()
+                        DebugLogger.log("LITERT", "GPU crashed during generation — banning GPU for 24h")
+                    }
+                    markGenerationEnded()
+                    markInitEnded()
+                    closeInternal()
+                }
+
+                if (!crashedDuringGen && !crashedDuringInit &&
+                    isReady &&
+                    loadedModelPath == config.modelPath &&
+                    loadedMaxTokens == config.maxTokens) {
+                    DebugLogger.log("LITERT", "Already loaded — skipping: ${config.modelPath.substringAfterLast('/')}")
+                    activeModelName = config.modelName
+                    _activeModelNameFlow.value = config.modelName
+                    return@withLock
+                }
 
             // Start FGS BEFORE any heavy work. Model loading allocates 500MB–3GB
             // and burns 100% CPU for 4–10s. Without FGS, Samsung OneUI 7 (Android 16)
@@ -288,25 +316,17 @@ class LiteRTInferenceEngine @Inject constructor(
                 val profile = deviceProfiler.profile()
 
                 // Smart Backend Selection:
-                // 1. Only try GPU if the profiler says it's 'gpuSafe' (checks Vulkan + RAM).
-                // 2. Fall back to CPU if the model size exceeds the safe budget.
-                // 3. PERMANENT RULE: .task format on SM8550 (Adreno 740) crashes 100% of
-                //    the time with the OpenCL backend — skip GPU entirely. This is a known
-                //    MediaPipe Tasks GenAI driver incompatibility on Samsung Android 16.
-                //    The .litertlm format (Gemma 4 E2B) uses a different runtime that IS
-                //    compatible with GPU on this chip.
-                val isTaskFormat = config.modelPath.endsWith(".task", ignoreCase = true)
-                val isSm8550 = profile.socModel.contains("SM8550", ignoreCase = true) ||
-                               profile.socFamily == com.saarthi.core.inference.model.SocFamily.QUALCOMM_SM8550
-                val forceTaskCpu = isTaskFormat && isSm8550
-                if (forceTaskCpu) {
-                    DebugLogger.log("LITERT", ".task format on SM8550 — forcing CPU (GPU incompatible with this model format on Adreno 740)")
+                // DeviceProfiler.gpuSafe already encodes all SoC-specific safety rules,
+                // including the SM8550 policy update (GPU re-enabled for all Qualcomm SoCs
+                // because CPU inference on Android 16 is killed by the kernel ~100% of the
+                // time). Trust the profiler; if GPU crashes at runtime, markGpuGenCrashed()
+                // bans it for 24h automatically. No per-chip overrides here.
+                val preferredBackend = if (profile.gpuSafe && sizeMb <= profile.safeModelBudgetMb) {
+                    LlmInference.Backend.GPU
+                } else {
+                    LlmInference.Backend.CPU
                 }
-                val preferredBackend = when {
-                    forceTaskCpu -> LlmInference.Backend.CPU
-                    profile.gpuSafe && sizeMb <= profile.safeModelBudgetMb -> LlmInference.Backend.GPU
-                    else -> LlmInference.Backend.CPU
-                }
+                DebugLogger.log("LITERT", "Backend selected: ${preferredBackend.name}  gpuSafe=${profile.gpuSafe}  budget=${profile.safeModelBudgetMb}MB  modelSize=${sizeMb}MB")
 
                 llmInference = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, preferredBackend)
                 loadedModelPath = config.modelPath
@@ -426,9 +446,15 @@ class LiteRTInferenceEngine @Inject constructor(
      */
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow<String> {
         val inference = llmInference
-            ?: throw IllegalStateException("LiteRT engine not initialised.")
+            ?: throw IllegalStateException(
+                if (crashLoopBlocked)
+                    "This model has crashed repeatedly and is not compatible with your device. " +
+                    "Please return to the model selection screen and choose a different model."
+                else
+                    "LiteRT engine not initialised."
+            )
 
-        // Adaptive timeout: GPU at ~30 tok/s → 90s = ~2700 tokens. CPU at ~5 tok/s → 180s.
+        // Adaptive timeout: GPU at ~30 tok/s → 90s ≈ 2700 tokens. CPU at ~5 tok/s → 180s.
         val timeoutMs = if (usingGpu) 90_000L else 180_000L
         DebugLogger.log("LITERT", "Stream start  backend=${if (usingGpu) "GPU" else "CPU"}  timeout=${timeoutMs/1000}s  promptChars=${prompt.length}")
 
@@ -436,24 +462,28 @@ class LiteRTInferenceEngine @Inject constructor(
             var tokenCount = 0
             var isFinished = false
             var watchdog: kotlinx.coroutines.Job? = null
+            // Tracks whether generateResponseAsync was actually called so catch/finally
+            // know whether the native thread is running and must NOT be considered done.
+            var nativeCallStarted = false
             try {
-                // Set state BEFORE calling generateResponseAsync so the crash-recovery
-                // prefs are written even if the native call itself blocks or throws.
                 isGenerating = true
                 markGenerationStarted()
 
                 watchdog = launch {
                     delay(timeoutMs)
                     if (!isFinished) {
-                        DebugLogger.log("LITERT", "Watchdog: generation timed out after ${timeoutMs/1000}s")
+                        DebugLogger.log("LITERT", "Watchdog: generation timed out after ${timeoutMs/1000}s — clearing native state")
+                        // Native is stuck; force-clear so closeInternal() can proceed later.
+                        isNativeGenerating = false
+                        markGenerationEnded()
                         close(RuntimeException("Response timed out. Please try again."))
                     }
                 }
 
-                // Mark native generation active BEFORE the async call.
-                // This flag stays true until 'done=true' fires on the native thread,
-                // even if the collecting coroutine is cancelled before that.
+                // Set isNativeGenerating BEFORE the async call so crash-recovery prefs
+                // are correct even if the process is killed in the first milliseconds.
                 isNativeGenerating = true
+                nativeCallStarted = true
                 inference.generateResponseAsync(prompt) { partialResult, done ->
                     val cleaned = partialResult
                         .replace("<start_of_turn>", "")
@@ -467,11 +497,21 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
 
                     if (done) {
-                        isNativeGenerating = false  // native thread finished — safe to close engine now
+                        // Native thread is finished — safe to close the engine now.
+                        isNativeGenerating = false
                         isFinished = true
                         watchdog?.cancel()
-                        resetCrashCount()  // successful generation — break crash loop counter
+                        resetCrashCount()
+                        markGenerationEnded()
                         DebugLogger.log("LITERT", "Stream complete  tokens≈$tokenCount")
+                        // Close any LlmInference instance that was replaced while this
+                        // generation was in flight (e.g. user switched models mid-stream).
+                        closingLlmInference?.let { old ->
+                            runCatching { old.close() }
+                                .onFailure { Timber.w(it, "LiteRT deferred-close warning") }
+                            closingLlmInference = null
+                            DebugLogger.log("LITERT", "Deferred engine instance closed after generation")
+                        }
                         close()
                     }
                 }
@@ -480,15 +520,24 @@ class LiteRTInferenceEngine @Inject constructor(
 
             } catch (e: Throwable) {
                 watchdog?.cancel()
-                isNativeGenerating = false
+                // Only clear isNativeGenerating if native was never started —
+                // otherwise the 'done' callback is responsible for clearing it.
+                // Clearing it prematurely while the native thread is active allows
+                // closeInternal() to run, which causes a use-after-free SIGABRT.
+                if (!nativeCallStarted) {
+                    isNativeGenerating = false
+                    markGenerationEnded()
+                }
                 if (e is CancellationException) throw e
                 close(RuntimeException("Generation failed: ${e.message}", e))
             } finally {
                 isGenerating = false
-                // Note: isNativeGenerating is cleared inside the native 'done' callback.
-                // If we get here WITHOUT a done callback (e.g. exception), clear it now.
-                isNativeGenerating = false
-                markGenerationEnded()
+                // isNativeGenerating and markGenerationEnded() are handled by either:
+                //   (a) the native 'done' callback  — normal / cancelled path
+                //   (b) the watchdog timeout         — stuck native thread path
+                //   (c) the catch block above        — pre-native exception path
+                // Do NOT clear isNativeGenerating here; that would hide an active
+                // native thread from closeInternal() and trigger a SIGABRT.
             }
         }
     }.flowOn(engineDispatcher)
@@ -525,10 +574,27 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     private fun closeInternal() {
-        if (isGenerating || isNativeGenerating) {
-            DebugLogger.log("LITERT", "Close deferred: native generation still in progress (isGenerating=$isGenerating, isNativeGenerating=$isNativeGenerating)")
+        if (isNativeGenerating) {
+            // Native thread is still running — closing llmInference now would cause a
+            // use-after-free SIGABRT. Save the current instance for deferred close;
+            // the 'done' callback will safely close it once the native thread exits.
+            DebugLogger.log("LITERT", "Close deferred: native generation still in progress — queuing deferred close")
+            if (llmInference != null) {
+                closingLlmInference = llmInference
+                llmInference    = null
+                loadedModelPath = null
+                loadedMaxTokens = 0
+                activeModelName = null
+                _activeModelNameFlow.value = null
+                setReady(false)
+            }
             return
         }
+        // Close any previously-deferred instance that the done callback hasn't cleaned yet
+        runCatching { closingLlmInference?.close() }
+            .onFailure { Timber.w(it, "LiteRT deferred-close warning") }
+        closingLlmInference = null
+
         if (llmInference == null) return
         setReady(false)
         runCatching { llmInference?.close() }
