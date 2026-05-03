@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.File
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     id("saarthi.android.library")
@@ -72,6 +73,15 @@ android {
                 version = "3.22.1"
             }
         }
+    }
+}
+
+// litertlm-android:0.10.0 was compiled with Kotlin 2.3.x (metadata version 2.3.0).
+// The project uses Kotlin 2.0.0. This flag tells the compiler to accept the version
+// mismatch — safe because we only call the public API (no ABI-breaking changes).
+tasks.withType<KotlinCompile>().configureEach {
+    kotlinOptions {
+        freeCompilerArgs += "-Xskip-metadata-version-check"
     }
 }
 
