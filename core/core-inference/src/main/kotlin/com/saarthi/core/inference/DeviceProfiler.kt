@@ -91,10 +91,13 @@ class DeviceProfiler @Inject constructor(
         // Per-chip policy and reasoning:
         //
         //  QUALCOMM Adreno 830 (SM8750) — GPU always. Best-in-class OpenCL, no known issues.
-        //  QUALCOMM Adreno 740 (SM8550) — GPU on API <36 only. MediaPipe 0.10.33 regression:
-        //                                  generateResponseAsync causes GPU fault → SIGKILL with
-        //                                  zero tokens on Android 16. Confirmed vs 0.10.22 which
-        //                                  worked. Force CPU on API 36 until MediaPipe fixes it.
+        //  QUALCOMM Adreno 740 (SM8550) — GPU on API <36 only. MediaPipe 0.10.33 introduced a
+        //                                  regression: generateResponseAsync → GPU fault → SIGKILL
+        //                                  on Android 16 (zero tokens produced). Also crashes on
+        //                                  CPU in <10s with batteryOptExempt=true (native bug, not
+        //                                  watchdog). Upgraded to 0.10.35 which may fix the crash.
+        //                                  GPU remains disabled on API 36 as a precaution; if
+        //                                  0.10.35 proves stable, remove the apiLevel < 36 guard.
         //  QUALCOMM other Adreno         — GPU enabled. Engine bans per-model if a crash occurs.
         //  GOOGLE TENSOR (Pixel)         — GPU always. Stable OpenCL on all API levels.
         //  SAMSUNG EXYNOS                — CPU on API 34+. OpenCL driver regression from API 34.
@@ -106,7 +109,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in MediaPipe
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> apiLevel < 36  // MediaPipe 0.10.33 GPU regression on API 36
+                SocFamily.QUALCOMM_SM8550  -> apiLevel < 36  // GPU+CPU crash in 0.10.33 on API 36; cautious until 0.10.35 confirmed
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
@@ -119,7 +122,7 @@ class DeviceProfiler @Inject constructor(
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
             socFamily == SocFamily.QUALCOMM_SM8550 && apiLevel >= 36 ->
-                "SM8550+API36: MediaPipe 0.10.33 GPU generation regression"
+                "SM8550+API36: GPU+CPU native crash in MediaPipe 0.10.33 (upgraded to 0.10.35, GPU kept off as precaution)"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->

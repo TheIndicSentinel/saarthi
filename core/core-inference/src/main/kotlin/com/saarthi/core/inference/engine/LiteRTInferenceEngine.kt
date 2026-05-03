@@ -447,7 +447,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     "prior GPU crash ban active for ${modelKey(modelPath)}"
                 Build.VERSION.SDK_INT >= 36 ->
                     "gpuSafe=false — SoC=${Build.SOC_MODEL} API=${Build.VERSION.SDK_INT} " +
-                    "(MediaPipe 0.10.33 GPU regression on this SoC/API combination)"
+                    "(SoC/API36 combination: GPU kept off as precaution, see DeviceProfiler)"
                 else ->
                     "gpuSafe=false — SoC=${if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else Build.HARDWARE} " +
                     "API=${Build.VERSION.SDK_INT}"
