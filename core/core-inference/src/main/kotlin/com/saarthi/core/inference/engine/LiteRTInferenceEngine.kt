@@ -20,6 +20,7 @@ import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.model.InferenceConfig
+import com.saarthi.core.inference.model.SocFamily
 import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -405,7 +406,16 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         // ── GPU (OpenCL/Vulkan — fast on Adreno, Mali, Tensor GPU) ────────────
-        if (profile.gpuSafe && !gpuBanned && (profile.safeModelBudgetMb * 1_048_576L) >= maxTokens.toLong()) {
+        // SM8550 (Snapdragon 8 Gen 2) GPU crashes during generation on models ≥ 2 GB
+        // (confirmed empirically: Gemma 4 E2B + Gemma 3n E2B both SIGKILL on first token).
+        // Skip GPU upfront to avoid the crash-and-restart cycle; small models (<2 GB) may
+        // still try GPU since the driver handles them fine.
+        val modelSizeMb = java.io.File(modelPath).length() / 1_048_576
+        val sm8550LargeModelGpuCrash =
+            profile.socFamily == SocFamily.QUALCOMM_SM8550 && modelSizeMb >= 2_000
+
+        if (profile.gpuSafe && !gpuBanned && !sm8550LargeModelGpuCrash &&
+            (profile.safeModelBudgetMb * 1_048_576L) >= maxTokens.toLong()) {
             try {
                 DebugLogger.log("LITERT", "[GPU] Trying OpenCL/Vulkan GPU backend...")
                 return buildEngine(modelPath, maxTokens, Backend.GPU())
@@ -420,9 +430,10 @@ class LiteRTInferenceEngine @Inject constructor(
             }
         } else {
             val reason = when {
-                gpuBanned          -> "prior GPU/NPU crash ban active for ${modelKey(modelPath)}"
-                !profile.gpuSafe   -> "gpuSafe=false — SoC=${profile.socModel} API=${profile.apiLevel}"
-                else               -> "model too large for GPU memory budget"
+                gpuBanned               -> "prior GPU/NPU crash ban active for ${modelKey(modelPath)}"
+                !profile.gpuSafe        -> "gpuSafe=false — SoC=${profile.socModel} API=${profile.apiLevel}"
+                sm8550LargeModelGpuCrash -> "SM8550 + model ${modelSizeMb}MB ≥ 2000MB: GPU crashes during gen"
+                else                    -> "model too large for GPU memory budget"
             }
             DebugLogger.log("LITERT", "[GPU] Skipped — $reason")
         }
