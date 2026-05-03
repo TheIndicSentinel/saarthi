@@ -47,15 +47,6 @@
         "Unrestricted" battery usage, the process is shielded from the power watchdog.
     -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!--
-        Remove FOREGROUND_SERVICE_DATA_SYNC that MediaPipe's AAR injects via manifest merge.
-        This permission was removed in Android 16 (API 36); keeping it in the merged manifest
-        causes startForeground() to throw SecurityException on API 36 devices (e.g. SM-S918B),
-        silently leaving the app with no foreground protection and the LMK killing it in ~10s.
-    -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
-        tools:node="remove" />
-
     <!-- Android 11+ package visibility: needed for SpeechRecognizer.isRecognitionAvailable()
          to correctly detect installed speech recognition services. Without this the API
          returns false even when Google/AOSP recognition is available. -->
@@ -64,6 +55,15 @@
             <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
+
+    <!--
+        Required for litertlm-android GPU (OpenCL) and NPU (QNN) backends.
+        libOpenCL.so: GPU compute via OpenCL (Adreno, Mali, PowerVR).
+        libvndksupport.so: VNDK shim that lets the runtime load vendor OpenCL libs.
+        Both are optional — absent = backend falls back to CPU automatically.
+    -->
+    <uses-native-library android:name="libOpenCL.so"      android:required="false" />
+    <uses-native-library android:name="libvndksupport.so" android:required="false" />
 
     <application
         android:name=".SaarthiApp"
@@ -118,16 +118,10 @@
             in Android 16 (API 36). Including it causes startForeground() to throw
             SecurityException → FGS silently degrades → LMK kills the process mid-inference.
         -->
-        <!--
-            tools:replace prevents the manifest merger from appending "|dataSync" from
-            MediaPipe's AAR manifest. Without this, the merged type becomes "specialUse|dataSync"
-            which fails validation on Android 16 (API 36) where dataSync was removed.
-        -->
         <service
             android:name="com.saarthi.core.inference.InferenceService"
             android:exported="false"
-            android:foregroundServiceType="specialUse"
-            tools:replace="android:foregroundServiceType">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="On-device AI model inference (LLM text generation)" />

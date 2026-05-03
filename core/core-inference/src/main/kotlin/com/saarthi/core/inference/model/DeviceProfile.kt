@@ -33,6 +33,12 @@ data class DeviceProfile(
      * and whether the model binary fits within the GPU memory budget.
      */
     val gpuSafe: Boolean,
+    /**
+     * Whether it is safe to use the NPU (Qualcomm QNN/Hexagon) backend.
+     * Only true on SM8750 (Snapdragon 8 Gen 3) where device-specific
+     * QNN-compiled .litertlm bundles exist. All other SoCs use GPU/CPU.
+     */
+    val npuSafe: Boolean = false,
 
     // ── Platform ──────────────────────────────────────────────────────────────
     val abi: String,
@@ -67,7 +73,7 @@ data class DeviceProfile(
 
     override fun toString(): String =
         "DeviceProfile(tier=$tier, totalRam=${totalRamMb}MB, avail=${availableRamMb}MB, " +
-        "budget=${safeModelBudgetMb}MB, threads=$recommendedThreads, gpu=$gpuSafe, " +
+        "budget=${safeModelBudgetMb}MB, threads=$recommendedThreads, gpu=$gpuSafe, npu=$npuSafe, " +
         "soc=$socModel/$socFamily)"
 
 }

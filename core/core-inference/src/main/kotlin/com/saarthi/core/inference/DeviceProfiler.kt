@@ -25,13 +25,15 @@ import javax.inject.Singleton
  *    headroom for the OS, GPU driver allocations, and background apps so the
  *    LMK (Low-Memory Killer) never targets our process.
  *
- * 3. **Thread count = cores − 2, clamped [2, 6]**: Leaves 2 cores for the
- *    Android UI thread + system daemons. Going above 6 threads hits
+ * 3. **Thread count = cores − 2, clamped [2, 4]**: Leaves 2 cores for the
+ *    Android UI thread + system daemons. Going above 4 threads hits
  *    diminishing returns on ARM big.LITTLE and causes thermal throttling.
  *
- * 4. **GPU safety is context-aware**: Checks Vulkan support, platform stability
- *    (Android 16 + Samsung = risky for mid-range), and whether the available
- *    RAM can handle the GPU's shared-memory overhead.
+ * 4. **GPU safety is SoC-aware**: Checks Vulkan support, OEM driver stability
+ *    history, and whether the available RAM can handle shared-memory overhead.
+ *
+ * 5. **NPU safety**: Only Qualcomm SM8750 (Snapdragon 8 Gen 3) currently has
+ *    QNN/Hexagon-compiled .litertlm bundles. All other SoCs use GPU or CPU.
  */
 @Singleton
 class DeviceProfiler @Inject constructor(
@@ -66,7 +68,7 @@ class DeviceProfiler @Inject constructor(
         // ── CPU Threads ──────────────────────────────────────────────────────
         val cpuCores = Runtime.getRuntime().availableProcessors()
         // Leave 2 cores for UI + OS. Min 2 threads (even on dual-core).
-        // Max 6 threads (beyond this, ARM big.LITTLE thermal-throttles).
+        // Max 4 threads (beyond this, ARM big.LITTLE thermal-throttles).
         val recommendedThreads = (cpuCores - 2).coerceIn(2, 4)
 
         // ── GPU / Vulkan ─────────────────────────────────────────────────────
@@ -76,40 +78,33 @@ class DeviceProfiler @Inject constructor(
 
         val manufacturer = Build.MANUFACTURER.orEmpty()
         val apiLevel = Build.VERSION.SDK_INT
-        val isSamsung = manufacturer.contains("samsung", ignoreCase = true)
 
-        // ── SoC Family Detection (must precede GPU safety check) ──────────────
+        // ── SoC Family Detection (must precede GPU/NPU safety checks) ─────────
         val socModel = detectSocModel()
         val socFamily = classifySoc(socModel)
 
-        // ── GPU Safety: SoC-aware backend policy (Google AI Edge tiering) ──────
+        // ── GPU Safety: SoC-aware backend policy (litertlm-android era) ────────
         //
-        // Google's official recommendation: prefer GPU via OpenCL/Vulkan for performance;
-        // fall back to CPU (XNNPACK NEON) as the guaranteed path. Response QUALITY is
-        // identical on CPU and GPU — only TOKEN SPEED differs (~3-8 tok/s CPU vs ~25-40 GPU).
+        // litertlm-android:0.10.0 is the same runtime used by Google AI Edge Gallery,
+        // which runs correctly on all devices below — including SM8550/Android 16.
+        // The GPU crash was specific to tasks-genai 0.10.33+ and is no longer relevant.
         //
-        // Per-chip policy and reasoning:
+        // Per-chip policy:
         //
-        //  QUALCOMM Adreno 830 (SM8750) — GPU always. Best-in-class OpenCL, no known issues.
-        //  QUALCOMM Adreno 740 (SM8550) — GPU on API <36 only. MediaPipe 0.10.33 introduced a
-        //                                  regression: generateResponseAsync → GPU fault → SIGKILL
-        //                                  on Android 16 (zero tokens produced). Also crashes on
-        //                                  CPU in <10s with batteryOptExempt=true (native bug, not
-        //                                  watchdog). Upgraded to 0.10.35 which may fix the crash.
-        //                                  GPU remains disabled on API 36 as a precaution; if
-        //                                  0.10.35 proves stable, remove the apiLevel < 36 guard.
-        //  QUALCOMM other Adreno         — GPU enabled. Engine bans per-model if a crash occurs.
-        //  GOOGLE TENSOR (Pixel)         — GPU always. Stable OpenCL on all API levels.
-        //  SAMSUNG EXYNOS                — CPU on API 34+. OpenCL driver regression from API 34.
-        //  MEDIATEK Dimensity (flagship) — GPU on ≥8GB RAM. Mali OpenCL stable on flagship tier.
-        //  MEDIATEK mid-range/Helio      — CPU. OpenCL driver quality too variable for production.
-        //  GENERIC / unknown             — GPU if 4GB+ avail RAM; unknown driver = conservative.
+        //  QUALCOMM SM8750  — GPU always (best-in-class Adreno 830, no known issues).
+        //  QUALCOMM SM8550  — GPU always (litertlm-android confirmed stable on Android 16).
+        //  QUALCOMM GENERIC — GPU enabled. Per-model crash recovery bans if runtime fault.
+        //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
+        //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
+        //  MEDIATEK flagship — GPU on ≥8GB RAM (Mali OpenCL stable on Dimensity flagship).
+        //  MEDIATEK other   — CPU. OpenCL driver quality too variable for production.
+        //  GENERIC / unknown — GPU if 4GB+ avail RAM.
         val gpuSafe: Boolean = when {
             availRamMb < 3_000 -> false  // GPU VRAM overhead risks LMK on low-RAM devices
-            !hasVulkan -> false           // No Vulkan = no GPU delegate in MediaPipe
+            !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> apiLevel < 36  // GPU+CPU crash in 0.10.33 on API 36; cautious until 0.10.35 confirmed
+                SocFamily.QUALCOMM_SM8550  -> true
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
@@ -121,8 +116,6 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
-            socFamily == SocFamily.QUALCOMM_SM8550 && apiLevel >= 36 ->
-                "SM8550+API36: GPU+CPU native crash in MediaPipe 0.10.33 (upgraded to 0.10.35, GPU kept off as precaution)"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->
@@ -130,11 +123,28 @@ class DeviceProfiler @Inject constructor(
             else -> if (gpuSafe) "OK" else "GENERIC: avail RAM < 4GB"
         }
 
+        // ── NPU Safety: QNN/Hexagon backend policy ────────────────────────────
+        //
+        // NPU via litertlm-android Backend.NPU(nativeLibraryDir) uses Qualcomm QNN
+        // (Qualcomm Neural Networks) to run inference on the Hexagon DSP/NPU.
+        //
+        // Device-specific .litertlm bundles with QNN support currently exist only for
+        // Snapdragon 8 Gen 3 (SM8750). ModelCatalog includes a QNN-specific model
+        // entry for this SoC. All other SoCs fall back to GPU or CPU.
+        //
+        // NPU additionally requires sufficient RAM (same floor as GPU) to keep the
+        // DSP runtime and model data in memory simultaneously.
+        val npuSafe: Boolean = when {
+            availRamMb < 3_000            -> false
+            socFamily == SocFamily.QUALCOMM_SM8750 -> true
+            else                          -> false
+        }
+
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
 
         DebugLogger.log("PROFILER",
             "GPU policy: gpuSafe=$gpuSafe  reason=$gpuSafeReason  " +
-            "soc=$socModel  api=$apiLevel  manufacturer=$manufacturer")
+            "npuSafe=$npuSafe  soc=$socModel  api=$apiLevel  manufacturer=$manufacturer")
 
         return DeviceProfile(
             totalRamMb        = totalRamMb,
@@ -146,6 +156,7 @@ class DeviceProfiler @Inject constructor(
             hasVulkan         = hasVulkan,
             vulkanVersion     = vulkanVersion,
             gpuSafe           = gpuSafe,
+            npuSafe           = npuSafe,
             abi               = abi,
             apiLevel          = apiLevel,
             manufacturer      = manufacturer,

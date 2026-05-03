@@ -81,13 +81,6 @@ dependencies {
     implementation(project(":core:core-common"))
     implementation(libs.timber)
     
-    // MediaPipe LLM Inference (LiteRT-based)
-    implementation(libs.mediapipe.tasks.genai)
-    
-    // TensorFlow Lite core runtime
-    implementation("org.tensorflow:tensorflow-lite:2.14.0")
-    
-    // GPU Delegate for Adreno/Mali acceleration (30-50% speedup on mobile)
-    // Enables hardware acceleration on Snapdragon (Adreno), MediaTek (Mali), and other GPUs
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+    // LiteRT-LM: Google AI Edge inference library (same runtime as AI Edge Gallery)
+    implementation(libs.litertlm)
 }

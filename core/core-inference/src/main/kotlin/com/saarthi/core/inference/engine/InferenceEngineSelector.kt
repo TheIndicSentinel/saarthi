@@ -35,8 +35,7 @@ class InferenceEngineSelector @Inject constructor(
             val ext = path.substringAfterLast('.', "unknown")
             throw UnsupportedOperationException(
                 "Unsupported model format: .$ext\n\n" +
-                "Native LlamaCpp has been disabled for stability. " +
-                "Please use official .task models from the catalog."
+                "Please use official .litertlm models from the catalog."
             )
         }
     }
