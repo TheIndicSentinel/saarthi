@@ -56,15 +56,6 @@
         </intent>
     </queries>
 
-    <!--
-        Required for litertlm-android GPU (OpenCL) and NPU (QNN) backends.
-        libOpenCL.so: GPU compute via OpenCL (Adreno, Mali, PowerVR).
-        libvndksupport.so: VNDK shim that lets the runtime load vendor OpenCL libs.
-        Both are optional — absent = backend falls back to CPU automatically.
-    -->
-    <uses-native-library android:name="libOpenCL.so"      android:required="false" />
-    <uses-native-library android:name="libvndksupport.so" android:required="false" />
-
     <application
         android:name=".SaarthiApp"
         android:allowBackup="false"
@@ -79,6 +70,13 @@
         android:hasFragileUserData="true"
         android:allowNativeHeapPointerTagging="false"
         android:memtagMode="off">
+        <!--
+            Required for litertlm-android GPU (OpenCL) and NPU (QNN) backends.
+            Both are optional — absent = backend falls back to CPU automatically.
+        -->
+        <uses-native-library android:name="libOpenCL.so"      android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+
         <!--
             memtagMode="off": Disables ARM MTE (Memory Tagging Extension) for this process.
             llama.cpp's GGML allocator does not tag memory allocations, so MTE on ARMv9
