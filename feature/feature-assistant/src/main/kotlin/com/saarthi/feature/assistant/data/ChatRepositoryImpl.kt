@@ -152,7 +152,8 @@ class ChatRepositoryImpl @Inject constructor(
 
         // Build prompt and run inference fully on IO — avoids blocking the main thread
         // Start foreground service IMMEDIATELY — prevents Android from killing process.
-        InferenceService.start(context)
+        // Updates the notification from "Loading…" to "Generating response…" if already running.
+        InferenceService.startGenerating(context)
         
         return flow {
             // Check readiness first
@@ -176,8 +177,14 @@ class ChatRepositoryImpl @Inject constructor(
 
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
-                    // Stop foreground service on error
-                    InferenceService.stop(context)
+                    // Only stop FGS if the native inference thread is no longer running.
+                    // If isNativeGenerating=true here it means the watchdog timed out (or the
+                    // coroutine was cancelled) while the native GPU thread is still computing.
+                    // Stopping the FGS in that state removes OS protection from the native
+                    // thread — Samsung's power watchdog then kills the process ~40s later.
+                    // The native 'done' callback in LiteRTInferenceEngine will call stop() once
+                    // the native thread actually finishes.
+                    if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
                     // Surface engine errors as a visible assistant message — never crash the app.
                     val errMsg = e.message?.takeIf { it.isNotBlank() }
                         ?: "Something went wrong. Please try again."
@@ -207,8 +214,8 @@ class ChatRepositoryImpl @Inject constructor(
                     emit(token)
                 }
                 .onCompletion { throwable ->
-                    // Stop foreground service when generation is done
-                    InferenceService.stop(context)
+                    // Same guard as .catch: only stop FGS if native thread has finished.
+                    if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
                     val elapsed = (System.currentTimeMillis() - startTime) / 1000f
                     val tps = if (elapsed > 0) tokenCount / elapsed else 0f
                     DebugLogger.log("CHAT", "streamResponse done  tokens=$tokenCount  elapsed=${elapsed.toInt()}s  tps=${"%.1f".format(tps)}  error=${throwable?.message}")

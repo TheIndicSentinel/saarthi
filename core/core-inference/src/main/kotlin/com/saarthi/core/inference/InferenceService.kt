@@ -24,15 +24,25 @@ import javax.inject.Inject
  * and the power watchdog from terminating the process mid-decode.
  *
  * Lifecycle:
- *   1. ChatRepositoryImpl calls [start] before streaming tokens.
- *   2. The service posts a low-priority notification ("Thinking…").
- *   3. When generation is done (or the chat screen is destroyed), [stop] is called.
+ *   1. LiteRTInferenceEngine calls [startLoading] before model loading begins.
+ *   2. ChatRepositoryImpl calls [startGenerating] before streaming tokens — updates
+ *      the notification to show "Generating response…" text.
+ *   3. When generation is done (or the chat screen is destroyed), [stop] is called
+ *      from ChatRepositoryImpl (normal path) or from the native 'done' callback in
+ *      LiteRTInferenceEngine (timeout/cancel path — keeps FGS alive for the native
+ *      GPU thread, only stopping once the native computation actually finishes).
+ *
+ * Notification states:
+ *   LOADING    — "Loading AI model…"   shown while model is being loaded from disk
+ *   GENERATING — "Generating response…" shown during active inference
  *
  * This service does NOT host the inference engine itself — it only holds
- * the foreground wakelocks. The engine is a Hilt singleton injected elsewhere.
+ * the foreground wake-locks and exposes state-based notification updates.
  */
 @AndroidEntryPoint
 class InferenceService : Service() {
+
+    enum class NotificationState { LOADING, GENERATING }
 
     @Inject lateinit var inferenceEngine: InferenceEngine
 
@@ -51,7 +61,11 @@ class InferenceService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildNotification()
+        val state = intent?.getStringExtra(EXTRA_STATE)
+            ?.let { runCatching { NotificationState.valueOf(it) }.getOrNull() }
+            ?: NotificationState.GENERATING
+
+        val notification = buildNotification(state)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is the correct and only type for
@@ -87,7 +101,7 @@ class InferenceService : Service() {
             wakeLock!!.acquire(10 * 60 * 1000L) // 10 min max safety timeout
         }
 
-        DebugLogger.log("SERVICE", "Foreground inference service started")
+        DebugLogger.log("SERVICE", "FGS onStartCommand  state=$state")
         return START_NOT_STICKY
     }
 
@@ -100,8 +114,8 @@ class InferenceService : Service() {
         }
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
-        
-        DebugLogger.log("SERVICE", "Foreground inference service stopped")
+
+        DebugLogger.log("SERVICE", "FGS stopped")
         super.onDestroy()
     }
 
@@ -121,7 +135,11 @@ class InferenceService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(state: NotificationState): Notification {
+        val (title, text) = when (state) {
+            NotificationState.LOADING   -> "Saarthi is loading a model…" to "Preparing the AI model. This takes a few seconds."
+            NotificationState.GENERATING -> "Saarthi is generating a response…" to "Processing your message offline."
+        }
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
@@ -129,8 +147,8 @@ class InferenceService : Service() {
             Notification.Builder(this)
         }
         return builder
-            .setContentTitle("Saarthi is thinking…")
-            .setContentText("Processing your message offline.")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -139,11 +157,23 @@ class InferenceService : Service() {
     }
 
     companion object {
+        internal const val NOTIFICATION_ID = 9001
         private const val CHANNEL_ID = "saarthi_inference"
-        private const val NOTIFICATION_ID = 9001
+        private const val EXTRA_STATE = "notification_state"
 
-        fun start(context: Context) {
+        /** Call before model loading begins — shows "Loading AI model…" notification. */
+        fun startLoading(context: Context) = startWithState(context, NotificationState.LOADING)
+
+        /**
+         * Call before inference streaming begins — shows "Generating response…" notification.
+         * If the service is already running (e.g. from model loading), the notification is
+         * updated in place via [startForeground] being called again in [onStartCommand].
+         */
+        fun startGenerating(context: Context) = startWithState(context, NotificationState.GENERATING)
+
+        private fun startWithState(context: Context, state: NotificationState) {
             val intent = Intent(context, InferenceService::class.java)
+                .putExtra(EXTRA_STATE, state.name)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -153,6 +183,16 @@ class InferenceService : Service() {
 
         fun stop(context: Context) {
             context.stopService(Intent(context, InferenceService::class.java))
+        }
+
+        /**
+         * Cancels any stale notification left over from a previous session that ended
+         * via SIGKILL (process killed mid-inference, so [onDestroy] was never called).
+         * Call from Application.onCreate to clean up before the first session starts.
+         */
+        fun cancelStaleNotification(context: Context) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(NOTIFICATION_ID)
         }
     }
 }

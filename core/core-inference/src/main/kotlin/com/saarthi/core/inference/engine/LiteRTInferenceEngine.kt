@@ -5,6 +5,7 @@ import com.saarthi.core.inference.InferenceService
 import android.app.ActivityManager
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
@@ -84,8 +85,14 @@ class LiteRTInferenceEngine @Inject constructor(
     // isGenerating=false immediately, but the MediaPipe native thread keeps running until
     // the 'done' callback fires. Calling llmInference.close() while the native thread is
     // active causes a SIGABRT (native use-after-free). closeInternal() checks BOTH flags.
+    //
+    // Also exposed via InferenceEngine interface so InferenceService and ChatRepositoryImpl
+    // can keep the FGS alive while the native GPU thread is still computing. Without this,
+    // Samsung's power watchdog kills the process ~40s after the FGS stops (even though GPU
+    // is still active) — observed as a crash ~130s after inference started on SM8550/Android 16.
     @Volatile private var isGenerating: Boolean = false
-    @Volatile private var isNativeGenerating: Boolean = false
+    @Volatile override var isNativeGenerating: Boolean = false
+        private set
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
 
@@ -194,7 +201,7 @@ class LiteRTInferenceEngine @Inject constructor(
         enginePrefs.edit().putBoolean("litert_init_pending", true).commit()
 
     private fun markInitEnded() =
-        enginePrefs.edit().putBoolean("litert_init_pending", false).apply()
+        enginePrefs.edit().putBoolean("litert_init_pending", false).commit()
 
     private fun markGenerationStarted() {
         enginePrefs.edit()
@@ -204,7 +211,7 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     private fun markGenerationEnded() =
-        enginePrefs.edit().putBoolean("litert_gen_pending", false).apply()
+        enginePrefs.edit().putBoolean("litert_gen_pending", false).commit()
 
     /** Was GPU the active backend when the process last crashed? Survives process kills. */
     private fun wasUsingGpuAtCrash(): Boolean =
@@ -266,7 +273,7 @@ class LiteRTInferenceEngine @Inject constructor(
             // kills the process before loading completes. The FGS stays active through
             // model init AND the first inference — ChatRepositoryImpl stops it after
             // generation completes.
-            InferenceService.start(context)
+            InferenceService.startLoading(context)
 
             setReady(false)
             activeModelName = null
@@ -292,6 +299,8 @@ class LiteRTInferenceEngine @Inject constructor(
             }
 
             val sizeMb = file.length() / 1_048_576
+            // Diagnostic snapshot — captured just before heavy native allocation.
+            logDeviceState("INIT")
             // Trust the caller's maxTokens — it is set from the model catalog's contextLength.
             // For .task models (Gemma 3/3n = 1280, Gemma 2 = 2048), setMaxTokens IS the
             // total KV-cache size (input + output). Forcing 2048 on a 1280-context model
@@ -454,9 +463,13 @@ class LiteRTInferenceEngine @Inject constructor(
                     "LiteRT engine not initialised."
             )
 
-        // Adaptive timeout: GPU at ~30 tok/s → 90s ≈ 2700 tokens. CPU at ~5 tok/s → 180s.
-        val timeoutMs = if (usingGpu) 90_000L else 180_000L
+        // Adaptive timeout: GPU at ~25–40 tok/s → 120s ≈ 3000–4800 tokens.
+        // CPU at ~3–8 tok/s → 180s. Use 120s for GPU (was 90s — too short on complex prompts
+        // and when GPU is thermally throttled, dropping to ~15 tok/s on SM8550/Android 16).
+        val timeoutMs = if (usingGpu) 120_000L else 180_000L
+        val genStartTimeMs = System.currentTimeMillis()
         DebugLogger.log("LITERT", "Stream start  backend=${if (usingGpu) "GPU" else "CPU"}  timeout=${timeoutMs/1000}s  promptChars=${prompt.length}")
+        logDeviceState("GEN")
 
         generateMutex.withLock {
             var tokenCount = 0
@@ -472,11 +485,19 @@ class LiteRTInferenceEngine @Inject constructor(
                 watchdog = launch {
                     delay(timeoutMs)
                     if (!isFinished) {
-                        DebugLogger.log("LITERT", "Watchdog: generation timed out after ${timeoutMs/1000}s — clearing native state")
-                        // Native is stuck; force-clear so closeInternal() can proceed later.
-                        isNativeGenerating = false
-                        markGenerationEnded()
-                        close(RuntimeException("Response timed out. Please try again."))
+                        // The native thread may STILL be computing — do NOT clear isNativeGenerating
+                        // here. Clearing it allows closeInternal() to close llmInference while the
+                        // native thread is active, causing a use-after-free SIGABRT.
+                        //
+                        // Instead: close the callbackFlow (user sees timeout error), keep FGS alive
+                        // (ChatRepositoryImpl skips stop when isNativeGenerating=true), and let the
+                        // native 'done' callback fire eventually to clean up and stop the FGS.
+                        //
+                        // On SM8550+Android 16: without FGS, Samsung's power watchdog kills the
+                        // process ~40s after FGS stops even though GPU is still computing. Keeping
+                        // FGS alive prevents this. This was the root cause of the 130s crash.
+                        DebugLogger.log("LITERT", "Watchdog: timeout at ${timeoutMs/1000}s — closing flow but keeping FGS alive for native thread")
+                        close(RuntimeException("Response timed out after ${timeoutMs/1000}s. The model may be slow or the message too long — please try again."))
                     }
                 }
 
@@ -503,7 +524,9 @@ class LiteRTInferenceEngine @Inject constructor(
                         watchdog?.cancel()
                         resetCrashCount()
                         markGenerationEnded()
-                        DebugLogger.log("LITERT", "Stream complete  tokens≈$tokenCount")
+                        val elapsedMs = System.currentTimeMillis() - genStartTimeMs
+                        val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
+                        DebugLogger.log("LITERT", "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${if (usingGpu) "GPU" else "CPU"}")
                         // Close any LlmInference instance that was replaced while this
                         // generation was in flight (e.g. user switched models mid-stream).
                         closingLlmInference?.let { old ->
@@ -512,6 +535,11 @@ class LiteRTInferenceEngine @Inject constructor(
                             closingLlmInference = null
                             DebugLogger.log("LITERT", "Deferred engine instance closed after generation")
                         }
+                        // Always stop FGS from the native done callback. This handles:
+                        //  1. Normal path: FGS already stopped by ChatRepositoryImpl (idempotent).
+                        //  2. Timeout/cancel path: ChatRepositoryImpl skipped stop because
+                        //     isNativeGenerating was still true — this is the deferred stop.
+                        InferenceService.stop(context)
                         close()
                     }
                 }
@@ -571,6 +599,34 @@ class LiteRTInferenceEngine @Inject constructor(
 
     override fun release() {
         closeInternal()
+    }
+
+    /**
+     * Logs a snapshot of device state (RAM, thermal, battery) for diagnosing crashes.
+     * Call this just before heavy native operations (model load, inference start).
+     */
+    private fun logDeviceState(tag: String) {
+        try {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val mi = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+            DebugLogger.log("LITERT", "[$tag] RAM: avail=${mi.availMem/1_048_576}MB  total=${mi.totalMem/1_048_576}MB  lowMem=${mi.lowMemory}")
+        } catch (_: Exception) {}
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val pm = context.getSystemService(PowerManager::class.java)
+                val thermalName = when (pm.currentThermalStatus) {
+                    0 -> "NONE"; 1 -> "LIGHT"; 2 -> "MODERATE"
+                    3 -> "SEVERE"; 4 -> "CRITICAL"; 5 -> "EMERGENCY"; 6 -> "SHUTDOWN"
+                    else -> "UNKNOWN(${pm.currentThermalStatus})"
+                }
+                DebugLogger.log("LITERT", "[$tag] Thermal: $thermalName")
+            }
+        } catch (_: Exception) {}
+        try {
+            val bm = context.getSystemService(BatteryManager::class.java)
+            val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            DebugLogger.log("LITERT", "[$tag] Battery: ${pct}%  charging=${bm.isCharging}")
+        } catch (_: Exception) {}
     }
 
     private fun closeInternal() {

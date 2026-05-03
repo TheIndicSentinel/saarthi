@@ -193,15 +193,22 @@ class ModelDownloadManager @Inject constructor(
      * This is intentionally SEPARATE from [reattachActiveDownloads] so it does NOT
      * trigger the "newlyCompleted" auto-select logic in OnboardingViewModel — those
      * models are already downloaded, not freshly completed.
+     *
+     * Crucially: if DownloadManager STILL has an active download for this model, we
+     * do NOT emit Completed — the file on disk is still being written. Previously this
+     * caused "shows completed while actually downloading" when the app was backgrounded
+     * and resumed: the partial file (≥99% done due to HF file-size estimate drift) would
+     * pass isFileComplete(), falsely marking the download as finished.
      */
     fun restoreCompletedStates(models: List<ModelEntry>) {
         models.forEach { model ->
+            if (_allProgress.value[model.id] != null) return@forEach  // already tracked
+            // If DownloadManager is still writing to this file, don't mark it as complete
+            // even if the file looks large enough — the download is still in progress.
+            if (findActiveDownloadId(model.downloadUrl) != null) return@forEach
             val file = resolveLocalFile(model)
             if (isFileComplete(file, model.fileSizeBytes)) {
-                // Only update if not already tracked — avoids stomping an active download
-                if (_allProgress.value[model.id] == null) {
-                    _allProgress.update { it + (model.id to DownloadProgress.Completed(file.absolutePath)) }
-                }
+                _allProgress.update { it + (model.id to DownloadProgress.Completed(file.absolutePath)) }
             }
         }
     }
@@ -210,22 +217,28 @@ class ModelDownloadManager @Inject constructor(
      * Reattaches progress polling ONLY for models whose download is genuinely still
      * in-progress in Android DownloadManager (STATUS_PENDING / RUNNING / PAUSED).
      *
+     * Uses URL-based lookup ([findActiveDownloadId]) instead of file-path comparison.
+     * File-path comparison via [COLUMN_LOCAL_URI] is unreliable — on Android 10+ the
+     * column can return content:// URIs instead of file:// paths, causing the path
+     * equality check to fail silently and leaving the download state lost on resume.
+     *
      * Does NOT call startDownload for files that already exist on disk — that
      * would immediately emit Completed and trigger the auto-select path in the UI.
      * Use [restoreCompletedStates] to populate the UI for already-finished downloads.
      */
     fun reattachActiveDownloads(models: List<ModelEntry>) {
-        val activePaths = activeDownloadingPaths()
         models.forEach { model ->
+            if (activeJobs[model.id]?.isActive == true) return@forEach  // already polling
             val destFile = resolveLocalFile(model)
             // Guard: if the file is already complete, do NOT call startDownload —
             // startDownload() immediately emits Completed for existing files, which
             // triggers auto-select in the ViewModel and can load a 2nd model into RAM
             // while another model is already active, causing OOM kills mid-inference.
             if (isFileComplete(destFile, model.fileSizeBytes)) return@forEach
-
-            val modelPath = localPathFor(model).absolutePath
-            if (activePaths.any { it == modelPath } && activeJobs[model.id]?.isActive != true) {
+            // URL-based lookup — works regardless of COLUMN_LOCAL_URI format.
+            // enqueueOrReattach (called by startDownload) also uses URL lookup, so
+            // this is consistent and won't start a duplicate download.
+            if (findActiveDownloadId(model.downloadUrl) != null) {
                 DebugLogger.log("DOWNLOAD", "Reattaching to in-progress download: ${model.id}")
                 startDownload(model)
             }

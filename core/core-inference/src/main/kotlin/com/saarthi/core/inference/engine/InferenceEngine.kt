@@ -22,6 +22,16 @@ interface InferenceEngine {
     val activeModelNameFlow: Flow<String?>
         get() = kotlinx.coroutines.flow.flow { emit(activeModelName) }
 
+    /**
+     * True while the native inference thread is computing (i.e. after generateResponseAsync is
+     * called and before the 'done' callback fires). Distinct from [isReady] and coroutine state.
+     *
+     * Used by InferenceService and ChatRepositoryImpl to decide whether the Foreground Service
+     * may safely be stopped. If true, stopping the FGS removes OS protection from the native
+     * GPU thread, which allows Samsung's power watchdog to kill the process mid-inference.
+     */
+    val isNativeGenerating: Boolean get() = false
+
     suspend fun initialize(config: InferenceConfig)
 
     /** Streams partial tokens as they are generated. */

@@ -2,6 +2,7 @@ package com.saarthi.app
 
 import android.app.Application
 import com.saarthi.core.inference.DebugLogger
+import com.saarthi.core.inference.InferenceService
 import com.saarthi.feature.assistant.data.ReminderManager
 import dagger.hilt.android.HiltAndroidApp
 import timber.log.Timber
@@ -16,6 +17,10 @@ class SaarthiApp : Application() {
         super.onCreate()
         Timber.plant(Timber.DebugTree())
         DebugLogger.init(this)
+        // Remove any stale inference notification left from a previous session that ended
+        // via SIGKILL (onDestroy was never called, so the FGS notification persists on
+        // Samsung OneUI even though the process is gone).
+        InferenceService.cancelStaleNotification(this)
         installCrashLogger()
         // Ensures the notification channel exists before any reminder fires
         reminderManager.createNotificationChannel()
