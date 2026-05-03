@@ -92,7 +92,9 @@ class DeviceProfiler @Inject constructor(
         // Per-chip policy:
         //
         //  QUALCOMM SM8750  — GPU always (best-in-class Adreno 830, no known issues).
-        //  QUALCOMM SM8550  — GPU always (litertlm-android confirmed stable on Android 16).
+        //  QUALCOMM SM8550  — CPU only. Empirically confirmed: ALL model sizes (including
+        //                     Gemma 3 1B at 557 MB) SIGKILL the process during GPU generation
+        //                     on SM-S918B (Android 16/API 36). CPU via XNNPACK is stable.
         //  QUALCOMM GENERIC — GPU enabled. Per-model crash recovery bans if runtime fault.
         //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
         //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
@@ -104,7 +106,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> true
+                SocFamily.QUALCOMM_SM8550  -> false
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34

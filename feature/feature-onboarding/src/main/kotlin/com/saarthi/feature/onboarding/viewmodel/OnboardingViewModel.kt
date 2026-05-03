@@ -162,6 +162,22 @@ class OnboardingViewModel @Inject constructor(
                 downloadManager.restoreCompletedStates(modelCatalog.allModels)
                 // reattachActiveDownloads: only polls models genuinely still downloading.
                 downloadManager.reattachActiveDownloads(modelCatalog.allModels)
+                // Pre-populate modelCandidates with every already-downloaded model file.
+                // Without this, models that completed while the app was crashed never
+                // land in modelCandidates: they're pre-added to handledCompletions (to
+                // prevent OOM auto-load), so the allProgress collector skips them in the
+                // newlyCompleted path. The user would see the "downloaded" badge but the
+                // model wouldn't appear in the picker until a manual rescan.
+                val downloadedPaths = modelCatalog.allModels
+                    .filter { downloadManager.isDownloaded(it) }
+                    .map { downloadManager.localPathFor(it).absolutePath }
+                if (downloadedPaths.isNotEmpty()) {
+                    _uiState.update { state ->
+                        state.copy(
+                            modelCandidates = (downloadedPaths + state.modelCandidates).distinct()
+                        )
+                    }
+                }
             }
 
             if (isModelChangeMode) {
