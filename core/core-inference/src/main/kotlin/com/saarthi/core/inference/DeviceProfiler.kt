@@ -118,6 +118,7 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
+            socFamily == SocFamily.QUALCOMM_SM8550 -> "SM8550: all model sizes SIGKILL on GPU generation"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->

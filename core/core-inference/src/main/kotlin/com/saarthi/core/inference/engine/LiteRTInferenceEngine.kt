@@ -338,14 +338,33 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 val sizeMb = file.length() / 1_048_576
                 logDeviceState("INIT")
-                val effectiveMaxTokens = config.maxTokens.coerceIn(1024, 8192)
+                val profile = deviceProfiler.profile()
+                val gpuBanned = gpuPreviouslyCrashedDuringGen(config.modelPath)
+
+                // On CPU-only devices cap KV-cache to available RAM headroom.
+                // Primary fixes: prevents OOM on Gemma 4 E2B (4s crash) and limits
+                // generation to ~256s at 2 tok/s so it fits the 300s watchdog window.
+                val effectiveMaxTokens: Int = run {
+                    val headroomMb = profile.availableRamMb - sizeMb
+                    if (!profile.gpuSafe && !profile.npuSafe) {
+                        val headroomCap = when {
+                            headroomMb < 300  -> 128
+                            headroomMb < 700  -> 256
+                            headroomMb < 1500 -> 512
+                            else              -> 1024
+                        }
+                        val cap = minOf(headroomCap, 512)
+                        DebugLogger.log("LITERT", "[CPU] maxTokens capped to $cap (headroom=${headroomMb}MB, model=${sizeMb}MB)")
+                        cap
+                    } else {
+                        config.maxTokens.coerceIn(1024, 8192)
+                    }
+                }
+
                 DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
                 markInitStarted()
                 try {
-                    val profile = deviceProfiler.profile()
-                    val gpuBanned = gpuPreviouslyCrashedDuringGen(config.modelPath)
-
                     engine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned)
                     loadedModelPath = config.modelPath
                     loadedMaxTokens = config.maxTokens
@@ -473,7 +492,7 @@ class LiteRTInferenceEngine @Inject constructor(
         val timeoutMs = when {
             usingNpu -> 60_000L   // NPU: fastest, ~60–100 tok/s
             usingGpu -> 120_000L  // GPU: ~25–40 tok/s
-            else     -> 180_000L  // CPU: ~3–8 tok/s
+            else     -> 300_000L  // CPU: 5 min — allows 512 tokens at ~2 tok/s on slow devices
         }
         val genStartTimeMs = System.currentTimeMillis()
         DebugLogger.log("LITERT", "Stream start  backend=${backendLabel()}  timeout=${timeoutMs/1000}s  promptChars=${prompt.length}")
@@ -514,12 +533,26 @@ class LiteRTInferenceEngine @Inject constructor(
                 watchdog = launch {
                     delay(timeoutMs)
                     if (!isFinished) {
-                        // Close the callbackFlow so the user sees a timeout error, but do NOT
-                        // clear isNativeGenerating — the native thread may still be computing.
-                        // Keeping FGS alive prevents Samsung power watchdog from killing the process
-                        // ~40s after FGS stops. The native 'done/error' callback performs the deferred stop.
-                        DebugLogger.log("LITERT", "Watchdog: timeout at ${timeoutMs/1000}s — closing flow but keeping FGS alive for native thread")
-                        close(RuntimeException("Response timed out after ${timeoutMs/1000}s. The model may be slow or the message too long — please try again."))
+                        isFinished = true
+                        DebugLogger.log("LITERT", "Watchdog: timeout at ${timeoutMs/1000}s — force-closing engine to terminate native XNNPACK thread")
+                        // Without force-close, the XNNPACK thread runs 10+ min → OS SIGKILL.
+                        // engine.close() during active inference may SIGSEGV the native thread;
+                        // crash recovery handles it on next launch.
+                        isNativeGenerating = false
+                        runCatching { conversation?.close() }
+                        engine = null
+                        loadedModelPath = null
+                        loadedMaxTokens = 0
+                        activeModelName = null
+                        _activeModelNameFlow.value = null
+                        setReady(false)
+                        runCatching { eng.close() }
+                        markGenerationEnded()
+                        InferenceService.stop(context)
+                        close(RuntimeException(
+                            "Response timed out after ${timeoutMs / 1000}s. " +
+                            "CPU-only inference is slow on this device — try a shorter message."
+                        ))
                     }
                 }
 
