@@ -356,7 +356,11 @@ class LiteRTInferenceEngine @Inject constructor(
                         DebugLogger.log("LITERT", "[TOKENS] maxTokens capped to $cap — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
                         cap
                     } else {
-                        val cap = config.maxTokens.coerceIn(1024, 8192)
+                        // Google AI Edge Gallery defaults to 1024 — the proven safe ceiling
+                        // for all current mobile GPUs including SM8550 Adreno 740.
+                        // Higher values (2048+) trigger SIGKILL on Samsung OneUI 7 due to
+                        // GPU power-quota exhaustion during the createConversation() warm-up.
+                        val cap = 1024
                         DebugLogger.log("LITERT", "[TOKENS] maxTokens=$cap  headroom=${headroomMb}MB  model=${sizeMb}MB")
                         cap
                     }
