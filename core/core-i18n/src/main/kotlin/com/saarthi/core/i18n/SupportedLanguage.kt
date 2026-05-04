@@ -250,10 +250,7 @@ enum class SupportedLanguage(
 
     /** Instruction appended to system prompt so the model responds in this language. */
     val systemPromptInstruction: String get() =
-        "CRITICAL: You are currently speaking with the user in $nativeName ($englishName). " +
-        "You MUST respond ONLY in $nativeName ($englishName). " +
-        "DO NOT use English words or switch to any other language unless the user explicitly asks you to. " +
-        "Consistency in the chosen language is your highest priority."
+        "Always respond in $nativeName. Maintain this language consistently."
 
     companion object {
         fun fromCode(code: String): SupportedLanguage =

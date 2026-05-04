@@ -44,7 +44,11 @@ private const val MAX_HISTORY_TURNS = 6  // reduced adaptively for small-context
 // For 1280-ctx models: (1280 - 512) * 3.0 = ~2304 chars
 // For 2048-ctx models: (2048 - 512) * 3.0 = ~4608 chars
 // We use 3.0 chars/token (conservative) because Gemma tokenizer uses sub-word BPE.
-private const val MAX_PROMPT_CHARS_1280 = 1_800  // 1280-ctx models (Gemma 3/3n) - tightened for stability
+// SM8550 CPU: createConversation() crashes at maxNumTokens ≥ 768. Engine uses 512.
+// System prompt ~90 tokens, leaving ~400 tokens for history + user + response.
+// At 3.5 chars/token: 400 × 3.5 = 1400 chars total; minus ~300 chars system = 1100 for history+user.
+// Use 1000 to be safe (leaves ~286 tokens for history+user, ~226 for response).
+private const val MAX_PROMPT_CHARS_1280 = 1_000  // 512-ctx CPU devices (Gemma 3/3n)
 private const val MAX_PROMPT_CHARS_2048 = 4_500  // 2048-ctx models (Gemma 2)
 private const val MAX_PROMPT_CHARS_LARGE = 8_000 // Large-ctx models (Gemma 4)
 
@@ -402,10 +406,7 @@ class ChatRepositoryImpl @Inject constructor(
         append(PackType.BASE.systemPrompt)
         appendLine()
         appendLine()
-        // Critical: tell the model exactly which language to respond in
         append(currentLanguage.systemPromptInstruction)
-        appendLine()
-        append("If attachments are included, use only readable extracted text and do not guess from unsupported files.")
         if (memoryContext.isNotEmpty()) {
             appendLine()
             appendLine()

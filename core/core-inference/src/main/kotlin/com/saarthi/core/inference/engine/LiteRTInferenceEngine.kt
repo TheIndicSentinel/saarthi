@@ -81,6 +81,8 @@ class LiteRTInferenceEngine @Inject constructor(
 
     @Volatile private var loadedModelPath: String? = null
     @Volatile private var loadedMaxTokens: Int = 0
+    // The actual maxNumTokens passed to the Engine (≤ loadedMaxTokens which stores config value).
+    @Volatile private var loadedEffectiveMaxTokens: Int = 0
 
     private val _isReadyFlow = MutableStateFlow(false)
     override val isReadyFlow: Flow<Boolean> = _isReadyFlow.asStateFlow()
@@ -347,17 +349,15 @@ class LiteRTInferenceEngine @Inject constructor(
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
                     if (!profile.gpuSafe && !profile.npuSafe) {
-                        // SM8550/Android 16: createConversation() crashes at maxNumTokens=1024
-                        // (likely a warm-up forward-pass in LiteRT that uses all maxNumTokens
-                        // attention positions). Binary search: 512 works (context overflow later),
-                        // 1024 crashes at 3s (0 tokens). Try 768 = midpoint.
+                        // CONFIRMED SM8550 crash: createConversation() crashes with maxNumTokens ≥ 768.
+                        // Diagnostic log showed [GEN] conv-start but NO conv-ready → crash is INSIDE
+                        // createConversation, not in sendMessageAsync. LiteRT warm-up pass uses all
+                        // maxNumTokens attention positions; ≥ 768 triggers a native SIGKILL on SM8550.
                         //
-                        // 768 gives: 768 - ~460 (prompt+template) = ~308 response tokens.
-                        // At ~2 tok/s on SM8550: ~154s < 300s watchdog.
-                        val cap = when {
-                            headroomMb < 500  -> 640   // very low headroom — short but safe
-                            else              -> 768   // midpoint binary search for crash threshold
-                        }
+                        // 512 is confirmed safe: createConversation() completes, decode runs.
+                        // System prompt is now ~90 tokens + user msg ~15 tokens = ~115 tokens.
+                        // Response budget: 512 - 115 = ~397 tokens (~132s at 3 tok/s) ✓
+                        val cap = 512
                         DebugLogger.log("LITERT", "[CPU] maxTokens capped to $cap (headroom=${headroomMb}MB, model=${sizeMb}MB)")
                         cap
                     } else {
@@ -372,6 +372,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     engine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned)
                     loadedModelPath = config.modelPath
                     loadedMaxTokens = config.maxTokens
+                    loadedEffectiveMaxTokens = effectiveMaxTokens
                     activeModelName = config.modelName
                     _activeModelNameFlow.value = config.modelName
                     markInitEnded()
@@ -566,11 +567,9 @@ class LiteRTInferenceEngine @Inject constructor(
                     topP        = 0.95,
                     temperature = 0.8,
                 )
-                // DIAGNOSTIC: log before/after createConversation to narrow crash location.
-                // If "[GEN] conv-start" appears but "[GEN] conv-ready" does not → crash is
-                // inside createConversation (warm-up pass). If both appear → crash is in
-                // sendMessageAsync. Remove these logs once the crash location is confirmed.
-                DebugLogger.log("LITERT", "[GEN] conv-start  maxTokens=$loadedMaxTokens  backend=${backendLabel()}")
+                // Diagnostic: conv-start/conv-ready bracket createConversation() to confirm
+                // crash location. loadedEffectiveMaxTokens = actual Engine capacity (not config).
+                DebugLogger.log("LITERT", "[GEN] conv-start  engineMaxTokens=$loadedEffectiveMaxTokens  backend=${backendLabel()}")
                 conversation = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
                 DebugLogger.log("LITERT", "[GEN] conv-ready  starting sendMessageAsync...")
 

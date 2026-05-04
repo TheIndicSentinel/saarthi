@@ -402,17 +402,9 @@ class OnboardingViewModel @Inject constructor(
     // ── Model init ────────────────────────────────────────────────────────────
 
     fun confirmModelAndInit() {
-        // On Samsung OneUI 6/7 (Android 13–16), CPU/GPU-intensive processes are killed
-        // by the power watchdog in 13–60 s even with a running foreground service, unless
-        // the app holds battery optimization exemption ("Unrestricted" mode).
-        // Trigger the standard system dialog once; the Screen observes the flag and
-        // launches the Intent — no blocking card in the UI.
-        val pm = appContext.getSystemService(PowerManager::class.java)
-        if (!pm.isIgnoringBatteryOptimizations(appContext.packageName)) {
-            DebugLogger.log("VMODEL", "Battery optimization active — launching system exemption dialog before first inference")
-            _uiState.update { it.copy(showBatteryOptimizationWarning = true) }
-            return
-        }
+        // Battery optimization dialog removed: the crash was inside LiteRT's createConversation()
+        // (a native warm-up pass), not from Samsung's power watchdog. The WakeLock acquired in
+        // InferenceService + FOREGROUND_SERVICE_TYPE_SPECIAL_USE is sufficient protection.
         confirmModelAndInitInternal()
     }
 
