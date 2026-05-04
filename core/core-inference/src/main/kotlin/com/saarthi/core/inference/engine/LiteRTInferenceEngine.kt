@@ -345,24 +345,26 @@ class LiteRTInferenceEngine @Inject constructor(
                 val gpuBanned = gpuPreviouslyCrashedDuringGen(config.modelPath)
 
                 // maxNumTokens = total context window (input + output tokens).
-                // Google AI Edge Gallery defaults to 1024. This is the recommended value
-                // for production stability across all backends (GPU, CPU, NPU).
-                // Only drop to 512 if RAM headroom is critically low (< 2GB after model load)
-                // to prevent the LiteRT warm-up pass from triggering LMK.
+                // GPU path: 1024 tokens — Gallery default, Adreno GPU handles it.
+                // CPU path: 512 tokens — SM8550 CPU warm-up crashes at ≥768, 512 is confirmed safe.
+                // "CPU path" = GPU is statically disabled OR a prior GPU crash banned it for this model.
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
-                    if (headroomMb < 2048) {
-                        val cap = 512
-                        DebugLogger.log("LITERT", "[TOKENS] maxTokens capped to $cap — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
-                        cap
-                    } else {
-                        // Google AI Edge Gallery defaults to 1024 — the proven safe ceiling
-                        // for all current mobile GPUs including SM8550 Adreno 740.
-                        // Higher values (2048+) trigger SIGKILL on Samsung OneUI 7 due to
-                        // GPU power-quota exhaustion during the createConversation() warm-up.
-                        val cap = 1024
-                        DebugLogger.log("LITERT", "[TOKENS] maxTokens=$cap  headroom=${headroomMb}MB  model=${sizeMb}MB")
-                        cap
+                    // GPU banned means tryLoadWithFallback will skip GPU and NPU → CPU is certain.
+                    val willUseCpu = (!profile.gpuSafe || gpuBanned) && !profile.npuSafe
+                    when {
+                        headroomMb < 2048 -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
+                            512
+                        }
+                        willUseCpu -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — CPU backend (GPU ${if (gpuBanned) "banned" else "unavailable"})  model=${sizeMb}MB")
+                            512
+                        }
+                        else -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024  headroom=${headroomMb}MB  model=${sizeMb}MB")
+                            1024
+                        }
                     }
                 }
 
