@@ -6,8 +6,8 @@ package com.saarthi.core.inference.model
  * QNN (Qualcomm Neural Networks) / Hexagon NPU delegate for best performance.
  */
 enum class SocFamily {
-    QUALCOMM_SM8750,  // Snapdragon 8 Gen 3+ — has QNN-optimized model files
-    QUALCOMM_SM8550,  // Snapdragon 8 Gen 2  — has QNN-optimized Gemma3 1B model file
+    QUALCOMM_SM8750,  // Snapdragon 8 Gen 3+ — has QNN-optimized model files (HTP v75/v79)
+    QUALCOMM_SM8550,  // Snapdragon 8 Gen 2  — uses generic files (HTP v69 incompatible with litertlm 0.10.2 QNN)
     QUALCOMM_GENERIC, // Other Snapdragon     — use generic file
     GOOGLE_TENSOR,    // Pixel devices        — use generic file
     SAMSUNG_EXYNOS,   // Exynos variants      — use generic file

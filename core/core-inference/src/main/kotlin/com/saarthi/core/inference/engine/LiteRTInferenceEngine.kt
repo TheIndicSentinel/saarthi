@@ -448,13 +448,18 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "Model ready  $profile  backend=${backendLabel()}")
                 } catch (e: Throwable) {
                     markInitEnded()
-                    val msg = when (e) {
-                        is OutOfMemoryError ->
+                    val rawMsg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                    val msg = when {
+                        e is OutOfMemoryError ->
                             "Not enough RAM to load this model. Close background apps and try again, or choose a smaller model."
-                        else ->
-                            e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                        rawMsg.contains("LiteRtLmJni", ignoreCase = true) ||
+                        rawMsg.contains("JniException", ignoreCase = true) ->
+                            "Your device could not load this model. " +
+                            "This usually means the model requires hardware your phone does not support. " +
+                            "Please try a different model."
+                        else -> rawMsg
                     }
-                    DebugLogger.log("LITERT", "Load failed: $msg")
+                    DebugLogger.log("LITERT", "Load failed: $rawMsg")
                     Timber.e(e, "LiteRT model load failed")
                     InferenceService.stop(context)
                     throw RuntimeException("LiteRT failed to load model: $msg", e)

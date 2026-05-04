@@ -26,15 +26,6 @@ class ModelCatalog @Inject constructor() {
      * based on DeviceProfiler policy and per-model crash history.
      */
     fun recommendedFor(profile: DeviceProfile): List<ModelEntry> {
-        // SM8550 special case: GPU is banned, CPU crashes in createConversation(),
-        // and NPU only works with QNN-compiled device-specific bundles.
-        // Generic models have no safe execution path on SM8550 — hide them entirely.
-        if (profile.socFamily == SocFamily.QUALCOMM_SM8550 && !profile.gpuSafe) {
-            return allModels.filter {
-                it.socTarget == SocFamily.QUALCOMM_SM8550 && it.isSafeFor(profile)
-            }
-        }
-
         val socOptimisedBaseIds = allModels
             .filter { it.socTarget == profile.socFamily && it.socTarget != SocFamily.GENERIC }
             .map { it.baseModelId }
@@ -64,10 +55,11 @@ class ModelCatalog @Inject constructor() {
     // This is the same runtime used by Google AI Edge Gallery.
     //
     // Architecture:
-    //   • Each base model may have: one generic entry + one device-specific entry.
-    //   • Device-specific entries (socTarget != GENERIC) use QNN/Hexagon NPU.
-    //   • Generic entries use CPU + OpenCL GPU with automatic CPU fallback.
-    //   • recommendedFor(profile) selects the best entry per SoC automatically.
+    //   • Each base model may have: one generic entry + one SoC-specific entry.
+    //   • SoC-specific entries (socTarget != GENERIC) use QNN/Hexagon NPU.
+    //   • Generic entries use GPU (OpenCL) with automatic CPU fallback.
+    //   • recommendedFor(profile) selects the best entry per SoC automatically,
+    //     preferring the SoC-specific variant when available, otherwise generic.
     //
     // Tier mapping:
     //   FLAGSHIP : ≥ 10 GB total RAM  (Samsung S23 Ultra, Pixel 8 Pro, etc.)
@@ -167,23 +159,7 @@ class ModelCatalog @Inject constructor() {
         //  GEMMA 3 1B — LITERT-LM (ultra-compact, any phone)
         // ══════════════════════════════════════════════════════════════════════
 
-        // ── Gemma 3 · Snapdragon 8 Gen 2 (SM8550 QNN/NPU optimised) ─────────
-        ModelEntry(
-            id            = "gemma3-1b-it-sm8550",
-            displayName   = "Gemma 3 · Fastest  ⚡",
-            description   = "Optimised for your Snapdragon 8 Gen 2 processor. Fastest responses on your device. ~658 MB download.",
-            downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_q4_ekv1280_sm8550.litertlm",
-            fileSizeBytes = 690_143_232L,
-            engineType    = EngineType.LITERT,
-            requiredTier  = DeviceTier.LOW,
-            modelFamily   = "gemma3",
-            contextLength = 4096,
-            tags          = listOf("Fastest", "Compact", "Snapdragon 8 Gen 2"),
-            socTarget     = SocFamily.QUALCOMM_SM8550,
-            baseModelId   = "gemma3-1b-it-litert-int4",
-        ),
-
-        // ── Gemma 3 · Generic (all devices with GPU) ─────────────────────────
+        // ── Gemma 3 · Generic (all devices) ──────────────────────────────────
         ModelEntry(
             id            = "gemma3-1b-it-litert-int4",
             displayName   = "Gemma 3 · Compact & Fast  ⚡",
