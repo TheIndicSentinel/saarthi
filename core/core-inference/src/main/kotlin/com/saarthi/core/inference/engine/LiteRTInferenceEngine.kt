@@ -136,6 +136,34 @@ class LiteRTInferenceEngine @Inject constructor(
         private const val GPU_BAN_EXPIRY_MS = 24 * 60 * 60 * 1000L  // 24 hours
     }
 
+    // ── Version-based crash state reset ──────────────────────────────────────
+
+    // On each new APK install, clear all per-session crash tracking so stale crash
+    // counts from a previous build don't trigger the crash loop blocker on first run.
+    // GPU bans are also cleared — a new build may have different backend config.
+    init {
+        val prefs = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE)
+        val currentVersion = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toInt()
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0).versionCode
+            }
+        }.getOrDefault(-1)
+        val storedVersion = prefs.getInt("litert_app_version", 0)
+        if (currentVersion != -1 && currentVersion != storedVersion) {
+            val editor = prefs.edit()
+            editor.putBoolean("litert_gen_pending", false)
+            editor.putBoolean("litert_init_pending", false)
+            prefs.all.keys.filter { it.startsWith("litert_crash_count_") ||
+                                    it.startsWith("litert_gpu_ban_") }.forEach { editor.remove(it) }
+            editor.putInt("litert_app_version", currentVersion)
+            editor.commit()
+            DebugLogger.log("LITERT", "[VERSION] New install v$currentVersion (was v$storedVersion) — crash state cleared")
+        }
+    }
+
     // ── Crash detection helpers ───────────────────────────────────────────────
 
     private fun wasKilledDuringGeneration() =
