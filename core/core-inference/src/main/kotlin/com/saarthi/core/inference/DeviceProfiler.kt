@@ -91,11 +91,9 @@ class DeviceProfiler @Inject constructor(
         // Per-chip policy:
         //
         //  QUALCOMM SM8750  — GPU always (best-in-class Adreno 830, no known issues).
-        //  QUALCOMM SM8550  — GPU enabled. Some Samsung OneUI 7 builds (Android 16) have a GPU
-        //                     power-quota bug that kills inference after 20–30s. The per-model
-        //                     crash recovery system handles this dynamically: GPU crash → 24h ban
-        //                     → auto-retry. If Samsung fixes the driver, GPU resumes automatically.
-        //                     Non-Samsung SM8550 devices (OnePlus, Xiaomi) are unaffected.
+        //  QUALCOMM SM8550  — CPU only. GPU createConversation() crashes at any maxNumTokens on
+        //                     Samsung OneUI 7 / Android 16 (confirmed on SM-S918B). CPU via
+        //                     XNNPACK at maxNumTokens=512 is the confirmed stable path.
         //  QUALCOMM GENERIC — GPU enabled. Per-model crash recovery bans if runtime fault.
         //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
         //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
@@ -107,7 +105,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> true
+                SocFamily.QUALCOMM_SM8550  -> false
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
