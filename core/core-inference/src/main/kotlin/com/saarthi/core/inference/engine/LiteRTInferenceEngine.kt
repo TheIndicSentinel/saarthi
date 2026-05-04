@@ -344,19 +344,21 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 val gpuBanned = gpuPreviouslyCrashedDuringGen(config.modelPath)
 
-                // Cap maxNumTokens on CPU-only paths. LiteRT warm-up pass allocates all
-                // maxNumTokens attention positions at createConversation() time; large values
-                // cause native SIGKILL on constrained devices.
-                // SM8550 is CPU-only (gpuSafe=false), so it hits this branch automatically.
-                // 512 is confirmed safe: conv-ready appears, generation proceeds.
+                // maxNumTokens = total context window (input + output tokens).
+                // Google AI Edge Gallery defaults to 1024. This is the recommended value
+                // for production stability across all backends (GPU, CPU, NPU).
+                // Only drop to 512 if RAM headroom is critically low (< 2GB after model load)
+                // to prevent the LiteRT warm-up pass from triggering LMK.
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
-                    if (!profile.gpuSafe && !profile.npuSafe) {
+                    if (headroomMb < 2048) {
                         val cap = 512
-                        DebugLogger.log("LITERT", "[TOKENS] maxTokens capped to $cap — CPU-only headroom=${headroomMb}MB  model=${sizeMb}MB")
+                        DebugLogger.log("LITERT", "[TOKENS] maxTokens capped to $cap — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
                         cap
                     } else {
-                        config.maxTokens.coerceIn(1024, 8192)
+                        val cap = config.maxTokens.coerceIn(1024, 8192)
+                        DebugLogger.log("LITERT", "[TOKENS] maxTokens=$cap  headroom=${headroomMb}MB  model=${sizeMb}MB")
+                        cap
                     }
                 }
 
