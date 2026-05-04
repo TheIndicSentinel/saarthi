@@ -87,14 +87,13 @@ class DeviceProfiler @Inject constructor(
         //
         // litertlm-android:0.10.0 is the same runtime used by Google AI Edge Gallery,
         // which runs correctly on all devices below — including SM8550/Android 16.
-        // The GPU crash was specific to tasks-genai 0.10.33+ and is no longer relevant.
         //
         // Per-chip policy:
         //
         //  QUALCOMM SM8750  — GPU always (best-in-class Adreno 830, no known issues).
-        //  QUALCOMM SM8550  — CPU only. Empirically confirmed: ALL model sizes (including
-        //                     Gemma 3 1B at 557 MB) SIGKILL the process during GPU generation
-        //                     on SM-S918B (Android 16/API 36). CPU via XNNPACK is stable.
+        //  QUALCOMM SM8550  — GPU enabled. createConversation() crashes at maxNumTokens ≥ 768
+        //                     on any backend; LiteRTInferenceEngine caps to 512 for SM8550.
+        //                     Google AI Edge Gallery confirms GPU works on SM-S918B (Android 16).
         //  QUALCOMM GENERIC — GPU enabled. Per-model crash recovery bans if runtime fault.
         //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
         //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
@@ -106,7 +105,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> false
+                SocFamily.QUALCOMM_SM8550  -> true
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
@@ -118,7 +117,6 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
-            socFamily == SocFamily.QUALCOMM_SM8550 -> "SM8550: all model sizes SIGKILL on GPU generation"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->
