@@ -21,7 +21,6 @@ import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
-import com.saarthi.core.inference.model.SocFamily
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -343,31 +342,18 @@ class LiteRTInferenceEngine @Inject constructor(
                 logDeviceState("INIT")
                 val profile = deviceProfiler.profile()
 
-                // SM8550: clear any stale GPU ban accumulated under the old (wrong) diagnosis.
-                // Prior crashes were caused by maxNumTokens ≥ 768 in createConversation(), not
-                // the GPU backend. With maxNumTokens capped to 512, GPU is safe on SM8550.
-                if (profile.socFamily == SocFamily.QUALCOMM_SM8550) {
-                    val key = modelKey(config.modelPath)
-                    if (enginePrefs.getBoolean("litert_gpu_ban_$key", false)) {
-                        DebugLogger.log("LITERT", "[SM8550] Clearing stale GPU ban for $key — prior crash was maxNumTokens overflow, not GPU fault")
-                        clearGpuGenCrashedFlag(config.modelPath)
-                    }
-                }
-
                 val gpuBanned = gpuPreviouslyCrashedDuringGen(config.modelPath)
 
-                // Cap maxNumTokens passed to createConversation(). LiteRT performs a native
-                // warm-up forward pass over all maxNumTokens positions at conversation creation.
-                // On SM8550 (Snapdragon 8 Gen 2), this warm-up SIGKILL crashes at ≥768 on ANY
-                // backend (GPU or CPU). 512 is confirmed safe — same cap used by Google AI Edge Gallery.
-                // System prompt ~90 tokens + user msg ~15 ≈ 115 tokens → ~397 token response budget. ✓
+                // Cap maxNumTokens on CPU-only paths. LiteRT warm-up pass allocates all
+                // maxNumTokens attention positions at createConversation() time; large values
+                // cause native SIGKILL on constrained devices.
+                // SM8550 is CPU-only (gpuSafe=false), so it hits this branch automatically.
+                // 512 is confirmed safe: conv-ready appears, generation proceeds.
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
-                    val isSm8550 = profile.socFamily == SocFamily.QUALCOMM_SM8550
-                    if (isSm8550 || (!profile.gpuSafe && !profile.npuSafe)) {
+                    if (!profile.gpuSafe && !profile.npuSafe) {
                         val cap = 512
-                        val reason = if (isSm8550) "SM8550 warm-up limit (any backend)" else "CPU-only headroom=${headroomMb}MB"
-                        DebugLogger.log("LITERT", "[TOKENS] maxTokens capped to $cap — $reason  model=${sizeMb}MB")
+                        DebugLogger.log("LITERT", "[TOKENS] maxTokens capped to $cap — CPU-only headroom=${headroomMb}MB  model=${sizeMb}MB")
                         cap
                     } else {
                         config.maxTokens.coerceIn(1024, 8192)

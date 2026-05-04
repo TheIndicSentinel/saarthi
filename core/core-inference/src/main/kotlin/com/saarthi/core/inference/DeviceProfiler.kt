@@ -91,9 +91,11 @@ class DeviceProfiler @Inject constructor(
         // Per-chip policy:
         //
         //  QUALCOMM SM8750  — GPU always (best-in-class Adreno 830, no known issues).
-        //  QUALCOMM SM8550  — GPU enabled. createConversation() crashes at maxNumTokens ≥ 768
-        //                     on any backend; LiteRTInferenceEngine caps to 512 for SM8550.
-        //                     Google AI Edge Gallery confirms GPU works on SM-S918B (Android 16).
+        //  QUALCOMM SM8550  — CPU only. Confirmed via conv-start/conv-ready diagnostic on
+        //                     SM-S918B (Android 16/API 36): createConversation() crashes inside
+        //                     the GPU warm-up at ANY maxNumTokens (512 included). Crash times
+        //                     decrease with each retry (26s→7.6s→4.3s), consistent with Samsung's
+        //                     GPU power quota being depleted. CPU via XNNPACK is stable.
         //  QUALCOMM GENERIC — GPU enabled. Per-model crash recovery bans if runtime fault.
         //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
         //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
@@ -105,7 +107,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> true
+                SocFamily.QUALCOMM_SM8550  -> false
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
@@ -117,6 +119,8 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
+            socFamily == SocFamily.QUALCOMM_SM8550 ->
+                "SM8550: GPU crashes in litertlm createConversation() at any maxNumTokens"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->
