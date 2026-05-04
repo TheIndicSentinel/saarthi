@@ -117,6 +117,8 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
+            socFamily == SocFamily.QUALCOMM_SM8550 ->
+                "SM8550: GPU createConversation() crashes (confirmed SM-S918B/Android16) — using NPU"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->
@@ -129,16 +131,18 @@ class DeviceProfiler @Inject constructor(
         // NPU via litertlm-android Backend.NPU(nativeLibraryDir) uses Qualcomm QNN
         // (Qualcomm Neural Networks) to run inference on the Hexagon DSP/NPU.
         //
-        // Device-specific .litertlm bundles with QNN support currently exist only for
-        // Snapdragon 8 Gen 3 (SM8750). ModelCatalog includes a QNN-specific model
-        // entry for this SoC. All other SoCs fall back to GPU or CPU.
+        // Device-specific .litertlm bundles with QNN support exist for:
+        //   SM8750 (Snapdragon 8 Gen 3) — all Gemma4/3n/3 1B models
+        //   SM8550 (Snapdragon 8 Gen 2) — Gemma3 1B (Gemma3-1B-IT_q4_ekv1280_sm8550.litertlm)
+        // All other SoCs fall back to GPU or CPU.
         //
         // NPU additionally requires sufficient RAM (same floor as GPU) to keep the
         // DSP runtime and model data in memory simultaneously.
         val npuSafe: Boolean = when {
-            availRamMb < 3_000            -> false
+            availRamMb < 3_000                     -> false
             socFamily == SocFamily.QUALCOMM_SM8750 -> true
-            else                          -> false
+            socFamily == SocFamily.QUALCOMM_SM8550 -> true  // SM8550-specific QNN model available
+            else                                   -> false
         }
 
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"

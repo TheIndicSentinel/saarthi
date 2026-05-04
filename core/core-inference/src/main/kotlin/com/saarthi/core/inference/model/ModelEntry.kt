@@ -7,7 +7,7 @@ package com.saarthi.core.inference.model
  */
 enum class SocFamily {
     QUALCOMM_SM8750,  // Snapdragon 8 Gen 3+ — has QNN-optimized model files
-    QUALCOMM_SM8550,  // Snapdragon 8 Gen 2  — use generic (no SM8550-specific file yet)
+    QUALCOMM_SM8550,  // Snapdragon 8 Gen 2  — has QNN-optimized Gemma3 1B model file
     QUALCOMM_GENERIC, // Other Snapdragon     — use generic file
     GOOGLE_TENSOR,    // Pixel devices        — use generic file
     SAMSUNG_EXYNOS,   // Exynos variants      — use generic file

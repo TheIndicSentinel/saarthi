@@ -34,7 +34,7 @@ class ModelCatalog @Inject constructor() {
         return allModels.filter { model ->
             val isVisible = when {
                 model.socTarget != SocFamily.GENERIC -> model.socTarget == profile.socFamily
-                model.baseModelId in socOptimisedBaseIds -> false
+                model.id in socOptimisedBaseIds -> false
                 else -> true
             }
             isVisible && model.isSafeFor(profile)
@@ -51,7 +51,7 @@ class ModelCatalog @Inject constructor() {
 
     // ── Model catalog ─────────────────────────────────────────────────────────
     //
-    // All models use the .litertlm format required by litertlm-android:0.10.0.
+    // All models use the .litertlm format required by litertlm-android:0.10.2.
     // This is the same runtime used by Google AI Edge Gallery.
     //
     // Architecture:
@@ -158,6 +158,27 @@ class ModelCatalog @Inject constructor() {
         //  GEMMA 3 1B — LITERT-LM (ultra-compact, any phone)
         // ══════════════════════════════════════════════════════════════════════
 
+        // ── Gemma 3 1B · Qualcomm SM8550 (QNN/Hexagon NPU) ───────────────────
+        // Device-specific .litertlm bundle compiled for SM8550 QNN backend.
+        // This is the same model path used by Google AI Edge Gallery on SM-S918B.
+        // ekv1280 = extended KV cache (1280 slots). GPU is banned on SM8550
+        // (createConversation() native crash, confirmed on SM-S918B/Android 16).
+        ModelEntry(
+            id            = "gemma3-1b-it-sm8550",
+            displayName   = "Gemma 3 1B IT · Snapdragon 8 Gen 2 NPU  ⚡ Fastest",
+            description   = "Gemma 3 1B compiled for SM8550 QNN/Hexagon NPU — fastest on Snapdragon 8 Gen 2. Same path as Google AI Edge Gallery. ~750 MB download.",
+            downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_q4_ekv1280_sm8550.litertlm",
+            fileSizeBytes = 786_432_000L,
+            engineType    = EngineType.LITERT,
+            requiredTier  = DeviceTier.LOW,
+            modelFamily   = "gemma3",
+            contextLength = 4096,
+            tags          = listOf("NPU", "Qualcomm", "Gemma 3", "Snapdragon 8 Gen 2", "Ultra-Fast"),
+            socTarget     = SocFamily.QUALCOMM_SM8550,
+            baseModelId   = "gemma3-1b-it-litert-int4",
+        ),
+
+        // ── Gemma 3 1B · Generic (all devices) ───────────────────────────────
         ModelEntry(
             id            = "gemma3-1b-it-litert-int4",
             displayName   = "Gemma 3 1B IT · LiteRT INT4  ⚡ Ultra-Fast",

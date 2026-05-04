@@ -18,7 +18,7 @@ splashscreen = "1.0.1"
 activity-compose = "1.9.1"
 core-ktx = "1.13.1"
 accompanist = "0.34.0"
-litertlm = "0.10.0"
+litertlm = "0.10.2"
 mlkit-text-recognition = "16.0.0"
 
 [libraries]
