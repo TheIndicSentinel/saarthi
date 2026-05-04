@@ -398,38 +398,17 @@ class LiteRTInferenceEngine @Inject constructor(
                 val gpuBanned = gpuPreviouslyCrashedDuringGen(config.modelPath)
 
                 // maxNumTokens = total context window (input + output tokens).
-                // GPU path: 1024 tokens — Gallery default, Adreno GPU handles it.
-                // CPU path: 512 tokens — SM8550 CPU warm-up crashes at ≥768, 512 is confirmed safe.
-                // "CPU path" = GPU is statically disabled OR a prior GPU crash banned it for this model.
+                // 1024 = Google AI Edge Gallery default for all backends including CPU.
+                // Only reduced to 512 when RAM headroom is critically low (< 2 GB free
+                // after model load) to prevent OOM during KV-cache allocation.
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
-                    // CPU is certain when GPU is unavailable/banned AND either:
-                    //   a) NPU is not safe for this SoC at all, OR
-                    //   b) NPU is safe but this specific model file has no QNN-compiled
-                    //      layers for this SoC (e.g. generic gemma-4-E2B-it.litertlm on
-                    //      SM8550 — NPU will throw immediately, leaving only CPU).
-                    val modelNpuCompatible = isModelNpuOptimised(config.modelPath, profile)
-                    val willUseCpu = (!profile.gpuSafe || gpuBanned) &&
-                                     (!profile.npuSafe || !modelNpuCompatible)
-                    when {
-                        headroomMb < 2048 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
-                            512
-                        }
-                        willUseCpu -> {
-                            val reason = when {
-                                gpuBanned          -> "GPU banned"
-                                !profile.gpuSafe   -> "GPU unavailable"
-                                !modelNpuCompatible -> "no QNN layers for ${profile.socFamily}"
-                                else               -> "NPU unsafe"
-                            }
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — CPU path ($reason)  model=${sizeMb}MB")
-                            512
-                        }
-                        else -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024  headroom=${headroomMb}MB  model=${sizeMb}MB")
-                            1024
-                        }
+                    if (headroomMb < 2048) {
+                        DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
+                        512
+                    } else {
+                        DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024  headroom=${headroomMb}MB  model=${sizeMb}MB")
+                        1024
                     }
                 }
 
