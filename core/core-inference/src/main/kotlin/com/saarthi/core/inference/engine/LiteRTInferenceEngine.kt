@@ -265,6 +265,21 @@ class LiteRTInferenceEngine @Inject constructor(
         else     -> "CPU"
     }
 
+    // Returns true only when the model file has QNN-compiled layers for this SoC.
+    // Generic .litertlm bundles (e.g. gemma-4-E2B-it.litertlm) contain no QNN layers
+    // and will throw LiteRtLmJniException immediately if Backend.NPU is attempted.
+    // SM8750: all catalog models have a QNN variant so NPU is always worth trying.
+    // SM8550: only the sm8550-named bundle works on QNN; generic files fall to CPU.
+    private fun isModelNpuOptimised(
+        modelPath: String,
+        profile: com.saarthi.core.inference.model.DeviceProfile,
+    ): Boolean = when (profile.socFamily) {
+        com.saarthi.core.inference.model.SocFamily.QUALCOMM_SM8750 -> true
+        com.saarthi.core.inference.model.SocFamily.QUALCOMM_SM8550 ->
+            modelPath.contains("sm8550", ignoreCase = true)
+        else -> false
+    }
+
     // ── Initialize ────────────────────────────────────────────────────────────
 
     override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
@@ -378,15 +393,27 @@ class LiteRTInferenceEngine @Inject constructor(
                 // "CPU path" = GPU is statically disabled OR a prior GPU crash banned it for this model.
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
-                    // GPU banned means tryLoadWithFallback will skip GPU and NPU → CPU is certain.
-                    val willUseCpu = (!profile.gpuSafe || gpuBanned) && !profile.npuSafe
+                    // CPU is certain when GPU is unavailable/banned AND either:
+                    //   a) NPU is not safe for this SoC at all, OR
+                    //   b) NPU is safe but this specific model file has no QNN-compiled
+                    //      layers for this SoC (e.g. generic gemma-4-E2B-it.litertlm on
+                    //      SM8550 — NPU will throw immediately, leaving only CPU).
+                    val modelNpuCompatible = isModelNpuOptimised(config.modelPath, profile)
+                    val willUseCpu = (!profile.gpuSafe || gpuBanned) &&
+                                     (!profile.npuSafe || !modelNpuCompatible)
                     when {
                         headroomMb < 2048 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
                             512
                         }
                         willUseCpu -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — CPU backend (GPU ${if (gpuBanned) "banned" else "unavailable"})  model=${sizeMb}MB")
+                            val reason = when {
+                                gpuBanned          -> "GPU banned"
+                                !profile.gpuSafe   -> "GPU unavailable"
+                                !modelNpuCompatible -> "no QNN layers for ${profile.socFamily}"
+                                else               -> "NPU unsafe"
+                            }
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — CPU path ($reason)  model=${sizeMb}MB")
                             512
                         }
                         else -> {
@@ -443,8 +470,12 @@ class LiteRTInferenceEngine @Inject constructor(
         gpuBanned: Boolean,
     ): Engine {
 
-        // ── NPU (Qualcomm QNN — fastest on SM8750 with QNN .litertlm bundle) ──
-        if (profile.npuSafe && !gpuBanned) {
+        val modelNpuCompatible = isModelNpuOptimised(modelPath, profile)
+
+        // ── NPU (Qualcomm QNN — SM8750/SM8550 with device-specific .litertlm) ──
+        // Only attempted when the SoC allows NPU AND the model file has QNN-compiled
+        // layers for this SoC. Generic bundles have no QNN layers and throw immediately.
+        if (profile.npuSafe && !gpuBanned && modelNpuCompatible) {
             try {
                 DebugLogger.log("LITERT", "[NPU] Trying QNN/Hexagon NPU backend...")
                 return buildEngine(modelPath, maxTokens, Backend.NPU(context.applicationInfo.nativeLibraryDir))
@@ -457,6 +488,8 @@ class LiteRTInferenceEngine @Inject constructor(
                 DebugLogger.log("LITERT", "[NPU] Failed: ${e.message?.take(120)}")
                 Timber.w(e, "NPU backend failed")
             }
+        } else if (profile.npuSafe && !modelNpuCompatible) {
+            DebugLogger.log("LITERT", "[NPU] Skipped — model has no QNN layers for ${profile.socFamily}: ${modelPath.substringAfterLast('/')}")
         }
 
         // ── GPU (OpenCL/Vulkan — fast on Adreno, Mali, Tensor GPU) ────────────
