@@ -204,13 +204,14 @@ class LiteRTInferenceEngine @Inject constructor(
         val count = getCrashCount(modelPath)
         if (count >= 3) {
             val key = modelKey(modelPath)
-            DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes for $key) — model incompatible with this device, blocking generation")
+            DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes for $key) — blocking, crash count preserved until new app version")
             enginePrefs.edit()
                 .putBoolean("litert_gen_pending", false)
                 .putBoolean("litert_init_pending", false)
                 .putBoolean("litert_gpu_ban_$key", false)
                 .putLong("litert_gpu_ban_ts_$key", 0L)
-                .putInt("litert_crash_count_$key", 0)
+                // Intentionally NOT resetting litert_crash_count — keeps the block in
+                // place until a new APK version installs (version-based reset in init block).
                 .commit()
             crashLoopBlocked = true
             return true
@@ -234,8 +235,12 @@ class LiteRTInferenceEngine @Inject constructor(
             .apply()
     }
 
-    private fun markInitStarted() =
-        enginePrefs.edit().putBoolean("litert_init_pending", true).commit()
+    private fun markInitStarted(modelPath: String) {
+        enginePrefs.edit()
+            .putBoolean("litert_init_pending", true)
+            .putString("litert_crash_model_path", modelPath)
+            .commit()
+    }
 
     private fun markInitEnded() =
         enginePrefs.edit().putBoolean("litert_init_pending", false).commit()
@@ -293,8 +298,13 @@ class LiteRTInferenceEngine @Inject constructor(
                     markGenerationEnded()
                     markInitEnded()
                     closeInternal()
-                    DebugLogger.log("LITERT", "Crash loop: aborting init — model not loaded")
-                    return@withLock
+                    InferenceService.stop(context)
+                    DebugLogger.log("LITERT", "Crash loop: throwing — model not compatible with this device")
+                    throw RuntimeException(
+                        "This model cannot run on your device.\n\n" +
+                        "The AI engine crashed too many times while loading. " +
+                        "Please choose a different model, or check for app updates."
+                    )
                 }
 
                 val crashedDuringGen  = wasKilledDuringGeneration()
@@ -302,7 +312,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 if (crashedDuringGen || crashedDuringInit) {
                     val wasGpuOrNpu = wasUsingGpuAtCrash()
                     val crashedModelPath = enginePrefs.getString("litert_crash_model_path", "") ?: ""
-                    val crashWasThisModel = crashedDuringGen &&
+                    val crashWasThisModel = (crashedDuringGen || crashedDuringInit) &&
                         (crashedModelPath == config.modelPath || crashedModelPath.isEmpty())
                     val batteryExempt = runCatching {
                         context.getSystemService(PowerManager::class.java)
@@ -425,7 +435,7 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
-                markInitStarted()
+                markInitStarted(config.modelPath)
                 try {
                     engine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned)
                     loadedModelPath = config.modelPath
@@ -549,11 +559,7 @@ class LiteRTInferenceEngine @Inject constructor(
         val eng = engine
             ?: throw IllegalStateException(
                 if (crashLoopBlocked)
-                    "The app was closed several times during AI generation.\n\n" +
-                    "On Samsung devices, Android can terminate heavy processes unless " +
-                    "battery optimization is disabled for this app.\n\n" +
-                    "Go to Settings → Apps → Saarthi → Battery → set to Unrestricted, " +
-                    "then return here and try again."
+                    "This model cannot run on your device. Please go back and choose a different model."
                 else
                     "LiteRT engine not initialised."
             )

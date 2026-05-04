@@ -131,17 +131,16 @@ class DeviceProfiler @Inject constructor(
         // NPU via litertlm-android Backend.NPU(nativeLibraryDir) uses Qualcomm QNN
         // (Qualcomm Neural Networks) to run inference on the Hexagon DSP/NPU.
         //
-        // Device-specific .litertlm bundles with QNN support exist for:
-        //   SM8750 (Snapdragon 8 Gen 3) — all Gemma4/3n/3 1B models
-        //   SM8550 (Snapdragon 8 Gen 2) — Gemma3 1B (Gemma3-1B-IT_q4_ekv1280_sm8550.litertlm)
-        // All other SoCs fall back to GPU or CPU.
-        //
-        // NPU additionally requires sufficient RAM (same floor as GPU) to keep the
-        // DSP runtime and model data in memory simultaneously.
+        // SM8750 (Snapdragon 8 Gen 3) — all Gemma4/3n/3 1B models (HTP v75/v79, supported)
+        // SM8550 (Snapdragon 8 Gen 2) — DISABLED: litertlm QNN runtime targets HTP v75/v79;
+        //   SM8550 uses HTP v69 → version mismatch → SIGKILL in Engine.initialize().
+        //   Even though a sm8550-named bundle exists, the QNN libraries bundled in
+        //   litertlm-android 0.10.2 are incompatible with SM8550's Hexagon firmware.
+        //   Falls through to CPU (stable via XNNPACK).
         val npuSafe: Boolean = when {
             availRamMb < 3_000                     -> false
             socFamily == SocFamily.QUALCOMM_SM8750 -> true
-            socFamily == SocFamily.QUALCOMM_SM8550 -> true  // SM8550-specific QNN model available
+            socFamily == SocFamily.QUALCOMM_SM8550 -> false  // HTP v69 mismatch — SIGKILL on NPU init
             else                                   -> false
         }
 
