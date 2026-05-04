@@ -347,12 +347,16 @@ class LiteRTInferenceEngine @Inject constructor(
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
                     if (!profile.gpuSafe && !profile.npuSafe) {
-                        // Minimum 768 ensures the ~450-token system prompt always fits.
-                        // 1024 at headroom >= 500 MB gives ~574 response tokens at 2 tok/s
-                        // (~287s) which fits inside the 300s watchdog.
+                        // SM8550/Android 16: createConversation() crashes at maxNumTokens=1024
+                        // (likely a warm-up forward-pass in LiteRT that uses all maxNumTokens
+                        // attention positions). Binary search: 512 works (context overflow later),
+                        // 1024 crashes at 3s (0 tokens). Try 768 = midpoint.
+                        //
+                        // 768 gives: 768 - ~460 (prompt+template) = ~308 response tokens.
+                        // At ~2 tok/s on SM8550: ~154s < 300s watchdog.
                         val cap = when {
-                            headroomMb < 500  -> 768
-                            else              -> 1024
+                            headroomMb < 500  -> 640   // very low headroom — short but safe
+                            else              -> 768   // midpoint binary search for crash threshold
                         }
                         DebugLogger.log("LITERT", "[CPU] maxTokens capped to $cap (headroom=${headroomMb}MB, model=${sizeMb}MB)")
                         cap
@@ -562,7 +566,13 @@ class LiteRTInferenceEngine @Inject constructor(
                     topP        = 0.95,
                     temperature = 0.8,
                 )
+                // DIAGNOSTIC: log before/after createConversation to narrow crash location.
+                // If "[GEN] conv-start" appears but "[GEN] conv-ready" does not → crash is
+                // inside createConversation (warm-up pass). If both appear → crash is in
+                // sendMessageAsync. Remove these logs once the crash location is confirmed.
+                DebugLogger.log("LITERT", "[GEN] conv-start  maxTokens=$loadedMaxTokens  backend=${backendLabel()}")
                 conversation = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
+                DebugLogger.log("LITERT", "[GEN] conv-ready  starting sendMessageAsync...")
 
                 // Set isNativeGenerating BEFORE the async call so crash-recovery prefs
                 // are correct even if the process is killed in the first milliseconds.
