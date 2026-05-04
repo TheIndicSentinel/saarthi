@@ -347,13 +347,13 @@ class LiteRTInferenceEngine @Inject constructor(
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
                     if (!profile.gpuSafe && !profile.npuSafe) {
-                        val headroomCap = when {
-                            headroomMb < 300  -> 128
-                            headroomMb < 700  -> 256
-                            headroomMb < 1500 -> 512
+                        // Minimum 768 ensures the ~450-token system prompt always fits.
+                        // 1024 at headroom >= 500 MB gives ~574 response tokens at 2 tok/s
+                        // (~287s) which fits inside the 300s watchdog.
+                        val cap = when {
+                            headroomMb < 500  -> 768
                             else              -> 1024
                         }
-                        val cap = minOf(headroomCap, 512)
                         DebugLogger.log("LITERT", "[CPU] maxTokens capped to $cap (headroom=${headroomMb}MB, model=${sizeMb}MB)")
                         cap
                     } else {
