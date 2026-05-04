@@ -83,18 +83,22 @@ class DeviceProfiler @Inject constructor(
         val socModel = detectSocModel()
         val socFamily = classifySoc(socModel)
 
-        // ── GPU Safety: SoC-aware backend policy (litertlm-android era) ────────
+        // ── GPU Safety: SoC-aware backend policy ─────────────────────────────────
         //
-        // litertlm-android:0.10.0 is the same runtime used by Google AI Edge Gallery,
-        // which runs correctly on all devices below — including SM8550/Android 16.
+        // Follows the Google AI Edge Gallery approach: GPU is the preferred backend
+        // on all devices where Vulkan is available and RAM is sufficient. Per-model
+        // crash recovery (GPU ban) handles any device-specific driver failures at
+        // runtime rather than pre-emptively disabling GPU for whole SoC families.
+        //
+        // GPU createConversation() on Adreno 740 (SM8550) completes in <1 second.
+        // CPU createConversation() takes 4-6 seconds → Android 16 process monitor
+        // kills it. GPU is therefore the only viable path on SM8550 + Android 16.
         //
         // Per-chip policy:
-        //
-        //  QUALCOMM SM8750  — GPU always (best-in-class Adreno 830, no known issues).
-        //  QUALCOMM SM8550  — CPU only. GPU createConversation() crashes at any maxNumTokens on
-        //                     Samsung OneUI 7 / Android 16 (confirmed on SM-S918B). CPU via
-        //                     XNNPACK at maxNumTokens=512 is the confirmed stable path.
-        //  QUALCOMM GENERIC — GPU enabled. Per-model crash recovery bans if runtime fault.
+        //  QUALCOMM SM8750  — GPU always (Adreno 830, no known issues).
+        //  QUALCOMM SM8550  — GPU enabled. Faster than CPU, avoids OS watchdog kill.
+        //                     If GPU crashes, per-model GPU ban falls back to CPU.
+        //  QUALCOMM GENERIC — GPU enabled.
         //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
         //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
         //  MEDIATEK flagship — GPU on ≥8GB RAM (Mali OpenCL stable on Dimensity flagship).
@@ -105,7 +109,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> false
+                SocFamily.QUALCOMM_SM8550  -> true   // GPU re-enabled — faster than CPU, avoids watchdog
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
@@ -117,8 +121,6 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
-            socFamily == SocFamily.QUALCOMM_SM8550 ->
-                "SM8550: GPU createConversation() crashes (confirmed SM-S918B/Android16) — using NPU"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->

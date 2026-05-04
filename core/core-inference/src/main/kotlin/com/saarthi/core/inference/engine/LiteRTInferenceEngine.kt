@@ -524,6 +524,9 @@ class LiteRTInferenceEngine @Inject constructor(
             modelPath    = modelPath,
             backend      = backend,
             maxNumTokens = maxTokens,
+            // Caches compiled GPU shaders and model artifacts across runs.
+            // Matches Google AI Edge Gallery pattern — makes 2nd+ loads near-instant.
+            cacheDir     = context.cacheDir.absolutePath,
         )
         val e = Engine(engineConfig)
         e.initialize()  // blocking — must be called on background thread
