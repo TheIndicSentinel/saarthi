@@ -69,13 +69,35 @@ class ModelDownloadManager @Inject constructor(
     }
 
     fun modelsDir(): File =
-        File(context.getExternalFilesDir(null), "models").also { it.mkdirs() }
+        File(context.filesDir, "models").also { it.mkdirs() }
 
     fun adaptersDir(): File =
-        File(context.getExternalFilesDir(null), "adapters").also { it.mkdirs() }
+        File(context.filesDir, "adapters").also { it.mkdirs() }
+
+    fun tmpModelsDir(): File =
+        File(context.getExternalFilesDir(null), "models_tmp").also { it.mkdirs() }
+
+    fun tmpAdaptersDir(): File =
+        File(context.getExternalFilesDir(null), "adapters_tmp").also { it.mkdirs() }
 
     fun localPathFor(model: ModelEntry): File = File(modelsDir(), model.fileName)
     fun localPathFor(lora: LoraEntry): File   = File(adaptersDir(), lora.fileName)
+
+    fun tmpPathFor(model: ModelEntry): File = File(tmpModelsDir(), model.fileName)
+    fun tmpPathFor(lora: LoraEntry): File   = File(tmpAdaptersDir(), lora.fileName)
+
+    private fun atomicMove(source: File, dest: File): Boolean {
+        try {
+            if (dest.exists()) dest.delete()
+            if (source.renameTo(dest)) return true
+            source.copyTo(dest, overwrite = true)
+            source.delete()
+            return true
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to move file")
+            return false
+        }
+    }
 
     /**
      * Returns the actual file on disk for a model — checks canonical name first,
@@ -115,22 +137,23 @@ class ModelDownloadManager @Inject constructor(
     fun startDownload(model: ModelEntry) {
         if (activeJobs[model.id]?.isActive == true) return  // already polling
 
-        // resolveLocalFile renames any DownloadManager-suffixed file to the canonical path
-        val destFile = resolveLocalFile(model)
-        if (isFileComplete(destFile, model.fileSizeBytes)) {
-            _allProgress.update { it + (model.id to DownloadProgress.Completed(destFile.absolutePath)) }
+        val finalFile = resolveLocalFile(model)
+        if (isFileComplete(finalFile, model.fileSizeBytes)) {
+            _allProgress.update { it + (model.id to DownloadProgress.Completed(finalFile.absolutePath)) }
             return
         }
 
+        val tmpFile = tmpPathFor(model)
+
         val job = scope.launch {
-            val downloadId = enqueueOrReattach(model.downloadUrl, destFile, model.displayName)
+            val downloadId = enqueueOrReattach(model.downloadUrl, tmpFile, model.displayName)
             if (downloadId == -1L) {
                 _allProgress.update { it + (model.id to DownloadProgress.Failed("Failed to start download")) }
                 return@launch
             }
 
             // Register a one-shot broadcast receiver for completion
-            registerCompletionReceiver(model.id, downloadId, destFile, model.fileSizeBytes)
+            registerCompletionReceiver(model.id, downloadId, tmpFile, finalFile, model.fileSizeBytes)
 
             // Poll progress until DownloadManager reports done or failure
             while (true) {
@@ -140,13 +163,15 @@ class ModelDownloadManager @Inject constructor(
             }
 
             // The polling loop exited (STATUS_SUCCESSFUL or cursor gone).
-            // The BroadcastReceiver *may* have already fired, but in a race condition
-            // it might not yet have. Check the file directly and emit Completed if valid.
-            // This prevents the UI from staying stuck at 99%.
             delay(500) // Small delay to let DownloadManager flush to disk
-            if (isFileComplete(destFile, model.fileSizeBytes, trustOS = true)) {
-                DebugLogger.log("DOWNLOAD", "Success (poll-exit): ${destFile.name}  ${destFile.length() / 1_048_576}MB")
-                _allProgress.update { it + (model.id to DownloadProgress.Completed(destFile.absolutePath)) }
+            if (isFileComplete(tmpFile, model.fileSizeBytes, trustOS = true)) {
+                val moved = atomicMove(tmpFile, finalFile)
+                if (moved) {
+                    DebugLogger.log("DOWNLOAD", "Success (poll-exit, moved): ${finalFile.name}")
+                    _allProgress.update { it + (model.id to DownloadProgress.Completed(finalFile.absolutePath)) }
+                } else {
+                    _allProgress.update { it + (model.id to DownloadProgress.Failed("Failed to move model to internal storage")) }
+                }
             } else {
                 // Check if maybe the status is actually failed
                 val finalStatus = queryStatus(downloadId)
@@ -155,7 +180,6 @@ class ModelDownloadManager @Inject constructor(
                     DebugLogger.log("DOWNLOAD", "Failed (poll-exit): $reason")
                     _allProgress.update { it + (model.id to DownloadProgress.Failed(reason)) }
                 }
-                // Otherwise let the BroadcastReceiver handle it
             }
         }
         activeJobs[model.id] = job
@@ -371,7 +395,8 @@ class ModelDownloadManager @Inject constructor(
     private fun registerCompletionReceiver(
         modelId: String,
         downloadId: Long,
-        destFile: File,
+        tmpFile: File,
+        finalFile: File,
         expectedBytes: Long,
     ) {
         lateinit var receiver: BroadcastReceiver
@@ -386,11 +411,16 @@ class ModelDownloadManager @Inject constructor(
                     runCatching { ctx.unregisterReceiver(receiver) }
 
                     val osSuccess = queryStatus(downloadId) == DownloadManager.STATUS_SUCCESSFUL
-                    val isActuallyComplete = isFileComplete(destFile, expectedBytes, trustOS = osSuccess)
+                    val isActuallyComplete = isFileComplete(tmpFile, expectedBytes, trustOS = osSuccess)
 
                     val progress = if (osSuccess && isActuallyComplete) {
-                        DebugLogger.log("DOWNLOAD", "Complete: ${destFile.name}  ${destFile.length() / 1_048_576}MB")
-                        DownloadProgress.Completed(destFile.absolutePath)
+                        val moved = atomicMove(tmpFile, finalFile)
+                        if (moved) {
+                            DebugLogger.log("DOWNLOAD", "Complete (moved): ${finalFile.name}")
+                            DownloadProgress.Completed(finalFile.absolutePath)
+                        } else {
+                            DownloadProgress.Failed("Failed to move to internal storage")
+                        }
                     } else {
                         val reason = queryFailureReason(downloadId)
                         DebugLogger.log("DOWNLOAD", "Failed: $reason")

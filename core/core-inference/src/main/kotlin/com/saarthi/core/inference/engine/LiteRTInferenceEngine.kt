@@ -181,10 +181,22 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun getCrashCount(modelPath: String) =
         enginePrefs.getInt("litert_crash_count_${modelKey(modelPath)}", 0)
 
-    private fun incrementCrashCount(modelPath: String) {
+    private fun getCpuCrashCount(modelPath: String) =
+        enginePrefs.getInt("litert_cpu_crash_count_${modelKey(modelPath)}", 0)
+
+    private fun incrementCrashCount(modelPath: String, wasGpuOrNpu: Boolean) {
+        val key = modelKey(modelPath)
         val count = getCrashCount(modelPath) + 1
-        enginePrefs.edit().putInt("litert_crash_count_${modelKey(modelPath)}", count).commit()
-        DebugLogger.log("LITERT", "Crash count for ${modelKey(modelPath)}: $count")
+        val editor = enginePrefs.edit().putInt("litert_crash_count_$key", count)
+        
+        if (!wasGpuOrNpu) {
+            val cpuCount = getCpuCrashCount(modelPath) + 1
+            editor.putInt("litert_cpu_crash_count_$key", cpuCount)
+            DebugLogger.log("LITERT", "Crash count for $key: $count (CPU count: $cpuCount)")
+        } else {
+            DebugLogger.log("LITERT", "Crash count for $key: $count")
+        }
+        editor.commit()
     }
 
     private fun resetCrashCount(modelPath: String) =
@@ -206,7 +218,7 @@ class LiteRTInferenceEngine @Inject constructor(
 
     private fun breakCrashLoopIfNeeded(modelPath: String): Boolean {
         val count = getCrashCount(modelPath)
-        if (count >= 3) {
+        if (count >= 4) {
             val key = modelKey(modelPath)
             DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes for $key) — blocking, crash count preserved until new app version")
             enginePrefs.edit()
@@ -361,7 +373,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "=== END CRASH RECOVERY ===")
 
                     if (crashWasThisModel) {
-                        incrementCrashCount(config.modelPath)
+                        incrementCrashCount(config.modelPath, wasGpuOrNpu)
                         if (wasGpuOrNpu) {
                             val convWasReady = wasConvReadyAtCrash()
                             if (convWasReady) {
@@ -378,7 +390,7 @@ class LiteRTInferenceEngine @Inject constructor(
                             }
                         }
                     }
-                    if (crashedDuringInit && !crashWasThisModel) incrementCrashCount(config.modelPath)
+                    if (crashedDuringInit && !crashWasThisModel) incrementCrashCount(config.modelPath, false)
                     markGenerationEnded()
                     markInitEnded()
                     closeInternal()
@@ -431,9 +443,19 @@ class LiteRTInferenceEngine @Inject constructor(
                 // the full KV-cache synchronously. At 1024 tokens the allocation + shader warm-up
                 // exceeds the ~5–7s Android process watchdog threshold, causing a SIGKILL before
                 // a single token is generated. 512 halves the KV-cache, giving more headroom.
+                val cpuCrashCount = getCpuCrashCount(config.modelPath)
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
                     when {
+                        config.maxTokens > 0 -> config.maxTokens
+                        cpuCrashCount >= 2 -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=256 (AUTO-RECOVERY: CPU crash count $cpuCrashCount)")
+                            256
+                        }
+                        cpuCrashCount >= 1 -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 (AUTO-RECOVERY: CPU crash count $cpuCrashCount)")
+                            512
+                        }
                         headroomMb < 2048 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
                             512
@@ -444,12 +466,14 @@ class LiteRTInferenceEngine @Inject constructor(
                         }
                     }
                 }
+                
+                val dynamicThreads = if (cpuCrashCount >= 2) 1 else 2
 
                 DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
                 markInitStarted(config.modelPath)
                 try {
-                    val newEngine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned)
+                    val newEngine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned, dynamicThreads)
                     
                     // CRITICAL: Save the active backend state BEFORE we do any heavy operations
                     // like createConversation. If the native driver SIGKILLs during the next step,
@@ -513,6 +537,7 @@ class LiteRTInferenceEngine @Inject constructor(
         maxTokens: Int,
         profile: com.saarthi.core.inference.model.DeviceProfile,
         gpuBanned: Boolean,
+        dynamicThreads: Int,
     ): Engine {
 
         val modelNpuCompatible = isModelNpuOptimised(modelPath, profile)
@@ -562,8 +587,8 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         // ── CPU (XNNPACK NEON — guaranteed path on all ARM64 devices) ──────────
-        DebugLogger.log("LITERT", "[CPU] Falling back to CPU/XNNPACK  threads=2 (forced to prevent concurrent mmap crash)")
-        return buildEngine(modelPath, maxTokens, Backend.CPU(2))
+        DebugLogger.log("LITERT", "[CPU] Falling back to CPU/XNNPACK  threads=$dynamicThreads (auto-recovery)")
+        return buildEngine(modelPath, maxTokens, Backend.CPU(dynamicThreads))
             .also {
                 usingNpu = false
                 usingGpu = false
@@ -575,7 +600,7 @@ class LiteRTInferenceEngine @Inject constructor(
             modelPath    = modelPath,
             backend      = backend,
             maxNumTokens = maxTokens,
-            cacheDir     = if (backend is Backend.GPU) context.cacheDir.absolutePath else null,
+            cacheDir     = null,
         )
         val e = Engine(engineConfig)
         e.initialize()  // blocking — must be called on background thread
