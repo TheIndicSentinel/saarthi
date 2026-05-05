@@ -434,10 +434,6 @@ class LiteRTInferenceEngine @Inject constructor(
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
                     when {
-                        gpuBanned || !profile.gpuSafe -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — CPU backend: capping KV-cache to avoid XNNPACK mmap crash")
-                            512
-                        }
                         headroomMb < 2048 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
                             512
@@ -637,7 +633,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 if (activeConversation == null) {
                     DebugLogger.log("LITERT", "[GEN] Lazy init: creating conversation matrix...")
                     val samplerConfig = if (loadedModelPath?.contains("npu") == true) null else SamplerConfig(
-                        topK = 40, topP = 0.95, temperature = 0.8
+                        topK = 64, topP = 0.95, temperature = 1.0
                     )
                     activeConversation = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
                     DebugLogger.log("LITERT", "[GEN] Conversation matrix created safely.")
