@@ -59,7 +59,7 @@ class DeviceProfiler @Inject constructor(
         val safeModelBudgetMb = minOf(budgetFromAvail, budgetFromTotal)
 
         // ── Storage ──────────────────────────────────────────────────────────
-        val storageDir = context.getExternalFilesDir(null) ?: context.filesDir
+        val storageDir = context.filesDir
         val availStorageMb = runCatching {
             val stat = StatFs(storageDir.absolutePath)
             stat.availableBlocksLong * stat.blockSizeLong / 1_048_576
@@ -100,7 +100,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> false // Adreno 740 native crash during createConversation
+                SocFamily.QUALCOMM_SM8550  -> true // Dynamic retry allowed now that models are in internal storage
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
@@ -112,8 +112,6 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
-            socFamily == SocFamily.QUALCOMM_SM8550 ->
-                "SM8550: litertlm GPU createConversation() native crash on Adreno 740"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->

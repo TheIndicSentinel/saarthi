@@ -575,11 +575,7 @@ class LiteRTInferenceEngine @Inject constructor(
             modelPath    = modelPath,
             backend      = backend,
             maxNumTokens = maxTokens,
-            // CRITICAL: The GPU backend requires a safe, SELinux-approved location
-            // (internal cache) to write its OpenCL binaries to avoid an uncatchable SIGKILL.
-            // However, providing a cacheDir to the CPU (XNNPACK) backend on Android 16
-            // triggers a fatal native crash during createConversation().
-            cacheDir = if (backend is Backend.GPU) context.cacheDir.absolutePath else null,
+            cacheDir     = null,
         )
         val e = Engine(engineConfig)
         e.initialize()  // blocking — must be called on background thread
