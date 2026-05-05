@@ -434,6 +434,10 @@ class LiteRTInferenceEngine @Inject constructor(
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
                     when {
+                        gpuBanned || !profile.gpuSafe -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — CPU backend: capping KV-cache to avoid XNNPACK mmap crash")
+                            512
+                        }
                         headroomMb < 2048 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
                             512
@@ -578,16 +582,11 @@ class LiteRTInferenceEngine @Inject constructor(
             modelPath    = modelPath,
             backend      = backend,
             maxNumTokens = maxTokens,
-            // CRITICAL: We MUST explicitly set cacheDir to the internal app cache directory.
-            // When cacheDir is null, the native litertlm C++ backend defaults to using the
-            // directory where the model is located to store JIT/OpenCL shader caches.
-            // Since our models are located in EXTERNAL storage (/storage/emulated/0/...),
-            // Android 16's strict SELinux policies interpret a native executable thread trying
-            // to write binary cache data to an external SD card path as a massive security
-            // violation and issues an immediate, uncatchable SIGKILL.
-            // By explicitly pointing to the internal cache dir, we give the Adreno driver
-            // a safe, SELinux-approved location to write its OpenCL binaries.
-            cacheDir = context.cacheDir.absolutePath,
+            // CRITICAL: The GPU backend requires a safe, SELinux-approved location
+            // (internal cache) to write its OpenCL binaries to avoid an uncatchable SIGKILL.
+            // However, providing a cacheDir to the CPU (XNNPACK) backend on Android 16
+            // triggers a fatal native crash during createConversation().
+            cacheDir = if (backend is Backend.GPU) context.cacheDir.absolutePath else null,
         )
         val e = Engine(engineConfig)
         e.initialize()  // blocking — must be called on background thread
