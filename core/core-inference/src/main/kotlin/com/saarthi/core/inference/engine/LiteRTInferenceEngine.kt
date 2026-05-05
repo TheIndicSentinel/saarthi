@@ -559,9 +559,13 @@ class LiteRTInferenceEngine @Inject constructor(
             modelPath    = modelPath,
             backend      = backend,
             maxNumTokens = maxTokens,
-            // Caches compiled GPU shaders and model artifacts across runs.
-            // Matches Google AI Edge Gallery pattern — makes 2nd+ loads near-instant.
-            cacheDir     = context.cacheDir.absolutePath,
+            // Match Google AI Edge Gallery (LlmChatModelHelper.kt): cacheDir is ONLY set
+            // for development paths (/data/local/tmp). For production paths it must be null.
+            // Setting cacheDir on a CPU backend can trigger SIGKILL on Samsung Android 16
+            // due to restricted storage policies.
+            cacheDir     = if (modelPath.startsWith("/data/local/tmp"))
+                               context.getExternalFilesDir(null)?.absolutePath
+                           else null,
         )
         val e = Engine(engineConfig)
         e.initialize()  // blocking — must be called on background thread
