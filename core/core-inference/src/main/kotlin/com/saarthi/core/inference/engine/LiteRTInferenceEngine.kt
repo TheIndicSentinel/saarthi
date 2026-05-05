@@ -462,18 +462,15 @@ class LiteRTInferenceEngine @Inject constructor(
                         .putBoolean("litert_was_using_gpu", usingGpu || usingNpu)
                         .commit()
                     
-                    // Match Google AI Edge Gallery: Create conversation once during init
-                    // and store it as part of the "Stateful Session".
-                    DebugLogger.log("LITERT", "[INIT] Warm-up: creating persistent conversation...")
-                    markConvStarted()
-                    val samplerConfig = if (usingNpu) null else SamplerConfig(
-                        topK = 40, topP = 0.95, temperature = 0.8
-                    )
-                    val newConv = newEngine.createConversation(ConversationConfig(samplerConfig = samplerConfig))
-                    markConvReady()
+                    // Match Google AI Edge Gallery: Do NOT synchronously create the conversation here.
+                    // Doing engine.initialize() + engine.createConversation() sequentially
+                    // takes ~15-20s of contiguous 100% CPU time, which triggers the Samsung Phantom
+                    // Process Killer (silent SIGKILL). We will let initialize() return so the app boots,
+                    // and defer createConversation until it's needed or pre-warmed safely.
+                    DebugLogger.log("LITERT", "[INIT] Engine loaded. Deferring conversation creation.")
                     
                     engine = newEngine
-                    activeConversation = newConv
+                    activeConversation = null
                     
                     loadedModelPath = config.modelPath
                     loadedMaxTokens = config.maxTokens
@@ -636,6 +633,16 @@ class LiteRTInferenceEngine @Inject constructor(
             try {
                 isGenerating = true
                 markGenerationStarted()
+
+                if (activeConversation == null) {
+                    DebugLogger.log("LITERT", "[GEN] Lazy init: creating conversation matrix...")
+                    val samplerConfig = if (loadedModelPath?.contains("npu") == true) null else SamplerConfig(
+                        topK = 40, topP = 0.95, temperature = 0.8
+                    )
+                    activeConversation = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
+                    DebugLogger.log("LITERT", "[GEN] Conversation matrix created safely.")
+                }
+                conversation = activeConversation
 
                 // Periodic heartbeat — fires every 10s. Each line records elapsed time,
                 // token count, backend, and system state. If the process is killed (SIGKILL),
