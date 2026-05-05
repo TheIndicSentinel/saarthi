@@ -73,13 +73,7 @@ class DeviceProfiler @Inject constructor(
         val cpuCores = Runtime.getRuntime().availableProcessors()
         // Leave 2 cores for UI + OS. Min 2 threads (even on dual-core).
         // Max 4 threads (beyond this, ARM big.LITTLE thermal-throttles).
-        val recommendedThreads = if (socFamily == SocFamily.QUALCOMM_SM8550) {
-            // SM8550: 4 threads during createConversation triggers OS watchdog/thermal
-            // killer. Cap at 2 threads to keep power draw within limits during init.
-            2
-        } else {
-            (cpuCores - 2).coerceIn(2, 4)
-        }
+        val recommendedThreads = (cpuCores - 2).coerceIn(2, 4)
 
         // ── GPU / Vulkan ─────────────────────────────────────────────────────
         val hasVulkan = context.packageManager
@@ -93,7 +87,8 @@ class DeviceProfiler @Inject constructor(
         //
         // Per-chip policy:
         //  QUALCOMM SM8750  — GPU always (Adreno 830, no known issues).
-        //  QUALCOMM SM8550  — GPU always (Adreno 740).
+        //  QUALCOMM SM8550  — CPU only. The Adreno 740 driver crashes deeply in the native
+        //                     OpenCL litertlm library during createConversation().
         //  QUALCOMM GENERIC — GPU enabled.
         //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
         //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
@@ -105,7 +100,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> true
+                SocFamily.QUALCOMM_SM8550  -> false // Adreno 740 native crash during createConversation
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
@@ -117,6 +112,8 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
+            socFamily == SocFamily.QUALCOMM_SM8550 ->
+                "SM8550: litertlm GPU createConversation() native crash on Adreno 740"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->

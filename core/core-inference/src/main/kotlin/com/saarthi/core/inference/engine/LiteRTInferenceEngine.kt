@@ -451,6 +451,13 @@ class LiteRTInferenceEngine @Inject constructor(
                 try {
                     val newEngine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned)
                     
+                    // CRITICAL: Save the active backend state BEFORE we do any heavy operations
+                    // like createConversation. If the native driver SIGKILLs during the next step,
+                    // the Crash Recovery system will correctly see that the GPU was active and ban it.
+                    enginePrefs.edit()
+                        .putBoolean("litert_was_using_gpu", usingGpu || usingNpu)
+                        .commit()
+                    
                     // Match Google AI Edge Gallery: Create conversation once during init
                     // and store it as part of the "Stateful Session".
                     DebugLogger.log("LITERT", "[INIT] Warm-up: creating persistent conversation...")
