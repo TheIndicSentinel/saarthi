@@ -577,13 +577,16 @@ class LiteRTInferenceEngine @Inject constructor(
             visionBackend = Backend.GPU(), // Must be GPU for Gemma 3
             audioBackend  = Backend.CPU(), // Must be CPU for Gemma 3
             maxNumTokens = maxTokens,
-            // Match Google AI Edge Gallery (LlmChatModelHelper.kt): cacheDir is ONLY set
-            // for development paths (/data/local/tmp). For production paths it must be null.
-            // Setting cacheDir on a CPU backend can trigger SIGKILL on Samsung Android 16
-            // due to restricted storage policies.
-            cacheDir     = if (modelPath.startsWith("/data/local/tmp"))
-                               context.getExternalFilesDir(null)?.absolutePath
-                           else null,
+            // CRITICAL: We MUST explicitly set cacheDir to the internal app cache directory.
+            // When cacheDir is null, the native litertlm C++ backend defaults to using the
+            // directory where the model is located to store JIT/OpenCL shader caches.
+            // Since our models are located in EXTERNAL storage (/storage/emulated/0/...),
+            // Android 16's strict SELinux policies interpret a native executable thread trying
+            // to write binary cache data to an external SD card path as a massive security
+            // violation and issues an immediate, uncatchable SIGKILL.
+            // By explicitly pointing to the internal cache dir, we give the Adreno driver
+            // a safe, SELinux-approved location to write its OpenCL binaries.
+            cacheDir = context.cacheDir.absolutePath,
         )
         val e = Engine(engineConfig)
         e.initialize()  // blocking — must be called on background thread
