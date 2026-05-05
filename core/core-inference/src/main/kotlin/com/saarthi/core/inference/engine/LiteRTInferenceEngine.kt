@@ -126,6 +126,7 @@ class LiteRTInferenceEngine @Inject constructor(
     //   litert_init_pending     — set during model init; true at startup → crashed mid-load (OOM)
     //   litert_was_using_gpu    — which backend was active at crash (GPU/NPU = true)
     //   litert_crash_model_path — which model was generating at crash
+    //   litert_conv_ready       — false during createConversation(), true after; crash while false = don't ban GPU
     //   litert_crash_count_*    — per-model consecutive crash count
     //   litert_gpu_ban_*        — per-model GPU ban flag (true = use CPU for 24h)
     //   litert_gpu_ban_ts_*     — per-model GPU ban timestamp
@@ -156,6 +157,7 @@ class LiteRTInferenceEngine @Inject constructor(
             val editor = prefs.edit()
             editor.putBoolean("litert_gen_pending", false)
             editor.putBoolean("litert_init_pending", false)
+            editor.putBoolean("litert_conv_ready", true)
             prefs.all.keys.filter { it.startsWith("litert_crash_count_") ||
                                     it.startsWith("litert_gpu_ban_") }.forEach { editor.remove(it) }
             editor.putInt("litert_app_version", currentVersion)
@@ -259,6 +261,19 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun wasUsingGpuAtCrash() =
         enginePrefs.getBoolean("litert_was_using_gpu", false)
 
+    private fun markConvStarted() =
+        enginePrefs.edit().putBoolean("litert_conv_ready", false).commit()
+
+    private fun markConvReady() =
+        enginePrefs.edit().putBoolean("litert_conv_ready", true).commit()
+
+    // Default true = conservative (unknown crash assumed post-conv → ban GPU).
+    // markConvStarted() sets false before createConversation(); markConvReady() sets true after.
+    // A crash in createConversation() leaves the pref false → GPU is NOT banned on next run
+    // (second run has cached shaders, may complete in time).
+    private fun wasConvReadyAtCrash() =
+        enginePrefs.getBoolean("litert_conv_ready", true)
+
     private fun setReady(value: Boolean) {
         isReady = value
         _isReadyFlow.value = value
@@ -346,8 +361,19 @@ class LiteRTInferenceEngine @Inject constructor(
                     if (crashWasThisModel) {
                         incrementCrashCount(config.modelPath)
                         if (wasGpuOrNpu) {
-                            markGpuGenCrashed(config.modelPath)
-                            DebugLogger.log("LITERT", "GPU/NPU crashed — banning for ${modelKey(config.modelPath)}")
+                            val convWasReady = wasConvReadyAtCrash()
+                            if (convWasReady) {
+                                // Crash happened inside sendMessageAsync — GPU actually ran but died
+                                // during token generation. Ban GPU for 24h, fall back to CPU.
+                                markGpuGenCrashed(config.modelPath)
+                                DebugLogger.log("LITERT", "[CRASH] GPU/NPU crashed post-conv-ready (sendMessageAsync) — banning GPU for ${modelKey(config.modelPath)}")
+                            } else {
+                                // Crash happened inside createConversation() — GPU never ran a single
+                                // token. This is a shader compilation / KV-cache alloc timeout on
+                                // first run. cacheDir means second run re-uses compiled shaders and
+                                // typically completes 3-5× faster. Do NOT ban GPU.
+                                DebugLogger.log("LITERT", "[CRASH] GPU/NPU crashed in createConversation() — NOT banning GPU, cached shaders may fix it next run")
+                            }
                         }
                     }
                     if (crashedDuringInit && !crashWasThisModel) incrementCrashCount(config.modelPath)
@@ -399,16 +425,25 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 // maxNumTokens = total context window (input + output tokens).
                 // 1024 = Google AI Edge Gallery default for all backends including CPU.
-                // Only reduced to 512 when RAM headroom is critically low (< 2 GB free
-                // after model load) to prevent OOM during KV-cache allocation.
+                // Reduced to 512 on SM8550 (Snapdragon 8 Gen 2): createConversation() allocates
+                // the full KV-cache synchronously. At 1024 tokens the allocation + shader warm-up
+                // exceeds the ~5–7s Android process watchdog threshold, causing a SIGKILL before
+                // a single token is generated. 512 halves the KV-cache, giving more headroom.
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
-                    if (headroomMb < 2048) {
-                        DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
-                        512
-                    } else {
-                        DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024  headroom=${headroomMb}MB  model=${sizeMb}MB")
-                        1024
+                    when {
+                        headroomMb < 2048 -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
+                            512
+                        }
+                        profile.socFamily == com.saarthi.core.inference.model.SocFamily.QUALCOMM_SM8550 -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — SM8550: reduced KV-cache to lower createConversation() time below watchdog threshold")
+                            512
+                        }
+                        else -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024  headroom=${headroomMb}MB  model=${sizeMb}MB")
+                            1024
+                        }
                     }
                 }
 
@@ -627,7 +662,9 @@ class LiteRTInferenceEngine @Inject constructor(
                 // Diagnostic: conv-start/conv-ready bracket createConversation() to confirm
                 // crash location. loadedEffectiveMaxTokens = actual Engine capacity (not config).
                 DebugLogger.log("LITERT", "[GEN] conv-start  engineMaxTokens=$loadedEffectiveMaxTokens  backend=${backendLabel()}")
+                markConvStarted()
                 conversation = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
+                markConvReady()
                 DebugLogger.log("LITERT", "[GEN] conv-ready  starting sendMessageAsync...")
 
                 // Set isNativeGenerating BEFORE the async call so crash-recovery prefs
