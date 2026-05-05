@@ -65,11 +65,21 @@ class DeviceProfiler @Inject constructor(
             stat.availableBlocksLong * stat.blockSizeLong / 1_048_576
         }.getOrDefault(0L)
 
+        // ── SoC Family Detection (must precede thread & GPU/NPU safety checks) ──
+        val socModel = detectSocModel()
+        val socFamily = classifySoc(socModel)
+
         // ── CPU Threads ──────────────────────────────────────────────────────
         val cpuCores = Runtime.getRuntime().availableProcessors()
         // Leave 2 cores for UI + OS. Min 2 threads (even on dual-core).
         // Max 4 threads (beyond this, ARM big.LITTLE thermal-throttles).
-        val recommendedThreads = (cpuCores - 2).coerceIn(2, 4)
+        val recommendedThreads = if (socFamily == SocFamily.QUALCOMM_SM8550) {
+            // SM8550: 4 threads during createConversation triggers OS watchdog/thermal
+            // killer. Cap at 2 threads to keep power draw within limits during init.
+            2
+        } else {
+            (cpuCores - 2).coerceIn(2, 4)
+        }
 
         // ── GPU / Vulkan ─────────────────────────────────────────────────────
         val hasVulkan = context.packageManager
@@ -78,10 +88,6 @@ class DeviceProfiler @Inject constructor(
 
         val manufacturer = Build.MANUFACTURER.orEmpty()
         val apiLevel = Build.VERSION.SDK_INT
-
-        // ── SoC Family Detection (must precede GPU/NPU safety checks) ─────────
-        val socModel = detectSocModel()
-        val socFamily = classifySoc(socModel)
 
         // ── GPU Safety: SoC-aware backend policy ─────────────────────────────────
         //
