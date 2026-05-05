@@ -570,12 +570,6 @@ class LiteRTInferenceEngine @Inject constructor(
         val engineConfig = EngineConfig(
             modelPath    = modelPath,
             backend      = backend,
-            // Google AI Edge Gallery explicitly configures vision & audio backends.
-            // Gemma 3 is a multimodal model. If these are omitted, the native C++ litertlm
-            // engine encounters a null pointer when allocating the multimodal KV-cache
-            // and throws an uncatchable SIGKILL during createConversation().
-            visionBackend = Backend.GPU(), // Must be GPU for Gemma 3
-            audioBackend  = Backend.CPU(), // Must be CPU for Gemma 3
             maxNumTokens = maxTokens,
             // CRITICAL: We MUST explicitly set cacheDir to the internal app cache directory.
             // When cacheDir is null, the native litertlm C++ backend defaults to using the
