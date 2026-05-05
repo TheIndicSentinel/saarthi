@@ -438,10 +438,6 @@ class LiteRTInferenceEngine @Inject constructor(
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB  model=${sizeMb}MB")
                             512
                         }
-                        profile.socFamily == com.saarthi.core.inference.model.SocFamily.QUALCOMM_SM8550 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — SM8550: reduced KV-cache to lower createConversation() time below watchdog threshold")
-                            512
-                        }
                         else -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024  headroom=${headroomMb}MB  model=${sizeMb}MB")
                             1024
