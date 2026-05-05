@@ -69,10 +69,10 @@ class ModelDownloadManager @Inject constructor(
     }
 
     fun modelsDir(): File =
-        File(context.filesDir, "models").also { it.mkdirs() }
+        File(context.getExternalFilesDir(null), "models").also { it.mkdirs() }
 
     fun adaptersDir(): File =
-        File(context.filesDir, "adapters").also { it.mkdirs() }
+        File(context.getExternalFilesDir(null), "adapters").also { it.mkdirs() }
 
     fun localPathFor(model: ModelEntry): File = File(modelsDir(), model.fileName)
     fun localPathFor(lora: LoraEntry): File   = File(adaptersDir(), lora.fileName)

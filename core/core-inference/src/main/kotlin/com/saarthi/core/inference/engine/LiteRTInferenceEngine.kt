@@ -458,15 +458,15 @@ class LiteRTInferenceEngine @Inject constructor(
                         .putBoolean("litert_was_using_gpu", usingGpu || usingNpu)
                         .commit()
                     
-                    // Match Google AI Edge Gallery: Do NOT synchronously create the conversation here.
-                    // Doing engine.initialize() + engine.createConversation() sequentially
-                    // takes ~15-20s of contiguous 100% CPU time, which triggers the Samsung Phantom
-                    // Process Killer (silent SIGKILL). We will let initialize() return so the app boots,
-                    // and defer createConversation until it's needed or pre-warmed safely.
-                    DebugLogger.log("LITERT", "[INIT] Engine loaded. Deferring conversation creation.")
+                    // Undo lazy init per research: create conversation synchronously during init
+                    DebugLogger.log("LITERT", "[INIT] Engine loaded. Creating conversation matrix synchronously...")
+                    val samplerConfig = if (config.modelPath.contains("npu")) null else SamplerConfig(
+                        topK = 64, topP = 0.95, temperature = 1.0
+                    )
+                    activeConversation = newEngine.createConversation(ConversationConfig(samplerConfig = samplerConfig))
+                    DebugLogger.log("LITERT", "[INIT] Conversation matrix created safely.")
                     
                     engine = newEngine
-                    activeConversation = null
                     
                     loadedModelPath = config.modelPath
                     loadedMaxTokens = config.maxTokens
@@ -562,8 +562,8 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         // ── CPU (XNNPACK NEON — guaranteed path on all ARM64 devices) ──────────
-        DebugLogger.log("LITERT", "[CPU] Falling back to CPU/XNNPACK  threads=${profile.recommendedThreads}")
-        return buildEngine(modelPath, maxTokens, Backend.CPU(profile.recommendedThreads))
+        DebugLogger.log("LITERT", "[CPU] Falling back to CPU/XNNPACK  threads=2 (forced to prevent concurrent mmap crash)")
+        return buildEngine(modelPath, maxTokens, Backend.CPU(2))
             .also {
                 usingNpu = false
                 usingGpu = false
@@ -575,7 +575,7 @@ class LiteRTInferenceEngine @Inject constructor(
             modelPath    = modelPath,
             backend      = backend,
             maxNumTokens = maxTokens,
-            cacheDir     = null,
+            cacheDir     = if (backend is Backend.GPU) context.cacheDir.absolutePath else null,
         )
         val e = Engine(engineConfig)
         e.initialize()  // blocking — must be called on background thread
@@ -626,14 +626,6 @@ class LiteRTInferenceEngine @Inject constructor(
                 isGenerating = true
                 markGenerationStarted()
 
-                if (activeConversation == null) {
-                    DebugLogger.log("LITERT", "[GEN] Lazy init: creating conversation matrix...")
-                    val samplerConfig = if (loadedModelPath?.contains("npu") == true) null else SamplerConfig(
-                        topK = 64, topP = 0.95, temperature = 1.0
-                    )
-                    activeConversation = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
-                    DebugLogger.log("LITERT", "[GEN] Conversation matrix created safely.")
-                }
                 conversation = activeConversation
 
                 // Periodic heartbeat — fires every 10s. Each line records elapsed time,

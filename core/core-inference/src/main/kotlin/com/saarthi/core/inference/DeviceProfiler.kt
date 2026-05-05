@@ -59,7 +59,7 @@ class DeviceProfiler @Inject constructor(
         val safeModelBudgetMb = minOf(budgetFromAvail, budgetFromTotal)
 
         // ── Storage ──────────────────────────────────────────────────────────
-        val storageDir = context.filesDir
+        val storageDir = context.getExternalFilesDir(null) ?: context.filesDir
         val availStorageMb = runCatching {
             val stat = StatFs(storageDir.absolutePath)
             stat.availableBlocksLong * stat.blockSizeLong / 1_048_576
