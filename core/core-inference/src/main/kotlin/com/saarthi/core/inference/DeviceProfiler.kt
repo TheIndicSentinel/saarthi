@@ -85,19 +85,14 @@ class DeviceProfiler @Inject constructor(
 
         // ── GPU Safety: SoC-aware backend policy ─────────────────────────────────
         //
-        // Follows the Google AI Edge Gallery approach: GPU is the preferred backend
-        // on all devices where Vulkan is available and RAM is sufficient. Per-model
-        // crash recovery (GPU ban) handles any device-specific driver failures at
-        // runtime rather than pre-emptively disabling GPU for whole SoC families.
-        //
-        // GPU createConversation() on Adreno 740 (SM8550) completes in <1 second.
-        // CPU createConversation() takes 4-6 seconds → Android 16 process monitor
-        // kills it. GPU is therefore the only viable path on SM8550 + Android 16.
-        //
         // Per-chip policy:
         //  QUALCOMM SM8750  — GPU always (Adreno 830, no known issues).
-        //  QUALCOMM SM8550  — GPU enabled. Faster than CPU, avoids OS watchdog kill.
-        //                     If GPU crashes, per-model GPU ban falls back to CPU.
+        //  QUALCOMM SM8550  — CPU only. litertlm createConversation() raises a native
+        //                     SIGKILL/SIGABRT in the Adreno 740 OpenCL driver on
+        //                     Android 16 regardless of token count (observed crash at
+        //                     2.5s — too fast for any OS watchdog). This is a litertlm
+        //                     GPU driver bug, not a timing issue. CPU with maxNumTokens=512
+        //                     is the only reliable path on SM8550.
         //  QUALCOMM GENERIC — GPU enabled.
         //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
         //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
@@ -109,7 +104,7 @@ class DeviceProfiler @Inject constructor(
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> true   // GPU re-enabled — faster than CPU, avoids watchdog
+                SocFamily.QUALCOMM_SM8550  -> false  // Native litertlm crash in createConversation() on Adreno 740 + Android 16
                 SocFamily.QUALCOMM_GENERIC -> true
                 SocFamily.GOOGLE_TENSOR    -> true
                 SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
@@ -121,6 +116,8 @@ class DeviceProfiler @Inject constructor(
         val gpuSafeReason = when {
             availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
+            socFamily == SocFamily.QUALCOMM_SM8550 ->
+                "SM8550: litertlm GPU createConversation() native crash on Adreno 740 + Android 16"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
             socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->
