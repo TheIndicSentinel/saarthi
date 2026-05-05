@@ -73,11 +73,13 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     @Volatile private var engine: Engine? = null
+    @Volatile private var activeConversation: Conversation? = null
 
     // When closeInternal() is called while a native generation is in progress,
     // we cannot close the Engine immediately. Save it here; the native 'done' /
     // 'error' callback closes it once the native thread finishes.
     @Volatile private var closingEngine: Engine? = null
+    @Volatile private var closingConversation: Conversation? = null
 
     @Volatile private var loadedModelPath: String? = null
     @Volatile private var loadedMaxTokens: Int = 0
@@ -451,7 +453,22 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 markInitStarted(config.modelPath)
                 try {
-                    engine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned)
+                    val newEngine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned)
+                    
+                    // After Engine is initialized, perform the "Warm-up" pass by creating 
+                    // the persistent Conversation object. This moves the 5-8s SIGKILL risk 
+                    // from the message loop to the loading screen.
+                    DebugLogger.log("LITERT", "[INIT] Warm-up: creating persistent conversation...")
+                    markConvStarted()
+                    val samplerConfig = if (usingNpu) null else SamplerConfig(
+                        topK = 40, topP = 0.95, temperature = 0.8
+                    )
+                    val newConv = newEngine.createConversation(ConversationConfig(samplerConfig = samplerConfig))
+                    markConvReady()
+                    
+                    engine = newEngine
+                    activeConversation = newConv
+                    
                     loadedModelPath = config.modelPath
                     loadedMaxTokens = config.maxTokens
                     loadedEffectiveMaxTokens = effectiveMaxTokens
@@ -459,7 +476,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     _activeModelNameFlow.value = config.modelName
                     markInitEnded()
                     setReady(true)
-                    DebugLogger.log("LITERT", "Model ready  $profile  backend=${backendLabel()}")
+                    DebugLogger.log("LITERT", "Model ready & pre-warmed  $profile  backend=${backendLabel()}")
                 } catch (e: Throwable) {
                     markInitEnded()
                     val rawMsg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
@@ -546,8 +563,15 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         // ── CPU (XNNPACK NEON — guaranteed path on all ARM64 devices) ──────────
-        DebugLogger.log("LITERT", "[CPU] Falling back to CPU/XNNPACK  threads=${profile.recommendedThreads}")
-        return buildEngine(modelPath, maxTokens, Backend.CPU(profile.recommendedThreads))
+        val threads = if (profile.socFamily == com.saarthi.core.inference.model.SocFamily.QUALCOMM_SM8550) {
+            // Cap at 2 threads on SM8550 to lower the power/thermal signature. 
+            // Prevents Samsung's Android 16 watchdog from killing the process during high CPU load.
+            2.coerceAtMost(profile.recommendedThreads)
+        } else {
+            profile.recommendedThreads
+        }
+        DebugLogger.log("LITERT", "[CPU] Falling back to CPU/XNNPACK  threads=$threads")
+        return buildEngine(modelPath, maxTokens, Backend.CPU(threads))
             .also {
                 usingNpu = false
                 usingGpu = false
@@ -653,19 +677,12 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                 }
 
-                // SamplerConfig must be null for NPU backend (QNN handles sampling internally).
-                val samplerConfig = if (usingNpu) null else SamplerConfig(
-                    topK        = 40,
-                    topP        = 0.95,
-                    temperature = 0.8,
-                )
-                // Diagnostic: conv-start/conv-ready bracket createConversation() to confirm
-                // crash location. loadedEffectiveMaxTokens = actual Engine capacity (not config).
-                DebugLogger.log("LITERT", "[GEN] conv-start  engineMaxTokens=$loadedEffectiveMaxTokens  backend=${backendLabel()}")
-                markConvStarted()
-                conversation = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
-                markConvReady()
-                DebugLogger.log("LITERT", "[GEN] conv-ready  starting sendMessageAsync...")
+                // Use the persistent pre-warmed conversation. 
+                // No createConversation() call here — avoids the 8s SIGKILL risk during generation.
+                val conversation = activeConversation 
+                    ?: throw IllegalStateException("Conversation not pre-warmed during initialization")
+
+                DebugLogger.log("LITERT", "[GEN] starting sendMessageAsync using persistent session...")
 
                 // Set isNativeGenerating BEFORE the async call so crash-recovery prefs
                 // are correct even if the process is killed in the first milliseconds.
@@ -686,7 +703,8 @@ class LiteRTInferenceEngine @Inject constructor(
                         isFinished = true
                         watchdog?.cancel()
                         heartbeat?.cancel()
-                        runCatching { conversation?.close() }
+                        // Persistent conversation: DO NOT close here. 
+                        // It stays alive for the next turn.
                         resetCrashCount(loadedModelPath ?: "")
                         markGenerationEnded()
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
@@ -713,7 +731,8 @@ class LiteRTInferenceEngine @Inject constructor(
                         isFinished = true
                         watchdog?.cancel()
                         heartbeat?.cancel()
-                        runCatching { conversation?.close() }
+                        // On actual error, we may want to reset the conversation, 
+                        // but for now we keep it and let the user retry.
                         markGenerationEnded()
                         DebugLogger.log("LITERT", "Generation error: ${error.message}")
                         InferenceService.stop(context)
@@ -724,9 +743,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 awaitClose {
                     watchdog?.cancel()
                     heartbeat?.cancel()
-                    // If the flow was closed before onDone fired (timeout / coroutine cancellation),
-                    // try to free the KV-cache. The Engine itself stays alive.
-                    if (!isFinished) runCatching { conversation?.close() }
+                    // Persistent conversation: DO NOT close here.
                 }
 
             } catch (e: Throwable) {
@@ -738,7 +755,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     isNativeGenerating = false
                     markGenerationEnded()
                 }
-                runCatching { conversation?.close() }
+                // Persistent conversation: DO NOT close here.
                 if (e is CancellationException) throw e
                 close(RuntimeException("Generation failed: ${e.message}", e))
             } finally {
@@ -826,7 +843,11 @@ class LiteRTInferenceEngine @Inject constructor(
             DebugLogger.log("LITERT", "Close deferred: native generation still in progress")
             if (engine != null) {
                 closingEngine = engine
-                engine          = null
+                closingConversation = activeConversation
+                
+                engine             = null
+                activeConversation = null
+                
                 loadedModelPath = null
                 loadedMaxTokens = 0
                 activeModelName = null
@@ -835,20 +856,28 @@ class LiteRTInferenceEngine @Inject constructor(
             }
             return
         }
+        
+        runCatching { closingConversation?.close() }
+        closingConversation = null
         runCatching { closingEngine?.close() }
             .onFailure { Timber.w(it, "LiteRT deferred-close warning") }
         closingEngine = null
 
         if (engine == null) return
         setReady(false)
+        
+        runCatching { activeConversation?.close() }
         runCatching { engine?.close() }
             .onFailure { Timber.w(it, "LiteRT close warning") }
-        engine          = null
+            
+        engine             = null
+        activeConversation = null
+        
         loadedModelPath = null
         loadedMaxTokens = 0
         activeModelName = null
         _activeModelNameFlow.value = null
-        DebugLogger.log("LITERT", "Engine closed")
+        DebugLogger.log("LITERT", "Engine & Conversation closed")
     }
 
     // ── Memory pressure callbacks ─────────────────────────────────────────────
