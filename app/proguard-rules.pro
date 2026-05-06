@@ -28,3 +28,7 @@
 
 # Timber
 -dontwarn org.slf4j.**
+
+# LiteRT (Gemma 3) JNI Bridge
+-keep class com.google.ai.edge.litertlm.** { *; }
+-dontwarn com.google.ai.edge.litertlm.**
