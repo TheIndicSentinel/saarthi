@@ -469,6 +469,10 @@ class LiteRTInferenceEngine @Inject constructor(
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=256 (BATTERY SAFE MODE: ${batteryPct.toInt()}%)")
                             256
                         }
+                        cpuCrashCount >= 2 -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=64 (ULTRA-SAFE DEBUG MODE)")
+                            64
+                        }
                         cpuCrashCount >= 1 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=256 (AUTO-RECOVERY: CPU crash count $cpuCrashCount)")
                             256
@@ -519,11 +523,22 @@ class LiteRTInferenceEngine @Inject constructor(
                         topK = 64, topP = 0.95, temperature = 1.0
                     )
                     markStage(CrashStage.CREATE_CONVERSATION)
-                    activeConversation = newEngine.createConversation(ConversationConfig(samplerConfig = samplerConfig))
+                    DebugLogger.log("LITERT", "[NATIVE] [JNI_ENTER] createConversation (tokens=$effectiveMaxTokens, threads=$dynamicThreads, backend=${backendLabel()})")
+                    try {
+                        activeConversation = newEngine.createConversation(ConversationConfig(samplerConfig = samplerConfig))
+                        DebugLogger.log("LITERT", "[NATIVE] [JNI_EXIT] createConversation SUCCESS")
+                    } catch (e: Exception) {
+                        DebugLogger.log("LITERT", "[JNI_ERROR] createConversation threw: ${e.message}")
+                        throw e
+                    } catch (t: Throwable) {
+                        DebugLogger.log("LITERT", "[JNI_FATAL] createConversation threw Throwable: ${t.javaClass.simpleName}")
+                        throw t
+                    }
                     
                     if (cpuCrashCount == 0 && !gpuBanned) {
                         markStage(CrashStage.WARMUP)
                         DebugLogger.log("LITERT", "[INIT] Running warmup (1-token generation)...")
+                        DebugLogger.log("LITERT", "[NATIVE] [JNI_ENTER] sendMessageAsync (warmup)")
                         activeConversation?.sendMessageAsync(" ", object : MessageCallback {
                             override fun onMessage(m: Message) {}
                             override fun onDone() {}
