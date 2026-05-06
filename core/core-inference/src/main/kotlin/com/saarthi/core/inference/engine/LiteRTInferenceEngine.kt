@@ -633,7 +633,8 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         // ── CPU (XNNPACK NEON — guaranteed path on all ARM64 devices) ──────────
-        DebugLogger.log("LITERT", "[CPU] Falling back to CPU/XNNPACK  threads=$dynamicThreads (auto-recovery)")
+        val backendLabel = if (xnnpackBanned) "PLAIN CPU (XNNPACK BANNED)" else "CPU/XNNPACK"
+        DebugLogger.log("LITERT", "[CPU] Falling back to $backendLabel  threads=$dynamicThreads (auto-recovery)")
         return buildEngine(modelPath, maxTokens, Backend.CPU(dynamicThreads))
             .also {
                 usingNpu = false

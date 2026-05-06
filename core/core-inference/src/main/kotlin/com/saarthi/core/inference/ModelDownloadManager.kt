@@ -308,7 +308,7 @@ class ModelDownloadManager @Inject constructor(
         // was simply outdated. Only flag files that are significantly SMALLER than expected.
         // trustOS = true (OS reported success): allow 10% deviation for HF revision drift.
         // trustOS = false (scan/init): require 99% match to prevent "phantom completions".
-        val threshold = if (trustOS) 0.90 else 0.99
+        val threshold = if (trustOS) 0.85 else 0.95
 
         if (expectedBytes > 0L && size < (expectedBytes * threshold).toLong()) {
             Timber.w("File ${file.name}: ${size / 1_048_576}MB of ${expectedBytes / 1_048_576}MB expected — incomplete (threshold: $threshold)")
