@@ -487,18 +487,22 @@ class LiteRTInferenceEngine @Inject constructor(
                 
                 val dynamicThreads = when {
                     isLowBattery -> 1
-                    cpuCrashCount >= 2 -> 1
+                    cpuCrashCount >= 1 -> 1 // Aggressive: 1 thread after first CPU crash
                     else -> 2
                 }
                 
                 val batteryGpuBanned = isLowBattery
+                val xnnpackBanned = cpuCrashCount >= 2
+                if (xnnpackBanned) {
+                    DebugLogger.log("LITERT", "[CPU] XNNPACK banned due to consecutive crashes.")
+                }
 
                 DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
                 markInitStarted(config.modelPath)
                 markStage(CrashStage.MODEL_LOAD)
                 try {
-                    val newEngine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned || batteryGpuBanned, dynamicThreads)
+                    val newEngine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned || batteryGpuBanned, dynamicThreads, xnnpackBanned)
                     
                     // CRITICAL: Save the active backend state BEFORE we do any heavy operations
                     // like createConversation. If the native driver SIGKILLs during the next step,
@@ -517,16 +521,18 @@ class LiteRTInferenceEngine @Inject constructor(
                     markStage(CrashStage.CREATE_CONVERSATION)
                     activeConversation = newEngine.createConversation(ConversationConfig(samplerConfig = samplerConfig))
                     
-                    markStage(CrashStage.WARMUP)
-                    DebugLogger.log("LITERT", "[INIT] Running warmup (1-token generation)...")
-                    val warmupResult = activeConversation?.sendMessageAsync(" ", object : MessageCallback {
-                        override fun onMessage(m: Message) {}
-                        override fun onDone() {}
-                        override fun onError(e: Throwable) {}
-                    })
-                    // Note: sendMessageAsync is async, but on Samsung SM8550/S24, 
-                    // if it crashes, it crashes immediately here during buffer alloc.
-                    DebugLogger.log("LITERT", "[INIT] Warmup passed.")
+                    if (cpuCrashCount == 0 && !gpuBanned) {
+                        markStage(CrashStage.WARMUP)
+                        DebugLogger.log("LITERT", "[INIT] Running warmup (1-token generation)...")
+                        activeConversation?.sendMessageAsync(" ", object : MessageCallback {
+                            override fun onMessage(m: Message) {}
+                            override fun onDone() {}
+                            override fun onError(e: Throwable) {}
+                        })
+                        DebugLogger.log("LITERT", "[INIT] Warmup passed.")
+                    } else {
+                        DebugLogger.log("LITERT", "[INIT] Skipping warmup in recovery mode.")
+                    }
                     DebugLogger.log("LITERT", "[INIT] Conversation matrix created safely.")
                     
                     engine = newEngine
@@ -577,6 +583,7 @@ class LiteRTInferenceEngine @Inject constructor(
         profile: com.saarthi.core.inference.model.DeviceProfile,
         gpuBanned: Boolean,
         dynamicThreads: Int,
+        xnnpackBanned: Boolean,
     ): Engine {
 
         val modelNpuCompatible = isModelNpuOptimised(modelPath, profile)
@@ -627,7 +634,7 @@ class LiteRTInferenceEngine @Inject constructor(
 
         // ── CPU (XNNPACK NEON — guaranteed path on all ARM64 devices) ──────────
         DebugLogger.log("LITERT", "[CPU] Falling back to CPU/XNNPACK  threads=$dynamicThreads (auto-recovery)")
-        return buildEngine(modelPath, maxTokens, Backend.CPU(dynamicThreads))
+        return buildEngine(modelPath, maxTokens, Backend.CPU(dynamicThreads, !xnnpackBanned))
             .also {
                 usingNpu = false
                 usingGpu = false
