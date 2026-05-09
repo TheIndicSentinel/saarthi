@@ -363,6 +363,45 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun samplerForActiveModel(): SamplerConfig? =
         samplerFor(activeModelName ?: loadedModelPath ?: "")
 
+    // ── Streaming repetition guard ────────────────────────────────────────────
+    //
+    // Two cheap O(n) checks over the most recent ~400 chars of streamed output:
+    //
+    //  1. Word-frequency: any word ≥8 chars appearing 4+ times in the window.
+    //     Catches list-loops like "Maharashtra … Maharashtra … Maharashtra" where
+    //     the model gets stuck on the same long token, classic on Gemma 1B.
+    //
+    //  2. Phrase-mirror: the most recent 40 characters appearing earlier in the
+    //     prior 200 chars. Catches whole-phrase echo loops that aren't dominated
+    //     by a single word.
+    //
+    // Returns true → caller should call conversation.cancelProcess() to stop the
+    // native thread. Whatever was streamed up to that point stays visible.
+    private val repetitionWordRegex = Regex("[\\s\\p{Punct}]+")
+
+    private fun detectRepetitionLoop(buf: StringBuilder): Boolean {
+        if (buf.length < 200) return false
+        val from = maxOf(0, buf.length - 400)
+        val tail = buf.substring(from)
+
+        val maxWordCount = tail
+            .split(repetitionWordRegex)
+            .asSequence()
+            .filter { it.length >= 8 }
+            .groupingBy { it }
+            .eachCount()
+            .maxOfOrNull { it.value }
+            ?: 0
+        if (maxWordCount >= 4) return true
+
+        if (buf.length >= 240) {
+            val recent = buf.substring(buf.length - 40)
+            val before = buf.substring(buf.length - 240, buf.length - 40)
+            if (before.contains(recent)) return true
+        }
+        return false
+    }
+
     // ── Initialize ────────────────────────────────────────────────────────────
 
     override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
@@ -821,12 +860,30 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 isNativeGenerating = true
 
+                // Streamed-output buffer used by the repetition guard below.
+                // litertlm's SamplerConfig has no repetition_penalty / DRY parameter,
+                // so on small models (Gemma 3 1B in particular) lists like "name all
+                // states" can fall into a token loop where the same long word repeats.
+                // We detect that on the streamed text and call cancelProcess() — what
+                // was already emitted stays visible, the loop is cut short.
+                val accumulated = StringBuilder()
+                var repetitionStopFired = false
+
                 conversation.sendMessageAsync(prompt, object : MessageCallback {
                     override fun onMessage(message: Message) {
                         val cleaned = message.toString().filterSpecialTokens()
                         if (cleaned.isNotEmpty()) {
+                            accumulated.append(cleaned)
                             trySend(cleaned)
                             tokenCount++
+                            if (!repetitionStopFired && detectRepetitionLoop(accumulated)) {
+                                repetitionStopFired = true
+                                DebugLogger.log(
+                                    "LITERT",
+                                    "[REP] Loop detected at $tokenCount tokens (chars=${accumulated.length}) — stopping native generation"
+                                )
+                                runCatching { conversation.cancelProcess() }
+                            }
                         }
                     }
 
