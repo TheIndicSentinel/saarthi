@@ -8,6 +8,7 @@ import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ChatSessionDao
 import com.saarthi.core.memory.db.ChatSessionEntity
 import com.saarthi.core.memory.db.ConversationDao
@@ -48,7 +49,7 @@ private const val MAX_HISTORY_TURNS = 6  // reduced adaptively for small-context
 // System prompt ~90 tokens, leaving ~400 tokens for history + user + response.
 // At 3.5 chars/token: 400 × 3.5 = 1400 chars total; minus ~300 chars system = 1100 for history+user.
 // Use 1000 to be safe (leaves ~286 tokens for history+user, ~226 for response).
-private const val MAX_PROMPT_CHARS_1280 = 1_000  // 512-ctx CPU devices (Gemma 3/3n)
+private const val MAX_PROMPT_CHARS_1280 = 3_000  // Increased from 1k for stable history/context
 private const val MAX_PROMPT_CHARS_2048 = 4_500  // 2048-ctx models (Gemma 2)
 private const val MAX_PROMPT_CHARS_LARGE = 8_000 // Large-ctx models (Gemma 4)
 
@@ -63,6 +64,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val inferenceEngine: InferenceEngine,
     private val reminderManager: ReminderManager,
     private val deviceProfiler: DeviceProfiler,
+    private val systemPromptProvider: SystemPromptProvider,
 ) : ChatRepository {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -108,6 +110,8 @@ class ChatRepositoryImpl @Inject constructor(
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         chatSessionDao.insert(ChatSessionEntity(id = id, title = "New Chat", createdAt = now, updatedAt = now))
+        // Reset engine session so the new chat starts with a clean KV cache
+        runCatching { inferenceEngine.resetSession() }
         switchSession(id)
         return id
     }
@@ -116,6 +120,8 @@ class ChatRepositoryImpl @Inject constructor(
         _currentSessionId.value = sessionId
         val messages = conversationDao.getBySession(sessionId)
         _history.value = messages.map { it.toChatMessage() }
+        // Reset engine session to prevent stale KV cache from previous chat
+        runCatching { inferenceEngine.resetSession() }
     }
 
     override suspend fun deleteSession(sessionId: String) {
@@ -271,6 +277,8 @@ class ChatRepositoryImpl @Inject constructor(
         _history.update { emptyList() }
         conversationDao.deleteBySession(sessionId)
         chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
+        // Reset engine session so cleared chat starts fresh
+        runCatching { inferenceEngine.resetSession() }
     }
 
     override suspend fun deleteMessage(id: String) {
@@ -335,44 +343,28 @@ class ChatRepositoryImpl @Inject constructor(
         DebugLogger.log("PROMPT", "History turns=${history.size}  attachments=${attachments.size}")
 
         return buildString {
-            if (history.isEmpty()) {
-                // Single turn: system instructions + user message in one user turn.
-                // Gemma instruct format: <start_of_turn>user\nSYSTEM\n\nUSER<end_of_turn>
-                append("<start_of_turn>user\n")
-                append(systemInstructions)
-                append("\n\n")
-                if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
-                append(userMessage)
-                append("<end_of_turn>\n")
-                append("<start_of_turn>model\n")
-            } else {
-                // Multi-turn: system instructions are prepended to the FIRST history user
-                // turn only. All subsequent turns follow the plain user/model alternation.
-                // This matches the Gemma 3 instruct chat template exactly and avoids
-                // nested <start_of_turn> tags that confuse the native tokeniser.
-                var systemInjected = false
+            // Plain text prompt — NO <start_of_turn>/<end_of_turn> tags.
+            // The LiteRT Conversation API adds Gemma chat template wrapping
+            // internally. Adding our own tags causes double-templating, which
+            // prevents the model from generating clean EOS → onDone never fires.
+            // (Matches Google AI Edge Gallery reference implementation.)
+            append(systemInstructions)
+            append("\n\n")
+
+            if (history.isNotEmpty()) {
                 history.forEach { msg ->
-                    val role = if (msg.role == MessageRole.USER) "user" else "model"
-                    append("<start_of_turn>$role\n")
-                    if (!systemInjected && msg.role == MessageRole.USER) {
-                        append(systemInstructions)
-                        append("\n\n")
-                        systemInjected = true
-                    }
-                    append(msg.content)
-                    append("<end_of_turn>\n")
+                    val role = if (msg.role == MessageRole.USER) "User" else "Assistant"
+                    append("$role: ${msg.content}\n")
                 }
-                // Current user message (system never appears here)
-                append("<start_of_turn>user\n")
-                if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
-                append(userMessage)
-                append("<end_of_turn>\n")
-                append("<start_of_turn>model\n")
+                append("\n")
             }
+
+            if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
+            append(userMessage)
         }.let { prompt ->
             val budget = maxPromptChars
             val needsTrim = prompt.length > budget
-            val finalPrompt = if (needsTrim) trimPrompt(prompt, budget) else prompt
+            val finalPrompt = if (needsTrim) prompt.take(budget) else prompt
             DebugLogger.log("PROMPT", "Final prompt  chars=${finalPrompt.length}  budget=$budget  trimmed=$needsTrim")
             finalPrompt
         }
@@ -402,21 +394,29 @@ class ChatRepositoryImpl @Inject constructor(
         return result
     }
 
-    private fun buildSystemPrompt(memoryContext: String): String = buildString {
-        append(PackType.BASE.systemPrompt)
-        appendLine()
-        appendLine()
-        append(currentLanguage.systemPromptInstruction)
+    private fun buildSystemPrompt(memoryContext: String): String {
+        val modelName = inferenceEngine.activeModelName
+        val tier = systemPromptProvider.tierFor(modelName)
         if (memoryContext.isNotEmpty()) {
-            appendLine()
-            appendLine()
-            append(memoryContext)
             val memCount = memoryContext.lines().count { it.startsWith("- ") }
-            DebugLogger.log("MEMORY", "Injected $memCount user memory facts into prompt (global, cross-chat)")
+            if (tier == SystemPromptProvider.ModelTier.COMPACT) {
+                DebugLogger.log("MEMORY", "Skipping $memCount memory facts — model tier=COMPACT (1B can't reliably use memories)")
+            } else {
+                DebugLogger.log("MEMORY", "Injected $memCount user memory facts into prompt  tier=$tier")
+            }
         } else {
             DebugLogger.log("MEMORY", "No user memories stored yet")
         }
-    }.trimEnd()
+        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}")
+        val langLine = if (currentLanguage == SupportedLanguage.ENGLISH) ""
+                       else currentLanguage.systemPromptInstruction
+        return systemPromptProvider.build(
+            modelName = modelName,
+            pack = PackType.BASE,
+            languageInstruction = langLine,
+            memoryContext = memoryContext,
+        )
+    }
 
     /**
      * Intelligent Sliding Window: Handles context overflow for the model's compiled KV limits.
@@ -426,11 +426,8 @@ class ChatRepositoryImpl @Inject constructor(
      * 2. Drop middle history turns one-by-one until budget is met.
      * 3. If still over budget (e.g. system prompt alone overflows), hard-truncate
      *    the system turn as a last resort.
-     *
-     * FIXED: removed `if (turns.size <= 3) return prompt` which caused every
-     * first message to bypass trimming and return the full over-budget prompt.
      */
-    private fun trimPrompt(prompt: String, budget: Int = MAX_PROMPT_CHARS_1280): String {
+    private fun trimPrompt(prompt: String, budget: Int = 3000): String {
         if (prompt.length <= budget) return prompt
 
         val marker = "<start_of_turn>"
@@ -445,11 +442,13 @@ class ChatRepositoryImpl @Inject constructor(
         val latestTurns = turns.takeLast(minOf(2, turns.size - 1))
         val middleTurns = turns.drop(1).dropLast(latestTurns.size).toMutableList()
 
+        // Phase 1: Try to fit by dropping middle history
         var currentPrompt = buildString {
             append(systemTurn)
             middleTurns.forEach { append(it) }
             latestTurns.forEach { append(it) }
         }
+        
         while (currentPrompt.length > budget && middleTurns.isNotEmpty()) {
             middleTurns.removeAt(0)
             currentPrompt = buildString {
@@ -459,13 +458,16 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
-        // Phase 2: system prompt itself exceeds budget — hard truncate as last resort.
+        // Phase 2: If still over, drop ALL history except system and latest turn
         if (currentPrompt.length > budget) {
-            val latestBlock = buildString { latestTurns.forEach { append(it) } }
-            val systemBudget = budget - latestBlock.length
-            val truncatedSystem = if (systemBudget > 0) systemTurn.take(systemBudget) else ""
-            currentPrompt = truncatedSystem + latestBlock
-            DebugLogger.log("PROMPT", "WARN: system turn truncated to ${truncatedSystem.length}c to meet budget ($budget)")
+            currentPrompt = systemTurn + latestTurns.joinToString("")
+        }
+
+        // Phase 3: Final hard truncation if even system + latest user Q is too big.
+        // We take the budget but ensure we at least try to keep the roles intact.
+        if (currentPrompt.length > budget) {
+            DebugLogger.log("PROMPT", "WARN: critical truncation to budget $budget")
+            return currentPrompt.take(budget)
         }
 
         return currentPrompt

@@ -24,6 +24,7 @@ import com.saarthi.core.inference.model.PackType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
@@ -112,6 +113,12 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile private var isGenerating: Boolean = false
     @Volatile override var isNativeGenerating: Boolean = false
         private set
+
+    // Signals when the native inference thread has truly finished (onDone/onError fired).
+    // The next generateStream() awaits this before creating a new Conversation.
+    // LiteRT only supports ONE active Conversation at a time — we must never call
+    // createConversation() while the previous native thread is still running.
+    @Volatile private var nativeDoneSignal: CompletableDeferred<Unit>? = null
 
     // Set when the crash loop detector fires (≥3 consecutive crashes for this model).
     // generateStream() throws a user-visible error instead of crashing again.
@@ -321,6 +328,31 @@ class LiteRTInferenceEngine @Inject constructor(
         else -> false
     }
 
+    // ── Sampler config (model-aware) ──────────────────────────────────────────
+    //
+    // Google's recommended Gemma 3/4 sampling — temp=1.0, topK=64, topP=0.95 —
+    // matches the AI Edge Gallery reference implementation. The previous
+    // temp=0.7 + topK=40 combination caused 1B models to loop on high-probability
+    // sequences (visible repetition in chat). Higher temp + larger topK gives
+    // the diversity Gemma was trained for.
+    //
+    // NPU returns null because QNN handles sampling internally on Hexagon.
+    private fun samplerFor(modelPath: String): SamplerConfig? {
+        if (usingNpu) return null
+        val name = modelPath.lowercase()
+        return when {
+            name.contains("gemma3") || name.contains("gemma-3") || name.contains("gemma 3") ->
+                SamplerConfig(topK = 64, topP = 0.95, temperature = 1.0)
+            name.contains("gemma4") || name.contains("gemma-4") || name.contains("gemma 4") ->
+                SamplerConfig(topK = 64, topP = 0.95, temperature = 1.0)
+            else ->
+                SamplerConfig(topK = 40, topP = 0.95, temperature = 0.8)
+        }
+    }
+
+    private fun samplerForActiveModel(): SamplerConfig? =
+        samplerFor(activeModelName ?: loadedModelPath ?: "")
+
     // ── Initialize ────────────────────────────────────────────────────────────
 
     override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
@@ -497,9 +529,17 @@ class LiteRTInferenceEngine @Inject constructor(
                 
                 val batteryGpuBanned = isLowBattery
                 val xnnpackBanned = cpuCrashCount >= 2
-                if (xnnpackBanned) {
-                    DebugLogger.log("LITERT", "[CPU] XNNPACK banned due to consecutive crashes.")
+                
+                // CRITICAL: GPU VRAM Safety for large models.
+                // Gemma 4 (3.5GB) requires ~4.5GB peak memory for GPU load.
+                // If weight size > 60% of available RAM, fallback to CPU to avoid OOM.
+                val memoryPressureBannedGpu = sizeMb > (profile.availableRamMb * 0.6)
+                if (memoryPressureBannedGpu && sizeMb > 2000) {
+                    DebugLogger.log("LITERT", "[GPU] BANNED: Model size (${sizeMb}MB) is too large for available RAM (${profile.availableRamMb}MB). Falling back to CPU.")
                 }
+
+                val canUseGpu = profile.gpuSafe && !gpuBanned && !batteryGpuBanned && !memoryPressureBannedGpu
+                val canUseNpu = profile.npuSafe && !gpuBanned && !batteryGpuBanned 
 
                 DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
@@ -519,9 +559,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     
                     // Undo lazy init per research: create conversation synchronously during init
                     DebugLogger.log("LITERT", "[INIT] Engine loaded. Creating conversation matrix synchronously...")
-                    val samplerConfig = if (config.modelPath.contains("npu")) null else SamplerConfig(
-                        topK = 64, topP = 0.95, temperature = 1.0
-                    )
+                    val samplerConfig = samplerFor(config.modelPath)
                     markStage(CrashStage.CREATE_CONVERSATION)
                     DebugLogger.log("LITERT", "[NATIVE] [JNI_ENTER] createConversation (tokens=$effectiveMaxTokens, threads=$dynamicThreads, backend=${backendLabel()})")
                     try {
@@ -535,20 +573,11 @@ class LiteRTInferenceEngine @Inject constructor(
                         throw t
                     }
                     
-                    if (cpuCrashCount == 0 && !gpuBanned) {
-                        markStage(CrashStage.WARMUP)
-                        DebugLogger.log("LITERT", "[INIT] Running warmup (1-token generation)...")
-                        DebugLogger.log("LITERT", "[NATIVE] [JNI_ENTER] sendMessageAsync (warmup)")
-                        activeConversation?.sendMessageAsync(" ", object : MessageCallback {
-                            override fun onMessage(m: Message) {}
-                            override fun onDone() {}
-                            override fun onError(e: Throwable) {}
-                        })
-                        DebugLogger.log("LITERT", "[INIT] Warmup passed.")
-                    } else {
-                        DebugLogger.log("LITERT", "[INIT] Skipping warmup in recovery mode.")
-                    }
-                    DebugLogger.log("LITERT", "[INIT] Conversation matrix created safely.")
+                    // NO warmup — matches Google AI Edge Gallery reference implementation.
+                    // Fire-and-forget warmup corrupts conversation state when the user's
+                    // first message arrives before the warmup completes, causing onDone
+                    // to never fire and permanently blocking subsequent generations.
+                    DebugLogger.log("LITERT", "[INIT] Conversation ready (no warmup — Gallery pattern).")
                     
                     engine = newEngine
                     
@@ -672,11 +701,20 @@ class LiteRTInferenceEngine @Inject constructor(
     // ── generateStream ────────────────────────────────────────────────────────
 
     /**
-     * Real token-by-token streaming via [Conversation.sendMessageAsync].
+     * Token-by-token streaming via persistent [Conversation.sendMessageAsync].
      *
-     * A new [Conversation] is created per request — this is cheap (allocates KV-cache only;
-     * model weights stay in the [Engine]). The conversation is closed in [MessageCallback.onDone]
-     * or [MessageCallback.onError] to free the KV-cache, or in [awaitClose] on cancellation.
+     * PERSISTENT CONVERSATION WITH RECYCLING:
+     *   • Uses the class-level [activeConversation] (created during init).
+     *   • After [onDone] fires, the old conversation is CLOSED and a fresh one
+     *     is created immediately. This recycles the KV cache so the next message
+     *     starts with full context budget (fixes the 1-token EOS bug).
+     *   • [buildPrompt] in ChatRepositoryImpl embeds the full context (system
+     *     prompt + history + user message), so each prompt is self-contained.
+     *
+     * Why persistent (not per-request):
+     *   SM8550 GPU's native driver never fires onDone/onError when a freshly
+     *   created Conversation is used. Keeping the conversation alive from init
+     *   (where warmup primes the GPU shaders) ensures callbacks fire reliably.
      */
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow<String> {
         val eng = engine
@@ -688,9 +726,9 @@ class LiteRTInferenceEngine @Inject constructor(
             )
 
         val timeoutMs = when {
-            usingNpu -> 60_000L   // NPU: fastest, ~60–100 tok/s
-            usingGpu -> 120_000L  // GPU: ~25–40 tok/s
-            else     -> 300_000L  // CPU: 5 min — allows 512 tokens at ~2 tok/s on slow devices
+            usingNpu -> 60_000L
+            usingGpu -> 120_000L
+            else     -> 300_000L
         }
         val genStartTimeMs = System.currentTimeMillis()
         DebugLogger.log("LITERT", "Stream start  backend=${backendLabel()}  timeout=${timeoutMs/1000}s  promptChars=${prompt.length}")
@@ -706,18 +744,37 @@ class LiteRTInferenceEngine @Inject constructor(
             var isFinished = false
             var watchdog: kotlinx.coroutines.Job? = null
             var heartbeat: kotlinx.coroutines.Job? = null
-            var nativeCallStarted = false
-            var conversation: Conversation? = null
 
             try {
                 isGenerating = true
                 markGenerationStarted()
 
-                conversation = activeConversation
+                // ── Wait for previous native thread (with timeout) ────────────
+                nativeDoneSignal?.let { prev ->
+                    if (!prev.isCompleted) {
+                        DebugLogger.log("LITERT", "[GEN] Waiting for previous native thread to finish...")
+                        // First try cancelProcess() to stop the native thread gracefully
+                        runCatching<Unit?> { activeConversation?.cancelProcess() }
+                        DebugLogger.log("LITERT", "[GEN] Called cancelProcess() — waiting for onError to fire...")
+                        kotlinx.coroutines.withTimeoutOrNull(10_000L) { prev.await() }
+                            ?: run {
+                                // cancelProcess didn't work — force cleanup as last resort
+                                DebugLogger.log("LITERT", "[GEN] TIMEOUT after cancelProcess — force recycling conversation")
+                                isNativeGenerating = false
+                                runCatching<Unit?> { activeConversation?.close() }
+                                val sc = samplerForActiveModel()
+                                activeConversation = runCatching {
+                                    eng.createConversation(ConversationConfig(samplerConfig = sc))
+                                }.getOrNull()
+                                prev.complete(Unit)
+                                DebugLogger.log("LITERT", "[GEN] Force-recycled conversation")
+                            }
+                    }
+                }
 
-                // Periodic heartbeat — fires every 10s. Each line records elapsed time,
-                // token count, backend, and system state. If the process is killed (SIGKILL),
-                // the last heartbeat before silence shows exactly how far generation reached.
+                val thisDone = CompletableDeferred<Unit>()
+                nativeDoneSignal = thisDone
+
                 heartbeat = launch {
                     var tick = 0
                     while (!isFinished) {
@@ -730,43 +787,28 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                 }
 
+                // Use the persistent activeConversation.
+                // If null (shouldn't happen), create one as safety fallback.
+                if (activeConversation == null) {
+                    val sc = samplerForActiveModel()
+                    activeConversation = eng.createConversation(ConversationConfig(samplerConfig = sc))
+                    DebugLogger.log("LITERT", "[GEN] Safety fallback: created new conversation")
+                }
+                val conversation = activeConversation!!
+
                 watchdog = launch {
                     delay(timeoutMs)
                     if (!isFinished) {
-                        isFinished = true
-                        DebugLogger.log("LITERT", "Watchdog: timeout at ${timeoutMs/1000}s — force-closing engine to terminate native XNNPACK thread")
-                        // Without force-close, the XNNPACK thread runs 10+ min → OS SIGKILL.
-                        // engine.close() during active inference may SIGSEGV the native thread;
-                        // crash recovery handles it on next launch.
-                        isNativeGenerating = false
-                        runCatching { conversation?.close() }
-                        engine = null
-                        loadedModelPath = null
-                        loadedMaxTokens = 0
-                        activeModelName = null
-                        _activeModelNameFlow.value = null
-                        setReady(false)
-                        runCatching { eng.close() }
-                        markGenerationEnded()
-                        InferenceService.stop(context)
-                        close(RuntimeException(
-                            "Response timed out after ${timeoutMs / 1000}s. " +
-                            "CPU-only inference is slow on this device — try a shorter message."
-                        ))
+                        DebugLogger.log("LITERT", "Watchdog: timeout at ${timeoutMs/1000}s — calling cancelProcess()")
+                        // Use cancelProcess() to stop the native thread cleanly.
+                        // onError(CancellationException) will handle recycling.
+                        runCatching<Unit> { conversation.cancelProcess() }
                     }
                 }
 
-                // Use the persistent pre-warmed conversation. 
-                // Matches Google AI Edge Gallery behavior.
-                val conversation = activeConversation 
-                    ?: throw IllegalStateException("Conversation not pre-warmed during initialization")
+                DebugLogger.log("LITERT", "[GEN] Starting sendMessageAsync on persistent conversation...")
 
-                DebugLogger.log("LITERT", "[GEN] starting sendMessageAsync using persistent session...")
-
-                // Set isNativeGenerating BEFORE the async call so crash-recovery prefs
-                // are correct even if the process is killed in the first milliseconds.
                 isNativeGenerating = true
-                nativeCallStarted  = true
 
                 conversation.sendMessageAsync(prompt, object : MessageCallback {
                     override fun onMessage(message: Message) {
@@ -782,24 +824,29 @@ class LiteRTInferenceEngine @Inject constructor(
                         isFinished = true
                         watchdog?.cancel()
                         heartbeat?.cancel()
-                        // Persistent conversation: DO NOT close here. Matches Google AI Edge Gallery.
+
+                        // CRITICAL FIX: onDone is called on the native C++ inference thread.
+                        // Calling eng.createConversation() here causes a DEADLOCK because
+                        // LiteRT holds an internal mutex until this callback returns.
+                        // We must do the recycling asynchronously.
+                        CoroutineScope(Dispatchers.IO).launch {
+                            runCatching { conversation.close() }
+                            val sc = samplerForActiveModel()
+                            activeConversation = runCatching {
+                                eng.createConversation(ConversationConfig(samplerConfig = sc))
+                            }.getOrNull()
+                            thisDone.complete(Unit)
+                        }
+
                         resetCrashCount(loadedModelPath ?: "")
                         markGenerationEnded()
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                         val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
                         DebugLogger.log("LITERT", "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}")
-                        // Close any Engine that was replaced while this generation was in flight
-                        // (e.g., user switched models mid-stream via closeInternal deferred-close).
                         closingEngine?.let { old ->
                             runCatching { old.close() }
-                                .onFailure { Timber.w(it, "LiteRT deferred-close warning") }
                             closingEngine = null
-                            DebugLogger.log("LITERT", "Deferred engine instance closed after generation")
                         }
-                        // Always stop FGS from the native done callback. Handles:
-                        //  1. Normal path: FGS already stopped by ChatRepositoryImpl (idempotent).
-                        //  2. Timeout/cancel path: ChatRepositoryImpl skipped stop because
-                        //     isNativeGenerating was still true — this is the deferred stop.
                         InferenceService.stop(context)
                         close()
                     }
@@ -809,30 +856,56 @@ class LiteRTInferenceEngine @Inject constructor(
                         isFinished = true
                         watchdog?.cancel()
                         heartbeat?.cancel()
-                        // Keep conversation alive for potential retry
+
+                        // Recycle asynchronously to prevent native deadlock
+                        CoroutineScope(Dispatchers.IO).launch {
+                            runCatching { conversation.close() }
+                            val sc = samplerForActiveModel()
+                            activeConversation = runCatching {
+                                eng.createConversation(ConversationConfig(samplerConfig = sc))
+                            }.getOrNull()
+                            thisDone.complete(Unit)
+                        }
+
                         markGenerationEnded()
-                        DebugLogger.log("LITERT", "Generation error: ${error.message}")
-                        InferenceService.stop(context)
-                        close(RuntimeException("Generation failed: ${error.message}", error))
+
+                        // cancelProcess() triggers CancellationException — treat as
+                        // normal stop (user navigated away), not as an error.
+                        if (error is java.util.concurrent.CancellationException || error is CancellationException) {
+                            val elapsedMs = System.currentTimeMillis() - genStartTimeMs
+                            val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
+                            DebugLogger.log("LITERT", "Stream cancelled  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}")
+                            resetCrashCount(loadedModelPath ?: "")
+                            InferenceService.stop(context)
+                            close()  // normal close — no error
+                        } else {
+                            DebugLogger.log("LITERT", "Generation error: ${error.message}")
+                            InferenceService.stop(context)
+                            close(RuntimeException("Generation failed: ${error.message}", error))
+                        }
                     }
                 })
 
                 awaitClose {
                     watchdog?.cancel()
                     heartbeat?.cancel()
-                    // Persistent conversation: DO NOT close here.
+                    // CRITICAL: Stop the native thread immediately.
+                    // Without this, the native thread runs indefinitely (model hasn't
+                    // hit EOS) and blocks ALL future generations with FAILED_PRECONDITION.
+                    // cancelProcess() triggers onError(CancellationException) which
+                    // properly recycles the conversation.
+                    // (Matches Gallery's stopResponse() → conversation.cancelProcess())
+                    if (isNativeGenerating) {
+                        DebugLogger.log("LITERT", "[GEN] Coroutine cancelled — calling cancelProcess() to stop native thread")
+                        runCatching { conversation.cancelProcess() }
+                    } else {
+                        DebugLogger.log("LITERT", "[GEN] Coroutine cancelled — native already finished")
+                    }
                 }
 
             } catch (e: Throwable) {
                 watchdog?.cancel()
                 heartbeat?.cancel()
-                // Only clear isNativeGenerating if native was never started — otherwise
-                // the 'done/error' callback is responsible for clearing it.
-                if (!nativeCallStarted) {
-                    isNativeGenerating = false
-                    markGenerationEnded()
-                }
-                // Persistent conversation: DO NOT close here.
                 if (e is CancellationException) throw e
                 close(RuntimeException("Generation failed: ${e.message}", e))
             } finally {
@@ -851,7 +924,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 isGenerating = true
                 markGenerationStarted()
                 try {
-                    val samplerConfig = if (usingNpu) null else SamplerConfig(40, 0.95, 0.8)
+                    val samplerConfig = samplerForActiveModel()
                     val conv = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
                     try {
                         val deferred = CompletableDeferred<String>()
@@ -882,9 +955,34 @@ class LiteRTInferenceEngine @Inject constructor(
     override suspend fun loadLoraAdapter(adapterPath: String, scale: Float) = Unit
     override fun clearLoraAdapter() = Unit
 
+    // ── Session reset ─────────────────────────────────────────────────────────
+
+    /**
+     * Discards the cached [activeConversation] so the next generation starts
+     * with a clean KV cache. Called when the user creates a new chat, switches
+     * sessions, or clears history.
+     *
+     * With per-request conversations in [generateStream], this is a safety net:
+     * it ensures no stale conversation lingers if the architecture is ever
+     * changed back to persistent sessions.
+     */
+    override suspend fun resetSession() = withContext(engineDispatcher) {
+        generateMutex.withLock {
+            val eng = engine ?: return@withLock
+            runCatching { activeConversation?.close() }
+            val sc = samplerForActiveModel()
+            activeConversation = runCatching {
+                eng.createConversation(ConversationConfig(samplerConfig = sc))
+            }.getOrNull()
+            nativeDoneSignal = null
+            DebugLogger.log("LITERT", "[SESSION] Session reset — conversation recycled, KV cache cleared")
+        }
+    }
+
     override fun release() {
         markStage(CrashStage.CLEANUP)
-        closeInternal() }
+        closeInternal()
+    }
 
     // ── Device state logging ──────────────────────────────────────────────────
 

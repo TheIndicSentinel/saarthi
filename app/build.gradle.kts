@@ -8,8 +8,8 @@ android {
     namespace = "com.saarthi.app"
     defaultConfig {
         applicationId = "com.saarthi.app"
-        versionCode = 9
-        versionName = "1.0.8"
+        versionCode = 10
+        versionName = "1.0.9"
     }
 
     signingConfigs {

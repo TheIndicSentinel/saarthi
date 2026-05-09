@@ -53,5 +53,13 @@ interface InferenceEngine {
      */
     fun clearLoraAdapter() {}
 
+    /**
+     * Reset the inference session state (KV cache, conversation context).
+     * Called when the user starts a new chat or clears history.
+     * Implementations should discard any cached conversation state so the next
+     * [generateStream] call starts from a clean context.
+     */
+    suspend fun resetSession() {}
+
     fun release()
 }
