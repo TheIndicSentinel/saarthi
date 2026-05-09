@@ -32,6 +32,18 @@ interface InferenceEngine {
      */
     val isNativeGenerating: Boolean get() = false
 
+    /**
+     * True when the next [generateStream] call will start a brand-new conversation
+     * (no prior turns in the model's KV cache). The caller should send the system
+     * prompt on the first turn only — subsequent turns just send the user's
+     * message and let the engine's stateful conversation maintain context, the
+     * same way Google AI Edge Gallery's AI Chat does.
+     *
+     * Becomes false after the first successful generation; reset to true by
+     * [resetSession] or after an error that recycles the conversation.
+     */
+    val isFreshConversation: Boolean get() = true
+
     suspend fun initialize(config: InferenceConfig)
 
     /** Streams partial tokens as they are generated. */

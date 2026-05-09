@@ -323,51 +323,73 @@ class ChatRepositoryImpl @Inject constructor(
         }
 
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
-        val memoryContext = runCatching { memoryRepository.buildContextSummary() }.getOrDefault("")
-        val systemInstructions = buildSystemPrompt(memoryContext)
-
-        DebugLogger.log("PROMPT", "System prompt built  chars=${systemInstructions.length}  lang=${currentLanguage.code}  memory=${memoryContext.isNotEmpty()}")
-
-        // Filter history: non-empty, non-streaming, drop current user message, keep only
-        // complete user→model pairs (orphaned user messages from prior crashes are excluded).
-        val rawHistory = _history.value
-            .filter { it.content.isNotBlank() && !it.isStreaming }
-            .dropLast(1)  // drop the just-added current user message
-        val history = buildCompleteHistoryPairs(rawHistory)
-            .takeLast(maxHistoryTurns)
-
+        val isFresh = inferenceEngine.isFreshConversation
         val fileContext = if (attachments.isNotEmpty())
             fileContentExtractor.buildRagContext(attachments, userMessage)
         else ""
 
-        DebugLogger.log("PROMPT", "History turns=${history.size}  attachments=${attachments.size}")
-
-        return buildString {
-            // Plain text prompt — NO <start_of_turn>/<end_of_turn> tags.
-            // The LiteRT Conversation API adds Gemma chat template wrapping
-            // internally. Adding our own tags causes double-templating, which
-            // prevents the model from generating clean EOS → onDone never fires.
-            // (Matches Google AI Edge Gallery reference implementation.)
-            append(systemInstructions)
-            append("\n\n")
-
-            if (history.isNotEmpty()) {
-                history.forEach { msg ->
-                    val role = if (msg.role == MessageRole.USER) "User" else "Assistant"
-                    append("$role: ${msg.content}\n")
-                }
-                append("\n")
+        // OFFICIAL APPROACH (matches Google AI Edge Gallery's AI Chat):
+        // The Conversation maintains the chat history in its KV cache. Each turn we
+        // send ONLY the new user message and the engine wraps it in Gemma's native
+        // chat template (<start_of_turn>user … <start_of_turn>model …) automatically.
+        //
+        // FRESH turn = first message in this Conversation (brand-new chat, switched
+        // session, cleared history, or recycled after error). On a FRESH turn we send
+        // the full system prompt, plus — if the user is resuming a saved chat — a
+        // brief recap of the last 1–2 turns so the model picks up where they left off.
+        //
+        // CONTINUE turn = the model already has the prior turns in its KV cache; we
+        // just send the new user message.
+        return if (isFresh) {
+            val memoryContext = runCatching { memoryRepository.buildContextSummary() }.getOrDefault("")
+            val priorTurns = buildPriorTurnsRecap()
+            val systemInstructions = buildSystemPrompt(memoryContext, priorTurns)
+            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  attachments=${attachments.size}  recapTurns=${priorTurns.isNotEmpty()}")
+            buildString {
+                append(systemInstructions)
+                append("\n\n")
+                if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
+                append(userMessage)
+            }.let { prompt ->
+                val budget = maxPromptChars
+                val finalPrompt = if (prompt.length > budget) prompt.take(budget) else prompt
+                DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget")
+                finalPrompt
             }
-
-            if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
-            append(userMessage)
-        }.let { prompt ->
-            val budget = maxPromptChars
-            val needsTrim = prompt.length > budget
-            val finalPrompt = if (needsTrim) prompt.take(budget) else prompt
-            DebugLogger.log("PROMPT", "Final prompt  chars=${finalPrompt.length}  budget=$budget  trimmed=$needsTrim")
-            finalPrompt
+        } else {
+            DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  (KV cache holds prior history)")
+            buildString {
+                if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
+                append(userMessage)
+            }
         }
+    }
+
+    /**
+     * Recap of the most recent saved user/assistant pair(s), used when the user is
+     * resuming a chat (engine just initialised or was reset, but DB has saved
+     * messages). Empty for brand-new chats.
+     *
+     * Sized per model tier: 1 prior pair on COMPACT (1B has a tight token budget),
+     * 2 pairs on STANDARD/LARGE.
+     */
+    private fun buildPriorTurnsRecap(): String {
+        val complete = buildCompleteHistoryPairs(
+            _history.value.filter { it.content.isNotBlank() && !it.isStreaming }.dropLast(1)
+        )
+        if (complete.isEmpty()) return ""
+        val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+        val pairsToKeep = if (tier == SystemPromptProvider.ModelTier.COMPACT) 1 else 2
+        val perMsgChars = if (tier == SystemPromptProvider.ModelTier.COMPACT) 200 else 400
+        val recent = complete.takeLast(pairsToKeep * 2)
+        return buildString {
+            append("Recap of the user's most recent exchange with you (continue naturally — do not repeat it):\n")
+            recent.forEach { msg ->
+                val who = if (msg.role == MessageRole.USER) "User" else "You"
+                val body = msg.content.take(perMsgChars)
+                append("$who: $body\n")
+            }
+        }.trimEnd()
     }
 
     /**
@@ -394,20 +416,16 @@ class ChatRepositoryImpl @Inject constructor(
         return result
     }
 
-    private fun buildSystemPrompt(memoryContext: String): String {
+    private fun buildSystemPrompt(memoryContext: String, priorTurnsContext: String = ""): String {
         val modelName = inferenceEngine.activeModelName
         val tier = systemPromptProvider.tierFor(modelName)
         if (memoryContext.isNotEmpty()) {
             val memCount = memoryContext.lines().count { it.startsWith("- ") }
-            if (tier == SystemPromptProvider.ModelTier.COMPACT) {
-                DebugLogger.log("MEMORY", "Skipping $memCount memory facts — model tier=COMPACT (1B can't reliably use memories)")
-            } else {
-                DebugLogger.log("MEMORY", "Injected $memCount user memory facts into prompt  tier=$tier")
-            }
+            DebugLogger.log("MEMORY", "Injected $memCount user memory facts into prompt  tier=$tier")
         } else {
             DebugLogger.log("MEMORY", "No user memories stored yet")
         }
-        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}")
+        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}  recap=${priorTurnsContext.isNotEmpty()}")
         val langLine = if (currentLanguage == SupportedLanguage.ENGLISH) ""
                        else currentLanguage.systemPromptInstruction
         return systemPromptProvider.build(
@@ -415,6 +433,7 @@ class ChatRepositoryImpl @Inject constructor(
             pack = PackType.BASE,
             languageInstruction = langLine,
             memoryContext = memoryContext,
+            priorTurnsContext = priorTurnsContext,
         )
     }
 

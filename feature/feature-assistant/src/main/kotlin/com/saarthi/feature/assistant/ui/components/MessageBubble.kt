@@ -124,10 +124,17 @@ fun MessageBubble(
                 Column {
                     if (message.content.isEmpty() && message.isStreaming) {
                         TypingIndicator()
-                    } else {
+                    } else if (isUser) {
+                        // User text is verbatim — never render markdown for what they typed.
                         Text(
                             text = message.content,
                             style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 22.sp),
+                            color = SaarthiColors.TextPrimary,
+                        )
+                    } else {
+                        // Assistant output is markdown — render bold/italic/lists/code.
+                        MarkdownText(
+                            text = message.content,
                             color = SaarthiColors.TextPrimary,
                         )
                     }

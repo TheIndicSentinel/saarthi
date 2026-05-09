@@ -104,6 +104,16 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile private var usingNpu: Boolean = false
     @Volatile private var usingGpu: Boolean = false
 
+    // True when the active Conversation has no turns in its KV cache yet.
+    // Caller (ChatRepositoryImpl) reads this to decide whether to prepend the
+    // system prompt to the next user message — same pattern as AI Edge Gallery.
+    // Lifecycle:
+    //   • init / resetSession      → true   (conversation just created)
+    //   • after first onDone       → false  (KV cache now holds prior turns)
+    //   • after onError + recycle  → true   (corrupted state, started over)
+    @Volatile private var _isFreshConversation: Boolean = true
+    override val isFreshConversation: Boolean get() = _isFreshConversation
+
     // isGenerating: tracks whether our *coroutine* is inside a generation block.
     // isNativeGenerating: tracks whether the litertlm native thread is still computing.
     // These are separate: cancelling the coroutine sets isGenerating=false immediately,
@@ -398,12 +408,9 @@ class LiteRTInferenceEngine @Inject constructor(
                     val likelyCause = when {
                         crashWasThisModel && wasGpuOrNpu ->
                             "GPU/NPU_FAULT: inference caused SIGKILL on GPU/NPU backend — banning GPU for 24h."
-                        crashWasThisModel && !wasGpuOrNpu && !batteryExempt ->
-                            "OEM_WATCHDOG: CPU inference killed by battery watchdog (no exemption). " +
-                            "Grant 'Unrestricted' battery in Settings → Apps → Saarthi → Battery."
-                        crashWasThisModel && !wasGpuOrNpu && batteryExempt ->
-                            "CPU_CRASH_UNKNOWN: Process killed during CPU generation despite battery exemption. " +
-                            "Possible OOM or native LiteRT bug."
+                        crashWasThisModel && !wasGpuOrNpu ->
+                            "CPU_CRASH: Process killed during CPU generation. " +
+                            "Possible OEM watchdog, OOM, or native LiteRT issue."
                         crashedDuringInit ->
                             "INIT_CRASH: Killed during model load — likely OOM. " +
                             "Close background apps and retry, or choose a smaller model."
@@ -586,6 +593,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     loadedEffectiveMaxTokens = effectiveMaxTokens
                     activeModelName = config.modelName
                     _activeModelNameFlow.value = config.modelName
+                    _isFreshConversation = true   // brand-new Conversation, no turns in KV
                     markInitEnded()
                     setReady(true)
                     DebugLogger.log("LITERT", "Model ready & pre-warmed  $profile  backend=${backendLabel()}")
@@ -825,24 +833,21 @@ class LiteRTInferenceEngine @Inject constructor(
                         watchdog?.cancel()
                         heartbeat?.cancel()
 
-                        // CRITICAL FIX: onDone is called on the native C++ inference thread.
-                        // Calling eng.createConversation() here causes a DEADLOCK because
-                        // LiteRT holds an internal mutex until this callback returns.
-                        // We must do the recycling asynchronously.
-                        CoroutineScope(Dispatchers.IO).launch {
-                            runCatching { conversation.close() }
-                            val sc = samplerForActiveModel()
-                            activeConversation = runCatching {
-                                eng.createConversation(ConversationConfig(samplerConfig = sc))
-                            }.getOrNull()
-                            thisDone.complete(Unit)
-                        }
+                        // STATEFUL: keep the Conversation alive across turns. Its KV cache
+                        // now holds this turn's user message + model response — the next
+                        // generateStream() call sends only the new user message and Gemma's
+                        // chat template wraps it naturally. Same pattern as AI Edge Gallery's
+                        // AI Chat. Recycling here would force ChatRepositoryImpl to replay
+                        // the whole transcript as plain text every turn, which confuses
+                        // small models and burns context.
+                        _isFreshConversation = false
+                        thisDone.complete(Unit)
 
                         resetCrashCount(loadedModelPath ?: "")
                         markGenerationEnded()
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                         val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
-                        DebugLogger.log("LITERT", "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}")
+                        DebugLogger.log("LITERT", "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}  freshConversation=false")
                         closingEngine?.let { old ->
                             runCatching { old.close() }
                             closingEngine = null
@@ -857,13 +862,19 @@ class LiteRTInferenceEngine @Inject constructor(
                         watchdog?.cancel()
                         heartbeat?.cancel()
 
-                        // Recycle asynchronously to prevent native deadlock
+                        // Errors and cancellations leave the Conversation in a half-finished
+                        // state — calling sendMessageAsync on it again throws FAILED_PRECONDITION.
+                        // Recycle it so the next turn starts fresh. The next turn is treated as
+                        // a brand-new conversation (system prompt re-sent).
+                        // Async to avoid native-thread deadlock (LiteRT holds an internal mutex
+                        // until this callback returns; createConversation() needs that mutex).
                         CoroutineScope(Dispatchers.IO).launch {
                             runCatching { conversation.close() }
                             val sc = samplerForActiveModel()
                             activeConversation = runCatching {
                                 eng.createConversation(ConversationConfig(samplerConfig = sc))
                             }.getOrNull()
+                            _isFreshConversation = true
                             thisDone.complete(Unit)
                         }
 
@@ -975,6 +986,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 eng.createConversation(ConversationConfig(samplerConfig = sc))
             }.getOrNull()
             nativeDoneSignal = null
+            _isFreshConversation = true   // next turn must re-send system prompt
             DebugLogger.log("LITERT", "[SESSION] Session reset — conversation recycled, KV cache cleared")
         }
     }

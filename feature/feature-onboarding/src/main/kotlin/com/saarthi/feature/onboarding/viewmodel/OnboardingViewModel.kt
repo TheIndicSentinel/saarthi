@@ -26,7 +26,6 @@ import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.model.PackType
-import android.os.PowerManager
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -58,9 +57,6 @@ data class OnboardingUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val manualPathInput: String = "",
-    // True while waiting for user to respond to the system battery optimization dialog.
-    // The Screen observes this and launches the system intent; cleared on return.
-    val showBatteryOptimizationWarning: Boolean = false,
     val needsAllFilesPermission: Boolean = false,
     val downloadedModelIds: Set<String> = emptySet(),
 )
@@ -384,36 +380,9 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    // ── Battery optimization ──────────────────────────────────────────────────
-
-    /**
-     * Called by the Screen after the user returns from the system battery settings.
-     * Clears the pending flag so the LaunchedEffect does not re-fire, then proceeds
-     * directly to model init (the user has had a chance to grant exemption).
-     */
-    fun onReturnFromBatterySettings() {
-        _uiState.update { it.copy(showBatteryOptimizationWarning = false) }
-        val pm = appContext.getSystemService(PowerManager::class.java)
-        val granted = pm.isIgnoringBatteryOptimizations(appContext.packageName)
-        DebugLogger.log("VMODEL", "Returned from battery settings — batteryOptExempt=$granted")
-        confirmModelAndInitInternal()
-    }
-
     // ── Model init ────────────────────────────────────────────────────────────
 
     fun confirmModelAndInit() {
-        // Samsung OneUI on Android 14+ aggressively kills CPU-intensive processes without
-        // Unrestricted battery. CPU inference (SM8550 + all CPU-only devices) runs for
-        // 100–250 seconds; the OEM watchdog fires well within that window.
-        // batteryOptExempt=false was logged in every crash session on SM-S918B.
-        val pm = appContext.getSystemService(PowerManager::class.java)
-        val isExempt = runCatching { pm.isIgnoringBatteryOptimizations(appContext.packageName) }
-            .getOrDefault(true)
-        DebugLogger.log("VMODEL", "confirmModelAndInit  batteryOptExempt=$isExempt")
-        if (!isExempt) {
-            _uiState.update { it.copy(showBatteryOptimizationWarning = true) }
-            return
-        }
         confirmModelAndInitInternal()
     }
 
