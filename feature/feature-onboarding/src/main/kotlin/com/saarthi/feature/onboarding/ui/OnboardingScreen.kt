@@ -32,6 +32,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -197,9 +201,9 @@ private fun WelcomeStep(onNext: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            OnboardingFeatureRow("🔒", "Complete Privacy", "Your conversations never leave your device", SaarthiColors.Gold)
-            OnboardingFeatureRow("📴", "100% Offline", "Works without internet, anywhere in India", SaarthiColors.CyberTeal)
-            OnboardingFeatureRow("🪔", "Made for Bharat", "Understands Indian languages and context", SaarthiColors.Saffron)
+            OnboardingFeatureRow(Icons.Outlined.Shield, "Complete Privacy", "Your conversations never leave your device", SaarthiColors.Gold)
+            OnboardingFeatureRow(Icons.Outlined.CloudOff, "100% Offline", "Works without internet, anywhere in India", SaarthiColors.CyberTeal)
+            OnboardingFeatureRow(Icons.Outlined.Public, "Made for Bharat", "Understands Indian languages and context", SaarthiColors.Saffron)
         }
 
         Spacer(Modifier.weight(0.08f))
@@ -234,9 +238,30 @@ private fun LanguageSelectStep(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(48.dp))
-        Text("Choose your language", style = MaterialTheme.typography.headlineMedium, color = SaarthiColors.Gold)
-        Spacer(Modifier.height(8.dp))
-        Text("भाषा चुनें • மொழியை தேர்ந்தெடுக்கவும்", style = MaterialTheme.typography.bodyMedium, color = SaarthiColors.TextMuted)
+        Text(
+            "Choose your language",
+            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = SaarthiColors.Gold,
+        )
+        Spacer(Modifier.height(10.dp))
+        // Build the supported-language teaser from the enum so adding a language
+        // never desyncs the subtitle. Shown on two lines so all 10 native names fit.
+        val supportedTeaser = remember {
+            SupportedLanguage.entries.joinToString("  ·  ") { it.englishName }
+        }
+        Text(
+            supportedTeaser,
+            style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.3.sp),
+            color = SaarthiColors.TextSecondary,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Pick one to get started — you can change it later in settings.",
+            style = MaterialTheme.typography.bodySmall,
+            color = SaarthiColors.TextMuted,
+            textAlign = TextAlign.Center,
+        )
         Spacer(Modifier.height(24.dp))
         LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(SupportedLanguage.entries) { lang ->
@@ -769,7 +794,7 @@ private fun WelcomeMandala(modifier: Modifier = Modifier) {
 
 @Composable
 private fun OnboardingFeatureRow(
-    icon: String,
+    icon: ImageVector,
     title: String,
     subtitle: String,
     accentColor: Color = SaarthiColors.Gold,
@@ -788,14 +813,28 @@ private fun OnboardingFeatureRow(
             modifier = Modifier
                 .size(46.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(accentColor.copy(alpha = 0.12f)),
+                .background(accentColor.copy(alpha = 0.14f))
+                .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Text(icon, style = MaterialTheme.typography.titleLarge)
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accentColor,
+                modifier = Modifier.size(22.dp),
+            )
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, color = SaarthiColors.TextPrimary)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = SaarthiColors.TextMuted)
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = SaarthiColors.TextPrimary,
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = SaarthiColors.TextMuted,
+            )
         }
     }
 }

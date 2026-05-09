@@ -540,8 +540,20 @@ class LiteRTInferenceEngine @Inject constructor(
                 val batteryPct = level * 100 / scale.toFloat()
                 val isLowBattery = batteryPct < 20f && batteryPct > 0
 
+                // Tier-aware KV-cache budget. The previous flat 512-token cap made
+                // Gemma 4 unusable: by turn 3 the system prompt + recap already took
+                // ~520 tokens, leaving zero room for the reply (model emitted 1 EOS
+                // token and stopped — the "Namm" bug). Bigger models get more cache.
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
+                    val nameForTier = (config.modelName ?: config.modelPath).lowercase()
+                    val isLargeTier = nameForTier.contains("gemma 4") ||
+                        nameForTier.contains("gemma4") ||
+                        nameForTier.contains("gemma-4") ||
+                        sizeMb > 1500
+                    val isCompactTier = nameForTier.contains("1b") ||
+                        nameForTier.contains("compact") ||
+                        sizeMb < 700
                     when {
                         isLowBattery -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=256 (BATTERY SAFE MODE: ${batteryPct.toInt()}%)")
@@ -555,14 +567,25 @@ class LiteRTInferenceEngine @Inject constructor(
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=256 (AUTO-RECOVERY: CPU crash count $cpuCrashCount)")
                             256
                         }
-                        config.maxTokens > 0 && config.maxTokens <= 1024 -> config.maxTokens
+                        config.maxTokens > 0 && config.maxTokens <= 4096 -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=${config.maxTokens} (caller override)")
+                            config.maxTokens
+                        }
+                        isLargeTier && headroomMb >= 1500 -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (LARGE tier — Gemma 4 needs room for system+recap+reply)  headroom=${headroomMb}MB  model=${sizeMb}MB")
+                            2048
+                        }
+                        isCompactTier -> {
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 (COMPACT tier — tested stable on SM8550)")
+                            512
+                        }
                         headroomMb < 2048 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB")
                             512
                         }
                         else -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 (Production Default)")
-                            512
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024 (STANDARD tier default)  headroom=${headroomMb}MB")
+                            1024
                         }
                     }
                 }
