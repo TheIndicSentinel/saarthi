@@ -366,12 +366,15 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Recap of the most recent saved user/assistant pair(s), used when the user is
-     * resuming a chat (engine just initialised or was reset, but DB has saved
-     * messages). Empty for brand-new chats.
+     * Recap of the most recent saved turn(s), giving the model continuity even
+     * though the Conversation's KV cache is recycled per turn (see
+     * [LiteRTInferenceEngine.generateStream] for why we recycle).
      *
-     * Sized per model tier: 1 prior pair on COMPACT (1B has a tight token budget),
-     * 2 pairs on STANDARD/LARGE.
+     * Sized per tier:
+     *  • COMPACT (1B): just the user's last question (~120 chars). 1B doesn't
+     *    benefit much from re-reading its own previous reply, but it does
+     *    benefit from knowing what topic the user was on.
+     *  • STANDARD / LARGE: last 2 user/assistant pairs in full.
      */
     private fun buildPriorTurnsRecap(): String {
         val complete = buildCompleteHistoryPairs(
@@ -379,8 +382,12 @@ class ChatRepositoryImpl @Inject constructor(
         )
         if (complete.isEmpty()) return ""
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
-        val pairsToKeep = if (tier == SystemPromptProvider.ModelTier.COMPACT) 1 else 2
-        val perMsgChars = if (tier == SystemPromptProvider.ModelTier.COMPACT) 200 else 400
+        if (tier == SystemPromptProvider.ModelTier.COMPACT) {
+            val lastUser = complete.lastOrNull { it.role == MessageRole.USER } ?: return ""
+            return "Earlier the user asked: \"${lastUser.content.take(120)}\""
+        }
+        val pairsToKeep = 2
+        val perMsgChars = 400
         val recent = complete.takeLast(pairsToKeep * 2)
         return buildString {
             append("Recap of the user's most recent exchange with you (continue naturally — do not repeat it):\n")

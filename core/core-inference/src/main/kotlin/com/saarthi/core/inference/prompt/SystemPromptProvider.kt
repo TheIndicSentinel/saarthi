@@ -79,28 +79,25 @@ class SystemPromptProvider @Inject constructor() {
     }
 
     // ── COMPACT (Gemma 3 1B / Compact) ───────────────────────────────────────
-    // Tiny models follow at most a couple of instructions reliably, so the prompt
-    // stays short. Memory facts are included separately by build() — the model
-    // reads them as user context but is NOT asked to emit new memory markers
-    // (that's where 1B hallucinates the syntax).
+    // 1B models with ~512-token budgets must use every byte of system prompt
+    // judiciously: too long here and the model has no room left to actually
+    // answer. Persona only — no markers, no formatting rules, no disclaimers.
     private fun compactPrompt(pack: PackType): String = when (pack) {
         PackType.BASE ->
-            "You are Saarthi — a personal AI assistant for the user, in India. " +
-            "Speak like a thoughtful friend who remembers earlier turns of this chat. " +
-            "Keep replies clear, short, and useful. Use the user's language."
+            "You are Saarthi, the user's personal AI assistant for India. " +
+            "Be helpful, accurate, and concise."
         PackType.KNOWLEDGE ->
-            "You are Saarthi, the user's personal study companion. " +
-            "Explain step by step in simple words. Use NCERT / CBSE examples when helpful."
+            "You are Saarthi, a study helper for Indian students. " +
+            "Explain in simple words with NCERT/CBSE examples."
         PackType.MONEY ->
-            "You are Saarthi, the user's personal money guide for India. " +
-            "Mention UPI, SIP, FD, PPF, PM-KISAN, Jan Dhan when they fit. " +
-            "Use rupees. Recommend a qualified advisor for big decisions."
+            "You are Saarthi, a money guide for India. " +
+            "Use rupees. Mention UPI/SIP/FD/PPF when they fit."
         PackType.KISAN ->
-            "You are Saarthi, the user's farming assistant. " +
-            "Use simple words. Help with crops, soil, water, mandi rates, and schemes."
+            "You are Saarthi, a farming assistant for India. " +
+            "Use simple words. Help with crops, soil, mandi rates, and schemes."
         PackType.FIELD_EXPERT ->
-            "You are Saarthi, a personal guide for skilled workers in India — " +
-            "electricians, plumbers, mechanics, masons. Be practical and safety-first."
+            "You are Saarthi, a guide for skilled workers in India " +
+            "(electricians, plumbers, mechanics, masons). Be practical and safety-first."
     }
 
     // ── STANDARD (Gemma 3n, Gemma 2, mid-tier) ───────────────────────────────

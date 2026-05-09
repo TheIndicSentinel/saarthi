@@ -709,20 +709,23 @@ class LiteRTInferenceEngine @Inject constructor(
     // ── generateStream ────────────────────────────────────────────────────────
 
     /**
-     * Token-by-token streaming via persistent [Conversation.sendMessageAsync].
+     * Token-by-token streaming via [Conversation.sendMessageAsync].
      *
-     * PERSISTENT CONVERSATION WITH RECYCLING:
-     *   • Uses the class-level [activeConversation] (created during init).
-     *   • After [onDone] fires, the old conversation is CLOSED and a fresh one
-     *     is created immediately. This recycles the KV cache so the next message
-     *     starts with full context budget (fixes the 1-token EOS bug).
-     *   • [buildPrompt] in ChatRepositoryImpl embeds the full context (system
-     *     prompt + history + user message), so each prompt is self-contained.
+     * RECYCLED CONVERSATION (one per turn):
+     *   • The first Conversation is created during [initialize] (so init-time
+     *     shader warmup happens before the user sees a blank UI).
+     *   • After [onDone] / [onError], the Conversation is closed and a fresh
+     *     one is created immediately for the next turn. KV cache is therefore
+     *     empty at the start of every sendMessageAsync.
+     *   • Continuity across turns comes from a prompt-level recap built by
+     *     [ChatRepositoryImpl.buildPriorTurnsRecap] — NOT from KV-cache reuse.
      *
-     * Why persistent (not per-request):
-     *   SM8550 GPU's native driver never fires onDone/onError when a freshly
-     *   created Conversation is used. Keeping the conversation alive from init
-     *   (where warmup primes the GPU shaders) ensures callbacks fire reliably.
+     * Why we recycle (not stateful KV reuse):
+     *   On Snapdragon 8 Gen 2 (SM8550) + Android 16, calling sendMessageAsync
+     *   a second time on the same Conversation reliably SIGKILLs the process
+     *   inside the litertlm GPU driver. Same failure pattern on the CPU
+     *   backend. Recycling avoids the bug at the cost of a tiny per-turn
+     *   createConversation() (~30–50ms with cached shaders).
      */
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow<String> {
         val eng = engine
@@ -833,21 +836,35 @@ class LiteRTInferenceEngine @Inject constructor(
                         watchdog?.cancel()
                         heartbeat?.cancel()
 
-                        // STATEFUL: keep the Conversation alive across turns. Its KV cache
-                        // now holds this turn's user message + model response — the next
-                        // generateStream() call sends only the new user message and Gemma's
-                        // chat template wraps it naturally. Same pattern as AI Edge Gallery's
-                        // AI Chat. Recycling here would force ChatRepositoryImpl to replay
-                        // the whole transcript as plain text every turn, which confuses
-                        // small models and burns context.
-                        _isFreshConversation = false
-                        thisDone.complete(Unit)
+                        // RECYCLE the Conversation after every turn.
+                        //
+                        // The stateful "reuse one Conversation across turns" pattern
+                        // crashes natively on Snapdragon 8 Gen 2 (SM8550) + Android 16:
+                        // the first sendMessageAsync succeeds, the second SIGKILLs the
+                        // process inside the litertlm GPU driver. Same pattern reproduces
+                        // on the CPU backend with watchdog kills. So we close the old
+                        // Conversation and create a fresh one — context continuity comes
+                        // from the prompt-level recap built by ChatRepositoryImpl, not
+                        // from the KV cache.
+                        //
+                        // Async to avoid native deadlock — onDone runs on the native
+                        // C++ inference thread, and createConversation() needs the same
+                        // mutex that LiteRT holds until this callback returns.
+                        CoroutineScope(Dispatchers.IO).launch {
+                            runCatching { conversation.close() }
+                            val sc = samplerForActiveModel()
+                            activeConversation = runCatching {
+                                eng.createConversation(ConversationConfig(samplerConfig = sc))
+                            }.getOrNull()
+                            _isFreshConversation = true
+                            thisDone.complete(Unit)
+                        }
 
                         resetCrashCount(loadedModelPath ?: "")
                         markGenerationEnded()
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                         val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
-                        DebugLogger.log("LITERT", "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}  freshConversation=false")
+                        DebugLogger.log("LITERT", "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}  conv=recycled")
                         closingEngine?.let { old ->
                             runCatching { old.close() }
                             closingEngine = null
