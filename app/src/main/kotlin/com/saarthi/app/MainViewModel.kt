@@ -72,18 +72,15 @@ class MainViewModel @Inject constructor(
                 modelPath.endsWith(it.fileName)
             }
 
-            // maxTokens = the KV-cache size MediaPipe pre-allocates AND the model's
-            // maximum total sequence (input + output). Must match the model's compiled-in
-            // context length for .task models (Gemma 3/3n = 1280, Gemma 2 = 2048).
-            // For .litertlm models (Gemma 4 with 128K training context) cap at 2048
-            // to avoid massive pre-allocation.
-            val maxTokens = (catalogEntry?.contextLength ?: 1280).coerceIn(1280, 2048)
+            // Pass maxTokens=0 so LiteRTInferenceEngine picks the tier-aware default
+            // based on the model size / display name (Gemma 4 → 2048, mid → 1024,
+            // 1B / Compact → 512). See LiteRTInferenceEngine.effectiveMaxTokens.
             val profile = deviceProfiler.profile()
             val config = InferenceConfig(
                 modelPath  = modelPath,
                 modelName  = catalogEntry?.displayName,
-                maxTokens  = maxTokens,
-                nCtx       = maxTokens,
+                maxTokens  = 0,
+                nCtx       = 0,
                 nThreads   = profile.recommendedThreads,
                 nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )

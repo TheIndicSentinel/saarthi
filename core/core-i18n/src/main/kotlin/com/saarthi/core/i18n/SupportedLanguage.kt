@@ -249,8 +249,10 @@ enum class SupportedLanguage(
     }
 
     /** Instruction appended to system prompt so the model responds in this language. */
-    val systemPromptInstruction: String get() =
-        "Always respond in $nativeName. Maintain this language consistently."
+    val systemPromptInstruction: String get() = when (this) {
+        ENGLISH -> "Always reply in English. Even if the user has typed earlier in another language, do not switch unless the user explicitly switches."
+        else    -> "Always reply in $nativeName ($englishName). Maintain this language consistently across the whole conversation."
+    }
 
     companion object {
         fun fromCode(code: String): SupportedLanguage =

@@ -244,20 +244,8 @@ private fun LanguageSelectStep(
             color = SaarthiColors.Gold,
         )
         Spacer(Modifier.height(10.dp))
-        // Build the supported-language teaser from the enum so adding a language
-        // never desyncs the subtitle. Shown on two lines so all 10 native names fit.
-        val supportedTeaser = remember {
-            SupportedLanguage.entries.joinToString("  ·  ") { it.englishName }
-        }
         Text(
-            supportedTeaser,
-            style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.3.sp),
-            color = SaarthiColors.TextSecondary,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Pick one to get started — you can change it later in settings.",
+            "You can change it later in settings.",
             style = MaterialTheme.typography.bodySmall,
             color = SaarthiColors.TextMuted,
             textAlign = TextAlign.Center,

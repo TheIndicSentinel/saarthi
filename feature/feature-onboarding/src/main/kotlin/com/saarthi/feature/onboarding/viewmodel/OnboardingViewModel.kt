@@ -414,18 +414,17 @@ class OnboardingViewModel @Inject constructor(
             }
         }
 
-        // maxTokens must match the model's compiled-in context for .task models.
-        // Gemma 3/3n = 1280, Gemma 2 = 2048, Gemma 4 .litertlm (128K) → capped at 2048.
-        // Production default: 512 tokens. Aggressive 1024/2048 settings cause OOM on Samsung S23/S24 
-        // during conversation matrix allocation. LiteRTInferenceEngine will further reduce 
-        // this to 256 if crashes occur.
-        val maxTokens = 512.coerceIn(256, 1024)
+        // Pass maxTokens=0 so LiteRTInferenceEngine picks the tier-aware default
+        // (Gemma 4 → 2048, Gemma 3n / 2 → 1024, Gemma 1B / Compact → 512). Forcing
+        // a value here used to short-circuit that logic and starve Gemma 4 turns
+        // of response budget (the "incomplete reply" bug). Auto-recovery in the
+        // engine still steps down to 256/64 on repeated CPU crashes.
         val profile = deviceProfiler.profile()
         val config = InferenceConfig(
             modelPath   = path,
             modelName   = catalogEntry?.displayName,
-            maxTokens   = maxTokens,
-            nCtx        = maxTokens,
+            maxTokens   = 0,
+            nCtx        = 0,
             nThreads    = profile.recommendedThreads,
             nGpuLayers  = catalogEntry?.nGpuLayers ?: 0,
         )

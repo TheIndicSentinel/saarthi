@@ -432,9 +432,11 @@ class ChatRepositoryImpl @Inject constructor(
         } else {
             DebugLogger.log("MEMORY", "No user memories stored yet")
         }
-        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}  recap=${priorTurnsContext.isNotEmpty()}")
-        val langLine = if (currentLanguage == SupportedLanguage.ENGLISH) ""
-                       else currentLanguage.systemPromptInstruction
+        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}  recap=${priorTurnsContext.isNotEmpty()}  lang=${currentLanguage.code}")
+        // Always pass the language instruction, including for English. Without it
+        // the model defaults to whatever it picks up from the user's input or its
+        // training mix (we saw English-selected users getting Hindi replies).
+        val langLine = currentLanguage.systemPromptInstruction
         return systemPromptProvider.build(
             modelName = modelName,
             pack = PackType.BASE,
