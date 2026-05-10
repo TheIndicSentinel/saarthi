@@ -364,7 +364,15 @@ class ModelDownloadManager @Inject constructor(
             val request = DownloadManager.Request(Uri.parse(url)).apply {
                 setTitle(title)
                 setDescription("Downloading AI model…")
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                // VISIBILITY_VISIBLE shows the OS download notification while in progress
+                // AND on completion. Two reasons we want this for production:
+                //  1. User sees download progress in the notification shade even if the
+                //     app is backgrounded or the screen is locked — same UX as Chrome /
+                //     Play Store, removes the "did it stop?" ambiguity.
+                //  2. Samsung OneUI 7 / Android 16's process killer is gentler on apps
+                //     with an active user-visible download notification — reduces the
+                //     "download paused when I switch apps" problem.
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
                 setDestinationUri(Uri.fromFile(destFile))
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(true)
