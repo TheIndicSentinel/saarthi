@@ -1,0 +1,83 @@
+# Dependabot — automated dependency updates, gated by ci.yml.
+#
+# Without this, libs.versions.toml drifts out of date until a CVE forces
+# an emergency upgrade. Dependabot opens one small PR per update; CI
+# runs the full test + assemble-debug suite against each, so anything
+# that breaks shows up as a red status check before the PR merges.
+#
+# Rate-limited so the PR queue doesn't drown the inbox: 5 open Gradle
+# PRs and 5 GitHub Actions PRs at a time, weekly cadence.
+version: 2
+
+updates:
+  # ── Gradle dependencies (libs.versions.toml + module-level imports) ──
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "gradle"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # Group Compose / Lifecycle / Navigation / Hilt / Room into single
+    # PRs so Dependabot doesn't open 12 PRs every time AndroidX cuts a
+    # quarterly release. CI on each grouped PR is one run, not twelve.
+    groups:
+      androidx-compose:
+        patterns:
+          - "androidx.compose*"
+          - "androidx.activity:activity-compose"
+      androidx-lifecycle:
+        patterns:
+          - "androidx.lifecycle*"
+      androidx-navigation:
+        patterns:
+          - "androidx.navigation*"
+          - "androidx.hilt:hilt-navigation-compose"
+      androidx-room:
+        patterns:
+          - "androidx.room*"
+      hilt:
+        patterns:
+          - "com.google.dagger:hilt*"
+      kotlinx-coroutines:
+        patterns:
+          - "org.jetbrains.kotlinx:kotlinx-coroutines*"
+      junit-mockk-test:
+        patterns:
+          - "junit:junit"
+          - "io.mockk:mockk"
+          - "app.cash.turbine:turbine"
+    # Conservative: don't touch the LiteRT-LM version automatically. It's
+    # the one dep where a minor bump has historically broken SM8550
+    # behaviour, and we only upgrade it deliberately with a device test.
+    ignore:
+      - dependency-name: "com.google.ai.edge.litertlm:litertlm-android"
+      # Kotlin + KSP must move together with the AGP version they're
+      # tested against — handle these as a coordinated upgrade, not
+      # one-at-a-time PRs.
+      - dependency-name: "org.jetbrains.kotlin:kotlin-gradle-plugin"
+      - dependency-name: "com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin"
+      - dependency-name: "com.android.tools.build:gradle"
+
+  # ── GitHub Actions used in our workflows ──────────────────────────────
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
