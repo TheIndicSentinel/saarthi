@@ -3,9 +3,7 @@ package com.saarthi.core.inference
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.model.EngineType
-import com.saarthi.core.inference.model.LoraEntry
 import com.saarthi.core.inference.model.ModelEntry
-import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.model.SocFamily
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -88,7 +86,6 @@ class ModelCatalog @Inject constructor() {
             fileSizeBytes = 3_242_086_400L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
-            modelFamily   = "gemma4-e2b",
             contextLength = 8192,
             tags          = listOf("Fastest", "New", "Snapdragon 8 Gen 3"),
             socTarget     = SocFamily.QUALCOMM_SM8750,
@@ -104,7 +101,6 @@ class ModelCatalog @Inject constructor() {
             fileSizeBytes = 2_583_085_056L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
-            modelFamily   = "gemma4-e2b",
             contextLength = 8192,
             tags          = listOf("Recommended", "New", "Best for Most Phones"),
         ),
@@ -118,7 +114,6 @@ class ModelCatalog @Inject constructor() {
             fileSizeBytes = 3_758_096_384L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.FLAGSHIP,
-            modelFamily   = "gemma4-e4b",
             contextLength = 8192,
             tags          = listOf("Best Quality", "New", "Powerful Phone Required"),
         ),
@@ -136,7 +131,6 @@ class ModelCatalog @Inject constructor() {
             fileSizeBytes = 3_655_827_456L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
-            modelFamily   = "gemma3n",
             contextLength = 8192,
             tags          = listOf("Recommended", "Fast", "Works on Most Phones"),
         ),
@@ -150,7 +144,6 @@ class ModelCatalog @Inject constructor() {
             fileSizeBytes = 4_405_655_031L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
-            modelFamily   = "gemma3n",
             contextLength = 8192,
             tags          = listOf("High Quality", "Mid-Range & Above"),
         ),
@@ -168,21 +161,12 @@ class ModelCatalog @Inject constructor() {
             fileSizeBytes = 584_417_280L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
-            modelFamily   = "gemma3",
             contextLength = 4096,
             tags          = listOf("Compact", "Fast", "Works on Any Phone"),
         ),
     )
 
-    // ── LoRA adapters ─────────────────────────────────────────────────────────
-
-    val loraEntries: List<LoraEntry> = emptyList()
-
     // ── Lookup helpers ────────────────────────────────────────────────────────
 
     fun findById(id: String): ModelEntry? = allModels.find { it.id == id }
-
-    fun loraForPack(packType: PackType, modelFamily: String): LoraEntry? = null
-
-    fun loraById(id: String): LoraEntry? = null
 }

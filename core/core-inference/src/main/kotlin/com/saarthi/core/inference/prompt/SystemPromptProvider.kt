@@ -36,13 +36,13 @@ import javax.inject.Singleton
  *      `SupportedLanguage.systemPromptInstruction` at the call site, keeping
  *      core-inference free of a core-i18n dependency.
  *
- * Future fine-tuning layer (planned, not yet wired):
- *   When a pack ships its own LoRA adapter (e.g. a Kisan-specific fine-tune),
- *   the engine loads the adapter via `InferenceEngine.loadLoraAdapter(path)`
- *   when the pack is selected for chat. The system prompt for that pack can
- *   then be slimmer because the adapter encodes domain knowledge directly.
- *   Hook for this lives in [PackAdapterManager] — a new pack just registers
- *   its adapter path and this provider trims the prompt to the bare persona.
+ * Future fine-tuning layer (planned, not wired):
+ *   When a pack ships its own fine-tune (LoRA / QLoRA / per-pack model file),
+ *   the engine layer is the integration point — add an InferenceEngine method
+ *   to load the adapter and call it from the pack-switch flow. The system
+ *   prompt for that pack can then be slimmer because the adapter encodes
+ *   domain knowledge directly. Until then, packs differentiate via the
+ *   per-pack prompt in [standardPrompt] / [compactPrompt].
  */
 @Singleton
 class SystemPromptProvider @Inject constructor() {

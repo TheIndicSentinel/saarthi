@@ -16,12 +16,8 @@ enum class SocFamily {
 }
 
 enum class EngineType {
-    /** MediaPipe LiteRT (.task / .litertlm) — GPU-accelerated, Google official. */
+    /** Google AI Edge LiteRT-LM (.task / .litertlm) — the only engine we ship. */
     LITERT,
-    /** llama.cpp GGUF — CPU fallback for community/custom models. */
-    LLAMA_CPP,
-    /** Kept for source compatibility; treated as LITERT at runtime. */
-    MEDIAPIPE,
 }
 
 data class ModelEntry(
@@ -32,9 +28,6 @@ data class ModelEntry(
     val fileSizeBytes: Long,
     val engineType: EngineType,
     val requiredTier: DeviceTier,
-    /** Short family key used to match LoRA adapters, e.g. "qwen2.5", "llama3.2", "gemma2". */
-    val modelFamily: String,
-    val nGpuLayers: Int = 0,
     val contextLength: Int = 2048,
     val tags: List<String> = emptyList(),
     /** Which SoC family this model file is compiled for. GENERIC = works on all devices. */

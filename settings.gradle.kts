@@ -32,7 +32,3 @@ include(":core:core-rag")
 // Feature modules
 include(":feature:feature-onboarding")
 include(":feature:feature-assistant")
-include(":feature:feature-money")
-include(":feature:feature-kisan")
-include(":feature:feature-knowledge")
-include(":feature:feature-fieldexpert")

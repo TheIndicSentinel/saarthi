@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import com.saarthi.core.inference.model.DownloadProgress
-import com.saarthi.core.inference.model.LoraEntry
 import com.saarthi.core.inference.model.ModelEntry
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -71,20 +70,11 @@ class ModelDownloadManager @Inject constructor(
     fun modelsDir(): File =
         File(context.filesDir, "models").also { it.mkdirs() }
 
-    fun adaptersDir(): File =
-        File(context.filesDir, "adapters").also { it.mkdirs() }
-
     fun tmpModelsDir(): File =
         File(context.getExternalFilesDir(null), "models_tmp").also { it.mkdirs() }
 
-    fun tmpAdaptersDir(): File =
-        File(context.getExternalFilesDir(null), "adapters_tmp").also { it.mkdirs() }
-
     fun localPathFor(model: ModelEntry): File = File(modelsDir(), model.fileName)
-    fun localPathFor(lora: LoraEntry): File   = File(adaptersDir(), lora.fileName)
-
     fun tmpPathFor(model: ModelEntry): File = File(tmpModelsDir(), model.fileName)
-    fun tmpPathFor(lora: LoraEntry): File   = File(tmpAdaptersDir(), lora.fileName)
 
     private fun atomicMove(source: File, dest: File): Boolean {
         try {
@@ -124,9 +114,6 @@ class ModelDownloadManager @Inject constructor(
 
     fun isDownloaded(model: ModelEntry): Boolean =
         isFileComplete(resolveLocalFile(model), model.fileSizeBytes)
-
-    fun isDownloaded(lora: LoraEntry): Boolean =
-        isFileComplete(localPathFor(lora), lora.fileSizeBytes)
 
     // ── Download API (called from ViewModel) ──────────────────────────────────
 
@@ -192,8 +179,6 @@ class ModelDownloadManager @Inject constructor(
         cancelByUrl(model.downloadUrl, localPathFor(model))
         _allProgress.update { it - model.id }
     }
-
-    fun cancelDownload(lora: LoraEntry) = cancelByUrl(lora.downloadUrl, localPathFor(lora))
 
     /** Clears completed/failed state from the progress map (after user dismissed). */
     fun clearProgress(modelId: String) {
@@ -275,11 +260,6 @@ class ModelDownloadManager @Inject constructor(
             }
         }
     }
-
-    // ── Lora downloads (simple flow — adapters are small) ─────────────────────
-
-    fun downloadLora(lora: LoraEntry): Flow<DownloadProgress> =
-        legacyDownloadFlow(lora.downloadUrl, localPathFor(lora), lora.displayName, lora.fileSizeBytes)
 
     // ── File validation ───────────────────────────────────────────────────────
 
@@ -558,20 +538,4 @@ class ModelDownloadManager @Inject constructor(
         } ?: DownloadManager.STATUS_FAILED
     }
 
-    /** Simple flow for small downloads (LoRA adapters) that don't need app-lifetime tracking. */
-    private fun legacyDownloadFlow(
-        url: String, destFile: File, title: String, expectedBytes: Long,
-    ): Flow<DownloadProgress> = kotlinx.coroutines.flow.callbackFlow {
-        if (isFileComplete(destFile, expectedBytes)) {
-            trySend(DownloadProgress.Completed(destFile.absolutePath)); close(); return@callbackFlow
-        }
-        val downloadId = enqueueOrReattach(url, destFile, title)
-        if (downloadId == -1L) { trySend(DownloadProgress.Failed("Failed to start download")); close(); return@callbackFlow }
-        while (true) {
-            val p = queryProgress(downloadId) ?: break
-            trySend(p)
-            delay(if (p is DownloadProgress.Paused) 3_000L else 600L)
-        }
-        awaitClose {}
-    }
 }

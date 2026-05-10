@@ -1059,10 +1059,6 @@ class LiteRTInferenceEngine @Inject constructor(
             }
         }
 
-    // ── LoRA — not supported in litertlm-android ─────────────────────────────
-    override suspend fun loadLoraAdapter(adapterPath: String, scale: Float) = Unit
-    override fun clearLoraAdapter() = Unit
-
     // ── Session reset ─────────────────────────────────────────────────────────
 
     /**

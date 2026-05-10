@@ -53,19 +53,6 @@ interface InferenceEngine {
     suspend fun generate(prompt: String, packType: PackType = PackType.BASE): String
 
     /**
-     * Load a LoRA adapter on top of the current base model.
-     * Engines that don't support LoRA (e.g. MediaPipe) silently ignore this call.
-     * [scale] controls blending strength — 1.0 = full adapter, 0.5 = half-blended.
-     */
-    suspend fun loadLoraAdapter(adapterPath: String, scale: Float = 1.0f) {}
-
-    /**
-     * Remove the active LoRA adapter and revert to base-model behaviour.
-     * No-op on engines that don't support LoRA.
-     */
-    fun clearLoraAdapter() {}
-
-    /**
      * Reset the inference session state (KV cache, conversation context).
      * Called when the user starts a new chat or clears history.
      * Implementations should discard any cached conversation state so the next

@@ -1,10 +1,8 @@
 package com.saarthi.core.inference.engine
 
-import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import kotlinx.coroutines.flow.Flow
-import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -46,12 +44,6 @@ class InferenceEngineSelector @Inject constructor(
     override suspend fun generate(prompt: String, packType: PackType): String =
         liteRtEngine.generate(prompt, packType)
 
-    override suspend fun loadLoraAdapter(adapterPath: String, scale: Float) =
-        liteRtEngine.loadLoraAdapter(adapterPath, scale)
-
-    override fun clearLoraAdapter() =
-        liteRtEngine.clearLoraAdapter()
-
     override fun release() {
         liteRtEngine.release()
     }
@@ -60,9 +52,6 @@ class InferenceEngineSelector @Inject constructor(
         val lower = path.lowercase()
         return lower.endsWith(".task") || lower.endsWith(".litertlm") || lower.endsWith(".bin")
     }
-
-    private fun isGgufModel(path: String): Boolean =
-        path.endsWith(".gguf", ignoreCase = true)
 
     private fun isFdPath(path: String): Boolean =
         path.startsWith("/proc/self/fd/")

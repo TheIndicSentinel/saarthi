@@ -29,22 +29,25 @@ saarthi/                                # repo root (this dir IS a git repo)
 ├── app/                                # the actual Android app
 ├── build-logic/convention/             # convention plugins ("saarthi.android.*")
 ├── core/                               # cross-cutting libs
-│   ├── core-common/
+│   ├── core-common/                    # shared DI helpers
 │   ├── core-i18n/                      # SupportedLanguage + locale helpers
-│   ├── core-inference/                 # LiteRT engine, prompt provider
+│   ├── core-inference/                 # LiteRT engine, prompt provider, model catalog
 │   ├── core-memory/                    # Room DB for chat + user memories
 │   ├── core-rag/                       # embedding + vector store
 │   └── core-ui/                        # design system (colors, glass cards)
 ├── feature/                            # user-facing screens
 │   ├── feature-assistant/              # chat UI
-│   ├── feature-onboarding/             # first-run flow
-│   ├── feature-money/                  # Money pack
-│   ├── feature-kisan/                  # Kisan pack
-│   ├── feature-knowledge/              # Knowledge pack
-│   └── feature-fieldexpert/            # Field Expert pack
+│   └── feature-onboarding/             # first-run flow + model picker
 ├── gradle/libs.versions.toml           # version catalog (single source of truth)
 └── .github/workflows/                  # CI (see "CI gates" below)
 ```
+
+> Older revisions of this repo carried four pack feature modules
+> (`feature-money`, `feature-kisan`, `feature-knowledge`, `feature-fieldexpert`)
+> and a 148 MB embedded `llama.cpp` native bridge. v1.0.19 deleted all of
+> them — the packs had no UI / consumer, the bridge had no Kotlin caller.
+> Pack personas are now expressed via `PackType` + `SystemPromptProvider`,
+> not as Gradle modules.
 
 ## How modules are wired
 

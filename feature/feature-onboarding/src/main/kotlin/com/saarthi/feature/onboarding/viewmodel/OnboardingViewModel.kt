@@ -19,7 +19,6 @@ import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.HuggingFaceTokenManager
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.ModelDownloadManager
-import com.saarthi.core.inference.PackAdapterManager
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DownloadProgress
@@ -73,7 +72,6 @@ class OnboardingViewModel @Inject constructor(
     private val deviceProfiler: DeviceProfiler,
     private val modelCatalog: ModelCatalog,
     private val downloadManager: ModelDownloadManager,
-    private val packAdapterManager: PackAdapterManager,
     private val hfTokenManager: HuggingFaceTokenManager,
 ) : ViewModel() {
 
@@ -424,9 +422,7 @@ class OnboardingViewModel @Inject constructor(
             modelPath   = path,
             modelName   = catalogEntry?.displayName,
             maxTokens   = 0,
-            nCtx        = 0,
             nThreads    = profile.recommendedThreads,
-            nGpuLayers  = catalogEntry?.nGpuLayers ?: 0,
         )
 
         _uiState.update { it.copy(step = OnboardingStep.MODEL_INIT, isLoading = true, error = null) }
@@ -442,9 +438,6 @@ class OnboardingViewModel @Inject constructor(
                 if (!path.startsWith("/proc/self/fd/")) {
                     repository.saveModelPath(path)
                 }
-                // Register the active model family so PackAdapterManager can match LoRA adapters
-                val family = catalogEntry?.modelFamily ?: "unknown"
-                packAdapterManager.setActiveModelFamily(family)
                 _uiState.update { it.copy(isLoading = false, isModelReady = true, step = OnboardingStep.CHAT_TEST) }
             }.onFailure { e ->
                 val errorMsg = when {

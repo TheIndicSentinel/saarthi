@@ -44,10 +44,9 @@ class SaarthiApp : Application() {
                 }
             } catch (_: Exception) {}
 
-            // "Another handler is already registered" is a MediaPipe process-level bug.
-            // With our new GGUF-only architecture this should never occur. If it does
-            // (e.g. old binary still resident), restart via MainActivity rather than
-            // killing the process, so the user sees an error instead of a blank crash.
+            // "Another handler is already registered" is a MediaPipe process-level bug
+            // we still observe occasionally on stale native state. Restart via MainActivity
+            // rather than killing the process so the user sees an error instead of a blank crash.
             val msg = throwable.message.orEmpty()
             if ("Another handler" in msg || "handler is already" in msg) {
                 try {

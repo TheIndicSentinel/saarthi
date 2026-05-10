@@ -6,7 +6,6 @@ import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.ModelCatalog
-import com.saarthi.core.inference.PackAdapterManager
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
@@ -32,7 +31,6 @@ class MainViewModel @Inject constructor(
     private val onboardingRepository: OnboardingRepository,
     private val inferenceEngine: InferenceEngine,
     private val modelCatalog: ModelCatalog,
-    private val packAdapterManager: PackAdapterManager,
     private val languageManager: LanguageManager,
     private val deviceProfiler: DeviceProfiler,
 ) : ViewModel() {
@@ -80,9 +78,7 @@ class MainViewModel @Inject constructor(
                 modelPath  = modelPath,
                 modelName  = catalogEntry?.displayName,
                 maxTokens  = 0,
-                nCtx       = 0,
                 nThreads   = profile.recommendedThreads,
-                nGpuLayers = catalogEntry?.nGpuLayers    ?: 0,
             )
 
 
@@ -90,7 +86,6 @@ class MainViewModel @Inject constructor(
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching {
                     inferenceEngine.initialize(config)
-                    restoreModelFamily(modelPath)
                 }.onFailure { e ->
                     val msg = when {
                         e is OutOfMemoryError ->
@@ -104,13 +99,6 @@ class MainViewModel @Inject constructor(
         }
     }
 
-
-    private fun restoreModelFamily(modelPath: String) {
-        val family = modelCatalog.allModels
-            .find { modelPath.endsWith(it.fileName) }
-            ?.modelFamily ?: "unknown"
-        packAdapterManager.setActiveModelFamily(family)
-    }
 
     fun retryWithNewModel() {
         _startState.value = AppStartState.GoToOnboarding

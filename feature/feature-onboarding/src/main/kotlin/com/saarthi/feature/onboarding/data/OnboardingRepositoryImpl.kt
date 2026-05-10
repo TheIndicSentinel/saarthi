@@ -27,14 +27,9 @@ private val Context.onboardingDataStore: DataStore<Preferences>
 private val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
 private val SAVED_MODEL_PATH    = stringPreferencesKey("saved_model_path")
 
-// Supported model formats:
-//   .task / .litertlm  → LiteRT (MediaPipe Tasks GenAI) — primary, GPU-accelerated
-//   .gguf              → llama.cpp — CPU fallback for community models
-private val MODEL_EXTENSIONS = setOf(".gguf", ".task", ".litertlm")
-private val MODEL_NAME_HINTS  = listOf(
-    "gemma", "llm", "model", "ai", "inference",
-    "llama", "qwen", "phi", "mistral", "falcon", "stablelm",
-)
+// Supported model formats — Google AI Edge LiteRT-LM is the only engine.
+private val MODEL_EXTENSIONS = setOf(".task", ".litertlm")
+private val MODEL_NAME_HINTS  = listOf("gemma", "llm", "model", "ai", "inference")
 
 class OnboardingRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
