@@ -1,3 +1,0 @@
-[submodule "core/core-inference/src/main/cpp/llama.cpp"]
-	path = core/core-inference/src/main/cpp/llama.cpp
-	url = https://github.com/ggerganov/llama.cpp
