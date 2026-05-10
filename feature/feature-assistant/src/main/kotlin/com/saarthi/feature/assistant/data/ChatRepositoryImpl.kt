@@ -257,14 +257,28 @@ class ChatRepositoryImpl @Inject constructor(
                         }
                     }
 
-                    // Schedule extracted reminders — relative (delay_minutes) or absolute (time)
-                    parsed.reminders.forEach { marker ->
-                        val text = marker.text.trim()
-                        when {
-                            marker.delayMinutes != null ->
-                                reminderManager.scheduleByDelay(text, marker.delayMinutes)
-                            marker.time != null ->
-                                reminderManager.scheduleReminder(text, marker.time.trim())
+                    // Defensive reminder gate. The system prompt tells the model to
+                    // emit reminder markers ONLY when the user explicitly asked, but
+                    // Gemma 4 at temperature=1.0 still over-emits — the user reported
+                    // notifications firing for casual topics like "GGUF optimization".
+                    // We refuse to schedule unless the user's most recent message
+                    // actually contains a reminder trigger phrase.
+                    if (parsed.reminders.isNotEmpty()) {
+                        if (userAskedForReminder(userMessage)) {
+                            parsed.reminders.forEach { marker ->
+                                val text = marker.text.trim()
+                                when {
+                                    marker.delayMinutes != null ->
+                                        reminderManager.scheduleByDelay(text, marker.delayMinutes)
+                                    marker.time != null ->
+                                        reminderManager.scheduleReminder(text, marker.time.trim())
+                                }
+                            }
+                        } else {
+                            DebugLogger.log(
+                                "REMINDER",
+                                "Dropping ${parsed.reminders.size} reminder marker(s) — user did not request one (msg=\"${userMessage.take(60)}\")"
+                            )
                         }
                     }
                 }
@@ -398,6 +412,34 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }.trimEnd()
     }
+
+    /**
+     * True when the user's message contains an explicit ask for a reminder /
+     * alert / alarm. Used as a runtime gate before scheduling, so an over-eager
+     * model can't fire a notification for a casual discussion topic.
+     *
+     * Covers English and the most common Indian-language reminder phrases.
+     * Conservative on purpose — false negatives are ok (user can rephrase),
+     * false positives are not (unwanted notifications break trust fast).
+     */
+    private fun userAskedForReminder(userMessage: String): Boolean {
+        val msg = userMessage.lowercase()
+        return REMINDER_TRIGGER_PHRASES.any { msg.contains(it) }
+    }
+
+    private val REMINDER_TRIGGER_PHRASES = listOf(
+        // English
+        "remind me", "remind us", "set a reminder", "set reminder",
+        "alert me", "notify me", "wake me", "ping me",
+        "set an alarm", "set alarm",
+        // Hindi (Latin + Devanagari)
+        "yaad dila", "yaad rakh", "yaad dilana", "yaad dilao",
+        "याद दिला", "याद रख", "रिमाइंडर", "अलार्म",
+        // Tamil / Telugu / Bengali / Marathi / Kannada / Gujarati / Punjabi / Odia
+        // — common transliterated forms users actually type
+        "ninaivu padut", "gnabakam unchu", "mone koriye dao",
+        "athavan karun", "nenapu ittuko", "yaad rakhjo",
+    )
 
     /**
      * Returns only complete user→model pairs from [history].
