@@ -110,10 +110,13 @@ object ResponseMarkerParser {
         }
 
         // Provenance phrases — strip entirely. These only ever appear in leaks.
+        // Note: we deliberately do NOT consume a trailing "." — the period is
+        // the sentence terminator and we want to keep it so the cleaned text
+        // reads as a normal sentence ("I am Saarthi. How can I help?").
         val provenancePatterns = listOf(
-            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+Google(?:\s+DeepMind)?\.?"""),
-            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+DeepMind\.?"""),
-            Regex("""(?i),?\s*(?:a|the)\s+(?:large\s+)?language\s+model\s+(?:made|created|developed|trained|built)\s+by\s+\w+(?:\s+\w+)?\.?"""),
+            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+Google(?:\s+DeepMind)?"""),
+            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+DeepMind"""),
+            Regex("""(?i),?\s*(?:a|the)\s+(?:large\s+)?language\s+model\s+(?:made|created|developed|trained|built)\s+by\s+\w+(?:\s+\w+)?"""),
         )
         for (pattern in provenancePatterns) {
             out = pattern.replace(out, "")

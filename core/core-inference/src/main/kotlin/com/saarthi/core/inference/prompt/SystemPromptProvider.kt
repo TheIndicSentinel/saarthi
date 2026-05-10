@@ -54,8 +54,13 @@ class SystemPromptProvider @Inject constructor() {
         return when {
             // 1B parameter models or anything explicitly marketed "Compact"
             n.contains("1b") || n.contains("compact") -> ModelTier.COMPACT
-            // Gemma 4 series — flagship / large
-            n.contains("gemma 4") || n.contains("gemma4") -> ModelTier.LARGE
+            // Gemma 4 series — flagship / large. Match all three naming forms
+            // we see in this codebase: display name "Gemma 4", file basename
+            // "gemma4", and Hugging Face path "gemma-4". Bug surfaced when only
+            // the file path was passed and we silently fell through to
+            // STANDARD, which gave Gemma 4 a too-small token budget and a
+            // mid-tier system prompt.
+            n.contains("gemma 4") || n.contains("gemma4") || n.contains("gemma-4") -> ModelTier.LARGE
             // Default — Gemma 3n, Gemma 2, etc.
             else -> ModelTier.STANDARD
         }
