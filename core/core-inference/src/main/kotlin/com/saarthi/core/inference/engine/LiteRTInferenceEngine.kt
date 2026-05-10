@@ -179,8 +179,11 @@ class LiteRTInferenceEngine @Inject constructor(
             editor.putBoolean("litert_gen_pending", false)
             editor.putBoolean("litert_init_pending", false)
             editor.putBoolean("litert_conv_ready", true)
-            prefs.all.keys.filter { it.startsWith("litert_crash_count_") ||
-                                    it.startsWith("litert_gpu_ban_") }.forEach { editor.remove(it) }
+            prefs.all.keys.filter {
+                it.startsWith("litert_crash_count_") ||
+                it.startsWith("litert_cpu_crash_count_") ||  // separate prefix; was leaking across installs
+                it.startsWith("litert_gpu_ban_")
+            }.forEach { editor.remove(it) }
             editor.putInt("litert_app_version", currentVersion)
             editor.commit()
             DebugLogger.log("LITERT", "[VERSION] New install v$currentVersion (was v$storedVersion) — crash state cleared")
@@ -529,21 +532,19 @@ class LiteRTInferenceEngine @Inject constructor(
                 // the full KV-cache synchronously. At 1024 tokens the allocation + shader warm-up
                 // exceeds the ~5–7s Android process watchdog threshold, causing a SIGKILL before
                 // a single token is generated. 512 halves the KV-cache, giving more headroom.
-                                val cpuCrashCount = getCpuCrashCount(config.modelPath)
+                val cpuCrashCount = getCpuCrashCount(config.modelPath)
                 if (cpuCrashCount >= 3) {
                     DebugLogger.log("LITERT", "[CRASH] Model marked UNSTABLE after $cpuCrashCount CPU crashes.")
                     throw RuntimeException("Model is unstable on this device. Please use a smaller model.")
                 }
-                val batteryStatus = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
-                val level = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
-                val scale = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
-                val batteryPct = level * 100 / scale.toFloat()
-                val isLowBattery = batteryPct < 20f && batteryPct > 0
 
-                // Tier-aware KV-cache budget. The previous flat 512-token cap made
-                // Gemma 4 unusable: by turn 3 the system prompt + recap already took
-                // ~520 tokens, leaving zero room for the reply (model emitted 1 EOS
-                // token and stopped — the "Namm" bug). Bigger models get more cache.
+                // Tier-aware KV-cache budget. We deliberately do NOT shrink it for
+                // low battery — battery management is the OS's job; an offline AI
+                // assistant has no business deciding the user's downloaded model
+                // can't load because their phone is at 14 %. (The earlier
+                // BATTERY_SAFE_MODE forced maxTokens=256 + 1 thread + GPU ban,
+                // which made Gemma 4 fail to load with INTERNAL on every device
+                // below 20 % battery — see v1.0.20.)
                 val effectiveMaxTokens: Int = run {
                     val headroomMb = profile.availableRamMb - sizeMb
                     val nameForTier = (config.modelName ?: config.modelPath).lowercase()
@@ -555,12 +556,12 @@ class LiteRTInferenceEngine @Inject constructor(
                         nameForTier.contains("compact") ||
                         sizeMb < 700
                     when {
-                        isLowBattery -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=256 (BATTERY SAFE MODE: ${batteryPct.toInt()}%)")
-                            256
-                        }
+                        // Real CPU crash evidence — keep these as a recovery ladder
+                        // since they react to ACTUAL inference instability, not
+                        // battery state. Crash counters are cleared on every new
+                        // APK install (see version-reset block).
                         cpuCrashCount >= 2 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=64 (ULTRA-SAFE DEBUG MODE)")
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=64 (ULTRA-SAFE: CPU crash count $cpuCrashCount)")
                             64
                         }
                         cpuCrashCount >= 1 -> {
@@ -589,33 +590,36 @@ class LiteRTInferenceEngine @Inject constructor(
                         }
                     }
                 }
-                
+
                 val dynamicThreads = when {
-                    isLowBattery -> 1
-                    cpuCrashCount >= 1 -> 1 // Aggressive: 1 thread after first CPU crash
-                    else -> 2
+                    cpuCrashCount >= 1 -> 1   // 1 thread after a CPU crash — react only to actual instability.
+                    else               -> 2
                 }
-                
-                val batteryGpuBanned = isLowBattery
+
                 val xnnpackBanned = cpuCrashCount >= 2
-                
-                // CRITICAL: GPU VRAM Safety for large models.
-                // Gemma 4 (3.5GB) requires ~4.5GB peak memory for GPU load.
-                // If weight size > 60% of available RAM, fallback to CPU to avoid OOM.
+
+                // GPU VRAM safety for large models on memory-tight devices.
+                // Gemma 4 (~3.5 GB) needs ~4.5 GB peak memory for GPU load. When
+                // the model is more than 60 % of available RAM, prefer CPU to
+                // avoid OOM. Independent of battery state.
                 val memoryPressureBannedGpu = sizeMb > (profile.availableRamMb * 0.6)
                 if (memoryPressureBannedGpu && sizeMb > 2000) {
                     DebugLogger.log("LITERT", "[GPU] BANNED: Model size (${sizeMb}MB) is too large for available RAM (${profile.availableRamMb}MB). Falling back to CPU.")
                 }
-
-                val canUseGpu = profile.gpuSafe && !gpuBanned && !batteryGpuBanned && !memoryPressureBannedGpu
-                val canUseNpu = profile.npuSafe && !gpuBanned && !batteryGpuBanned 
 
                 DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
                 markInitStarted(config.modelPath)
                 markStage(CrashStage.MODEL_LOAD)
                 try {
-                    val newEngine = tryLoadWithFallback(config.modelPath, effectiveMaxTokens, profile, gpuBanned || batteryGpuBanned, dynamicThreads, xnnpackBanned)
+                    val newEngine = tryLoadWithFallback(
+                        modelPath = config.modelPath,
+                        maxTokens = effectiveMaxTokens,
+                        profile = profile,
+                        gpuBanned = gpuBanned || memoryPressureBannedGpu,
+                        dynamicThreads = dynamicThreads,
+                        xnnpackBanned = xnnpackBanned,
+                    )
                     
                     // CRITICAL: Save the active backend state BEFORE we do any heavy operations
                     // like createConversation. If the native driver SIGKILLs during the next step,

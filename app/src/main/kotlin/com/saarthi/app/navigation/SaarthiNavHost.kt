@@ -36,7 +36,6 @@ sealed class Route(val path: String) {
     data object Onboarding   : Route("onboarding")
     data object Home         : Route("home")
     data object Assistant    : Route("assistant")
-    data object MoneyMentor  : Route("money_mentor")
     data object KisanSaathi  : Route("kisan_saathi")
     data object Knowledge    : Route("knowledge")
     data object FieldExpert  : Route("field_expert")
@@ -155,10 +154,6 @@ fun SaarthiNavHost(
                 initialLanguage = currentLanguage,
                 onNavigateToKnowledge = { navController.navigate(Route.Knowledge.path) }
             )
-        }
-
-        composable(Route.MoneyMentor.path) {
-            MoneyMentorPlaceholder(onBack = { navController.popBackStack() })
         }
 
         composable(Route.KisanSaathi.path) {

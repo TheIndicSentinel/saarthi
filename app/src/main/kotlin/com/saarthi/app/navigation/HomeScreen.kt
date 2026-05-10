@@ -127,20 +127,6 @@ fun HomeScreen(
                 onClick = { onNavigate(Route.Assistant) },
             )
             PackItem(
-                emoji = "💰",
-                title = when (currentLanguage) {
-                    SupportedLanguage.HINDI -> "मनी मेंटर"
-                    else -> "Money Mentor"
-                },
-                subtitle = when (currentLanguage) {
-                    SupportedLanguage.HINDI -> "खर्च ट्रैक करें · UPI · बचत योजनाएं"
-                    else -> "Track spending · UPI · Savings plans"
-                },
-                accentColor = MaterialTheme.saarthiColors.moneyGreen,
-                badge = "Coming Soon",
-                onClick = { onNavigate(Route.MoneyMentor) },
-            )
-            PackItem(
                 emoji = "🌾",
                 title = when (currentLanguage) {
                     SupportedLanguage.HINDI -> "किसान साथी"
@@ -313,7 +299,6 @@ private fun PackItem(
     }
 }
 
-@Composable fun MoneyMentorPlaceholder(onBack: () -> Unit) = PackPlaceholder("💰", "Money Mentor", SaarthiColors.MoneyGreen, onBack)
 @Composable fun KisanSaathiPlaceholder(onBack: () -> Unit) = PackPlaceholder("🌾", "Kisan Saathi", SaarthiColors.KisanEarth, onBack)
 @Composable fun KnowledgePlaceholder(onBack: () -> Unit) = PackPlaceholder("📚", "Knowledge Pack", SaarthiColors.KnowledgePurple, onBack)
 @Composable fun FieldExpertPlaceholder(onBack: () -> Unit) = PackPlaceholder("🔧", "Field Expert", SaarthiColors.FieldBlue, onBack)
