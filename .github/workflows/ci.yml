@@ -1,0 +1,187 @@
+name: CI
+
+# Fast PR-gating workflow.
+# Runs on every push to main and every pull request, so a broken build
+# can't reach main without a status-check failure.
+#
+# Two parallel jobs so failure modes are reported separately:
+#   • unit-tests — pure-JVM tests across all library modules (no NDK).
+#   • assemble-debug — full Android debug build (sets up NDK + Vulkan
+#     headers exactly like the release build does, so a debug build that
+#     passes here is a strong signal the release builder will too).
+#
+# The release-APK builder (build_apk.yml) is unchanged and still runs on
+# main/dispatch — it ships the signed APK; this workflow ships confidence.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default; specific jobs upgrade as needed.
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Unit tests — fast, no NDK. ~3-5 min cold, <2 min warm cache.
+  # Every Android library module gets a working test classpath via the
+  # AndroidLibraryConventionPlugin (junit + mockk + coroutines-test +
+  # turbine), so testDebugUnitTest covers the whole repo.
+  # ──────────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Branches other than main use the cache read-only so a failing
+          # PR can never poison the warm cache that main builds rely on.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Run unit tests (all modules)
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Test summary
+        if: always()
+        run: |
+          {
+            echo "## Unit-test results"
+            echo ""
+            echo "| Module | Tests | Failures | Errors |"
+            echo "|--------|-------|----------|--------|"
+            shopt -s globstar nullglob
+            for f in **/build/test-results/testDebugUnitTest/TEST-*.xml; do
+              tests=$(sed -nE 's/.*tests="([0-9]+)".*/\1/p' "$f" | head -1)
+              fail=$(sed -nE 's/.*failures="([0-9]+)".*/\1/p' "$f"   | head -1)
+              err=$(sed -nE  's/.*errors="([0-9]+)".*/\1/p' "$f"     | head -1)
+              cls=$(sed -nE  's/.*<testsuite name="([^"]+)".*/\1/p' "$f" | head -1)
+              echo "| \`${cls}\` | ${tests:-?} | ${fail:-?} | ${err:-?} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Debug-APK build — full toolchain, mirrors what build_apk.yml does for
+  # release. Matters because we have native code (llama.cpp/ggml) that
+  # only fails at link time, not at unit-test time. Without this gate a
+  # KSP / NDK / CMake regression would only be caught after merge.
+  # ──────────────────────────────────────────────────────────────────────
+  assemble-debug:
+    name: Assemble debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Install NDK 27 and CMake 3.22
+        # Same toolchain as build_apk.yml. Pinned versions because the
+        # ggml/llama.cpp build is sensitive to NDK header changes.
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;27.0.12077973" \
+            "cmake;3.22.1" 2>/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;27.0.12077973" \
+            "cmake;3.22.1"
+
+      - name: Patch NDK sysroot with Vulkan C++ headers
+        # ggml-vulkan.cpp needs vulkan/vulkan.hpp and spirv/unified1/spirv.hpp;
+        # the NDK sysroot only ships the C API. Mirror of build_apk.yml.
+        run: |
+          NDK_INC="$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
+          sudo apt-get install -y --no-install-recommends libvulkan-dev spirv-headers
+          sudo cp /usr/include/vulkan/*.hpp "$NDK_INC/vulkan/"
+          sudo cp -r /usr/include/spirv "$NDK_INC/"
+
+      - name: Patch ggml — remove SVE2/SME Android variants
+        # Belt-and-suspenders match for build_apk.yml's runtime fix.
+        run: |
+          python3 - << 'PYEOF'
+          import re, sys
+          path = 'core/core-inference/src/main/cpp/llama.cpp/ggml/src/CMakeLists.txt'
+          with open(path, 'r') as f:
+              content = f.read()
+          patched = re.sub(r'[ \t]*ggml_add_cpu_backend_variant\(android_armv9[^\n]*\n', '', content)
+          if 'android_armv9' in patched:
+              print("ERROR: SVE patch failed — android_armv9 still present", file=sys.stderr)
+              sys.exit(1)
+          with open(path, 'w') as f:
+              f.write(patched)
+          PYEOF
+
+      - name: Write local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_HOME"                                      > local.properties
+          echo "ndk.dir=$ANDROID_HOME/ndk/27.0.12077973"                   >> local.properties
+          # HF token only needed at runtime to download gated models;
+          # the debug build itself doesn't require it. Provide an empty
+          # string so the gradle script doesn't read a missing key.
+          echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}"                  >> local.properties
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: warn
