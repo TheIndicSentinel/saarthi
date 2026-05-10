@@ -55,7 +55,7 @@ object ResponseMarkerParser {
             }
         }
 
-        val cleaned = normalizeFormatting(stripAll(raw))
+        val cleaned = normalizeFormatting(rewriteIdentity(stripAll(raw)))
         return ParseResult(
             cleanText = cleaned,
             memories = memories,
@@ -64,7 +64,66 @@ object ResponseMarkerParser {
     }
 
     /** Strip complete markers from text shown in the streaming bubble. */
-    fun stripForDisplay(raw: String): String = normalizeFormatting(stripAll(raw))
+    fun stripForDisplay(raw: String): String =
+        normalizeFormatting(rewriteIdentity(stripAll(raw)))
+
+    /**
+     * Rewrites identity leaks the model emits despite the system prompt.
+     * Gemma 4's training is strong enough that no amount of prompt tuning fully
+     * stops it from saying "I am Gemma", "developed by Google DeepMind", "I'm a
+     * large language model", etc. — so we do a final substitution pass on the
+     * visible text. Matters because:
+     *   • The Saarthi brand experience falls apart the second the user reads
+     *     "I am Gemma".
+     *   • Production assistants (Pi, Replika, ChatGPT custom GPTs) all run a
+     *     similar guardrail layer for the same reason.
+     *
+     * Rules are conservative — only literal phrases that have no legitimate
+     * non-identity use in this app. We do NOT strip the words "Google", "Gemma",
+     * etc. on their own (the user might genuinely ask about Google), only when
+     * they appear in a self-introduction context. We DO neutralise full
+     * "developed by …" / "made by …" phrases since those only ever appear in
+     * leaks here.
+     */
+    fun rewriteIdentity(text: String): String {
+        if (text.isEmpty()) return text
+        var out = text
+
+        // Self-identification phrases (case-insensitive). Replace with the
+        // Saarthi-correct form so the bubble keeps reading naturally instead of
+        // showing weird gaps.
+        val selfIntroPatterns = listOf(
+            // "I am Gemma 4 / Gemma3n / Gemma" — normalised to Saarthi
+            Regex("""(?i)\bI\s+am\s+Gemma(?:[\s\-]?\d+(?:[A-Za-z]+)?)?\b""") to "I am Saarthi",
+            Regex("""(?i)\bI'm\s+Gemma(?:[\s\-]?\d+(?:[A-Za-z]+)?)?\b""")    to "I'm Saarthi",
+            Regex("""(?i)\bMy\s+name\s+is\s+Gemma(?:[\s\-]?\d+\w*)?\b""")     to "My name is Saarthi",
+            // "I am a large language model …" — change to "I am Saarthi"
+            Regex("""(?i)\bI\s+am\s+a\s+large\s+language\s+model\b""")        to "I am Saarthi",
+            Regex("""(?i)\bI'm\s+a\s+large\s+language\s+model\b""")           to "I'm Saarthi",
+            Regex("""(?i)\bI\s+am\s+an\s+AI\s+language\s+model\b""")          to "I am Saarthi, your AI assistant",
+            Regex("""(?i)\bI'm\s+an\s+AI\s+language\s+model\b""")             to "I'm Saarthi, your AI assistant",
+            Regex("""(?i)\bI\s+am\s+an?\s+(?:large\s+)?LLM\b""")              to "I am Saarthi",
+            Regex("""(?i)\bI'm\s+an?\s+(?:large\s+)?LLM\b""")                 to "I'm Saarthi",
+        )
+        for ((pattern, replacement) in selfIntroPatterns) {
+            out = pattern.replace(out, replacement)
+        }
+
+        // Provenance phrases — strip entirely. These only ever appear in leaks.
+        val provenancePatterns = listOf(
+            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+Google(?:\s+DeepMind)?\.?"""),
+            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+DeepMind\.?"""),
+            Regex("""(?i),?\s*(?:a|the)\s+(?:large\s+)?language\s+model\s+(?:made|created|developed|trained|built)\s+by\s+\w+(?:\s+\w+)?\.?"""),
+        )
+        for (pattern in provenancePatterns) {
+            out = pattern.replace(out, "")
+        }
+
+        // Tidy up any double spaces / dangling punctuation we just created.
+        out = out.replace(Regex("""\s{2,}"""), " ")
+                 .replace(Regex("""\s+([,.!?])"""), "$1")
+        return out
+    }
 
     private fun normalizeFormatting(text: String): String = text
         .lines()
