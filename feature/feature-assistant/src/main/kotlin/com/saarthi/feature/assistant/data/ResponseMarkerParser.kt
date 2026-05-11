@@ -31,27 +31,88 @@ object ResponseMarkerParser {
         val delayMinutes: Int? = null,
     )
 
+    // ── Parse regexes (tolerant) ───────────────────────────────────────────
+    //
+    // Earlier these required NO whitespace around `=` and a non-empty value
+    // (`text="([^"]+)"`). In English / Hindi the model emits the syntax
+    // verbatim and that worked, but in Telugu, Bengali, Tamil etc. it tends
+    // to write the spaces around `=` differently (`text = "x"`) and
+    // sometimes copies the literal placeholder text from the prompt
+    // (`text = ""`, `delay_minutes = "N"`). The strict regex matched
+    // neither case → the markers were not stripped → they leaked into
+    // the user-visible bubble.
+    //
+    // Now the regexes:
+    //   • allow whitespace around `=`,
+    //   • allow empty quoted values ("([^"]*)" — zero-or-more),
+    //   • allow either ASCII straight quotes (") or fancy / curly quotes
+    //     (“ ”) which Indic-language keyboards routinely produce.
+    //
+    // The schedule-side filter in ChatRepositoryImpl + the
+    // [isPlaceholderValue] helper below reject empty / template values
+    // before they hit AlarmManager, so a tolerant parser cannot cause
+    // spurious notifications.
+    private const val Q = "[\"“”]"
+
     private val MEMORY_REGEX = Regex(
-        """\[SAARTHI_MEMORY\s+key="([^"]+)"\s+value="([^"]+)"\]"""
+        """\[SAARTHI_MEMORY\s+key\s*=\s*$Q([^"“”]*)$Q\s+value\s*=\s*$Q([^"“”]*)$Q\s*\]"""
     )
     private val REMINDER_ABS_REGEX = Regex(
-        """\[SAARTHI_REMINDER\s+text="([^"]+)"\s+time="([^"]+)"\]"""
+        """\[SAARTHI_REMINDER\s+text\s*=\s*$Q([^"“”]*)$Q\s+time\s*=\s*$Q([^"“”]*)$Q\s*\]"""
     )
     private val REMINDER_REL_REGEX = Regex(
-        """\[SAARTHI_REMINDER\s+text="([^"]+)"\s+delay_minutes="(\d+)"\]"""
+        """\[SAARTHI_REMINDER\s+text\s*=\s*$Q([^"“”]*)$Q\s+delay_minutes\s*=\s*$Q(\d+)$Q\s*\]"""
     )
+
+    // Defensive net for everything the strict regexes might miss. ANY block
+    // that looks like a SAARTHI marker — well-formed or not — must be wiped
+    // from the rendered chat bubble. Without this, malformed markers from
+    // weaker-instruction-following languages (Telugu has been the reproducer)
+    // show up as raw "[SAARTHI_REMINDER text = ""...]" text in the chat.
+    //
+    // Greedy-bounded: closes on the first `]` so it can't swallow normal
+    // text that uses brackets later in the response.
+    private val ANY_SAARTHI_MARKER_REGEX = Regex(
+        """\[\s*SAARTHI_(?:REMINDER|MEMORY)\b[^\]]*\]""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /**
+     * Returns true when the value is empty or a literal template placeholder
+     * the model copied from the prompt instead of filling in.
+     * These must never reach AlarmManager / MemoryRepository.
+     */
+    private fun isPlaceholderValue(v: String): Boolean {
+        val t = v.trim()
+        if (t.isEmpty()) return true
+        if (t == "...") return true
+        if (t == "N") return true
+        if (t == "HH:MM") return true
+        if (t == "short_key" || t == "value") return true
+        if (t == "what to remind") return true
+        return false
+    }
 
     fun parse(raw: String): ParseResult {
         val memories = MEMORY_REGEX.findAll(raw)
-            .map { MemoryMarker(it.groupValues[1], it.groupValues[2]) }
+            .map { MemoryMarker(it.groupValues[1].trim(), it.groupValues[2].trim()) }
+            .filter { !isPlaceholderValue(it.key) && !isPlaceholderValue(it.value) }
             .toList()
 
         val reminders = buildList {
             REMINDER_ABS_REGEX.findAll(raw).forEach {
-                add(ReminderMarker(text = it.groupValues[1], time = it.groupValues[2]))
+                val text = it.groupValues[1].trim()
+                val time = it.groupValues[2].trim()
+                if (!isPlaceholderValue(text) && !isPlaceholderValue(time)) {
+                    add(ReminderMarker(text = text, time = time))
+                }
             }
             REMINDER_REL_REGEX.findAll(raw).forEach {
-                add(ReminderMarker(text = it.groupValues[1], delayMinutes = it.groupValues[2].toIntOrNull()))
+                val text = it.groupValues[1].trim()
+                val mins = it.groupValues[2].toIntOrNull()
+                if (mins != null && mins > 0 && !isPlaceholderValue(text)) {
+                    add(ReminderMarker(text = text, delayMinutes = mins))
+                }
             }
         }
 
@@ -141,12 +202,32 @@ object ResponseMarkerParser {
         .replace(Regex("\n{3,}"), "\n\n")
         .trim()
 
-    private fun stripAll(text: String): String = text
-        .replace(MEMORY_REGEX, "")
-        .replace(REMINDER_ABS_REGEX, "")
-        .replace(REMINDER_REL_REGEX, "")
-        .replace("<end_of_turn>", "")
-        .replace("<eos>", "")
-        .replace("<start_of_turn>", "")
-        .trim()
+    // Gemma special / control tokens that occasionally leak into output —
+    // especially in non-English sessions (Telugu, Bengali, Tamil) where the
+    // model's instruction-following confidence is lower. None of these should
+    // ever be visible to the user.
+    private val GEMMA_SPECIAL_TOKENS = listOf(
+        "<start_of_turn>", "<end_of_turn>",
+        "<bos>", "<eos>",
+        "<pad>", "<unk>",
+        "<image_soft_token>", "<audio_soft_token>",
+        // Some Gemma fine-tunes emit these zero-padded internal markers.
+        "<unused0>", "<unused1>", "<unused2>", "<unused3>",
+    )
+
+    private fun stripAll(text: String): String {
+        var out = text
+            .replace(MEMORY_REGEX, "")
+            .replace(REMINDER_ABS_REGEX, "")
+            .replace(REMINDER_REL_REGEX, "")
+            // Defensive net — any [SAARTHI_*] block of any shape must NOT
+            // reach the rendered bubble. Catches malformed markers the strict
+            // regexes above miss (empty values, wrong spacing, partial fields,
+            // curly quotes) — the actual user-visible bug in Telugu sessions.
+            .replace(ANY_SAARTHI_MARKER_REGEX, "")
+        for (token in GEMMA_SPECIAL_TOKENS) {
+            out = out.replace(token, "")
+        }
+        return out.trim()
+    }
 }

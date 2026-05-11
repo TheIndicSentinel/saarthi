@@ -8,8 +8,8 @@ android {
     namespace = "com.saarthi.app"
     defaultConfig {
         applicationId = "com.saarthi.app"
-        versionCode = 21
-        versionName = "1.0.20"
+        versionCode = 22
+        versionName = "1.0.21"
 
         // Ship only arm64-v8a. Every Android 7.0+ device that can run a
         // 1B+ on-device LLM has a 64-bit ARM CPU — keeping armeabi-v7a /
