@@ -95,10 +95,44 @@ class SystemPromptProviderTest {
             languageInstruction = langLine,
             memoryContext = "",
         )
+        // Sandwich layout: directive at both ends. Bottom appearance still
+        // required so the model sees it right before the user's turn.
         assertTrue(
             "Language instruction must be at the very end (proximity attention). Got:\n$prompt",
             prompt.trimEnd().endsWith(langLine),
         )
+    }
+
+    @Test
+    fun build_prepends_language_instruction_at_top() {
+        // Top-of-prompt placement anchors output language from the first
+        // attention pass. Critical for low-resource languages on
+        // Gemma 3n where bottom-only placement was being ignored.
+        val langLine = "Always reply in Telugu."
+        val prompt = provider.build(
+            modelName = "Gemma 3n",
+            pack = PackType.BASE,
+            languageInstruction = langLine,
+            memoryContext = "",
+        )
+        assertTrue(
+            "Language instruction must start the prompt. Got:\n$prompt",
+            prompt.trimStart().startsWith(langLine),
+        )
+    }
+
+    @Test
+    fun build_includes_language_instruction_at_both_ends() {
+        val langLine = "Reply in Tamil."
+        val prompt = provider.build(
+            modelName = "Gemma 3n",
+            pack = PackType.BASE,
+            languageInstruction = langLine,
+            memoryContext = "",
+        )
+        // Count occurrences — must be exactly 2 (top + bottom), not 1.
+        val count = langLine.toRegex().findAll(prompt).count()
+        assertEquals("Language directive must appear at top AND bottom", 2, count)
     }
 
     @Test
@@ -124,7 +158,28 @@ class SystemPromptProviderTest {
         )
         assertFalse(
             "Should not render memory section header when there are no facts",
-            prompt.contains("What you remember"),
+            prompt.contains("Facts the USER has shared"),
+        )
+    }
+
+    @Test
+    fun build_memory_header_disambiguates_user_from_assistant() {
+        // The earlier header "What you remember about the user:" caused
+        // smaller models in non-English sessions to conflate "your name"
+        // (the user's name from memory) with "your name" (the assistant's
+        // own name) — the model would reply "Your name is Arjun" when
+        // asked "What is your name?" in Telugu. New header explicitly
+        // marks the facts as being about the user, not the assistant.
+        val prompt = provider.build(
+            modelName = "Gemma 3n",
+            pack = PackType.BASE,
+            languageInstruction = "",
+            memoryContext = "- name: Arjun",
+        )
+        assertTrue(
+            "Memory section header must explicitly disambiguate from assistant identity. Got:\n$prompt",
+            prompt.contains("Facts the USER has shared") &&
+                prompt.contains("about the user, not about you"),
         )
     }
 

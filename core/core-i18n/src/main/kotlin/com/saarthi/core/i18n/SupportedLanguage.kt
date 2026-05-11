@@ -248,10 +248,29 @@ enum class SupportedLanguage(
         )
     }
 
-    /** Instruction appended to system prompt so the model responds in this language. */
+    /**
+     * Instruction sandwiched at the TOP and BOTTOM of the system prompt so
+     * the model responds in this language.
+     *
+     * Each non-English directive starts with a **native-script seed phrase**
+     * meaning "reply in <this language>". Models with weaker
+     * instruction-following (Gemma 3n in particular) anchor on the script of
+     * the directive itself — an English-only "Reply in Telugu" line gets
+     * ignored because the surrounding English prompt dilutes it. A
+     * native-script seed plus an emphatic English emphasis is the industry-
+     * standard pattern for multilingual production prompts.
+     */
     val systemPromptInstruction: String get() = when (this) {
-        ENGLISH -> "Always reply in English. Even if the user has typed earlier in another language, do not switch unless the user explicitly switches."
-        else    -> "Always reply in $nativeName ($englishName). Maintain this language consistently across the whole conversation."
+        ENGLISH  -> "Reply in English. If the user wrote earlier in another language, do not switch unless they switch now."
+        HINDI    -> "हिन्दी में जवाब दें। You MUST reply entirely in Hindi (हिन्दी), in Devanagari script. Do not write the reply in English under any circumstance."
+        TAMIL    -> "தமிழில் பதிலளிக்கவும். You MUST reply entirely in Tamil (தமிழ்), in Tamil script. Do not write the reply in English under any circumstance."
+        TELUGU   -> "తెలుగులో సమాధానం ఇవ్వండి. You MUST reply entirely in Telugu (తెలుగు), in Telugu script. Do not write the reply in English under any circumstance."
+        BENGALI  -> "বাংলায় উত্তর দিন। You MUST reply entirely in Bengali (বাংলা), in Bengali script. Do not write the reply in English under any circumstance."
+        MARATHI  -> "मराठीत उत्तर द्या. You MUST reply entirely in Marathi (मराठी), in Devanagari script. Do not write the reply in English under any circumstance."
+        KANNADA  -> "ಕನ್ನಡದಲ್ಲಿ ಉತ್ತರಿಸಿ. You MUST reply entirely in Kannada (ಕನ್ನಡ), in Kannada script. Do not write the reply in English under any circumstance."
+        GUJARATI -> "ગુજરાતીમાં જવાબ આપો. You MUST reply entirely in Gujarati (ગુજરાતી), in Gujarati script. Do not write the reply in English under any circumstance."
+        PUNJABI  -> "ਪੰਜਾਬੀ ਵਿੱਚ ਜਵਾਬ ਦਿਓ। You MUST reply entirely in Punjabi (ਪੰਜਾਬੀ), in Gurmukhi script. Do not write the reply in English under any circumstance."
+        ODIA     -> "ଓଡ଼ିଆରେ ଉତ୍ତର ଦିଅନ୍ତୁ। You MUST reply entirely in Odia (ଓଡ଼ିଆ), in Odia script. Do not write the reply in English under any circumstance."
     }
 
     companion object {
