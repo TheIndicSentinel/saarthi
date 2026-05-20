@@ -655,51 +655,39 @@ private fun EmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Box(modifier = Modifier.size(160.dp), contentAlignment = Alignment.Center) {
-            MandalaCanvas(modifier = Modifier.fillMaxSize())
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    "सारथी",
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 38.sp,
-                    ),
-                    color = SaarthiColors.Gold,
-                )
-                Text(
-                    "SAARTHI",
-                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 5.sp),
-                    color = SaarthiColors.TextMuted,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
+        com.saarthi.core.ui.components.SaarthiLogo(size = 56.dp)
+        Spacer(Modifier.height(16.dp))
         Text(
-            language.greeting,
-            style = MaterialTheme.typography.headlineMedium,
-            color = SaarthiColors.Gold,
+            "पूछिए",
+            style = com.saarthi.core.ui.theme.DisplayAccent.copy(fontSize = 16.sp, color = SaarthiColors.Marigold),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "What's on your mind?",
+            style = MaterialTheme.typography.headlineMedium.copy(
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = SaarthiColors.Text,
+            ),
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
-            language.inputHint,
-            style = MaterialTheme.typography.bodyMedium,
-            color = SaarthiColors.TextMuted,
+            "I work entirely on your phone.\nAsk me anything — your privacy stays intact.",
+            style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text3),
             textAlign = TextAlign.Center,
         )
-
-        Spacer(Modifier.height(12.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FeatureBadge("🔒", "Private")
-            FeatureBadge("📴", "Offline")
-            FeatureBadge("🇮🇳", "Bharat")
-        }
-
-        Spacer(Modifier.height(28.dp))
-
+        Spacer(Modifier.height(22.dp))
+        com.saarthi.core.ui.components.RangoliDivider(width = 100.dp, color = SaarthiColors.Text3)
+        Spacer(Modifier.height(18.dp))
+        Text(
+            "TRY THESE",
+            style = MaterialTheme.typography.labelSmall.copy(
+                color = SaarthiColors.Text3,
+                letterSpacing = 1.4.sp,
+            ),
+        )
+        Spacer(Modifier.height(10.dp))
         SuggestionChips(suggestions = language.suggestions, onSuggestionTap = onSuggestionTap)
     }
 }

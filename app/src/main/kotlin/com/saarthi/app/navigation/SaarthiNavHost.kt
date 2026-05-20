@@ -39,6 +39,12 @@ sealed class Route(val path: String) {
     data object KisanSaathi  : Route("kisan_saathi")
     data object Knowledge    : Route("knowledge")
     data object FieldExpert  : Route("field_expert")
+    data object Settings     : Route("settings")
+    data object Privacy      : Route("privacy")
+    data object About        : Route("about")
+    data object ResponseStyle: Route("response-style")
+    data object Downloads    : Route("downloads")
+    data object History      : Route("history")
     // Model change is onboarding re-entry — same composable, modelChange flag
     data object ModelChange  : Route("onboarding?modelChange=true")
 }
@@ -142,10 +148,46 @@ fun SaarthiNavHost(
                     navController.navigate("${Route.Onboarding.path}?modelChange=true")
                 },
                 onChangeLanguage = { lang -> mainViewModel.setLanguage(lang) },
+                onOpenSettings = { navController.navigate(Route.Settings.path) },
                 currentLanguage = currentLanguage,
                 greeting = currentLanguage.greeting,
                 exploreSubtitle = currentLanguage.exploreSubtitle,
             )
+        }
+
+        composable(Route.Settings.path) {
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onNavigate = { path ->
+                    when (path) {
+                        "privacy" -> navController.navigate(Route.Privacy.path)
+                        "about" -> navController.navigate(Route.About.path)
+                        "response-style" -> navController.navigate(Route.ResponseStyle.path)
+                        "downloads" -> navController.navigate(Route.Downloads.path)
+                        "history" -> navController.navigate(Route.History.path)
+                        "lang" -> { /* handled via dialog in Home — no-op for now */ }
+                    }
+                },
+                onChangeModel = {
+                    navController.navigate("${Route.Onboarding.path}?modelChange=true")
+                },
+            )
+        }
+
+        composable(Route.Privacy.path) {
+            PrivacyScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Route.About.path) {
+            AboutScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Route.ResponseStyle.path) {
+            ResponseStyleScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Route.Downloads.path) {
+            ManageDownloadsScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Route.History.path) {
+            HistoryScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Route.Assistant.path) {

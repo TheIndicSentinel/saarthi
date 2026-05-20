@@ -3,13 +3,12 @@ package com.saarthi.feature.onboarding.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,43 +20,34 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -67,19 +57,22 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saarthi.core.i18n.SupportedLanguage
-import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.ModelEntry
-import com.saarthi.core.ui.components.GlassmorphicCard
+import com.saarthi.core.ui.components.AmbientGlow
+import com.saarthi.core.ui.components.ChipTone
+import com.saarthi.core.ui.components.RangoliDivider
+import com.saarthi.core.ui.components.SaarthiChip
+import com.saarthi.core.ui.components.SaarthiLogo
 import com.saarthi.core.ui.components.SaarthiPrimaryButton
+import com.saarthi.core.ui.theme.DisplayAccent
 import com.saarthi.core.ui.theme.SaarthiColors
+import com.saarthi.core.ui.theme.SaarthiDisplayFont
 import com.saarthi.feature.onboarding.viewmodel.OnboardingStep
 import com.saarthi.feature.onboarding.viewmodel.OnboardingViewModel
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
+import kotlinx.coroutines.delay
 
 @Composable
 fun OnboardingScreen(
@@ -102,45 +95,45 @@ fun OnboardingScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(SaarthiColors.DeepSpace)
+            .background(SaarthiColors.Bg),
     ) {
         AnimatedContent(
             targetState = state.step,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
-            label = "onboarding_step",
+            label = "onb-step",
         ) { step ->
             when (step) {
-                OnboardingStep.WELCOME -> WelcomeStep(onNext = viewModel::goToLanguageSelect)
-                OnboardingStep.LANGUAGE_SELECT -> LanguageSelectStep(
-                    selectedLanguage = state.selectedLanguage,
+                OnboardingStep.SPLASH -> SplashScreen(onContinue = viewModel::goToWelcome)
+                OnboardingStep.WELCOME -> Onb1Welcome(
+                    onNext = viewModel::goToLanguageSelect,
+                    onSkip = { /* no skip from welcome */ },
+                )
+                OnboardingStep.LANGUAGE_SELECT -> Onb2Language(
+                    selected = state.selectedLanguage,
                     onSelect = viewModel::selectLanguage,
+                    onNext = viewModel::goToPrivacy,
+                    onBack = viewModel::goToWelcome,
+                )
+                OnboardingStep.PRIVACY -> Onb3Privacy(
                     onNext = viewModel::proceedToModelPick,
+                    onBack = viewModel::goToLanguageSelect,
                 )
-                OnboardingStep.MODEL_PICK -> ModelPickStep(
-                    deviceProfile = state.deviceProfile,
-                    catalogModels = state.catalogModels,
-                    downloadProgress = state.downloadProgress,
-                    downloadedModelIds = state.downloadedModelIds,
-                    localCandidates = state.modelCandidates,
-                    selectedPath = state.selectedModelPath,
-                    isScanning = state.isScanning,
-                    error = state.error,
+                OnboardingStep.MODEL_PICK -> Onb4ModelPick(
+                    state = state,
                     onDownload = viewModel::downloadModel,
-                    onCancelDownload = viewModel::cancelDownload,
-                    onSelectDownloaded = viewModel::selectDownloadedModel,
-                    onDeleteDownloaded = viewModel::deleteModel,
-                    onSelectLocal = viewModel::selectModel,
-                    onBrowse = { filePicker.launch(arrayOf("*/*")) },
-                    onConfirm = viewModel::confirmModelAndInit,
-                    onGrantAllFiles = { viewModel.openAllFilesAccessSettings(context) },
-                    onRescan = viewModel::rescanAfterPermissionGrant,
+                    onCancel = viewModel::cancelDownload,
+                    onSelect = viewModel::selectDownloadedModel,
+                    onDelete = viewModel::deleteModel,
+                    onProceed = viewModel::proceedFromModelPick,
+                    onBack = viewModel::goToPrivacy,
                 )
-                OnboardingStep.MODEL_INIT -> ModelInitStep(
-                    isLoading = state.isLoading,
-                    error = state.error,
+                OnboardingStep.DOWNLOADING,
+                OnboardingStep.MODEL_INIT -> DownloadingScreen(
+                    state = state,
+                    onBack = { viewModel.goBackTo(OnboardingStep.MODEL_PICK) },
                 )
-                OnboardingStep.CHAT_TEST -> SetupCompleteStep(
-                    onComplete = viewModel::completeOnboarding,
+                OnboardingStep.CHAT_TEST -> SetupCompleteScreen(
+                    onContinue = viewModel::completeOnboarding,
                 )
                 OnboardingStep.DONE -> {}
             }
@@ -148,680 +141,788 @@ fun OnboardingScreen(
     }
 }
 
-// ── Welcome ───────────────────────────────────────────────────────────────────
+// ── Splash ─────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun WelcomeStep(onNext: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.weight(0.07f))
-
-        Box(modifier = Modifier.size(200.dp), contentAlignment = Alignment.Center) {
-            WelcomeMandala(modifier = Modifier.fillMaxSize())
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    "सारथी",
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 44.sp,
-                    ),
-                    color = SaarthiColors.Gold,
-                )
-                Text(
-                    "SAARTHI",
-                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 6.sp),
-                    color = SaarthiColors.TextMuted,
-                )
-            }
-        }
-
-        Spacer(Modifier.weight(0.05f))
-
-        Text(
-            "आपका निजी AI सहायक",
-            style = MaterialTheme.typography.titleLarge,
-            color = SaarthiColors.TextSecondary,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Private · Offline · Always There",
-            style = MaterialTheme.typography.bodyMedium,
-            color = SaarthiColors.TextMuted,
-            textAlign = TextAlign.Center,
-        )
-
-        Spacer(Modifier.weight(0.07f))
-
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            OnboardingFeatureRow(Icons.Outlined.Shield, "Complete Privacy", "Your conversations never leave your device", SaarthiColors.Gold)
-            OnboardingFeatureRow(Icons.Outlined.CloudOff, "100% Offline", "Works without internet, anywhere in India", SaarthiColors.CyberTeal)
-            OnboardingFeatureRow(Icons.Outlined.Public, "Made for Bharat", "Understands Indian languages and context", SaarthiColors.Saffron)
-        }
-
-        Spacer(Modifier.weight(0.08f))
-
-        SaarthiPrimaryButton(
-            text = "शुरू करें — Get Started",
-            onClick = onNext,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "Open-source AI · Runs entirely on your device",
-            style = MaterialTheme.typography.labelMedium,
-            color = SaarthiColors.TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.weight(0.04f))
-    }
-}
-
-// ── Language select ───────────────────────────────────────────────────────────
-
-@Composable
-private fun LanguageSelectStep(
-    selectedLanguage: SupportedLanguage,
-    onSelect: (SupportedLanguage) -> Unit,
-    onNext: () -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.height(48.dp))
-        Text(
-            "Choose your language",
-            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = SaarthiColors.Gold,
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "You can change it later in settings.",
-            style = MaterialTheme.typography.bodySmall,
-            color = SaarthiColors.TextMuted,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(24.dp))
-        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(SupportedLanguage.entries) { lang ->
-                GlassmorphicCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    accentColor = if (lang == selectedLanguage) SaarthiColors.Gold else SaarthiColors.GlassBorder,
-                    onClick = { onSelect(lang) },
-                ) {
-                    Text(
-                        "${lang.nativeName}  •  ${lang.englishName}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (lang == selectedLanguage) SaarthiColors.Gold else SaarthiColors.TextPrimary,
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-        SaarthiPrimaryButton(text = "Continue", onClick = onNext, modifier = Modifier.fillMaxWidth())
-    }
-}
-
-// ── Model pick ────────────────────────────────────────────────────────────────
-
-@Composable
-private fun ModelPickStep(
-    deviceProfile: DeviceProfile?,
-    catalogModels: List<ModelEntry>,
-    downloadProgress: Map<String, DownloadProgress>,
-    downloadedModelIds: Set<String>,
-    localCandidates: List<String>,
-    selectedPath: String?,
-    isScanning: Boolean,
-    error: String?,
-    onDownload: (ModelEntry) -> Unit,
-    onCancelDownload: (ModelEntry) -> Unit,
-    onSelectDownloaded: (ModelEntry) -> Unit,
-    onDeleteDownloaded: (ModelEntry) -> Unit,
-    onSelectLocal: (String) -> Unit,
-    onBrowse: () -> Unit,
-    onConfirm: () -> Unit,
-    onGrantAllFiles: () -> Unit,
-    onRescan: () -> Unit,
-) {
-    var showLocalSection by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.height(32.dp))
-
-        Text(
-            "Select AI Model",
-            style = MaterialTheme.typography.headlineMedium,
-            color = SaarthiColors.Gold,
-        )
-        Spacer(Modifier.height(6.dp))
-
-        // Device badge
-        if (deviceProfile != null) {
-            val tierLabel = when (deviceProfile.tier) {
-                DeviceTier.FLAGSHIP -> "Flagship · ${deviceProfile.totalRamMb / 1024}GB RAM · ${if (deviceProfile.hasVulkan) "Vulkan GPU" else "CPU"}"
-                DeviceTier.MID      -> "Mid-range · ${deviceProfile.totalRamMb / 1024}GB RAM"
-                DeviceTier.LOW      -> "Entry-level · ${deviceProfile.totalRamMb / 1024}GB RAM"
-                DeviceTier.MINIMAL  -> "Ultra-low · ${deviceProfile.totalRamMb / 1024}GB RAM"
-            }
-            val tierColor = when (deviceProfile.tier) {
-                DeviceTier.FLAGSHIP -> SaarthiColors.Gold
-                DeviceTier.MID      -> SaarthiColors.CyberTeal
-                DeviceTier.LOW      -> SaarthiColors.TextSecondary
-                DeviceTier.MINIMAL  -> SaarthiColors.Warning
-            }
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(tierColor.copy(alpha = 0.12f))
-                    .border(1.dp, tierColor.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 14.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text("📱", style = MaterialTheme.typography.bodySmall)
-                Text(tierLabel, style = MaterialTheme.typography.labelMedium, color = tierColor)
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // ── Catalog models ────────────────────────────────────────────────────
-        Text(
-            "Recommended models for your device",
-            style = MaterialTheme.typography.titleSmall,
-            color = SaarthiColors.TextSecondary,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(10.dp))
-
-        catalogModels.forEach { model ->
-            val progress = downloadProgress[model.id]
-            CatalogModelCard(
-                model = model,
-                progress = progress,
-                isSelected = selectedPath?.endsWith(model.fileName) == true,
-                isDownloaded = model.id in downloadedModelIds,
-                onDownload = { onDownload(model) },
-                onCancel = { onCancelDownload(model) },
-                onSelect = { onSelectDownloaded(model) },
-                onDelete = { onDeleteDownloaded(model) },
-            )
-            Spacer(Modifier.height(10.dp))
-        }
-
-        // ── Divider / toggle for existing files ───────────────────────────────
-        Spacer(Modifier.height(8.dp))
-        TextButton(
-            onClick = { showLocalSection = !showLocalSection },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                if (showLocalSection) "Hide existing files ▲" else "Use a model already on this device ▼",
-                color = SaarthiColors.TextMuted,
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-
-        AnimatedVisibility(visible = showLocalSection) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider(color = SaarthiColors.GlassBorder)
-                Spacer(Modifier.height(12.dp))
-
-                if (isScanning) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(color = SaarthiColors.Gold, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Scanning device…", color = SaarthiColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
-                    }
-                } else if (localCandidates.isEmpty()) {
-                    Text("No model files found automatically.", color = SaarthiColors.TextMuted, style = MaterialTheme.typography.bodySmall)
-                } else {
-                    localCandidates.forEach { path ->
-                        val isSelected = path == selectedPath
-                        GlassmorphicCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            accentColor = if (isSelected) SaarthiColors.Gold else SaarthiColors.GlassBorder,
-                            onClick = { onSelectLocal(path) },
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    if (isSelected) Icon(Icons.Default.CheckCircle, null, tint = SaarthiColors.Gold, modifier = Modifier.size(16.dp))
-                                    Text(
-                                        path.substringAfterLast("/"),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (isSelected) SaarthiColors.Gold else SaarthiColors.TextPrimary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                Text(
-                                    path.substringBeforeLast("/"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = SaarthiColors.TextMuted,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                    }
-                }
-
-                Spacer(Modifier.height(4.dp))
-                OutlinedButton(onClick = onBrowse, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("Browse for model file", color = SaarthiColors.TextPrimary)
-                }
-                Spacer(Modifier.height(4.dp))
-                OutlinedButton(onClick = onGrantAllFiles, modifier = Modifier.fillMaxWidth()) {
-                    Text("Grant All Files Access (then rescan)", color = SaarthiColors.TextPrimary)
-                }
-                Spacer(Modifier.height(4.dp))
-                OutlinedButton(onClick = onRescan, modifier = Modifier.fillMaxWidth()) {
-                    Text("Rescan after granting access", color = SaarthiColors.TextPrimary)
-                }
-            }
-        }
-
-        if (error != null) {
-            Spacer(Modifier.height(10.dp))
-            Text(error, color = SaarthiColors.Error, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Debug log: ${DebugLogger.path()}",
-                style = MaterialTheme.typography.labelSmall,
-                color = SaarthiColors.TextMuted,
-                textAlign = TextAlign.Center,
-            )
-        }
-
-        Spacer(Modifier.height(16.dp))
-        SaarthiPrimaryButton(
-            text = if (selectedPath != null) "Load Selected Model" else "Select or download a model",
-            onClick = onConfirm,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(24.dp))
-    }
-}
-
-@Composable
-private fun CatalogModelCard(
-    model: ModelEntry,
-    progress: DownloadProgress?,
-    isSelected: Boolean,
-    isDownloaded: Boolean,
-    onDownload: () -> Unit,
-    onCancel: () -> Unit,
-    onSelect: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val accentColor = when {
-        isSelected -> SaarthiColors.Gold
-        model.tags.contains("Recommended") -> SaarthiColors.CyberTeal.copy(alpha = 0.6f)
-        else -> SaarthiColors.GlassBorder
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(SaarthiColors.NavyLight)
-            .border(1.dp, accentColor, RoundedCornerShape(16.dp))
-            .padding(14.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        model.displayName,
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = if (isSelected) SaarthiColors.Gold else SaarthiColors.TextPrimary,
-                    )
-                }
-                if (model.tags.isNotEmpty()) {
-                    Spacer(Modifier.height(3.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        model.tags.take(2).forEach { tag ->
-                            val tagColor = when (tag) {
-                                "Recommended" -> SaarthiColors.Gold
-                                "Best Quality" -> SaarthiColors.CyberTeal
-                                else -> SaarthiColors.TextMuted
-                            }
-                            Text(
-                                tag,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = tagColor,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(tagColor.copy(alpha = 0.12f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Right action area
-            val fileReady = isDownloaded || progress is DownloadProgress.Completed
-            when {
-                progress is DownloadProgress.Downloading || progress is DownloadProgress.Paused -> {
-                    // Actively downloading or paused — only show cancel
-                    IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Close, "Cancel", tint = SaarthiColors.Error, modifier = Modifier.size(20.dp))
-                    }
-                }
-                isSelected && fileReady -> {
-                    // Selected + on disk — checkmark + delete
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CheckCircle, null, tint = SaarthiColors.Gold, modifier = Modifier.size(24.dp))
-                        IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
-                            Icon(Icons.Default.Delete, "Delete model", tint = SaarthiColors.Error.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
-                fileReady -> {
-                    // Downloaded but not selected — Use + delete
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = onSelect, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
-                            Text("Use", color = SaarthiColors.Gold, style = MaterialTheme.typography.labelMedium)
-                        }
-                        IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
-                            Icon(Icons.Default.Delete, "Delete model", tint = SaarthiColors.TextMuted, modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
-                else -> {
-                    // Not downloaded — show download button
-                    IconButton(
-                        onClick = onDownload,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(SaarthiColors.Gold.copy(alpha = 0.15f)),
-                    ) {
-                        Icon(Icons.Default.CloudDownload, "Download", tint = SaarthiColors.Gold, modifier = Modifier.size(20.dp))
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(6.dp))
-        Text(
-            model.description,
-            style = MaterialTheme.typography.bodySmall,
-            color = SaarthiColors.TextMuted,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-
-        // Size info
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "${model.fileSizeMb} MB · ${model.engineType.name.replace('_', ' ')}",
-            style = MaterialTheme.typography.labelSmall,
-            color = SaarthiColors.TextMuted,
-        )
-
-        // Download progress bar
-        if (progress is DownloadProgress.Downloading) {
-            Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { progress.percent / 100f },
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
-                color = SaarthiColors.Gold,
-                trackColor = SaarthiColors.GlassBorder,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                "${progress.percent}% · ${progress.bytesDownloaded / 1_048_576}MB / ${progress.totalBytes / 1_048_576}MB",
-                style = MaterialTheme.typography.labelSmall,
-                color = SaarthiColors.TextMuted,
-            )
-        }
-
-        if (progress is DownloadProgress.Paused) {
-            Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(4.dp)),
-                color = SaarthiColors.Gold.copy(alpha = 0.5f),
-                trackColor = SaarthiColors.GlassBorder,
-            )
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    progress.reason, 
-                    color = SaarthiColors.Gold, 
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(
-                    onClick = { onDownload() /* calling onDownload again re-enqueues or restarts polling */ },
-                    contentPadding = PaddingValues(horizontal = 8.dp)
-                ) {
-                    Text("Retry Now", color = SaarthiColors.Gold, style = MaterialTheme.typography.labelSmall)
-                }
-            }
-        }
-
-
-        if (progress is DownloadProgress.Failed) {
-            Spacer(Modifier.height(4.dp))
-            Text("Download failed: ${progress.reason}", color = SaarthiColors.Error, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-// ── Model init ────────────────────────────────────────────────────────────────
-
-@Composable
-private fun ModelInitStep(isLoading: Boolean, error: String?) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        if (isLoading) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                com.saarthi.core.ui.components.ShimmerLoading(
-                    width = Modifier.fillMaxWidth(0.5f),
-                    height = 24.dp,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(Modifier.height(16.dp))
-                com.saarthi.core.ui.components.ShimmerLoading(
-                    width = Modifier.fillMaxWidth(0.7f),
-                    height = 16.dp,
-                    shape = RoundedCornerShape(8.dp)
-                )
-                Spacer(Modifier.height(32.dp))
-            }
-            Text("Initializing Neural Engine…", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), color = SaarthiColors.Gold)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Loading weights into GPU memory — please wait a moment.",
-                style = MaterialTheme.typography.bodySmall,
-                color = SaarthiColors.TextMuted,
-                textAlign = TextAlign.Center,
-            )
-        }
-        if (error != null) {
-            Text("Error: $error", color = SaarthiColors.Error, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Debug log saved to:\n${DebugLogger.path()}",
-                style = MaterialTheme.typography.labelSmall,
-                color = SaarthiColors.TextMuted,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-// ── Setup complete ────────────────────────────────────────────────────────────
-
-@Composable
-private fun SetupCompleteStep(onComplete: () -> Unit) {
+private fun SplashScreen(onContinue: () -> Unit) {
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(1500)
-        onComplete()
+        delay(1800)
+        onContinue()
     }
-
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Box(
             modifier = Modifier
-                .size(96.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(SaarthiColors.Gold.copy(alpha = 0.12f))
-                .border(1.dp, SaarthiColors.Gold.copy(alpha = 0.4f), RoundedCornerShape(24.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Default.CheckCircle, null, tint = SaarthiColors.Gold, modifier = Modifier.size(52.dp))
+                .size(420.dp)
+                .background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(SaarthiColors.Marigold.copy(alpha = 0.22f), Color.Transparent),
+                    ),
+                ),
+        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            SaarthiLogo(size = 88.dp)
+            Spacer(Modifier.height(24.dp))
+            Text("सारथी", style = DisplayAccent.copy(fontSize = 18.sp, color = SaarthiColors.Marigold))
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Saarthi",
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontSize = 36.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Your AI companion · आपका साथी",
+                style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text3),
+            )
+            Spacer(Modifier.height(48.dp))
+            RangoliDivider(width = 140.dp, color = SaarthiColors.Marigold)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "OFFLINE · PRIVATE · FREE",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = SaarthiColors.Text4,
+                    letterSpacing = 1.4.sp,
+                ),
+            )
         }
-
-        Spacer(Modifier.height(28.dp))
-
         Text(
-            "सारथी तैयार है",
-            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-            color = SaarthiColors.Gold,
-            textAlign = TextAlign.Center,
+            "Powered by Gemma · On-device AI",
+            style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text4),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Your AI is ready — offline, private, always with you.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = SaarthiColors.TextSecondary,
-            textAlign = TextAlign.Center,
-        )
-
-        Spacer(Modifier.height(40.dp))
-        CircularProgressIndicator(color = SaarthiColors.Gold, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
     }
 }
 
-// ── Shared composables ────────────────────────────────────────────────────────
+// ── Shared shell ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun WelcomeMandala(modifier: Modifier = Modifier) {
-    val gold = SaarthiColors.Gold
-    Canvas(modifier = modifier) {
-        val cx = size.width / 2
-        val cy = size.height / 2
-        val r1 = size.width * 0.47f
-        val r2 = size.width * 0.36f
-        val r3 = size.width * 0.24f
-        val sw = 1.2f
-
-        drawCircle(color = gold.copy(0.10f), radius = r1, center = Offset(cx, cy), style = Stroke(sw))
-        drawCircle(color = gold.copy(0.25f), radius = r2, center = Offset(cx, cy), style = Stroke(sw * 1.5f))
-        drawCircle(color = gold.copy(0.45f), radius = r3, center = Offset(cx, cy), style = Stroke(sw * 2f))
-
-        repeat(8) { i ->
-            val angle = i * (PI / 4)
-            drawLine(
-                color = gold.copy(0.08f),
-                start = Offset((cx + r3 * cos(angle)).toFloat(), (cy + r3 * sin(angle)).toFloat()),
-                end = Offset((cx + r1 * cos(angle)).toFloat(), (cy + r1 * sin(angle)).toFloat()),
-                strokeWidth = sw,
-            )
-        }
-
-        repeat(8) { i ->
-            val angle = i * (PI / 4) + (PI / 8)
-            drawCircle(
-                color = gold.copy(0.60f),
-                radius = 3.5f,
-                center = Offset((cx + r2 * cos(angle)).toFloat(), (cy + r2 * sin(angle)).toFloat()),
-            )
-        }
-
-        repeat(4) { i ->
-            val angle = i * (PI / 2) + (PI / 4)
-            drawLine(
-                color = gold.copy(0.20f),
-                start = Offset((cx + (r1 - 12f) * cos(angle)).toFloat(), (cy + (r1 - 12f) * sin(angle)).toFloat()),
-                end = Offset((cx + (r1 + 12f) * cos(angle)).toFloat(), (cy + (r1 + 12f) * sin(angle)).toFloat()),
-                strokeWidth = sw * 2f,
+private fun ProgressDots(current: Int, total: Int) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        repeat(total) { i ->
+            val active = i == current
+            Box(
+                modifier = Modifier
+                    .height(5.dp)
+                    .width(if (active) 22.dp else 5.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (active) SaarthiColors.Marigold else Color(0x2EF5EEE3)),
             )
         }
     }
 }
 
 @Composable
-private fun OnboardingFeatureRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    accentColor: Color = SaarthiColors.Gold,
+private fun OnbStepShell(
+    stepIdx: Int,
+    total: Int,
+    onBack: () -> Unit,
+    onSkip: (() -> Unit)? = null,
+    primaryLabel: String,
+    onPrimary: () -> Unit,
+    primaryEnabled: Boolean = true,
+    content: @Composable () -> Unit,
 ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ambient glow
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .size(420.dp)
+                .padding(top = 0.dp)
+                .background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(SaarthiColors.Marigold.copy(alpha = 0.16f), Color.Transparent),
+                    ),
+                ),
+        )
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                if (stepIdx > 0) {
+                    IconCircle(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = SaarthiColors.Text, modifier = Modifier.size(18.dp))
+                    }
+                } else {
+                    Box(Modifier.size(36.dp))
+                }
+                ProgressDots(stepIdx, total)
+                if (onSkip != null) {
+                    Text(
+                        "Skip",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = SaarthiColors.Text3,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable(onClick = onSkip)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                } else {
+                    Box(Modifier.size(36.dp))
+                }
+            }
+            Box(modifier = Modifier.weight(1f)) { content() }
+            Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                SaarthiPrimaryButton(
+                    text = primaryLabel,
+                    onClick = onPrimary,
+                    enabled = primaryEnabled,
+                    modifier = Modifier.fillMaxWidth(),
+                    trailing = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            null,
+                            tint = SaarthiColors.OnMarigold,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun IconCircle(onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(Color(0x10F5EEE3))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = { content() },
+    )
+}
+
+// ── Onb1 — Welcome ────────────────────────────────────────────────────────────
+
+@Composable
+private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
+    OnbStepShell(
+        stepIdx = 0,
+        total = 4,
+        onBack = {},
+        onSkip = null,
+        primaryLabel = "Get Started",
+        onPrimary = onNext,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            SaarthiLogo(size = 104.dp)
+            Spacer(Modifier.height(28.dp))
+            Text("सारथी", style = DisplayAccent.copy(fontSize = 22.sp))
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Your AI companion,",
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                "made for India.",
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Marigold,
+                ),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Saarthi — meaning charioteer — guides you through everyday questions in your language, fully offline.",
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    color = SaarthiColors.Text2,
+                    fontSize = 14.sp,
+                ),
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+// ── Onb2 — Language ───────────────────────────────────────────────────────────
+
+@Composable
+private fun Onb2Language(
+    selected: SupportedLanguage,
+    onSelect: (SupportedLanguage) -> Unit,
+    onNext: () -> Unit,
+    onBack: () -> Unit,
+) {
+    OnbStepShell(
+        stepIdx = 1,
+        total = 4,
+        onBack = onBack,
+        onSkip = null,
+        primaryLabel = "Continue",
+        onPrimary = onNext,
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Choose your language",
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "अपनी भाषा चुनें · You can change this anytime",
+                style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
+            )
+            Spacer(Modifier.height(18.dp))
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(SupportedLanguage.entries) { lang ->
+                    LanguageRow(lang = lang, selected = lang == selected, onClick = { onSelect(lang) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanguageRow(lang: SupportedLanguage, selected: Boolean, onClick: () -> Unit) {
+    val bg = if (selected) SaarthiColors.MarigoldSoft else SaarthiColors.Surface
+    val borderColor = if (selected) SaarthiColors.MarigoldBd else SaarthiColors.Border
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(SaarthiColors.NavyLight)
-            .border(1.dp, SaarthiColors.GlassBorder, RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .background(bg)
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(46.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(accentColor.copy(alpha = 0.14f))
-                .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(if (selected) SaarthiColors.MarigoldBd else Color(0x0DF5EEE3)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = accentColor,
-                modifier = Modifier.size(22.dp),
+            Text(
+                lang.nativeName.take(1),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = SaarthiDisplayFont,
+                    fontSize = 16.sp,
+                    color = if (selected) SaarthiColors.Marigold else SaarthiColors.Text2,
+                ),
             )
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                title,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                color = SaarthiColors.TextPrimary,
+                lang.nativeName,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    color = if (selected) SaarthiColors.Marigold else SaarthiColors.Text,
+                ),
             )
             Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = SaarthiColors.TextMuted,
+                lang.englishName,
+                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+            )
+        }
+        if (selected) {
+            Icon(Icons.Default.Check, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+// ── Onb3 — Privacy ────────────────────────────────────────────────────────────
+
+@Composable
+private fun Onb3Privacy(onNext: () -> Unit, onBack: () -> Unit) {
+    OnbStepShell(
+        stepIdx = 2,
+        total = 4,
+        onBack = onBack,
+        onSkip = null,
+        primaryLabel = "I understand",
+        onPrimary = onNext,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp).verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(88.dp)
+                    .background(
+                        androidx.compose.ui.graphics.Brush.radialGradient(
+                            colors = listOf(SaarthiColors.JadeSoft, Color.Transparent),
+                        ),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(SaarthiColors.JadeSoft)
+                        .border(1.dp, SaarthiColors.JadeBd, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Shield, null, tint = SaarthiColors.Jade, modifier = Modifier.size(30.dp))
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "Private by design",
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Saarthi runs the AI on your phone. Your questions, files, and answers never leave your device.",
+                style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(24.dp))
+            PrivacyRow(Icons.Outlined.WifiOff, "No internet needed", "Works on a flight, in a village, anywhere")
+            Spacer(Modifier.height(10.dp))
+            PrivacyRow(Icons.Outlined.Lock, "Zero data collection", "No accounts, no tracking, no servers")
+            Spacer(Modifier.height(10.dp))
+            PrivacyRow(Icons.Outlined.Memory, "Runs on your hardware", "Google Gemma model, optimized for mobile")
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun PrivacyRow(icon: ImageVector, title: String, subtitle: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(SaarthiColors.Surface)
+            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(SaarthiColors.JadeSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = SaarthiColors.Jade, modifier = Modifier.size(16.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall.copy(color = SaarthiColors.Text))
+            Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3))
+        }
+    }
+}
+
+// ── Onb4 — Model Pick ─────────────────────────────────────────────────────────
+
+@Composable
+private fun Onb4ModelPick(
+    state: com.saarthi.feature.onboarding.viewmodel.OnboardingUiState,
+    onDownload: (ModelEntry) -> Unit,
+    onCancel: (ModelEntry) -> Unit,
+    onSelect: (ModelEntry) -> Unit,
+    onDelete: (ModelEntry) -> Unit,
+    onProceed: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val pickedReady = state.catalogModels.any {
+        state.selectedModelPath?.endsWith(it.fileName) == true && it.id in state.downloadedModelIds
+    }
+    OnbStepShell(
+        stepIdx = 3,
+        total = 4,
+        onBack = onBack,
+        onSkip = null,
+        primaryLabel = if (pickedReady) "Continue" else "Download & Continue",
+        onPrimary = onProceed,
+        primaryEnabled = state.catalogModels.isNotEmpty(),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),
+        ) {
+            Text(
+                "Pick your AI brain",
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Download once · Works offline forever",
+                style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
+            )
+            Spacer(Modifier.height(14.dp))
+            DeviceTierBadge(profile = state.deviceProfile)
+            Spacer(Modifier.height(14.dp))
+            state.catalogModels.forEachIndexed { i, model ->
+                val progress = state.downloadProgress[model.id]
+                ModelOption(
+                    model = model,
+                    progress = progress,
+                    selected = state.selectedModelPath?.endsWith(model.fileName) == true,
+                    downloaded = model.id in state.downloadedModelIds,
+                    onClick = { onSelect(model) },
+                    onCancel = { onCancel(model) },
+                    onDelete = { onDelete(model) },
+                    toneIndex = i,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            if (state.error != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    state.error!!,
+                    style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Rose),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun DeviceTierBadge(profile: DeviceProfile?) {
+    if (profile == null) return
+    val label = when (profile.tier) {
+        DeviceTier.FLAGSHIP -> "Flagship · ${profile.totalRamMb / 1024}GB RAM · ${if (profile.hasVulkan) "Vulkan GPU" else "CPU"}"
+        DeviceTier.MID      -> "Mid-range · ${profile.totalRamMb / 1024}GB RAM"
+        DeviceTier.LOW      -> "Entry · ${profile.totalRamMb / 1024}GB RAM"
+        DeviceTier.MINIMAL  -> "Ultra-low · ${profile.totalRamMb / 1024}GB RAM"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(SaarthiColors.MarigoldSoft)
+            .border(1.dp, SaarthiColors.MarigoldBd, RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(Icons.Outlined.Memory, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(16.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text),
+        )
+    }
+}
+
+@Composable
+private fun ModelOption(
+    model: ModelEntry,
+    progress: DownloadProgress?,
+    selected: Boolean,
+    downloaded: Boolean,
+    onClick: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit,
+    toneIndex: Int,
+) {
+    val tone = when (toneIndex % 4) {
+        0 -> ChipTone.Marigold
+        1 -> ChipTone.Jade
+        2 -> ChipTone.Indigo
+        else -> ChipTone.Terracotta
+    }
+    val tag = model.tags.firstOrNull() ?: "Model"
+
+    val bg = if (selected) SaarthiColors.MarigoldSoft else SaarthiColors.Surface
+    val borderColor = if (selected) SaarthiColors.MarigoldBd else SaarthiColors.Border
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(bg)
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // radio dot
+            Box(
+                modifier = Modifier
+                    .size(18.dp)
+                    .clip(CircleShape)
+                    .border(1.5.dp, if (selected) SaarthiColors.Marigold else SaarthiColors.BorderHi, CircleShape)
+                    .background(if (selected) SaarthiColors.Marigold else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(SaarthiColors.Bg))
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        model.displayName,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = SaarthiColors.Text,
+                        ),
+                    )
+                    SaarthiChip(text = tag, tone = tone, small = true)
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "${model.description} · ${model.fileSizeMb} MB",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = SaarthiColors.Text3,
+                        fontSize = 11.5.sp,
+                    ),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (downloaded && !selected) {
+                SaarthiChip(text = "Ready", tone = ChipTone.Jade, small = true)
+            }
+        }
+        if (progress is DownloadProgress.Downloading) {
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                progress = { progress.percent / 100f },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(999.dp)),
+                color = SaarthiColors.Marigold,
+                trackColor = Color(0x0FF5EEE3),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${progress.percent}% · ${progress.bytesDownloaded / 1_048_576}MB / ${progress.totalBytes / 1_048_576}MB",
+                style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3),
+            )
+        }
+        if (progress is DownloadProgress.Paused) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Paused · ${progress.reason}",
+                style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Marigold),
+            )
+        }
+        if (progress is DownloadProgress.Failed) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Download failed: ${progress.reason}",
+                style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Rose),
+            )
+        }
+    }
+}
+
+// ── Downloading screen (also covers MODEL_INIT) ───────────────────────────────
+
+@Composable
+private fun DownloadingScreen(
+    state: com.saarthi.feature.onboarding.viewmodel.OnboardingUiState,
+    onBack: () -> Unit,
+) {
+    // Pick the model currently downloading or being initialized
+    val activeProgress = state.downloadProgress.entries.firstOrNull {
+        it.value is DownloadProgress.Downloading
+    }
+    val activeModel = state.catalogModels.firstOrNull { it.id == activeProgress?.key }
+        ?: state.catalogModels.firstOrNull { state.selectedModelPath?.endsWith(it.fileName) == true }
+        ?: state.catalogModels.firstOrNull()
+
+    val downloading = activeProgress?.value as? DownloadProgress.Downloading
+    val pct = downloading?.percent ?: if (state.isLoading) 100 else 0
+    val isInit = state.isLoading
+
+    Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .size(420.dp)
+                .background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(SaarthiColors.Marigold.copy(alpha = 0.20f), Color.Transparent),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconCircle(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = SaarthiColors.Text, modifier = Modifier.size(18.dp))
+                }
+                ProgressDots(3, 4)
+                Box(Modifier.size(36.dp))
+            }
+            Spacer(Modifier.weight(0.1f))
+            SaarthiLogo(size = 156.dp, progress = (pct / 100f).coerceIn(0f, 1f))
+            Spacer(Modifier.height(28.dp))
+            Text(
+                if (isInit) "INITIALIZING" else "DOWNLOADING",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = SaarthiColors.Text3,
+                    letterSpacing = 1.4.sp,
+                ),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                activeModel?.displayName ?: "AI Model",
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (isInit) "Loading weights into memory…"
+                else "Setting up your AI brain. After this, Saarthi works fully offline — forever.",
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    color = SaarthiColors.Text2,
+                    fontSize = 13.sp,
+                ),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+            Spacer(Modifier.height(20.dp))
+            // Progress card
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(SaarthiColors.Surface)
+                    .border(1.dp, SaarthiColors.Border, RoundedCornerShape(20.dp))
+                    .padding(16.dp),
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        "$pct%",
+                        style = MaterialTheme.typography.displayMedium.copy(
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SaarthiColors.Marigold,
+                        ),
+                    )
+                    if (downloading != null) {
+                        Text(
+                            "${downloading.bytesDownloaded / 1_048_576} / ${downloading.totalBytes / 1_048_576} MB",
+                            style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = { (pct / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp)),
+                    color = SaarthiColors.Marigold,
+                    trackColor = Color(0x0FF5EEE3),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                "Tip: You can keep using your phone — we'll finish in the background.",
+                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp, start = 8.dp, end = 8.dp),
+            )
+        }
+    }
+}
+
+// ── Setup Complete ────────────────────────────────────────────────────────────
+
+@Composable
+private fun SetupCompleteScreen(onContinue: () -> Unit) {
+    LaunchedEffect(Unit) {
+        delay(1800)
+        onContinue()
+    }
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .size(420.dp)
+                .background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(SaarthiColors.Marigold.copy(alpha = 0.30f), Color.Transparent),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier.fillMaxSize().padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            // Concentric diya rings
+            Box(modifier = Modifier.size(160.dp), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.size(160.dp).clip(CircleShape).border(1.dp, SaarthiColors.MarigoldBd.copy(alpha = 0.4f), CircleShape))
+                Box(modifier = Modifier.size(120.dp).clip(CircleShape).border(1.dp, SaarthiColors.MarigoldBd.copy(alpha = 0.6f), CircleShape))
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clip(CircleShape)
+                        .background(
+                            androidx.compose.ui.graphics.Brush.radialGradient(
+                                colors = listOf(SaarthiColors.MarigoldGlow, Color(0x14F4A52E)),
+                            ),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("🪔", style = MaterialTheme.typography.displayLarge.copy(fontSize = 44.sp))
+                }
+            }
+            Spacer(Modifier.height(28.dp))
+            Text(
+                "स्वागत है",
+                style = DisplayAccent.copy(fontSize = 20.sp, color = SaarthiColors.Marigold),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Ready, Saarthi",
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Your AI companion is set up and waiting. From here on, everything happens on your device.",
+                style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2),
+                textAlign = TextAlign.Center,
             )
         }
     }

@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -60,7 +61,17 @@ data class OnboardingUiState(
     val downloadedModelIds: Set<String> = emptySet(),
 )
 
-enum class OnboardingStep { WELCOME, LANGUAGE_SELECT, MODEL_PICK, MODEL_INIT, CHAT_TEST, DONE }
+enum class OnboardingStep {
+    SPLASH,
+    WELCOME,
+    LANGUAGE_SELECT,
+    PRIVACY,
+    MODEL_PICK,
+    DOWNLOADING,
+    MODEL_INIT,
+    CHAT_TEST,
+    DONE,
+}
 
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
@@ -80,7 +91,7 @@ class OnboardingViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(
         OnboardingUiState(
-            step = if (isModelChangeMode) OnboardingStep.MODEL_PICK else OnboardingStep.WELCOME,
+            step = if (isModelChangeMode) OnboardingStep.MODEL_PICK else OnboardingStep.SPLASH,
         )
     )
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
@@ -185,8 +196,17 @@ class OnboardingViewModel @Inject constructor(
     fun selectLanguage(language: SupportedLanguage) =
         _uiState.update { it.copy(selectedLanguage = language) }
 
+    fun goToWelcome() =
+        _uiState.update { it.copy(step = OnboardingStep.WELCOME) }
+
     fun goToLanguageSelect() =
         _uiState.update { it.copy(step = OnboardingStep.LANGUAGE_SELECT) }
+
+    fun goToPrivacy() =
+        _uiState.update { it.copy(step = OnboardingStep.PRIVACY) }
+
+    fun goBackTo(step: OnboardingStep) =
+        _uiState.update { it.copy(step = step) }
 
     fun proceedToModelPick() {
         _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isScanning = true) }
@@ -449,6 +469,45 @@ class OnboardingViewModel @Inject constructor(
                 }
                 DebugLogger.log("VMODEL", "Init failed: $errorMsg")
                 _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isLoading = false, error = errorMsg) }
+            }
+        }
+    }
+
+    /**
+     * Called when the user taps "Download & Continue" / "Continue" on Onb4.
+     * - If a downloaded model is selected → go straight to MODEL_INIT.
+     * - Else, start downloading the first recommended model and transition to
+     *   DOWNLOADING. When that finishes, the [allProgress] collector will set
+     *   selectedModelPath; we observe that and auto-init.
+     */
+    fun proceedFromModelPick() {
+        val s = _uiState.value
+        val selectedEntry = s.catalogModels.firstOrNull {
+            s.selectedModelPath?.endsWith(it.fileName) == true
+        }
+        when {
+            selectedEntry != null && selectedEntry.id in s.downloadedModelIds -> {
+                confirmModelAndInit()
+            }
+            else -> {
+                val model = selectedEntry ?: s.catalogModels.firstOrNull() ?: return
+                _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING, error = null) }
+                downloadManager.startDownload(model)
+                // Once the download completes, allProgress collector sets
+                // selectedModelPath + downloadedModelIds. Wait for that.
+                viewModelScope.launch {
+                    uiState.first { st ->
+                        st.step != OnboardingStep.DOWNLOADING ||
+                            (st.selectedModelPath?.endsWith(model.fileName) == true &&
+                                model.id in st.downloadedModelIds)
+                    }
+                    val st = _uiState.value
+                    if (st.step == OnboardingStep.DOWNLOADING &&
+                        st.selectedModelPath?.endsWith(model.fileName) == true
+                    ) {
+                        confirmModelAndInit()
+                    }
+                }
             }
         }
     }

@@ -23,11 +23,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Favorite
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Spa
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,147 +48,447 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.saarthi.core.i18n.SupportedLanguage
-import com.saarthi.core.ui.components.GlassmorphicCard
+import com.saarthi.core.ui.components.ChipTone
+import com.saarthi.core.ui.components.RangoliDivider
+import com.saarthi.core.ui.components.SaarthiChip
+import com.saarthi.core.ui.theme.DisplayAccent
 import com.saarthi.core.ui.theme.SaarthiColors
-import com.saarthi.core.ui.theme.saarthiColors
+import com.saarthi.core.ui.theme.SaarthiDisplayFont
 
 @Composable
 fun HomeScreen(
     onNavigate: (Route) -> Unit,
     onChangeModel: () -> Unit = {},
     onChangeLanguage: (SupportedLanguage) -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     currentLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     greeting: String = currentLanguage.greeting,
     exploreSubtitle: String = currentLanguage.exploreSubtitle,
 ) {
-    var showMenu by remember { mutableStateOf(false) }
     var showLanguagePicker by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SaarthiColors.DeepSpace)
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState()),
-    ) {
-        // Top bar
-        Row(
+    Box(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
+        // Ambient marigold glow at top
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    greeting,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = SaarthiColors.Gold,
-                )
-                Text(
-                    exploreSubtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = SaarthiColors.TextSecondary,
-                )
-            }
+                .align(Alignment.TopCenter)
+                .size(420.dp)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(SaarthiColors.Marigold.copy(alpha = 0.18f), Color.Transparent),
+                    ),
+                ),
+        )
 
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(
-                        Icons.Default.MoreVert,
-                        contentDescription = "Settings",
-                        tint = SaarthiColors.TextSecondary,
-                    )
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState()),
+        ) {
+            HomeTopBar(
+                onLang = { showLanguagePicker = true },
+                onMenu = onOpenSettings,
+            )
+
+            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                Spacer(Modifier.height(6.dp))
+                GreetingBlock(currentLanguage)
+                Spacer(Modifier.height(22.dp))
+                HeroComposer(onClick = { onNavigate(Route.Assistant) })
+                Spacer(Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    DropdownMenuItem(
-                        text = { Text(currentLanguage.changeLanguage, color = SaarthiColors.TextPrimary) },
-                        onClick = { showMenu = false; showLanguagePicker = true },
+                    Text(
+                        "SPECIALIST MODES",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = SaarthiColors.Text3,
+                            letterSpacing = 1.4.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
                     )
-                    DropdownMenuItem(
-                        text = { Text(currentLanguage.changeModel, color = SaarthiColors.TextPrimary) },
-                        onClick = { showMenu = false; onChangeModel() },
-                    )
+                    SaarthiChip(text = "Coming soon", tone = ChipTone.Indigo, small = true)
                 }
+                Spacer(Modifier.height(10.dp))
+                SpecialistsGrid(onClick = { onNavigate(Route.KisanSaathi) })
+                Spacer(Modifier.height(18.dp))
+
+                ThoughtOfTheDay()
+                Spacer(Modifier.height(32.dp))
             }
         }
 
-        // Pack items
-        Column(
-            modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            PackItem(
-                emoji = "💬",
-                title = currentLanguage.appName,
-                subtitle = when (currentLanguage) {
-                    SupportedLanguage.ENGLISH -> "Personal AI — ask anything, attach files, voice input"
-                    SupportedLanguage.HINDI   -> "अपना AI — कुछ भी पूछें, फ़ाइल जोड़ें, आवाज़ से बोलें"
-                    else -> "Personal AI — ask anything, attach files, voice input"
+        if (showLanguagePicker) {
+            LanguagePickerDialog(
+                currentLanguage = currentLanguage,
+                onLanguageSelected = {
+                    showLanguagePicker = false
+                    onChangeLanguage(it)
                 },
-                accentColor = SaarthiColors.Gold,
-                onClick = { onNavigate(Route.Assistant) },
-            )
-            PackItem(
-                emoji = "🌾",
-                title = when (currentLanguage) {
-                    SupportedLanguage.HINDI -> "किसान साथी"
-                    else -> "Kisan Saathi"
-                },
-                subtitle = when (currentLanguage) {
-                    SupportedLanguage.HINDI -> "खेती सलाह · मंडी भाव · सरकारी योजनाएं"
-                    else -> "Farming guidance · Mandi prices · Govt schemes"
-                },
-                accentColor = MaterialTheme.saarthiColors.kisanEarth,
-                badge = "Coming Soon",
-                onClick = { onNavigate(Route.KisanSaathi) },
-            )
-            PackItem(
-                emoji = "📚",
-                title = when (currentLanguage) {
-                    SupportedLanguage.HINDI -> "ज्ञान केंद्र"
-                    else -> "Knowledge Pack"
-                },
-                subtitle = when (currentLanguage) {
-                    SupportedLanguage.HINDI -> "NCERT · विज्ञान · सामान्य ज्ञान"
-                    else -> "NCERT · Science · General knowledge"
-                },
-                accentColor = MaterialTheme.saarthiColors.knowledgePurple,
-                badge = "Coming Soon",
-                onClick = { onNavigate(Route.Knowledge) },
-            )
-            PackItem(
-                emoji = "🔧",
-                title = when (currentLanguage) {
-                    SupportedLanguage.HINDI -> "फील्ड एक्सपर्ट"
-                    else -> "Field Expert"
-                },
-                subtitle = when (currentLanguage) {
-                    SupportedLanguage.HINDI -> "तकनीकी गाइड · एरर कोड · मैनुअल"
-                    else -> "Technical manuals · Error codes · Guides"
-                },
-                accentColor = MaterialTheme.saarthiColors.fieldBlue,
-                badge = "Coming Soon",
-                onClick = { onNavigate(Route.FieldExpert) },
+                onDismiss = { showLanguagePicker = false },
             )
         }
     }
+}
 
-    if (showLanguagePicker) {
-        LanguagePickerDialog(
-            currentLanguage = currentLanguage,
-            onLanguageSelected = {
-                showLanguagePicker = false
-                onChangeLanguage(it)
-            },
-            onDismiss = { showLanguagePicker = false },
+@Composable
+private fun HomeTopBar(onLang: () -> Unit, onMenu: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        // EN pill
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0x0DF5EEE3))
+                .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
+                .clickable(onClick = onLang)
+                .padding(horizontal = 11.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(Icons.Outlined.Public, null, tint = SaarthiColors.Text2, modifier = Modifier.size(14.dp))
+            Text(
+                "EN",
+                style = MaterialTheme.typography.labelMedium.copy(
+                    color = SaarthiColors.Text2,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+        }
+
+        // Active model pill (jade)
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(SaarthiColors.JadeSoft)
+                .border(1.dp, SaarthiColors.JadeBd, RoundedCornerShape(999.dp))
+                .padding(horizontal = 11.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(SaarthiColors.Jade))
+            Text(
+                "Gemma · Active",
+                style = MaterialTheme.typography.labelMedium.copy(
+                    color = SaarthiColors.Jade,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+        }
+
+        // Menu icon
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Color(0x0DF5EEE3))
+                .clickable(onClick = onMenu),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Default.MoreVert, "Settings", tint = SaarthiColors.Text, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun GreetingBlock(lang: SupportedLanguage) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("🪔", style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp))
+            Text(
+                text = greetingHi(lang),
+                style = DisplayAccent.copy(fontSize = 18.sp),
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "${greetingEn()}, friend",
+            style = MaterialTheme.typography.displayLarge.copy(
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold,
+                color = SaarthiColors.Text,
+                letterSpacing = (-0.6).sp,
+            ),
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "What can I help you with today?",
+            style = MaterialTheme.typography.bodyLarge.copy(
+                color = SaarthiColors.Text3,
+                fontSize = 14.sp,
+            ),
         )
     }
 }
+
+private fun greetingEn(): String {
+    val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when {
+        h < 12 -> "Good morning"
+        h < 17 -> "Good afternoon"
+        else -> "Good evening"
+    }
+}
+
+private fun greetingHi(lang: SupportedLanguage): String {
+    val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when {
+        h < 12 -> "सुप्रभात"
+        h < 17 -> "नमस्ते"
+        else -> "शुभ संध्या"
+    }
+}
+
+@Composable
+private fun HeroComposer(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(SaarthiColors.Surface)
+            .border(1.dp, SaarthiColors.BorderHi, RoundedCornerShape(28.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+    ) {
+        // marigold radial bleed top-right
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(180.dp)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(SaarthiColors.MarigoldSoft, Color.Transparent),
+                    ),
+                ),
+        )
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(SaarthiColors.MarigoldSoft)
+                        .border(1.dp, SaarthiColors.MarigoldBd, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(20.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Ask Saarthi anything",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SaarthiColors.Text,
+                        ),
+                    )
+                    Text(
+                        "Text · Voice · File · Image",
+                        style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+                    )
+                }
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = SaarthiColors.Text3, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SuggestionPill("Summarize a PDF")
+                SuggestionPill("PM Kisan eligibility")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SuggestionPill(text: String) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0x0AF5EEE3))
+            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium.copy(
+                color = SaarthiColors.Text2,
+                fontWeight = FontWeight.Medium,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun SpecialistsGrid(onClick: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SpecialistTile(
+                Icons.Outlined.Spa, "Kisan", "Farming · Mandi · Schemes",
+                tone = ChipTone.Jade, onClick = onClick,
+                modifier = Modifier.weight(1f),
+            )
+            SpecialistTile(
+                Icons.AutoMirrored.Outlined.MenuBook, "Vidya", "NCERT · Science · GK",
+                tone = ChipTone.Indigo, onClick = onClick,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SpecialistTile(
+                Icons.Outlined.Build, "Karigar", "Manuals · Error codes",
+                tone = ChipTone.Terracotta, onClick = onClick,
+                modifier = Modifier.weight(1f),
+            )
+            SpecialistTile(
+                Icons.Outlined.Favorite, "Swasth", "Wellness · First-aid",
+                tone = ChipTone.Marigold, onClick = onClick,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpecialistTile(
+    icon: ImageVector,
+    name: String,
+    sub: String,
+    tone: ChipTone,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val toneColor = when (tone) {
+        ChipTone.Marigold -> SaarthiColors.Marigold
+        ChipTone.Jade -> SaarthiColors.Jade
+        ChipTone.Indigo -> SaarthiColors.Indigo
+        ChipTone.Terracotta -> SaarthiColors.Terracotta
+        else -> SaarthiColors.Marigold
+    }
+    val toneBg = when (tone) {
+        ChipTone.Marigold -> SaarthiColors.MarigoldSoft
+        ChipTone.Jade -> SaarthiColors.JadeSoft
+        ChipTone.Indigo -> SaarthiColors.IndigoSoft
+        ChipTone.Terracotta -> SaarthiColors.TerracottaSoft
+        else -> SaarthiColors.MarigoldSoft
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(SaarthiColors.Surface)
+            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick),
+    ) {
+        // soft radial bleed
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(110.dp)
+                .background(
+                    Brush.radialGradient(colors = listOf(toneBg, Color.Transparent)),
+                ),
+        )
+        Column(modifier = Modifier.padding(16.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(toneBg)
+                    .border(1.dp, toneColor.copy(alpha = 0.22f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = toneColor, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    name,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SaarthiColors.Text,
+                    ),
+                )
+                Text(
+                    "Soon",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = SaarthiColors.Text3,
+                        fontSize = 9.5.sp,
+                        letterSpacing = 1.2.sp,
+                    ),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color(0x0DF5EEE3))
+                        .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                )
+            }
+            Text(
+                sub,
+                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThoughtOfTheDay() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        SaarthiColors.Marigold.copy(alpha = 0.08f),
+                        SaarthiColors.Terracotta.copy(alpha = 0.05f),
+                    ),
+                ),
+            )
+            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(20.dp))
+            .padding(16.dp),
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Outlined.Star, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(12.dp))
+                Text(
+                    "THOUGHT OF THE DAY",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = SaarthiColors.Marigold,
+                        letterSpacing = 1.4.sp,
+                    ),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "विद्या ददाति विनयम्",
+                style = DisplayAccent.copy(fontSize = 18.sp, color = SaarthiColors.Text),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "\"Knowledge gives humility\"",
+                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+            )
+        }
+    }
+}
+
+// ── Language picker dialog ───────────────────────────────────────────────────
 
 @Composable
 private fun LanguagePickerDialog(
@@ -191,67 +498,71 @@ private fun LanguagePickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = SaarthiColors.NavyMid,
+        containerColor = SaarthiColors.Bg2,
         title = {
             Text(
-                currentLanguage.changeLanguage,
-                color = SaarthiColors.TextPrimary,
-                style = MaterialTheme.typography.titleMedium,
+                "Change language",
+                style = MaterialTheme.typography.titleLarge,
+                color = SaarthiColors.Text,
             )
         },
         text = {
             LazyColumn(
                 contentPadding = PaddingValues(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(SupportedLanguage.entries) { lang ->
                     val isSelected = lang == currentLanguage
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isSelected) SaarthiColors.Gold.copy(alpha = 0.1f)
-                                else SaarthiColors.GlassSurface.copy(alpha = 0.3f)
+                                if (isSelected) SaarthiColors.MarigoldSoft
+                                else SaarthiColors.Surface
                             )
                             .border(
-                                width = if (isSelected) 1.dp else 0.dp,
-                                color = if (isSelected) SaarthiColors.Gold.copy(0.4f) else androidx.compose.ui.graphics.Color.Transparent,
-                                shape = RoundedCornerShape(10.dp),
+                                1.dp,
+                                if (isSelected) SaarthiColors.MarigoldBd else SaarthiColors.Border,
+                                RoundedCornerShape(12.dp),
                             )
                             .clickable { onLanguageSelected(lang) }
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Removed flag icon for a cleaner, text-pure interface.
                         Box(
                             modifier = Modifier
                                 .size(32.dp)
                                 .clip(CircleShape)
-                                .background(SaarthiColors.NavyDark),
-                            contentAlignment = Alignment.Center
+                                .background(
+                                    if (isSelected) SaarthiColors.MarigoldBd
+                                    else Color(0x0DF5EEE3)
+                                ),
+                            contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 lang.nativeName.take(1),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (isSelected) SaarthiColors.Gold else SaarthiColors.TextMuted
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontFamily = SaarthiDisplayFont,
+                                    color = if (isSelected) SaarthiColors.Marigold else SaarthiColors.Text2,
+                                ),
                             )
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "${lang.nativeName}  •  ${lang.englishName}",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (isSelected) SaarthiColors.Gold else SaarthiColors.TextPrimary,
+                                lang.nativeName,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    color = if (isSelected) SaarthiColors.Marigold else SaarthiColors.Text,
+                                ),
+                            )
+                            Text(
+                                lang.englishName,
+                                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                             )
                         }
                         if (isSelected) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null,
-                                tint = SaarthiColors.Gold,
-                                modifier = Modifier.size(18.dp),
-                            )
+                            Icon(Icons.Default.Check, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -260,76 +571,31 @@ private fun LanguagePickerDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = SaarthiColors.TextSecondary)
+                Text("Cancel", color = SaarthiColors.Text2)
             }
         },
     )
 }
 
-@Composable
-private fun PackItem(
-    emoji: String,
-    title: String,
-    subtitle: String,
-    accentColor: androidx.compose.ui.graphics.Color,
-    badge: String? = null,
-    onClick: () -> Unit,
-) {
-    GlassmorphicCard(
-        modifier = Modifier.fillMaxWidth(),
-        accentColor = accentColor,
-        onClick = onClick,
-    ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(emoji, style = MaterialTheme.typography.headlineMedium)
-                if (badge != null) {
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        badge,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SaarthiColors.TextMuted,
-                    )
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(title, style = MaterialTheme.typography.titleMedium, color = SaarthiColors.TextPrimary)
-            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = SaarthiColors.TextMuted)
-        }
-    }
-}
-
-@Composable fun KisanSaathiPlaceholder(onBack: () -> Unit) = PackPlaceholder("🌾", "Kisan Saathi", SaarthiColors.KisanEarth, onBack)
-@Composable fun KnowledgePlaceholder(onBack: () -> Unit) = PackPlaceholder("📚", "Knowledge Pack", SaarthiColors.KnowledgePurple, onBack)
-@Composable fun FieldExpertPlaceholder(onBack: () -> Unit) = PackPlaceholder("🔧", "Field Expert", SaarthiColors.FieldBlue, onBack)
+// ── Placeholder destinations (Kisan / Knowledge / Field) ─────────────────────
 
 @Composable
-private fun PackPlaceholder(
-    emoji: String,
-    name: String,
-    accent: androidx.compose.ui.graphics.Color,
-    onBack: () -> Unit,
-) {
+fun KisanSaathiPlaceholder(onBack: () -> Unit) = PackPlaceholder("Kisan Saathi", "Coming soon — farming guidance, mandi prices, govt schemes.", SaarthiColors.Jade, onBack)
+@Composable fun KnowledgePlaceholder(onBack: () -> Unit) = PackPlaceholder("Knowledge", "Coming soon — NCERT, science, general knowledge.", SaarthiColors.Indigo, onBack)
+@Composable fun FieldExpertPlaceholder(onBack: () -> Unit) = PackPlaceholder("Field Expert", "Coming soon — technical manuals, error codes.", SaarthiColors.Terracotta, onBack)
+
+@Composable
+private fun PackPlaceholder(name: String, sub: String, accent: Color, onBack: () -> Unit) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SaarthiColors.DeepSpace)
-            .statusBarsPadding()
-            .padding(32.dp),
+        modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg).statusBarsPadding().padding(28.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(emoji, style = MaterialTheme.typography.displayLarge)
-        Spacer(Modifier.height(16.dp))
-        Text(name, style = MaterialTheme.typography.headlineMedium, color = accent)
+        Text(name, style = MaterialTheme.typography.displayLarge.copy(fontSize = 28.sp, color = accent, fontWeight = FontWeight.Bold))
         Spacer(Modifier.height(8.dp))
-        Text(
-            "Coming soon — this feature is in development.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = SaarthiColors.TextSecondary,
-        )
+        Text(sub, style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2))
         Spacer(Modifier.height(24.dp))
-        androidx.compose.material3.TextButton(onClick = onBack) {
-            Text("← Back", color = SaarthiColors.Gold)
+        TextButton(onClick = onBack) {
+            Text("← Back", color = SaarthiColors.Marigold)
         }
     }
 }

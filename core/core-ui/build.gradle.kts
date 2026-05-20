@@ -6,6 +6,6 @@ plugins {
 android { namespace = "com.saarthi.core.ui" }
 
 dependencies {
-    implementation(libs.compose.material.icons)
+    api(libs.compose.material.icons)
     implementation(libs.accompanist.permissions)
 }
