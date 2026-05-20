@@ -111,30 +111,42 @@ fun ChatInputBar(
             }
         }
 
-        // Pill input row — bg=Surface, border=BorderHi, r=28
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(28.dp))
-                .background(SaarthiColors.Surface)
-                .border(1.dp, borderColor, RoundedCornerShape(28.dp))
-                .padding(start = 4.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // Leading + (attach)
-            IconButton(
-                onClick = onAttachClick,
-                modifier = Modifier.size(40.dp),
+            // Attach button — sits OUTSIDE the input pill so the pill stays
+            // clean (voice → send only).
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(SaarthiColors.Surface)
+                    .border(1.dp, SaarthiColors.Border, CircleShape),
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = "Attach",
-                    tint = SaarthiColors.Text2,
-                    modifier = Modifier.size(20.dp),
-                )
+                IconButton(onClick = onAttachClick, modifier = Modifier.size(44.dp)) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "Attach",
+                        tint = SaarthiColors.Text2,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
 
+            // Pill input row — single trailing icon (mic → send → stop).
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(SaarthiColors.Surface)
+                    .border(1.dp, borderColor, RoundedCornerShape(28.dp))
+                    .padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
             // Text field
             TextField(
                 value = inputText,
@@ -204,7 +216,8 @@ fun ChatInputBar(
                     )
                 }
             }
-        }
+            } // end pill Row
+        } // end outer Row (attach + pill)
         Spacer(Modifier.height(6.dp))
         Text(
             "Running offline · No data sent",

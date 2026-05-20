@@ -125,6 +125,7 @@ fun AssistantScreen(
     // Avoids showing HINDI for one frame while AssistantViewModel's fresh StateFlow catches up.
     initialLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     onNavigateToKnowledge: () -> Unit = {},
+    onChangeModel: () -> Unit = {},
     viewModel: AssistantViewModel = hiltViewModel(),
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -221,6 +222,7 @@ fun AssistantScreen(
                     searchQuery = uiState.searchQuery,
                     onSearchToggle = viewModel::toggleSearch,
                     onSearchQueryChange = viewModel::onSearchQueryChange,
+                    onChangeModel = onChangeModel,
                 )
             },
             snackbarHost = { SnackbarHost(snackbarHost) },
@@ -323,8 +325,8 @@ fun AssistantScreen(
         ModalBottomSheet(
             onDismissRequest = { scope.launch { attachmentSheetState.hide() } },
             sheetState = attachmentSheetState,
-            containerColor = SaarthiColors.NavyMid,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = SaarthiColors.GlassBorder) },
+            containerColor = SaarthiColors.Bg2,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = SaarthiColors.BorderHi) },
         ) {
             AttachmentBottomSheet(
                 onPickFiles = { filePicker.launch("*/*") },
@@ -332,6 +334,23 @@ fun AssistantScreen(
                 onDismiss = { scope.launch { attachmentSheetState.hide() } },
             )
         }
+    }
+
+    // Voice mode overlay — full-screen while listening.
+    if (uiState.isListening) {
+        com.saarthi.feature.assistant.ui.components.VoiceModeOverlay(
+            transcribedText = uiState.inputText,
+            isListening = uiState.isListening,
+            onClose = {
+                viewModel.stopListening()
+                viewModel.onInputChange("")
+            },
+            onSend = {
+                viewModel.stopListening()
+                if (uiState.inputText.isNotBlank()) viewModel.sendMessage()
+            },
+            onStop = { viewModel.stopListening() },
+        )
     }
 
     if (uiState.showClearDialog) {
@@ -514,6 +533,7 @@ private fun ChatTopBar(
     searchQuery: String,
     onSearchToggle: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
+    onChangeModel: () -> Unit = {},
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -570,14 +590,15 @@ private fun ChatTopBar(
 
             Spacer(Modifier.width(4.dp))
 
-            // Model selector pill — central focus, tappable to change model later.
+            // Model selector pill — clickable, takes user to model picker.
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(999.dp))
                     .background(Color(0x0DF5EEE3))
                     .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                    .clickable(onClick = onChangeModel)
+                    .padding(start = 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -607,6 +628,13 @@ private fun ChatTopBar(
                         style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3),
                     )
                 }
+                // Chevron — signals tappability and matches the spec mock.
+                Icon(
+                    Icons.Default.ArrowDownward,
+                    null,
+                    tint = SaarthiColors.Text3,
+                    modifier = Modifier.size(14.dp),
+                )
             }
 
             IconButton(onClick = onSearchToggle) {

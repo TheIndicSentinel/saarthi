@@ -195,7 +195,10 @@ fun SaarthiNavHost(
             AssistantScreen(
                 onBack = { navController.popBackStack() },
                 initialLanguage = currentLanguage,
-                onNavigateToKnowledge = { navController.navigate(Route.Knowledge.path) }
+                onNavigateToKnowledge = { navController.navigate(Route.Knowledge.path) },
+                onChangeModel = {
+                    navController.navigate("${Route.Onboarding.path}?modelChange=true")
+                },
             )
         }
 

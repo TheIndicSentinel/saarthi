@@ -675,10 +675,11 @@ private fun ModelOption(
             .clickable(onClick = onClick)
             .padding(14.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            // radio dot
+        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // radio dot — pinned to title baseline
             Box(
                 modifier = Modifier
+                    .padding(top = 3.dp)
                     .size(18.dp)
                     .clip(CircleShape)
                     .border(1.5.dp, if (selected) SaarthiColors.Marigold else SaarthiColors.BorderHi, CircleShape)
@@ -690,7 +691,12 @@ private fun ModelOption(
                 }
             }
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Title + tag + Ready chip — all in one row so height stays consistent
+                // regardless of whether the model is downloaded.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
                         model.displayName,
                         style = MaterialTheme.typography.titleMedium.copy(
@@ -699,6 +705,9 @@ private fun ModelOption(
                         ),
                     )
                     SaarthiChip(text = tag, tone = tone, small = true)
+                    if (downloaded) {
+                        SaarthiChip(text = "Ready", tone = ChipTone.Jade, small = true)
+                    }
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -710,9 +719,6 @@ private fun ModelOption(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-            }
-            if (downloaded && !selected) {
-                SaarthiChip(text = "Ready", tone = ChipTone.Jade, small = true)
             }
         }
         if (progress is DownloadProgress.Downloading) {
