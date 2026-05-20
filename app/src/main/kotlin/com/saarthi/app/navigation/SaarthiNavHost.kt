@@ -165,12 +165,13 @@ fun SaarthiNavHost(
                         "response-style" -> navController.navigate(Route.ResponseStyle.path)
                         "downloads" -> navController.navigate(Route.Downloads.path)
                         "history" -> navController.navigate(Route.History.path)
-                        "lang" -> { /* handled via dialog in Home — no-op for now */ }
                     }
                 },
                 onChangeModel = {
                     navController.navigate("${Route.Onboarding.path}?modelChange=true")
                 },
+                currentLanguage = currentLanguage,
+                onChangeLanguage = { lang -> mainViewModel.setLanguage(lang) },
             )
         }
 

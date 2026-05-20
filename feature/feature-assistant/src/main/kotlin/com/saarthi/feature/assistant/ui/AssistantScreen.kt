@@ -520,118 +520,110 @@ private fun ChatTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SaarthiColors.NavyDark.copy(alpha = 0.95f))
+            .background(SaarthiColors.Bg)
             .statusBarsPadding()
-            .height(56.dp)
-            .padding(horizontal = 4.dp),
+            .height(60.dp)
+            .padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (isSearchMode) {
             IconButton(onClick = onSearchToggle) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = SaarthiColors.TextSecondary)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = SaarthiColors.Text)
             }
             TextField(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Search...", color = SaarthiColors.TextMuted) },
+                placeholder = { Text("Search…", color = SaarthiColors.Text3) },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,
                     disabledContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor = SaarthiColors.Gold,
-                    focusedTextColor = SaarthiColors.TextPrimary,
-                    unfocusedTextColor = SaarthiColors.TextPrimary,
+                    cursorColor = SaarthiColors.Marigold,
+                    focusedTextColor = SaarthiColors.Text,
+                    unfocusedTextColor = SaarthiColors.Text,
                 ),
                 singleLine = true,
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { onSearchQueryChange("") }) {
-                            Icon(Icons.Default.Close, null, tint = SaarthiColors.TextMuted)
+                            Icon(Icons.Default.Close, null, tint = SaarthiColors.Text3)
                         }
                     }
                 }
             )
         } else {
-            if (onBack != null) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = SaarthiColors.TextSecondary)
-                }
-            } else {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(Icons.Default.Menu, null, tint = SaarthiColors.TextSecondary)
-                }
+            // Back or drawer
+            IconButton(onClick = onBack ?: onOpenDrawer) {
+                Icon(
+                    if (onBack != null) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu,
+                    null,
+                    tint = SaarthiColors.Text,
+                )
             }
 
-            Box(
+            // Small mandala mark — replaces the old gold-teal language-letter avatar.
+            com.saarthi.core.ui.components.SaarthiLogo(size = 30.dp)
+
+            Spacer(Modifier.width(4.dp))
+
+            // Model selector pill — central focus, tappable to change model later.
+            Row(
                 modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(SaarthiColors.Gold.copy(0.2f), SaarthiColors.CyberTeal.copy(0.1f))
-                        )
-                    )
-                    .border(1.dp, SaarthiColors.Gold.copy(0.4f), CircleShape),
-                contentAlignment = Alignment.Center,
+                    .weight(1f)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0x0DF5EEE3))
+                    .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(if (modelReady) SaarthiColors.Jade else SaarthiColors.Marigold),
+                )
                 Text(
-                    language.avatarLabel,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
+                    text = when {
+                        isStreaming -> language.thinkingText
+                        modelReady -> activeModelName ?: "AI ready"
+                        else -> language.chatOfflineSubtitle
+                    },
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = if (isStreaming) SaarthiColors.Jade else SaarthiColors.Text,
+                        fontWeight = FontWeight.SemiBold,
                     ),
-                    color = SaarthiColors.Gold,
-                )
-            }
-
-            Spacer(Modifier.width(10.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    language.appName,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = SaarthiColors.Gold,
-                )
-                val subColor = if (isStreaming) SaarthiColors.CyberTeal else SaarthiColors.TextMuted
-                val subText = when {
-                    isStreaming -> language.thinkingText
-                    modelReady -> activeModelName ?: "AI Assistant"
-                    else -> language.chatOfflineSubtitle
-                }
-                Text(
-                    subText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = subColor,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                if (isStreaming && tokensPerSecond > 0f) {
+                    Text(
+                        "${tokensPerSecond.toInt()} tok/s",
+                        style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3),
+                    )
+                }
             }
-
-            ModelStatusChip(
-                isStreaming = isStreaming,
-                tokensPerSecond = tokensPerSecond,
-                modelReady = modelReady,
-                activeModelName = activeModelName,
-            )
 
             IconButton(onClick = onSearchToggle) {
-                Icon(Icons.Default.Search, null, tint = SaarthiColors.TextSecondary)
+                Icon(Icons.Default.Search, null, tint = SaarthiColors.Text2)
             }
 
             Box {
                 IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, null, tint = SaarthiColors.TextSecondary)
+                    Icon(Icons.Default.MoreVert, null, tint = SaarthiColors.Text2)
                 }
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Clear chat", color = SaarthiColors.Error) },
-                        leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.Error) },
+                        text = { Text("Clear chat", color = SaarthiColors.Rose) },
+                        leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.Rose) },
                         onClick = { onClearChat(); showMenu = false },
                     )
                 }

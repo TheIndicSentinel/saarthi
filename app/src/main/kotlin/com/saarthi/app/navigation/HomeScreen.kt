@@ -210,7 +210,7 @@ private fun HomeTopBar(onLang: () -> Unit, onMenu: () -> Unit) {
 private fun GreetingBlock(lang: SupportedLanguage) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("🪔", style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp))
+            com.saarthi.core.ui.components.SaarthiLogo(size = 22.dp)
             Text(
                 text = greetingHi(lang),
                 style = DisplayAccent.copy(fontSize = 18.sp),

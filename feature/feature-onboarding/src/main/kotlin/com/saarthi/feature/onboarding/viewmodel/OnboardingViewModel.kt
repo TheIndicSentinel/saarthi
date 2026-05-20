@@ -379,6 +379,19 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update { it.copy(downloadedModelIds = ids) }
     }
 
+    /**
+     * Mark a catalog model as the user's current pick — even if it isn't
+     * downloaded yet. Sets selectedModelPath to where the file *would* live
+     * so proceedFromModelPick() can pick it up. Does NOT validate file
+     * integrity (use selectDownloadedModel for that).
+     */
+    fun highlightModel(model: ModelEntry) {
+        val path = downloadManager.localPathFor(model).absolutePath
+        _uiState.update {
+            it.copy(selectedModelPath = path, error = null)
+        }
+    }
+
     fun selectDownloadedModel(model: ModelEntry) {
         val file = downloadManager.localPathFor(model)
         if (downloadManager.isFileComplete(file, model.fileSizeBytes)) {

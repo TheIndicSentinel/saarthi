@@ -20,7 +20,7 @@ import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("saarthi_prefs")
+internal val Context.dataStore: DataStore<Preferences> by preferencesDataStore("saarthi_prefs")
 
 private val LANGUAGE_KEY = stringPreferencesKey("selected_language")
 

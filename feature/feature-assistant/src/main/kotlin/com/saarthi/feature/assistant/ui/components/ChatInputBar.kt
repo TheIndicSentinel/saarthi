@@ -11,7 +11,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -20,7 +19,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,7 +32,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,11 +44,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.saarthi.core.ui.theme.SaarthiColors
 import com.saarthi.feature.assistant.domain.AttachedFile
 
@@ -66,7 +67,7 @@ fun ChatInputBar(
     isStreaming: Boolean,
     isListening: Boolean,
     modifier: Modifier = Modifier,
-    hint: String = "Message Saarthi…",
+    hint: String = "Ask Saarthi anything…",
 ) {
     val micPulse = rememberInfiniteTransition(label = "mic_pulse")
     val micAlpha by micPulse.animateFloat(
@@ -78,30 +79,22 @@ fun ChatInputBar(
 
     val borderColor by animateColorAsState(
         targetValue = when {
-            isListening -> SaarthiColors.Error
-            isStreaming -> SaarthiColors.CyberTeal.copy(alpha = 0.7f)
-            else -> SaarthiColors.GlassBorder
+            isListening -> SaarthiColors.Rose
+            else -> SaarthiColors.BorderHi
         },
         label = "border",
     )
 
-    val canSend = (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isStreaming
+    val hasText = inputText.isNotBlank() || pendingAttachments.isNotEmpty()
+    val canSend = hasText && !isStreaming
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        SaarthiColors.DeepSpace.copy(alpha = 0f),
-                        SaarthiColors.DeepSpace,
-                    )
-                )
-            )
+            .background(SaarthiColors.Bg)
             .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp)
             .navigationBarsPadding(),
     ) {
-        // Pending attachments
         AnimatedVisibility(
             visible = pendingAttachments.isNotEmpty(),
             enter = fadeIn() + expandVertically(),
@@ -118,29 +111,26 @@ fun ChatInputBar(
             }
         }
 
-        // Pill input row
+        // Pill input row — bg=Surface, border=BorderHi, r=28
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(28.dp))
-                .background(SaarthiColors.NavyLight)
+                .background(SaarthiColors.Surface)
                 .border(1.dp, borderColor, RoundedCornerShape(28.dp))
-                .padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                .padding(start = 4.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // Attach
+            // Leading + (attach)
             IconButton(
                 onClick = onAttachClick,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(SaarthiColors.GlassSurface),
+                modifier = Modifier.size(40.dp),
             ) {
                 Icon(
                     Icons.Default.Add,
                     contentDescription = "Attach",
-                    tint = SaarthiColors.TextSecondary,
+                    tint = SaarthiColors.Text2,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -153,8 +143,10 @@ fun ChatInputBar(
                 placeholder = {
                     Text(
                         if (isListening) "Listening…" else hint,
-                        color = SaarthiColors.TextMuted,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            color = SaarthiColors.Text3,
+                            fontSize = 14.sp,
+                        ),
                     )
                 },
                 colors = TextFieldDefaults.colors(
@@ -162,11 +154,15 @@ fun ChatInputBar(
                     unfocusedContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = SaarthiColors.TextPrimary,
-                    unfocusedTextColor = SaarthiColors.TextPrimary,
-                    cursorColor = SaarthiColors.Gold,
+                    focusedTextColor = SaarthiColors.Text,
+                    unfocusedTextColor = SaarthiColors.Text,
+                    cursorColor = SaarthiColors.Marigold,
                 ),
-                textStyle = MaterialTheme.typography.bodyLarge,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 14.sp,
+                    color = SaarthiColors.Text,
+                    fontWeight = FontWeight.Normal,
+                ),
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Sentences,
                     imeAction = ImeAction.Default,
@@ -174,68 +170,73 @@ fun ChatInputBar(
                 maxLines = 6,
             )
 
-            // Voice or Stop
-            if (isStreaming) {
-                IconButton(
-                    onClick = onStopStreaming,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(SaarthiColors.Error.copy(alpha = 0.15f)),
-                ) {
-                    Icon(
-                        Icons.Default.Stop,
+            // Trailing — Stop while streaming; Send when text; otherwise Mic.
+            when {
+                isStreaming -> {
+                    TrailingCircleButton(
+                        bg = SaarthiColors.RoseSoft,
+                        iconTint = SaarthiColors.Rose,
+                        icon = Icons.Default.Stop,
                         contentDescription = "Stop",
-                        tint = SaarthiColors.Error,
-                        modifier = Modifier.size(20.dp),
+                        onClick = onStopStreaming,
                     )
                 }
-            } else {
-                IconButton(
-                    onClick = onVoiceClick,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isListening) SaarthiColors.Error.copy(alpha = micAlpha * 0.3f)
-                            else SaarthiColors.GlassSurface
-                        ),
-                ) {
-                    Icon(
-                        if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                hasText -> {
+                    TrailingCircleButton(
+                        bg = SaarthiColors.Marigold,
+                        iconTint = SaarthiColors.OnMarigold,
+                        icon = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        onClick = { if (canSend) onSend() },
+                    )
+                }
+                else -> {
+                    val micBg = if (isListening)
+                        SaarthiColors.Rose.copy(alpha = micAlpha * 0.4f)
+                    else
+                        Color(0x10F5EEE3)
+                    TrailingCircleButton(
+                        bg = micBg,
+                        iconTint = if (isListening) SaarthiColors.Rose else SaarthiColors.Text2,
+                        icon = Icons.Default.Mic,
                         contentDescription = "Voice",
-                        tint = if (isListening) SaarthiColors.Error else SaarthiColors.TextSecondary,
-                        modifier = Modifier.size(20.dp),
+                        onClick = onVoiceClick,
                     )
                 }
             }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Running offline · No data sent",
+            style = MaterialTheme.typography.labelSmall.copy(
+                color = SaarthiColors.Text4,
+                fontSize = 10.sp,
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
+}
 
-            // Send button
-            IconButton(
-                onClick = onSend,
-                enabled = canSend,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (canSend) {
-                            Brush.linearGradient(
-                                listOf(SaarthiColors.Gold, SaarthiColors.GoldDim)
-                            )
-                        } else {
-                            Brush.linearGradient(
-                                listOf(SaarthiColors.GlassSurface, SaarthiColors.GlassSurface)
-                            )
-                        }
-                    ),
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = if (canSend) SaarthiColors.DeepSpace else SaarthiColors.TextMuted,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+@Composable
+private fun TrailingCircleButton(
+    bg: Color,
+    iconTint: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(bg),
+        contentAlignment = Alignment.Center,
+    ) {
+        IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+            Icon(icon, contentDescription, tint = iconTint, modifier = Modifier.size(18.dp))
         }
     }
 }

@@ -123,6 +123,7 @@ fun OnboardingScreen(
                     onDownload = viewModel::downloadModel,
                     onCancel = viewModel::cancelDownload,
                     onSelect = viewModel::selectDownloadedModel,
+                    onHighlight = viewModel::highlightModel,
                     onDelete = viewModel::deleteModel,
                     onProceed = viewModel::proceedFromModelPick,
                     onBack = viewModel::goToPrivacy,
@@ -549,6 +550,7 @@ private fun Onb4ModelPick(
     onDownload: (ModelEntry) -> Unit,
     onCancel: (ModelEntry) -> Unit,
     onSelect: (ModelEntry) -> Unit,
+    onHighlight: (ModelEntry) -> Unit,
     onDelete: (ModelEntry) -> Unit,
     onProceed: () -> Unit,
     onBack: () -> Unit,
@@ -586,12 +588,15 @@ private fun Onb4ModelPick(
             Spacer(Modifier.height(14.dp))
             state.catalogModels.forEachIndexed { i, model ->
                 val progress = state.downloadProgress[model.id]
+                val isDownloaded = model.id in state.downloadedModelIds
                 ModelOption(
                     model = model,
                     progress = progress,
                     selected = state.selectedModelPath?.endsWith(model.fileName) == true,
-                    downloaded = model.id in state.downloadedModelIds,
-                    onClick = { onSelect(model) },
+                    downloaded = isDownloaded,
+                    onClick = {
+                        if (isDownloaded) onSelect(model) else onHighlight(model)
+                    },
                     onCancel = { onCancel(model) },
                     onDelete = { onDelete(model) },
                     toneIndex = i,
@@ -885,23 +890,11 @@ private fun SetupCompleteScreen(onContinue: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            // Concentric diya rings
+            // Concentric rings around the mandala mark
             Box(modifier = Modifier.size(160.dp), contentAlignment = Alignment.Center) {
                 Box(modifier = Modifier.size(160.dp).clip(CircleShape).border(1.dp, SaarthiColors.MarigoldBd.copy(alpha = 0.4f), CircleShape))
                 Box(modifier = Modifier.size(120.dp).clip(CircleShape).border(1.dp, SaarthiColors.MarigoldBd.copy(alpha = 0.6f), CircleShape))
-                Box(
-                    modifier = Modifier
-                        .size(88.dp)
-                        .clip(CircleShape)
-                        .background(
-                            androidx.compose.ui.graphics.Brush.radialGradient(
-                                colors = listOf(SaarthiColors.MarigoldGlow, Color(0x14F4A52E)),
-                            ),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("🪔", style = MaterialTheme.typography.displayLarge.copy(fontSize = 44.sp))
-                }
+                SaarthiLogo(size = 96.dp)
             }
             Spacer(Modifier.height(28.dp))
             Text(

@@ -13,12 +13,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Bolt
@@ -65,9 +68,12 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigate: (String) -> Unit,
     onChangeModel: () -> Unit,
+    currentLanguage: com.saarthi.core.i18n.SupportedLanguage = com.saarthi.core.i18n.SupportedLanguage.HINDI,
+    onChangeLanguage: (com.saarthi.core.i18n.SupportedLanguage) -> Unit = {},
 ) {
     var notifOn by remember { mutableStateOf(true) }
     var darkOn by remember { mutableStateOf(true) }
+    var showLangPicker by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg),
@@ -112,9 +118,9 @@ fun SettingsScreen(
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Public, null) },
                 title = "Language",
-                subtitle = "Change interface language",
+                subtitle = "${currentLanguage.nativeName} · ${currentLanguage.englishName}",
                 trailing = { ChevronRight() },
-                onClick = { onNavigate("lang") },
+                onClick = { showLangPicker = true },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) },
@@ -193,6 +199,78 @@ fun SettingsScreen(
             }
         }
     }
+
+    if (showLangPicker) {
+        SettingsLanguageDialog(
+            current = currentLanguage,
+            onSelect = {
+                onChangeLanguage(it)
+                showLangPicker = false
+            },
+            onDismiss = { showLangPicker = false },
+        )
+    }
+}
+
+@Composable
+private fun SettingsLanguageDialog(
+    current: com.saarthi.core.i18n.SupportedLanguage,
+    onSelect: (com.saarthi.core.i18n.SupportedLanguage) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SaarthiColors.Bg2,
+        title = {
+            Text("Change language", color = SaarthiColors.Text)
+        },
+        text = {
+            androidx.compose.foundation.lazy.LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(com.saarthi.core.i18n.SupportedLanguage.entries.toList()) { lang ->
+                    val isSel = lang == current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSel) SaarthiColors.MarigoldSoft else SaarthiColors.Surface)
+                            .border(1.dp, if (isSel) SaarthiColors.MarigoldBd else SaarthiColors.Border, RoundedCornerShape(12.dp))
+                            .clickable { onSelect(lang) }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                lang.nativeName,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    color = if (isSel) SaarthiColors.Marigold else SaarthiColors.Text,
+                                ),
+                            )
+                            Text(
+                                lang.englishName,
+                                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+                            )
+                        }
+                        if (isSel) {
+                            Icon(
+                                Icons.Filled.Check,
+                                null,
+                                tint = SaarthiColors.Marigold,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel", color = SaarthiColors.Text2)
+            }
+        },
+    )
 }
 
 @Composable
@@ -447,13 +525,11 @@ private fun StatTile(num: String, sub: String, modifier: Modifier = Modifier) {
 // ── Response style ────────────────────────────────────────────────────────────
 
 @Composable
-fun ResponseStyleScreen(onBack: () -> Unit) {
-    var length by remember { mutableStateOf("medium") }
-    var tone by remember { mutableStateOf("balanced") }
-    var styleMix by remember { mutableStateOf("mix") }
-    var disclaim by remember { mutableStateOf(true) }
-    var examples by remember { mutableStateOf(true) }
-
+fun ResponseStyleScreen(
+    onBack: () -> Unit,
+    viewModel: com.saarthi.app.ResponseStyleViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+) {
+    val style by viewModel.style.collectAsStateWithLifecycle()
     Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
         SaarthiTopBar(title = "Response style", subtitle = "How Saarthi talks to you", onBack = onBack)
         Column(
@@ -464,22 +540,22 @@ fun ResponseStyleScreen(onBack: () -> Unit) {
         ) {
             SegmentedCard(
                 title = "Answer length",
-                value = length,
-                onChange = { length = it },
+                value = style.length,
+                onChange = viewModel::setLength,
                 options = listOf("short" to "Short", "medium" to "Medium", "long" to "Long"),
             )
             Spacer(Modifier.height(14.dp))
             SegmentedCard(
                 title = "Tone",
-                value = tone,
-                onChange = { tone = it },
+                value = style.tone,
+                onChange = viewModel::setTone,
                 options = listOf("warm" to "Warm", "balanced" to "Balanced", "formal" to "Formal"),
             )
             Spacer(Modifier.height(14.dp))
             SegmentedCard(
                 title = "Language style",
-                value = styleMix,
-                onChange = { styleMix = it },
+                value = style.languageMix,
+                onChange = viewModel::setLanguageMix,
                 options = listOf("pure" to "Pure", "mix" to "Hinglish", "eng" to "English"),
             )
 
@@ -488,14 +564,30 @@ fun ResponseStyleScreen(onBack: () -> Unit) {
                 leadingIcon = { Icon(Icons.Outlined.Shield, null) },
                 title = "Show disclaimers",
                 subtitle = "Add safety notes for legal & medical topics",
-                trailing = { SaarthiToggle(on = disclaim, onToggle = { disclaim = !disclaim }) },
+                trailing = {
+                    SaarthiToggle(
+                        on = style.showDisclaimers,
+                        onToggle = { viewModel.setShowDisclaimers(!style.showDisclaimers) },
+                    )
+                },
             )
             Spacer(Modifier.height(6.dp))
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.MenuBook, null) },
                 title = "Include examples",
                 subtitle = "Anchor explanations with real-world cases",
-                trailing = { SaarthiToggle(on = examples, onToggle = { examples = !examples }) },
+                trailing = {
+                    SaarthiToggle(
+                        on = style.includeExamples,
+                        onToggle = { viewModel.setIncludeExamples(!style.includeExamples) },
+                    )
+                },
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "Preferences are saved on this device. The prompt builder will adopt them in the next update.",
+                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+                modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
     }
