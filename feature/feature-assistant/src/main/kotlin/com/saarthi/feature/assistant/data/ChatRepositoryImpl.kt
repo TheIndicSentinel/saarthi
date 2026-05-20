@@ -125,7 +125,12 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteSession(sessionId: String) {
+        // Cascade-delete every artefact tied to this chat. Without this,
+        // memories/embeddings from a deleted chat would persist and surface
+        // in future chats — that's the "states-in-India answer mentions
+        // groceries" bug class users reported.
         conversationDao.deleteBySession(sessionId)
+        memoryRepository.deleteForSession(sessionId)
         chatSessionDao.deleteById(sessionId)
         if (_currentSessionId.value == sessionId) {
             val remaining = chatSessionDao.getAll()
@@ -246,10 +251,13 @@ class ChatRepositoryImpl @Inject constructor(
                     }
                     scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
 
-                    // Save extracted memories
+                    // Save extracted memories — scoped to THIS chat session so the
+                    // facts can't bleed into another chat's prompt. Industry-standard
+                    // per-chat isolation (matches ChatGPT / Claude / Gemini default).
                     parsed.memories.forEach { marker ->
                         scope.launch {
                             memoryRepository.set(
+                                sessionId = sessionId,
                                 key = marker.key.trim().lowercase().replace(" ", "_"),
                                 value = marker.value.trim(),
                                 packSource = "USER",
@@ -290,6 +298,11 @@ class ChatRepositoryImpl @Inject constructor(
         val sessionId = _currentSessionId.value
         _history.update { emptyList() }
         conversationDao.deleteBySession(sessionId)
+        // Clearing history is also "wipe this chat's brain" — drop the
+        // session's memories so the next reply starts clean. Without this,
+        // the model could still see facts from messages the user just
+        // cleared.
+        memoryRepository.deleteForSession(sessionId)
         chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
@@ -355,7 +368,9 @@ class ChatRepositoryImpl @Inject constructor(
         // CONTINUE turn = the model already has the prior turns in its KV cache; we
         // just send the new user message.
         return if (isFresh) {
-            val memoryContext = runCatching { memoryRepository.buildContextSummary() }.getOrDefault("")
+            // Memory is scoped to THIS chat — never read another chat's memories.
+            val currentSession = _currentSessionId.value
+            val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
             val priorTurns = buildPriorTurnsRecap()
             val systemInstructions = buildSystemPrompt(memoryContext, priorTurns)
             DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  attachments=${attachments.size}  recapTurns=${priorTurns.isNotEmpty()}")
@@ -474,7 +489,8 @@ class ChatRepositoryImpl @Inject constructor(
         } else {
             DebugLogger.log("MEMORY", "No user memories stored yet")
         }
-        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}  recap=${priorTurnsContext.isNotEmpty()}  lang=${currentLanguage.code}")
+        val timeContext = buildTimeContext()
+        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}  recap=${priorTurnsContext.isNotEmpty()}  lang=${currentLanguage.code}  time=$timeContext")
         // Always pass the language instruction, including for English. Without it
         // the model defaults to whatever it picks up from the user's input or its
         // training mix (we saw English-selected users getting Hindi replies).
@@ -485,7 +501,30 @@ class ChatRepositoryImpl @Inject constructor(
             languageInstruction = langLine,
             memoryContext = memoryContext,
             priorTurnsContext = priorTurnsContext,
+            timeContext = timeContext,
         )
+    }
+
+    /**
+     * Single-line time context surfaced to the model so greetings match the
+     * actual time of day (was a real bug: "Good morning" at 9 PM). Format
+     * deliberately compact so it doesn't dominate the prompt.
+     *
+     * Example output: "Current local time is 21:14 on Mon, 20 May 2026 — it
+     * is evening (use a time-appropriate greeting if you greet the user)."
+     */
+    private fun buildTimeContext(): String {
+        val now = java.util.Calendar.getInstance()
+        val hour = now.get(java.util.Calendar.HOUR_OF_DAY)
+        val band = when (hour) {
+            in 5..11   -> "morning"
+            in 12..16  -> "afternoon"
+            in 17..20  -> "evening"
+            else       -> "night"
+        }
+        val timeStr = java.text.SimpleDateFormat("HH:mm 'on' EEE, d MMM yyyy", java.util.Locale.US)
+            .format(now.time)
+        return "Current local time is $timeStr — it is $band (use a time-appropriate greeting if you greet the user)."
     }
 
     /**

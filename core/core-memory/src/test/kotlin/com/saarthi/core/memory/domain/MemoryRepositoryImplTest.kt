@@ -7,6 +7,7 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -16,15 +17,18 @@ import org.junit.Test
  * MemoryRepositoryImpl is the surface that feeds stored user facts back
  * into the chat system prompt. Two pieces are worth covering:
  *
- *   • buildContextSummary — pure string-building from a list of entities.
- *     This is the ONE function whose output ends up in the LLM's input,
- *     so any drift in formatting silently degrades chat quality.
+ *   • buildContextSummary — pure string-building from a list of entities,
+ *     SCOPED to the calling session. New chats see only their own memories;
+ *     deleted chats are wiped via deleteForSession(). This is the contract
+ *     that prevents leak-across-chat bugs.
  *
- *   • CRUD pass-through — set/get/delete delegate to the DAO. We mock
- *     the DAO and verify that the contract holds: arguments arrive
- *     unchanged, and Entity↔Domain mapping doesn't lose data.
+ *   • CRUD pass-through — set/get/delete delegate to the DAO. We mock the
+ *     DAO and verify the contract holds: sessionId arrives unchanged,
+ *     Entity↔Domain mapping doesn't lose data.
  */
 class MemoryRepositoryImplTest {
+
+    private val SESSION = "test-session-1"
 
     private lateinit var dao: MemoryDao
     private lateinit var repository: MemoryRepositoryImpl
@@ -39,110 +43,140 @@ class MemoryRepositoryImplTest {
 
     @Test
     fun `buildContextSummary returns empty string when no facts stored`() = runTest {
-        coEvery { dao.getAll() } returns emptyList()
+        coEvery { dao.getBySession(SESSION) } returns emptyList()
 
-        val summary = repository.buildContextSummary()
+        val summary = repository.buildContextSummary(SESSION)
 
         assertEquals("", summary)
     }
 
     @Test
     fun `buildContextSummary uses friendly label for known key`() = runTest {
-        coEvery { dao.getAll() } returns listOf(
-            MemoryEntity(key = "name", value = "Rahul", packSource = "USER")
+        coEvery { dao.getBySession(SESSION) } returns listOf(
+            MemoryEntity(sessionId = SESSION, key = "name", value = "Rahul", packSource = "USER")
         )
 
-        val summary = repository.buildContextSummary()
+        val summary = repository.buildContextSummary(SESSION)
 
-        // The key "name" maps to the "Name" label in the rich label map —
-        // a regression here means the LLM sees raw key strings instead of
-        // human-readable facts.
-        assertTrue("Should use 'Name' label for 'name' key. Got:\n$summary",
-            summary.contains("- Name: Rahul"))
+        // "name" maps to the "Name" label. Regression here means the LLM
+        // sees raw key strings instead of human-readable facts.
+        assertTrue(
+            "Should use 'Name' label for 'name' key. Got:\n$summary",
+            summary.contains("- Name: Rahul"),
+        )
     }
 
     @Test
     fun `buildContextSummary maps user-prefixed keys to same labels`() = runTest {
-        // Both "name" and "user_name" should land on the same human label,
-        // so two memory writers (model emitting the marker vs. settings UI)
-        // don't surface the user's name twice under different labels.
-        coEvery { dao.getAll() } returns listOf(
-            MemoryEntity(key = "user_name", value = "Priya", packSource = "USER")
+        coEvery { dao.getBySession(SESSION) } returns listOf(
+            MemoryEntity(sessionId = SESSION, key = "user_name", value = "Priya", packSource = "USER")
         )
 
-        val summary = repository.buildContextSummary()
+        val summary = repository.buildContextSummary(SESSION)
 
-        assertTrue("Should use 'Name' label for 'user_name'. Got:\n$summary",
-            summary.contains("- Name: Priya"))
+        assertTrue(
+            "Should use 'Name' label for 'user_name'. Got:\n$summary",
+            summary.contains("- Name: Priya"),
+        )
     }
 
     @Test
     fun `buildContextSummary humanises unknown keys`() = runTest {
-        // An unmapped key like "preferred_payment_method" should still be
-        // readable — falls back to a Title-Cased version with underscores
-        // replaced by spaces.
-        coEvery { dao.getAll() } returns listOf(
-            MemoryEntity(key = "preferred_payment_method", value = "UPI", packSource = "USER")
+        coEvery { dao.getBySession(SESSION) } returns listOf(
+            MemoryEntity(
+                sessionId = SESSION,
+                key = "preferred_payment_method",
+                value = "UPI",
+                packSource = "USER",
+            )
         )
 
-        val summary = repository.buildContextSummary()
+        val summary = repository.buildContextSummary(SESSION)
 
-        assertTrue("Unknown key should be humanised. Got:\n$summary",
-            summary.contains("- Preferred payment method: UPI"))
+        assertTrue(
+            "Unknown key should be humanised. Got:\n$summary",
+            summary.contains("- Preferred payment method: UPI"),
+        )
     }
 
     @Test
-    fun `buildContextSummary opens with a directive header`() = runTest {
-        // The header is the contract with the LLM — it tells the model
-        // that what follows is "personal knowledge to use naturally"
-        // rather than instructions or tool output. If this drifts the
-        // model may misread the bullets as new tool definitions.
-        coEvery { dao.getAll() } returns listOf(
-            MemoryEntity(key = "city", value = "Pune", packSource = "USER")
+    fun `buildContextSummary returns bullets only — no header`() = runTest {
+        // Header lives in SystemPromptProvider (single source of truth) so
+        // buildContextSummary returns just the bullet list. Keeping the
+        // header out of here prevents duplicate headers in the final prompt
+        // (the prompt provider wraps the bullets with its own scope-
+        // aware header).
+        coEvery { dao.getBySession(SESSION) } returns listOf(
+            MemoryEntity(sessionId = SESSION, key = "city", value = "Pune", packSource = "USER")
         )
 
-        val summary = repository.buildContextSummary()
+        val summary = repository.buildContextSummary(SESSION)
 
-        assertTrue("Summary must start with the personal-knowledge header. Got:\n$summary",
-            summary.startsWith("What you know about this user"))
+        assertTrue(
+            "Bullets must be present. Got:\n$summary",
+            summary.contains("- City / Location: Pune"),
+        )
+        assertFalse(
+            "Repo must NOT add its own header — that's the provider's job",
+            summary.contains("What the user shared"),
+        )
     }
 
     @Test
     fun `buildContextSummary lists all entries in DAO order`() = runTest {
-        coEvery { dao.getAll() } returns listOf(
-            MemoryEntity(key = "name", value = "A", packSource = "USER"),
-            MemoryEntity(key = "city", value = "B", packSource = "USER"),
-            MemoryEntity(key = "profession", value = "C", packSource = "USER"),
+        coEvery { dao.getBySession(SESSION) } returns listOf(
+            MemoryEntity(sessionId = SESSION, key = "name", value = "A", packSource = "USER"),
+            MemoryEntity(sessionId = SESSION, key = "city", value = "B", packSource = "USER"),
+            MemoryEntity(sessionId = SESSION, key = "profession", value = "C", packSource = "USER"),
         )
 
-        val summary = repository.buildContextSummary()
+        val summary = repository.buildContextSummary(SESSION)
 
-        // All three values should appear, in the order the DAO returned.
-        // The DAO orders by updatedAt DESC; the repository preserves order.
         val nameIdx = summary.indexOf("Name: A")
         val cityIdx = summary.indexOf("City / Location: B")
         val profIdx = summary.indexOf("Profession / Work: C")
-        assertTrue("All entries must appear:\n$summary",
-            nameIdx >= 0 && cityIdx >= 0 && profIdx >= 0)
+        assertTrue(
+            "All entries must appear:\n$summary",
+            nameIdx >= 0 && cityIdx >= 0 && profIdx >= 0,
+        )
         assertTrue("Order must be preserved", nameIdx < cityIdx && cityIdx < profIdx)
+    }
+
+    @Test
+    fun `buildContextSummary never reads outside the supplied session`() = runTest {
+        coEvery { dao.getBySession(SESSION) } returns emptyList()
+
+        repository.buildContextSummary(SESSION)
+
+        // The DAO call MUST be scoped to SESSION. Calling getBySession with
+        // any other id, or any cross-session reader, would be a leak.
+        coVerify(exactly = 1) { dao.getBySession(SESSION) }
+        coVerify(exactly = 0) { dao.observeAll() }
     }
 
     // ── CRUD pass-through ──────────────────────────────────────────────
 
     @Test
-    fun `get returns null when DAO has no row`() = runTest {
-        coEvery { dao.get("missing") } returns null
+    fun `get returns null when DAO has no row in this session`() = runTest {
+        coEvery { dao.getInSession(SESSION, "missing") } returns null
 
-        assertNull(repository.get("missing"))
+        assertNull(repository.get(SESSION, "missing"))
     }
 
     @Test
     fun `get maps Entity to Domain preserving all fields`() = runTest {
-        coEvery { dao.get("name") } returns
-            MemoryEntity(key = "name", value = "Anjali", packSource = "USER", updatedAt = 12345L)
+        coEvery { dao.getInSession(SESSION, "name") } returns
+            MemoryEntity(
+                sessionId = SESSION,
+                key = "name",
+                value = "Anjali",
+                packSource = "USER",
+                updatedAt = 12345L,
+            )
 
-        val entry = repository.get("name")!!
+        val entry = repository.get(SESSION, "name")!!
 
+        assertEquals(SESSION, entry.sessionId)
         assertEquals("name", entry.key)
         assertEquals("Anjali", entry.value)
         assertEquals("USER", entry.packSource)
@@ -150,18 +184,57 @@ class MemoryRepositoryImplTest {
     }
 
     @Test
-    fun `set forwards key value and packSource to DAO upsert`() = runTest {
-        repository.set("city", "Bengaluru", "USER")
+    fun `set forwards sessionId key value and packSource to DAO upsert`() = runTest {
+        repository.set(SESSION, "city", "Bengaluru", "USER")
 
         coVerify(exactly = 1) {
-            dao.upsert(match { it.key == "city" && it.value == "Bengaluru" && it.packSource == "USER" })
+            dao.upsert(
+                match {
+                    it.sessionId == SESSION &&
+                        it.key == "city" &&
+                        it.value == "Bengaluru" &&
+                        it.packSource == "USER"
+                },
+            )
         }
     }
 
     @Test
-    fun `delete forwards key to DAO`() = runTest {
-        repository.delete("name")
+    fun `delete forwards sessionId and key to DAO`() = runTest {
+        repository.delete(SESSION, "name")
 
-        coVerify(exactly = 1) { dao.delete("name") }
+        coVerify(exactly = 1) { dao.deleteInSession(SESSION, "name") }
+    }
+
+    @Test
+    fun `deleteForSession cascades to DAO once`() = runTest {
+        repository.deleteForSession(SESSION)
+
+        // Critical contract: chat-deletion path MUST wipe all memories
+        // tied to that session, atomically. Failure here means deleted
+        // chats leave memory residue that surfaces in future chats —
+        // the exact bug we shipped this fix for.
+        coVerify(exactly = 1) { dao.deleteAllInSession(SESSION) }
+    }
+
+    @Test
+    fun `deleteForSession does not touch other sessions`() = runTest {
+        repository.deleteForSession(SESSION)
+
+        coVerify(exactly = 0) { dao.deleteEverything() }
+        coVerify(exactly = 0) { dao.deleteAllInSession("some-other-session") }
+    }
+
+    @Test
+    fun `buildContextSummary returns empty when no entries — never just header`() = runTest {
+        coEvery { dao.getBySession(SESSION) } returns emptyList()
+
+        val summary = repository.buildContextSummary(SESSION)
+
+        assertEquals(
+            "Empty memory list must return empty string — never just a header",
+            "",
+            summary,
+        )
     }
 }

@@ -158,18 +158,17 @@ class SystemPromptProviderTest {
         )
         assertFalse(
             "Should not render memory section header when there are no facts",
-            prompt.contains("Facts the USER has shared"),
+            prompt.contains("Facts the USER shared"),
         )
     }
 
     @Test
-    fun build_memory_header_disambiguates_user_from_assistant() {
-        // The earlier header "What you remember about the user:" caused
-        // smaller models in non-English sessions to conflate "your name"
-        // (the user's name from memory) with "your name" (the assistant's
-        // own name) — the model would reply "Your name is Arjun" when
-        // asked "What is your name?" in Telugu. New header explicitly
-        // marks the facts as being about the user, not the assistant.
+    fun build_memory_header_scopes_to_this_chat_and_disambiguates_identity() {
+        // Memory is per-chat (v1.0.24). The header must say "THIS chat" so
+        // (a) the model treats the facts as conversation-scoped, and
+        // (b) pronoun antecedents resolve to the user, not the assistant.
+        // Older header "What you remember about the user:" caused the
+        // Telugu-session "your name is Arjun" antecedent leak.
         val prompt = provider.build(
             modelName = "Gemma 3n",
             pack = PackType.BASE,
@@ -177,9 +176,43 @@ class SystemPromptProviderTest {
             memoryContext = "- name: Arjun",
         )
         assertTrue(
-            "Memory section header must explicitly disambiguate from assistant identity. Got:\n$prompt",
-            prompt.contains("Facts the USER has shared") &&
-                prompt.contains("about the user, not about you"),
+            "Memory section header must scope to THIS chat. Got:\n$prompt",
+            prompt.contains("Facts the USER shared in THIS chat"),
+        )
+        assertTrue(
+            "Memory section header must disambiguate user-facts from assistant identity",
+            prompt.contains("about the user, not about you"),
+        )
+    }
+
+    @Test
+    fun build_inserts_time_context_when_supplied() {
+        val time = "Current local time is 21:14 on Mon — it is evening."
+        val prompt = provider.build(
+            modelName = "Gemma 4",
+            pack = PackType.BASE,
+            languageInstruction = "",
+            memoryContext = "",
+            timeContext = time,
+        )
+        assertTrue(
+            "Time context must appear in prompt. Got:\n$prompt",
+            prompt.contains(time),
+        )
+    }
+
+    @Test
+    fun build_omits_time_context_when_blank() {
+        val prompt = provider.build(
+            modelName = "Gemma 4",
+            pack = PackType.BASE,
+            languageInstruction = "",
+            memoryContext = "",
+            timeContext = "",
+        )
+        assertFalse(
+            "Empty time context must not leave a stray 'Current local time' line",
+            prompt.contains("Current local time"),
         )
     }
 

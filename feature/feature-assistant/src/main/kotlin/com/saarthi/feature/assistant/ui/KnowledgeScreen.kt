@@ -60,7 +60,7 @@ fun KnowledgeScreen(
                 items(memories) { memory ->
                     MemoryItem(
                         memory = memory,
-                        onDelete = { viewModel.deleteMemory(memory.key) }
+                        onDelete = { viewModel.deleteMemory(memory.sessionId, memory.key) }
                     )
                 }
             }

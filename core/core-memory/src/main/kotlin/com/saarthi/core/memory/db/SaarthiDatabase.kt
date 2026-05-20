@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [MemoryEntity::class, ConversationEntity::class, ChatSessionEntity::class],
-    version = 3,
+    version = 4,   // v4: shared_memory got composite (sessionId, key) primary key for per-chat isolation.
     exportSchema = true,
 )
 abstract class SaarthiDatabase : RoomDatabase() {

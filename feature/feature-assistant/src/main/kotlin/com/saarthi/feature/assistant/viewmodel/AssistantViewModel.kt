@@ -211,8 +211,11 @@ class AssistantViewModel @Inject constructor(
         chatRepository.deleteSession(sessionId)
     }
 
-    fun deleteMemory(key: String) = viewModelScope.launch {
-        memoryRepository.delete(key)
+    fun deleteMemory(sessionId: String, key: String) = viewModelScope.launch {
+        // (sessionId, key) is the composite primary key in v1.0.24 — the same
+        // key can exist in multiple chats independently, so the delete must
+        // be session-scoped.
+        memoryRepository.delete(sessionId, key)
     }
 
     override fun onCleared() {
