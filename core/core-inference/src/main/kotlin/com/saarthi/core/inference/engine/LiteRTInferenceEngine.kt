@@ -155,7 +155,14 @@ class LiteRTInferenceEngine @Inject constructor(
         get() = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE)
 
     companion object {
-        private const val GPU_BAN_EXPIRY_MS = 24 * 60 * 60 * 1000L  // 24 hours
+        private const val GPU_BAN_EXPIRY_MS = 24 * 60 * 60 * 1000L          // 24 hours
+        // Crash counts auto-expire after this window. Previously they only
+        // reset on a successful onDone or a version bump (= reinstall),
+        // which left users permanently locked out of a model that hit the
+        // crash-loop threshold even once. Aligning with the GPU-ban window
+        // means a model that crashed yesterday is usable again today
+        // without uninstall+reinstall.
+        private const val CRASH_COUNT_EXPIRY_MS = 24 * 60 * 60 * 1000L      // 24 hours
     }
 
     // ── Version-based crash state reset ──────────────────────────────────────
@@ -200,20 +207,55 @@ class LiteRTInferenceEngine @Inject constructor(
 
     private fun modelKey(modelPath: String) = modelPath.substringAfterLast('/')
 
-    private fun getCrashCount(modelPath: String) =
-        enginePrefs.getInt("litert_crash_count_${modelKey(modelPath)}", 0)
+    /**
+     * Returns the per-model consecutive-crash count, automatically expiring
+     * it after [CRASH_COUNT_EXPIRY_MS] of no new crashes.
+     *
+     * Legacy state from older APK versions has no timestamp; we stamp it
+     * on first read so the 24-hour clock starts then. After expiry the
+     * count is wiped so the user gets a clean attempt without a reinstall.
+     */
+    private fun getCrashCount(modelPath: String): Int =
+        readExpiringCount("litert_crash_count_${modelKey(modelPath)}")
 
-    private fun getCpuCrashCount(modelPath: String) =
-        enginePrefs.getInt("litert_cpu_crash_count_${modelKey(modelPath)}", 0)
+    private fun getCpuCrashCount(modelPath: String): Int =
+        readExpiringCount("litert_cpu_crash_count_${modelKey(modelPath)}")
+
+    private fun readExpiringCount(baseKey: String): Int {
+        val count = enginePrefs.getInt(baseKey, 0)
+        if (count == 0) return 0
+        val tsKey = "${baseKey}_ts"
+        val ts = enginePrefs.getLong(tsKey, 0L)
+        if (ts == 0L) {
+            // Legacy state from before timestamp tracking — stamp it now
+            // so the expiry clock starts from this read.
+            enginePrefs.edit().putLong(tsKey, System.currentTimeMillis()).apply()
+            return count
+        }
+        val ageMs = System.currentTimeMillis() - ts
+        if (ageMs >= CRASH_COUNT_EXPIRY_MS) {
+            DebugLogger.log(
+                "LITERT",
+                "$baseKey expired after ${ageMs / 3_600_000}h — clearing (auto-recovery)",
+            )
+            enginePrefs.edit().remove(baseKey).remove(tsKey).apply()
+            return 0
+        }
+        return count
+    }
 
     private fun incrementCrashCount(modelPath: String, wasGpuOrNpu: Boolean) {
         val key = modelKey(modelPath)
+        val now = System.currentTimeMillis()
         val count = getCrashCount(modelPath) + 1
-        val editor = enginePrefs.edit().putInt("litert_crash_count_$key", count)
-        
+        val editor = enginePrefs.edit()
+            .putInt("litert_crash_count_$key", count)
+            .putLong("litert_crash_count_$key" + "_ts", now)
+
         if (!wasGpuOrNpu) {
             val cpuCount = getCpuCrashCount(modelPath) + 1
             editor.putInt("litert_cpu_crash_count_$key", cpuCount)
+                .putLong("litert_cpu_crash_count_$key" + "_ts", now)
             DebugLogger.log("LITERT", "Crash count for $key: $count (CPU count: $cpuCount)")
         } else {
             DebugLogger.log("LITERT", "Crash count for $key: $count")
@@ -221,8 +263,13 @@ class LiteRTInferenceEngine @Inject constructor(
         editor.commit()
     }
 
-    private fun resetCrashCount(modelPath: String) =
-        enginePrefs.edit().putInt("litert_crash_count_${modelKey(modelPath)}", 0).apply()
+    private fun resetCrashCount(modelPath: String) {
+        val key = modelKey(modelPath)
+        enginePrefs.edit()
+            .remove("litert_crash_count_$key")
+            .remove("litert_crash_count_${key}_ts")
+            .apply()
+    }
 
     private fun gpuPreviouslyCrashedDuringGen(modelPath: String): Boolean {
         val key = modelKey(modelPath)
@@ -242,14 +289,21 @@ class LiteRTInferenceEngine @Inject constructor(
         val count = getCrashCount(modelPath)
         if (count >= 4) {
             val key = modelKey(modelPath)
-            DebugLogger.log("LITERT", "CRASH LOOP DETECTED ($count consecutive crashes for $key) — blocking, crash count preserved until new app version")
+            DebugLogger.log(
+                "LITERT",
+                "CRASH LOOP ($count crashes for $key) — blocking. Auto-expires in ${CRASH_COUNT_EXPIRY_MS / 3_600_000}h, " +
+                "or sooner if a generation eventually succeeds.",
+            )
+            // Reset the in-flight crash trackers (so we don't double-count next
+            // attempt), but DO NOT reset the persistent count — that's how the
+            // block stays in place until the 24-hour expiry kicks in via
+            // getCrashCount() / readExpiringCount(). Reinstall is no longer
+            // required as a recovery path.
             enginePrefs.edit()
                 .putBoolean("litert_gen_pending", false)
                 .putBoolean("litert_init_pending", false)
                 .putBoolean("litert_gpu_ban_$key", false)
                 .putLong("litert_gpu_ban_ts_$key", 0L)
-                // Intentionally NOT resetting litert_crash_count — keeps the block in
-                // place until a new APK version installs (version-based reset in init block).
                 .commit()
             crashLoopBlocked = true
             return true
