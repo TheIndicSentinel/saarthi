@@ -27,12 +27,15 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,6 +49,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -62,6 +68,8 @@ fun MessageBubble(
     message: ChatMessage,
     onDelete: () -> Unit,
     onRetry: () -> Unit = {},
+    onListen: () -> Unit = {},
+    isSpeaking: Boolean = false,
     modifier: Modifier = Modifier,
     avatarLabel: String = "स",
 ) {
@@ -124,7 +132,16 @@ fun MessageBubble(
                     )
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                Column {
+                Column(
+                    modifier = if (!isUser && message.isStreaming) {
+                        // Live region announces streaming updates to TalkBack
+                        // without re-reading the bubble character-by-character.
+                        Modifier.semantics {
+                            liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+                            contentDescription = "Saarthi is generating a response"
+                        }
+                    } else Modifier,
+                ) {
                     if (message.content.isEmpty() && message.isStreaming) {
                         TypingIndicator()
                     } else if (isUser) {
@@ -177,7 +194,7 @@ fun MessageBubble(
                 }
             }
 
-            // Copy + Retry actions under each completed AI bubble.
+            // Copy + Retry + Listen actions under each completed AI bubble.
             if (!isUser && message.content.isNotEmpty() && !message.isStreaming) {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -190,6 +207,12 @@ fun MessageBubble(
                         icon = Icons.Default.Refresh,
                         label = "Retry",
                         onClick = onRetry,
+                    )
+                    BubbleActionChip(
+                        icon = if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                        label = if (isSpeaking) "Stop" else "Listen",
+                        onClick = onListen,
+                        highlighted = isSpeaking,
                     )
                 }
             }
@@ -231,21 +254,31 @@ private fun BubbleActionChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
+    highlighted: Boolean = false,
 ) {
+    val borderColor = if (highlighted) SaarthiColors.MarigoldBd else SaarthiColors.Border
+    val bg = if (highlighted) SaarthiColors.MarigoldSoft else androidx.compose.ui.graphics.Color.Transparent
+    val contentColor = if (highlighted) SaarthiColors.Marigold else SaarthiColors.Text3
     Row(
         modifier = Modifier
+            .minimumInteractiveComponentSize()  // expands hit-target to ≥ 48dp without changing visuals
             .clip(RoundedCornerShape(999.dp))
-            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 5.dp),
+            .background(bg)
+            .border(1.dp, borderColor, RoundedCornerShape(999.dp))
+            .clickable(
+                onClick = onClick,
+                role = androidx.compose.ui.semantics.Role.Button,
+            )
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Icon(icon, null, tint = SaarthiColors.Text3, modifier = Modifier.size(13.dp))
+        // Decorative icon; the adjacent label is what the screen reader announces.
+        Icon(icon, null, tint = contentColor, modifier = Modifier.size(13.dp))
         Text(
             label,
             style = MaterialTheme.typography.labelMedium.copy(
-                color = SaarthiColors.Text3,
+                color = contentColor,
                 fontSize = 11.sp,
             ),
         )

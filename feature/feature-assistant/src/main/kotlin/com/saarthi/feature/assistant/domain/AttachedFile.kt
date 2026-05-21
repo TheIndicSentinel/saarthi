@@ -1,7 +1,9 @@
 package com.saarthi.feature.assistant.domain
 
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 
+@Immutable
 data class AttachedFile(
     val uri: Uri,
     val name: String,

@@ -4,6 +4,17 @@ plugins {
     id("saarthi.hilt")
 }
 
+// Apply Firebase plugins ONLY when google-services.json is provided. Drop the
+// file into app/ and Crashlytics auto-activates on the next build.
+val firebaseConfigured = file("google-services.json").exists()
+if (firebaseConfigured) {
+    apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
+    logger.lifecycle("[Saarthi] Firebase Crashlytics ENABLED")
+} else {
+    logger.lifecycle("[Saarthi] Firebase Crashlytics DISABLED (no app/google-services.json)")
+}
+
 android {
     namespace = "com.saarthi.app"
     defaultConfig {
@@ -103,4 +114,13 @@ dependencies {
     // Feature modules
     implementation(project(":feature:feature-onboarding"))
     implementation(project(":feature:feature-assistant"))
+
+    // Firebase Crashlytics — only declared when google-services.json is present.
+    // Listing them outside this guard would force every contributor to provide
+    // a Firebase config or the build would fail at the AAR resolution step.
+    if (firebaseConfigured) {
+        implementation(platform(libs.firebase.bom))
+        implementation(libs.firebase.crashlytics)
+        implementation(libs.firebase.analytics)
+    }
 }

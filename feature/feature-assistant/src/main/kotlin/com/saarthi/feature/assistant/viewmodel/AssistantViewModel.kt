@@ -62,7 +62,49 @@ class AssistantViewModel @Inject constructor(
     private val fileExtractor: FileContentExtractor,
     private val languageManager: LanguageManager,
     private val memoryRepository: MemoryRepository,
+    private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
+    private val ttsPreference: com.saarthi.core.i18n.TtsPreference,
 ) : AndroidViewModel(application) {
+
+    val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
+
+    /** Which assistant message is currently being read aloud, if any.
+     *  The bubble uses this to flip its Listen chip to Stop. */
+    private val _speakingMessageId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
+
+    init {
+        observeTtsState()
+        observeAutoSpeak()
+    }
+
+    private fun observeTtsState() {
+        // Clear the highlighted message-id as soon as TTS reports it's no longer
+        // speaking (natural end, error, or stop()).
+        ttsManager.isSpeaking
+            .onEach { speaking -> if (!speaking) _speakingMessageId.value = null }
+            .launchIn(viewModelScope)
+    }
+
+    /** When Settings → "Read replies aloud" is on, auto-speak each assistant
+     *  reply once it finishes streaming. We hook into the message list and
+     *  fire on the *transition* from streaming → done for the latest message. */
+    private fun observeAutoSpeak() {
+        var lastFinalizedId: String? = null
+        allMessages
+            .onEach { msgs ->
+                if (!ttsPreference.autoSpeakReplies.value) return@onEach
+                val last = msgs.lastOrNull { it.role == com.saarthi.feature.assistant.domain.MessageRole.ASSISTANT }
+                    ?: return@onEach
+                if (last.isStreaming) return@onEach
+                if (last.content.isBlank()) return@onEach
+                if (last.id == lastFinalizedId) return@onEach
+                lastFinalizedId = last.id
+                _speakingMessageId.value = last.id
+                ttsManager.speak(last.content, currentLanguage.value)
+            }
+            .launchIn(viewModelScope)
+    }
 
     private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
@@ -110,6 +152,9 @@ class AssistantViewModel @Inject constructor(
     // ── Input ─────────────────────────────────────────────────────────────────
     fun onInputChange(text: String) = _uiState.update { it.copy(inputText = text) }
 
+    /** Stored so [stopGeneration] can cancel an in-flight generation. */
+    private var streamJob: kotlinx.coroutines.Job? = null
+
     fun sendMessage() {
         val text = _uiState.value.inputText.trim()
         val attachments = _uiState.value.pendingAttachments
@@ -117,12 +162,44 @@ class AssistantViewModel @Inject constructor(
 
         _uiState.update { it.copy(inputText = "", pendingAttachments = emptyList(), isStreaming = true, error = null) }
 
-        chatRepository.streamResponse(text, attachments)
+        streamJob = chatRepository.streamResponse(text, attachments)
             .launchIn(viewModelScope)
-            .invokeOnCompletion { throwable ->
-                _uiState.update { it.copy(isStreaming = false, error = throwable?.message) }
+            .also { job ->
+                job.invokeOnCompletion { throwable ->
+                    _uiState.update { it.copy(isStreaming = false, error = throwable?.message) }
+                }
             }
     }
+
+    /**
+     * User pressed the Stop button in the chat composer. Two-stage cancel:
+     *   1. Tell the native engine to halt the in-flight model run via
+     *      [InferenceEngine.cancelGeneration] — without this, the model keeps
+     *      burning CPU/GPU even though we've stopped collecting tokens.
+     *   2. Cancel the coroutine collecting the stream so any pending state
+     *      updates are dropped and `isStreaming` flips false immediately.
+     */
+    fun stopGeneration() {
+        if (!_uiState.value.isStreaming) return
+        runCatching { inferenceEngine.cancelGeneration() }
+        streamJob?.cancel()
+        // Defensive: invokeOnCompletion handler will clear isStreaming, but
+        // some races (cancel after job already completed) need a fallback.
+        _uiState.update { it.copy(isStreaming = false) }
+    }
+
+    /** User pressed the Listen chip on an AI bubble. Toggles: speak if not
+     *  speaking that message, stop if already speaking it. */
+    fun toggleSpeak(messageId: String, text: String) {
+        if (_speakingMessageId.value == messageId) {
+            ttsManager.stop()
+            return
+        }
+        _speakingMessageId.value = messageId
+        ttsManager.speak(text, currentLanguage.value)
+    }
+
+    fun stopSpeaking() = ttsManager.stop()
 
     /**
      * Retry an assistant message: delete the AI response + the user message
@@ -268,11 +345,25 @@ class AssistantViewModel @Inject constructor(
         // (sessionId, key) is the composite primary key in v1.0.24 — the same
         // key can exist in multiple chats independently, so the delete must
         // be session-scoped.
+        //
+        // Defensive: confirm the memory actually lives under the sessionId the
+        // caller claims. If the Knowledge panel ever started reusing
+        // `currentSessionId` by mistake, the existence check would catch it
+        // and log a clear diagnostic instead of silently deleting nothing.
+        val exists = runCatching { memoryRepository.get(sessionId, key) }.getOrNull()
+        if (exists == null) {
+            com.saarthi.core.inference.DebugLogger.log(
+                "MEMORY",
+                "deleteMemory: no entry for sessionId=$sessionId key=$key — caller likely passed the wrong session",
+            )
+            return@launch
+        }
         memoryRepository.delete(sessionId, key)
     }
 
     override fun onCleared() {
         speechRecognizer?.destroy()
+        ttsManager.stop()
         super.onCleared()
     }
 }

@@ -175,6 +175,20 @@ fun AssistantScreen(
         uiState.error?.let { scope.launch { snackbarHost.showSnackbar(it) } }
     }
 
+    // One-time battery-optimization whitelist prompt. The native engine
+    // generates for tens of seconds at a time; Doze + battery saver will
+    // silently kill the foreground service on Samsung/Xiaomi/Oppo OEMs and
+    // truncate the reply mid-stream. We ask once, the user's choice sticks.
+    var showBatteryOptDialog by remember { mutableStateOf(false) }
+    val activity = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) {
+        if (!com.saarthi.core.common.BatteryOptimizationPrompt.hasPrompted(activity) &&
+            !com.saarthi.core.common.BatteryOptimizationPrompt.isIgnoringBatteryOptimizations(activity)
+        ) {
+            showBatteryOptDialog = true
+        }
+    }
+
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         viewModel.onAttachmentsPicked(uris)
     }
@@ -258,18 +272,29 @@ fun AssistantScreen(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(messages, key = { it.id }) { msg ->
+                            items(
+                                items = messages,
+                                key = { it.id },
+                                // contentType lets Compose reuse the same
+                                // composable slot for every bubble, even as
+                                // the streaming bubble swaps from placeholder
+                                // to actual content.
+                                contentType = { "bubble" },
+                            ) { msg ->
+                                val speakingId by viewModel.speakingMessageId.collectAsStateWithLifecycle()
                                 MessageBubble(
                                     message = msg,
                                     onDelete = { viewModel.deleteMessage(msg.id) },
                                     onRetry = { viewModel.retryResponse(msg.id) },
+                                    onListen = { viewModel.toggleSpeak(msg.id, msg.content) },
+                                    isSpeaking = speakingId == msg.id,
                                     avatarLabel = currentLanguage.avatarLabel,
                                 )
                             }
                             if (uiState.isStreaming && messages.any { it.isStreaming && it.content.isEmpty() }) {
-                                item { ShimmerMessagePlaceholder() }
+                                item(contentType = "shimmer") { ShimmerMessagePlaceholder() }
                             }
-                            item { Spacer(Modifier.height(8.dp)) }
+                            item(contentType = "spacer") { Spacer(Modifier.height(8.dp)) }
                         }
 
 
@@ -324,7 +349,7 @@ fun AssistantScreen(
                             micPermission.launchPermissionRequest()
                         }
                     },
-                    onStopStreaming = viewModel::stopListening,
+                    onStopStreaming = viewModel::stopGeneration,
                     pendingAttachments = uiState.pendingAttachments,
                     onRemoveAttachment = viewModel::removeAttachment,
                     isStreaming = uiState.isStreaming,
@@ -353,6 +378,11 @@ fun AssistantScreen(
     // Voice mode overlay — stays open after listening ends so the user can
     // review the captured text and tap Send.
     if (uiState.showVoiceMode) {
+        // Pressing back while the overlay is up dismisses it instead of
+        // popping the chat screen.
+        androidx.activity.compose.BackHandler(enabled = true) {
+            viewModel.closeVoiceMode(clearText = true)
+        }
         com.saarthi.feature.assistant.ui.components.VoiceModeOverlay(
             transcribedText = uiState.inputText,
             isListening = uiState.isListening,
@@ -363,6 +393,48 @@ fun AssistantScreen(
             },
             onStop = { viewModel.stopListening() },
             onRestart = { viewModel.startListening() },
+        )
+    }
+
+    // Search mode back-handler: exit search before letting back propagate to
+    // the chat screen pop.
+    if (uiState.isSearchMode) {
+        androidx.activity.compose.BackHandler(enabled = true) {
+            viewModel.toggleSearch()
+        }
+    }
+
+    if (showBatteryOptDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showBatteryOptDialog = false
+                com.saarthi.core.common.BatteryOptimizationPrompt.markPrompted(activity)
+            },
+            containerColor = SaarthiColors.NavyMid,
+            title = { Text("Keep replies running smoothly?", color = SaarthiColors.TextPrimary) },
+            text = {
+                Text(
+                    "Android may pause Saarthi mid-reply to save battery. " +
+                        "Letting the app skip battery optimization means long answers finish without being cut off.",
+                    color = SaarthiColors.TextSecondary,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        com.saarthi.core.common.BatteryOptimizationPrompt.requestWhitelist(activity)
+                        com.saarthi.core.common.BatteryOptimizationPrompt.markPrompted(activity)
+                        showBatteryOptDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SaarthiColors.Marigold),
+                ) { Text("Allow", color = SaarthiColors.OnMarigold) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    com.saarthi.core.common.BatteryOptimizationPrompt.markPrompted(activity)
+                    showBatteryOptDialog = false
+                }) { Text("Not now", color = SaarthiColors.Text2) }
+            },
         )
     }
 
@@ -585,17 +657,17 @@ private fun ChatTopBar(
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { onSearchQueryChange("") }) {
-                            Icon(Icons.Default.Close, null, tint = SaarthiColors.Text3)
+                            Icon(Icons.Default.Close, contentDescription = "Clear search", tint = SaarthiColors.Text3)
                         }
                     }
                 }
             )
         } else {
-            // Back or drawer
+            // Back or drawer — icon-only, so the Icon must carry the label.
             IconButton(onClick = onBack ?: onOpenDrawer) {
                 Icon(
                     if (onBack != null) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu,
-                    null,
+                    contentDescription = if (onBack != null) "Back" else "Open conversations",
                     tint = SaarthiColors.Text,
                 )
             }
@@ -648,12 +720,12 @@ private fun ChatTopBar(
             }
 
             IconButton(onClick = onSearchToggle) {
-                Icon(Icons.Default.Search, null, tint = SaarthiColors.Text2)
+                Icon(Icons.Default.Search, contentDescription = "Search this chat", tint = SaarthiColors.Text2)
             }
 
             Box {
                 IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, null, tint = SaarthiColors.Text2)
+                    Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = SaarthiColors.Text2)
                 }
                 DropdownMenu(
                     expanded = showMenu,

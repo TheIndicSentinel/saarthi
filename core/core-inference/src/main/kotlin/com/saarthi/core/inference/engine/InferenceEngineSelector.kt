@@ -17,6 +17,13 @@ class InferenceEngineSelector @Inject constructor(
     override val activeModelName: String? get() = liteRtEngine.activeModelName
     override val activeModelNameFlow: Flow<String?> get() = liteRtEngine.activeModelNameFlow
 
+    override val isNativeGenerating: Boolean get() = liteRtEngine.isNativeGenerating
+    override val isFreshConversation: Boolean get() = liteRtEngine.isFreshConversation
+
+    override fun cancelGeneration() = liteRtEngine.cancelGeneration()
+
+    override suspend fun resetSession() = liteRtEngine.resetSession()
+
     override suspend fun initialize(config: InferenceConfig) {
         val path = config.modelPath
         if (isLiteRTModel(path)) {

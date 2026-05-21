@@ -47,3 +47,56 @@
 -keepattributes SourceFile, LineNumberTable
 -keepattributes Signature, InnerClasses, EnclosingMethod
 -keepattributes RuntimeVisibleAnnotations, RuntimeInvisibleAnnotations
+-renamesourcefileattribute SourceFile
+
+# ── @Keep + AndroidX annotation surface ────────────────────────────────────
+-keep,allowobfuscation,allowshrinking @androidx.annotation.Keep class *
+-keep class * { @androidx.annotation.Keep *; }
+-keep,allowobfuscation,allowshrinking @interface androidx.annotation.Keep
+
+# ── Kotlin metadata ────────────────────────────────────────────────────────
+# Without these, R8 strips Kotlin metadata that reflection-heavy libs
+# (Hilt/JSR-330, Compose tooling, kotlinx.serialization) need to resolve
+# generics. The release build emits "kotlin metadata" warnings until this
+# block is in place.
+-keep class kotlin.Metadata { *; }
+-keep class kotlin.reflect.** { *; }
+-keepclassmembers class kotlin.coroutines.SafeContinuation { java.lang.Object result; }
+-keepclassmembers class kotlin.coroutines.jvm.internal.BaseContinuationImpl { ** label; }
+-dontwarn kotlin.reflect.**
+-dontwarn kotlin.coroutines.jvm.internal.**
+
+# ── Saarthi inference surface (called via JNI + reflection) ────────────────
+# LiteRT's native callbacks reflect into our engine classes by name; obfuscating
+# them would silently break the conversation matrix on release builds.
+-keep class com.saarthi.core.inference.engine.** { *; }
+-keep class com.saarthi.core.inference.model.** { *; }
+-keep interface com.saarthi.core.inference.engine.** { *; }
+-keepclassmembers class com.saarthi.core.inference.** {
+    public <init>(...);
+}
+
+# ── Hilt-generated factories ───────────────────────────────────────────────
+# @Inject constructors must keep their signature for the generated
+# *_Factory / *_HiltModules classes to resolve their constructor args.
+-keepclasseswithmembers class * {
+    @javax.inject.Inject <init>(...);
+}
+-keep class **_HiltModules*  { *; }
+-keep class **_Factory { *; }
+-keep class **_MembersInjector { *; }
+-keepclasseswithmembernames class * {
+    @dagger.hilt.android.lifecycle.HiltViewModel <init>(...);
+}
+
+# ── Compose runtime + ui ──────────────────────────────────────────────────
+# Compose ships consumer-rules.pro, but its tooling-only classes can hit
+# obfuscation edge cases on layout inspector / preview surfaces.
+-dontwarn androidx.compose.runtime.**
+-dontwarn androidx.compose.ui.tooling.**
+
+# ── Firebase Crashlytics (optional — only effective when google-services.json
+#    is present and the firebase plugins are applied; harmless otherwise) ──
+-keepattributes *Annotation*
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**

@@ -645,9 +645,18 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                 }
 
+                // Honour the threads the device profiler recommended (typically
+                // cpuCores − 2, clamped to 2..4 on Snapdragon 8 Gen 2 → 4). The
+                // previous behaviour hardcoded 2 here regardless of the
+                // InferenceConfig and silently capped XNNPACK's parallelism at
+                // half the SoC's ARMv9 cores — a measurable tok/s loss on
+                // flagship devices. After a CPU crash we still drop to 1 since
+                // that's the only safe recovery strategy.
+                val requestedThreads = config.nThreads.takeIf { it > 0 }
+                    ?: profile.recommendedThreads
                 val dynamicThreads = when {
-                    cpuCrashCount >= 1 -> 1   // 1 thread after a CPU crash — react only to actual instability.
-                    else               -> 2
+                    cpuCrashCount >= 1 -> 1
+                    else               -> requestedThreads.coerceIn(1, 4)
                 }
 
                 val xnnpackBanned = cpuCrashCount >= 2
@@ -1086,6 +1095,12 @@ class LiteRTInferenceEngine @Inject constructor(
         withContext(engineDispatcher) {
             val eng = engine ?: throw IllegalStateException("LiteRT engine not initialised.")
             DebugLogger.log("LITERT", "Generate start  promptChars=${prompt.length}")
+            // Mirror streamResponse's foreground-service guard so the OEM
+            // power-manager (Samsung OneUI / Xiaomi MIUI in particular) can't
+            // kill the process while a long one-shot generate runs. Safe to
+            // call repeatedly — startGenerating just updates the notification
+            // state. The matching stop() is called in the finally block.
+            com.saarthi.core.inference.InferenceService.startGenerating(context)
             generateMutex.withLock {
                 isGenerating = true
                 markGenerationStarted()
@@ -1113,6 +1128,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 } finally {
                     isGenerating = false
                     markGenerationEnded()
+                    runCatching { com.saarthi.core.inference.InferenceService.stop(context) }
                 }
             }
         }
@@ -1140,6 +1156,24 @@ class LiteRTInferenceEngine @Inject constructor(
             _isFreshConversation = true   // next turn must re-send system prompt
             DebugLogger.log("LITERT", "[SESSION] Session reset — conversation recycled, KV cache cleared")
         }
+    }
+
+    /**
+     * User-initiated cancel — drive the native cancelProcess() so the model
+     * halts mid-stream when the user taps the Stop button in the UI. The
+     * watchdog uses the same primitive on timeout; we just hoist it onto the
+     * public interface.
+     *
+     * Safe to call from any thread, and a no-op when nothing is generating.
+     * The onError callback wired in [generateStream] is what flips
+     * `isNativeGenerating` back to false, so the FGS gets released through the
+     * existing path without us having to duplicate cleanup here.
+     */
+    override fun cancelGeneration() {
+        if (!isNativeGenerating) return
+        DebugLogger.log("LITERT", "[CANCEL] User-initiated cancel — calling cancelProcess()")
+        runCatching { activeConversation?.cancelProcess() }
+            .onFailure { DebugLogger.log("LITERT", "[CANCEL] cancelProcess threw: ${it.message?.take(120)}") }
     }
 
     override fun release() {

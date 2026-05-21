@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CloudDownload
@@ -147,6 +148,18 @@ fun SettingsScreen(
                            else "Off — daylight-friendly light",
                 trailing = { SaarthiToggle(on = darkOn, onToggle = { themeViewModel.toggle() }) },
             )
+            // Read replies aloud (TTS)
+            val ttsVm: com.saarthi.app.TtsSettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+            val ttsOn by ttsVm.autoSpeak.collectAsStateWithLifecycle()
+            SaarthiListRow(
+                leadingIcon = {
+                    Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
+                },
+                title = "Read replies aloud",
+                subtitle = if (ttsOn) "Saarthi speaks each reply when it's ready"
+                           else "Tap Listen on a reply to hear it",
+                trailing = { SaarthiToggle(on = ttsOn, onToggle = { ttsVm.toggle() }) },
+            )
 
             SectionLabel("Privacy")
             SaarthiListRow(
@@ -265,7 +278,9 @@ private fun SettingsLanguageDialog(
             androidx.compose.foundation.lazy.LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(com.saarthi.core.i18n.SupportedLanguage.entries.toList()) { lang ->
+                // `.entries` returns a cached EnumEntries — no need to .toList()
+                // every recomposition, which was allocating a fresh ArrayList.
+                items(com.saarthi.core.i18n.SupportedLanguage.entries) { lang ->
                     val isSel = lang == current
                     Row(
                         modifier = Modifier

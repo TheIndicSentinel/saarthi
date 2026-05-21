@@ -124,9 +124,59 @@ object ResponseMarkerParser {
         )
     }
 
-    /** Strip complete markers from text shown in the streaming bubble. */
-    fun stripForDisplay(raw: String): String =
-        normalizeFormatting(rewriteIdentity(stripAll(raw)))
+    /**
+     * Strip complete markers from text shown in the streaming bubble.
+     *
+     * If [streaming] is true, the tail of the text is held back until any
+     * in-progress identity leak ("I am Ge…", "I am a large lang…") completes
+     * — otherwise the user sees the leak flicker for one token before
+     * `rewriteIdentity` swaps it for "I am Saarthi". The withheld characters
+     * land in the very next [stripForDisplay] call (or on completion), so no
+     * content is lost.
+     */
+    fun stripForDisplay(raw: String, streaming: Boolean = true): String {
+        val cleaned = normalizeFormatting(rewriteIdentity(stripAll(raw)))
+        if (!streaming) return cleaned
+        return holdBackPartialLeaks(cleaned)
+    }
+
+    /**
+     * Tokens of "I am Gemma", "I'm a large language model" etc. arrive a few
+     * chars at a time; the regex only matches the full phrase. Until then the
+     * partial prefix is technically clean text and would render in the bubble
+     * for one frame, producing a visible flicker. Detect such prefixes at the
+     * tail and trim them off — they'll appear on the *next* token tick once
+     * the rewrite has something to match.
+     */
+    private fun holdBackPartialLeaks(text: String): String {
+        if (text.isEmpty()) return text
+        // Anchor at the very end of the visible text. Each prefix here is the
+        // *start* of a phrase that rewriteIdentity will catch in full — but
+        // only after a few more chars arrive.
+        val tailPrefixes = listOf(
+            "I am Gemma", "I'm Gemma", "My name is Gemma",
+            "I am a large language model", "I'm a large language model",
+            "I am an AI language model", "I'm an AI language model",
+            "I am an LLM", "I'm an LLM",
+            "I am a Google", "I'm a Google",
+            "developed by Google", "made by Google", "created by Google", "trained by Google", "built by Google",
+            "developed by DeepMind", "made by DeepMind",
+        )
+        // Find the longest tail of `text` that matches a *strict prefix* of any
+        // pattern (length < pattern.length). Trim that tail.
+        var holdFrom = text.length
+        for (pattern in tailPrefixes) {
+            val maxOverlap = minOf(text.length, pattern.length - 1)
+            // Walk down so we find the longest partial overlap with this pattern.
+            for (k in maxOverlap downTo 1) {
+                if (text.regionMatches(text.length - k, pattern, 0, k, ignoreCase = true)) {
+                    holdFrom = minOf(holdFrom, text.length - k)
+                    break  // longest overlap for this pattern found
+                }
+            }
+        }
+        return if (holdFrom < text.length) text.substring(0, holdFrom) else text
+    }
 
     /**
      * Rewrites identity leaks the model emits despite the system prompt.

@@ -25,7 +25,9 @@ class RagPipeline @Inject constructor(
     }
 
     suspend fun indexDocument(text: String) {
+        if (text.isBlank()) return  // skip empty documents — used to insert a single blank chunk
         val chunks = chunkText(text, chunkSize = 512, overlap = 64)
+            .filter { it.isNotBlank() }  // skip any chunk that ends up empty (single-word + overlap edge case)
         chunks.forEach { chunk ->
             val embedding = embeddingModel.embed(chunk)
             vectorStore.insert(chunk, embedding)

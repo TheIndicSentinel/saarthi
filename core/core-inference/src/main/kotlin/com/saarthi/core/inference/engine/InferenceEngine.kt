@@ -60,5 +60,15 @@ interface InferenceEngine {
      */
     suspend fun resetSession() {}
 
+    /**
+     * User-initiated cancel: stop whatever the engine is currently doing.
+     * Implementations should call the native cancel hook (e.g. LiteRT's
+     * `Conversation.cancelProcess()`) so the model halts mid-stream rather
+     * than continuing to burn battery + CPU while the UI ignores the rest.
+     *
+     * Safe to call when nothing is generating — must be a no-op in that case.
+     */
+    fun cancelGeneration() {}
+
     fun release()
 }

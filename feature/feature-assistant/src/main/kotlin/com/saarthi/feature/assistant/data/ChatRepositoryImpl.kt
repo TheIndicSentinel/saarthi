@@ -155,7 +155,7 @@ class ChatRepositoryImpl @Inject constructor(
                 // Update session title from first user message
                 val session = chatSessionDao.getAll().find { it.id == sessionId }
                 if (session != null) {
-                    val title = if (session.title == "New Chat") userMessage.take(40).trimEnd() else session.title
+                    val title = if (session.title == "New Chat") graphemeSafeTake(userMessage, 40).trimEnd() else session.title
                     chatSessionDao.updateTitleAndTimestamp(sessionId, title, System.currentTimeMillis())
                 }
             }
@@ -218,8 +218,10 @@ class ChatRepositoryImpl @Inject constructor(
                     tokenCount++
                     val elapsed = (System.currentTimeMillis() - startTime) / 1000f
                     if (elapsed > 0) _tokensPerSecond.value = tokenCount / elapsed
-                    // Strip complete marker tags so they never appear in the chat bubble
-                    val visible = ResponseMarkerParser.stripForDisplay(accumulated.toString())
+                    // Strip complete marker tags so they never appear in the chat bubble.
+                    // streaming=true holds back any in-progress identity leak
+                    // ("I am Gem…") until it can be rewritten in full.
+                    val visible = ResponseMarkerParser.stripForDisplay(accumulated.toString(), streaming = true)
                     _history.update { history ->
                         history.map { msg ->
                             if (msg.id == streamingId)
@@ -327,11 +329,28 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
+    // DeviceProfiler.profile() makes several system calls (MemoryInfo, thermal,
+    // battery). Calling it on every send + every history-trim was wasteful. Cache
+    // for 30 s — RAM headroom can fluctuate within a chat (other apps, GC) so a
+    // fully static cache would mis-classify, but per-prompt was overkill.
+    private var cachedProfile: com.saarthi.core.inference.model.DeviceProfile? = null
+    private var cachedProfileAtMs: Long = 0L
+    private val profileCacheTtlMs = 30_000L
+    private fun deviceProfileCached(): com.saarthi.core.inference.model.DeviceProfile {
+        val now = System.currentTimeMillis()
+        val cached = cachedProfile
+        if (cached != null && now - cachedProfileAtMs < profileCacheTtlMs) return cached
+        val fresh = deviceProfiler.profile()
+        cachedProfile = fresh
+        cachedProfileAtMs = now
+        return fresh
+    }
+
     private val maxHistoryTurns: Int
         get() {
             val budget = maxPromptChars
-            val profile = deviceProfiler.profile()
-            
+            val profile = deviceProfileCached()
+
             // Tiered history scaling:
             // 1. If RAM is low (< 4GB available), drop history aggressively to save KV memory.
             // 2. Otherwise, use the model's full safe capacity.
@@ -382,7 +401,12 @@ class ChatRepositoryImpl @Inject constructor(
                 append(userMessage)
             }.let { prompt ->
                 val budget = maxPromptChars
-                val finalPrompt = if (prompt.length > budget) prompt.take(budget) else prompt
+                // trimPrompt() preserves complete <start_of_turn> blocks — it
+                // drops middle history first, then the oldest turn, and only
+                // hard-truncates as a last resort. The previous take(budget)
+                // path would slice mid-sentence and confuse the model on every
+                // long context.
+                val finalPrompt = trimPrompt(prompt, budget)
                 DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget")
                 finalPrompt
             }
@@ -423,7 +447,15 @@ class ChatRepositoryImpl @Inject constructor(
             append("Recap of the user's most recent exchange with you (continue naturally — do not repeat it):\n")
             recent.forEach { msg ->
                 val who = if (msg.role == MessageRole.USER) "User" else "You"
-                val body = msg.content.take(perMsgChars)
+                // Defensive: pass each message through stripForDisplay before
+                // recapping. Normally clean text is stored (parse().cleanText
+                // is called on completion), but crash / truncated-stream paths
+                // can leave a half-formed `[SAARTHI_MEMORY key="…"` fragment
+                // in history. Without this, that fragment goes straight back
+                // into the next FRESH system prompt and the model may treat
+                // it as a fresh marker instruction.
+                val sanitized = ResponseMarkerParser.stripForDisplay(msg.content, streaming = false)
+                val body = sanitized.take(perMsgChars)
                 append("$who: $body\n")
             }
         }.trimEnd()
@@ -571,6 +603,29 @@ class ChatRepositoryImpl @Inject constructor(
      * 3. If still over budget (e.g. system prompt alone overflows), hard-truncate
      *    the system turn as a last resort.
      */
+    /**
+     * String.take() truncates at a UTF-16 code-unit boundary, which splits
+     * mid-character on scripts that use combining marks (Devanagari, Tamil,
+     * Telugu, Bengali, …). For session titles built from "नमस्ते आज क्या करूँ?"
+     * that meant the chip subtitle could end with an orphan virama or vowel
+     * mark — rendered as a tofu box on most fonts.
+     *
+     * BreakIterator walks Unicode grapheme cluster boundaries, so we cut at
+     * the last *complete* cluster that fits in [n] code units.
+     */
+    private fun graphemeSafeTake(s: String, n: Int): String {
+        if (s.length <= n) return s
+        val it = java.text.BreakIterator.getCharacterInstance()
+        it.setText(s)
+        var last = 0
+        var cur = it.next()
+        while (cur != java.text.BreakIterator.DONE && cur <= n) {
+            last = cur
+            cur = it.next()
+        }
+        return s.substring(0, last)
+    }
+
     private fun trimPrompt(prompt: String, budget: Int = 3000): String {
         if (prompt.length <= budget) return prompt
 

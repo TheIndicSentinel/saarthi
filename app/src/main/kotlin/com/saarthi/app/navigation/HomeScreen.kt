@@ -213,17 +213,22 @@ private fun HomeTopBar(
 
 @Composable
 private fun GreetingBlock(lang: SupportedLanguage) {
+    // Calendar.getInstance() was being called on *every* recomposition (the
+    // HomeScreen recomposes when language / menu / dialog state changes).
+    // The hour-of-day only matters once per screen entry, so cache the
+    // greeting tuple keyed off `lang` — Calendar work happens once.
+    val (greetEn, greetHi) = remember(lang) { resolveGreetings(lang) }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             com.saarthi.core.ui.components.SaarthiLogo(size = 22.dp)
             Text(
-                text = greetingHi(lang),
+                text = greetHi,
                 style = DisplayAccent.copy(fontSize = 18.sp),
             )
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "${greetingEn()}, friend",
+            "$greetEn, friend",
             style = MaterialTheme.typography.displayLarge.copy(
                 fontSize = 30.sp,
                 fontWeight = FontWeight.Bold,
@@ -242,22 +247,20 @@ private fun GreetingBlock(lang: SupportedLanguage) {
     }
 }
 
-private fun greetingEn(): String {
+private fun resolveGreetings(lang: SupportedLanguage): Pair<String, String> {
     val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    return when {
+    val en = when {
         h < 12 -> "Good morning"
         h < 17 -> "Good afternoon"
         else -> "Good evening"
     }
-}
-
-private fun greetingHi(lang: SupportedLanguage): String {
-    val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    return when {
+    val hi = when {
         h < 12 -> "सुप्रभात"
         h < 17 -> "नमस्ते"
         else -> "शुभ संध्या"
     }
+    // `lang` is reserved for per-language nuance later; ignored for now.
+    return en to hi
 }
 
 @Composable
