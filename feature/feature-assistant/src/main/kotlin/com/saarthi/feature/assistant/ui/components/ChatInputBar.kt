@@ -88,12 +88,14 @@ fun ChatInputBar(
     val hasText = inputText.isNotBlank() || pendingAttachments.isNotEmpty()
     val canSend = hasText && !isStreaming
 
+    // Note: Scaffold.innerPadding (applied by the parent screen) already
+    // consumes the navigation-bar inset, so we deliberately do NOT add
+    // .navigationBarsPadding() here — that would double the bottom gap.
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(SaarthiColors.Bg)
-            .navigationBarsPadding()
-            .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 6.dp),
     ) {
         AnimatedVisibility(
             visible = pendingAttachments.isNotEmpty(),

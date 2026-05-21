@@ -159,12 +159,11 @@ fun AssistantScreen(
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 
-    // Immersive Haptic Feedback during streaming
-    LaunchedEffect(messages) {
-        val lastMsg = messages.lastOrNull()
-        if (lastMsg?.isStreaming == true && lastMsg.content.isNotEmpty()) {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
+    // Streaming haptic disabled — buzzing on every token was distracting.
+    // A single subtle tick when the first token lands and when generation
+    // completes is more in line with modern AI chat UX.
+    LaunchedEffect(uiState.isStreaming) {
+        if (uiState.isStreaming) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
@@ -646,10 +645,13 @@ private fun ChatTopBar(
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
+                    modifier = Modifier
+                        .background(SaarthiColors.Bg2)
+                        .border(1.dp, SaarthiColors.BorderHi, RoundedCornerShape(12.dp)),
                 ) {
                     DropdownMenuItem(
                         text = { Text("New chat", color = SaarthiColors.Text) },
-                        leadingIcon = { Icon(Icons.Default.Add, null, tint = SaarthiColors.Text2) },
+                        leadingIcon = { Icon(Icons.Default.Add, null, tint = SaarthiColors.Marigold) },
                         onClick = { onNewChat(); showMenu = false },
                     )
                     DropdownMenuItem(
@@ -659,7 +661,7 @@ private fun ChatTopBar(
                     )
                     DropdownMenuItem(
                         text = { Text("Change model", color = SaarthiColors.Text) },
-                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = SaarthiColors.Text2) },
+                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = SaarthiColors.Marigold) },
                         onClick = { onChangeModel(); showMenu = false },
                     )
                     androidx.compose.material3.HorizontalDivider(
@@ -695,12 +697,12 @@ private fun EmptyState(
         com.saarthi.core.ui.components.SaarthiLogo(size = 56.dp)
         Spacer(Modifier.height(16.dp))
         Text(
-            "पूछिए",
+            language.askPromptNative,
             style = com.saarthi.core.ui.theme.DisplayAccent.copy(fontSize = 16.sp, color = SaarthiColors.Marigold),
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            "What's on your mind?",
+            language.emptyChatHeadline,
             style = MaterialTheme.typography.headlineMedium.copy(
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
@@ -710,7 +712,7 @@ private fun EmptyState(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "I work entirely on your phone.\nAsk me anything — your privacy stays intact.",
+            language.emptyChatSubtitle,
             style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text3),
             textAlign = TextAlign.Center,
         )
@@ -718,7 +720,7 @@ private fun EmptyState(
         com.saarthi.core.ui.components.RangoliDivider(width = 100.dp, color = SaarthiColors.Text3)
         Spacer(Modifier.height(18.dp))
         Text(
-            "TRY THESE",
+            language.tryTheseLabel,
             style = MaterialTheme.typography.labelSmall.copy(
                 color = SaarthiColors.Text3,
                 letterSpacing = 1.4.sp,

@@ -94,6 +94,7 @@ fun HomeScreen(
                 .verticalScroll(rememberScrollState()),
         ) {
             HomeTopBar(
+                language = currentLanguage,
                 onLang = { showLanguagePicker = true },
                 onMenu = onOpenSettings,
             )
@@ -143,7 +144,11 @@ fun HomeScreen(
 }
 
 @Composable
-private fun HomeTopBar(onLang: () -> Unit, onMenu: () -> Unit) {
+private fun HomeTopBar(
+    language: SupportedLanguage,
+    onLang: () -> Unit,
+    onMenu: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -164,7 +169,7 @@ private fun HomeTopBar(onLang: () -> Unit, onMenu: () -> Unit) {
         ) {
             Icon(Icons.Outlined.Public, null, tint = SaarthiColors.Text2, modifier = Modifier.size(14.dp))
             Text(
-                "EN",
+                language.code.uppercase(),
                 style = MaterialTheme.typography.labelMedium.copy(
                     color = SaarthiColors.Text2,
                     fontWeight = FontWeight.SemiBold,

@@ -586,14 +586,119 @@ fun ResponseStyleScreen(
                     )
                 },
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(20.dp))
+            // Live preview — shows the user what a Saarthi reply will look
+            // like under their current preferences. Pure UI, no model call.
+            ResponseStylePreview(style)
+            Spacer(Modifier.height(8.dp))
             Text(
-                "Preferences are saved on this device. The prompt builder will adopt them in the next update.",
+                "Preferences are applied to every model you load.",
                 style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
     }
+}
+
+@Composable
+private fun ResponseStylePreview(style: com.saarthi.core.i18n.ResponseStyle) {
+    val examplePrompt = "How do I make ginger tea for a sore throat?"
+    val exampleReply = remember(style) { buildPreviewReply(style) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(
+                        SaarthiColors.Marigold.copy(alpha = 0.06f),
+                        SaarthiColors.Terracotta.copy(alpha = 0.04f),
+                    ),
+                ),
+            )
+            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(20.dp))
+            .padding(16.dp),
+    ) {
+        Text(
+            "PREVIEW",
+            style = MaterialTheme.typography.labelSmall.copy(
+                color = SaarthiColors.Marigold,
+                letterSpacing = 1.4.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
+        Spacer(Modifier.height(10.dp))
+        // Example user prompt
+        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp))
+                    .background(SaarthiColors.MarigoldSoft)
+                    .border(1.dp, SaarthiColors.MarigoldBd, RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    examplePrompt,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 13.sp,
+                        color = SaarthiColors.Text,
+                    ),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        // Example assistant reply
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 4.dp, bottomEnd = 14.dp))
+                .background(SaarthiColors.Surface)
+                .border(1.dp, SaarthiColors.Border, RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 4.dp, bottomEnd = 14.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Text(
+                exampleReply,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 13.sp,
+                    color = SaarthiColors.Text,
+                    lineHeight = 19.sp,
+                ),
+            )
+        }
+    }
+}
+
+private fun buildPreviewReply(style: com.saarthi.core.i18n.ResponseStyle): String {
+    // Short replies for each axis combo. Constructed deterministically so a
+    // preference change instantly shows a different result.
+    val warmth = when (style.tone) {
+        "warm"   -> "Sure thing — "
+        "formal" -> "Certainly. "
+        else     -> ""
+    }
+    val body = when (style.languageMix) {
+        "pure" -> when (style.length) {
+            "short" -> "अदरक उबाल कर शहद मिलाइए, गर्म पीजिए।"
+            "long"  -> "एक कप पानी में अदरक की पाँच पतली स्लाइस डाल कर पाँच मिनट उबालें। थोड़ा छान लीजिए, स्वाद के लिए शहद और चुटकी भर हल्दी डालें। दिन में दो बार, चार दिन तक।"
+            else    -> "एक कप पानी में अदरक उबाल कर शहद मिलाइए — दिन में दो बार लीजिए।"
+        }
+        "eng" -> when (style.length) {
+            "short" -> "Boil ginger, add honey, sip warm."
+            "long"  -> "Add 5 thin ginger slices to a cup of water. Simmer for 5 minutes, strain, stir in a teaspoon of honey and a pinch of turmeric. Sip twice a day for about four days."
+            else    -> "Simmer ginger in water for 5 minutes, strain, then mix in honey. Drink twice daily."
+        }
+        else -> when (style.length) {
+            "short" -> "Adrak boil karke shahad mila kar piyo — gale ko relief milega."
+            "long"  -> "Ek cup paani mein 5 patli adrak slices daal kar 5 minute simmer karein. Strain karke ek chamach shahad aur chutki haldi mix karein. Din mein 2 baar, 3–4 din ke liye lein."
+            else    -> "Adrak ko paani mein 5 minute boil karein, strain karke shahad mila lein. Din mein 2 baar lein."
+        }
+    }
+    val example = if (style.includeExamples && style.length != "short")
+        " For example: warm liquids loosen throat mucus, and honey coats the inflamed tissue."
+    else ""
+    val disclaimer = if (style.showDisclaimers && style.length != "short")
+        " If symptoms last more than 3 days, please see a doctor."
+    else ""
+    return warmth + body + example + disclaimer
 }
 
 @Composable

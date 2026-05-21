@@ -86,10 +86,33 @@ class SystemPromptProvider @Inject constructor() {
         memoryContext: String,
         priorTurnsContext: String = "",
         timeContext: String = "",
+        responseStyleSuffix: String = "",
     ): String {
         val tier = tierFor(modelName)
+
+        // ── COMPACT (Gemma 3 1B): take the AI Edge Gallery path ──────────────
+        // Tiny models echo every instruction they see. The only reliable way
+        // to get conversational responses out of 1B-class models is to send
+        // virtually no system prompt at all — let the chat template + the
+        // model's pretraining handle it. We attach a single identity line and
+        // (only when needed) the language directive. No memory headers, no
+        // recap, no time context, no behaviour rules.
+        if (tier == ModelTier.COMPACT) {
+            return buildString {
+                append(compactPrompt(pack))
+                if (languageInstruction.isNotBlank()) {
+                    append("\n\n")
+                    append(languageInstruction)
+                }
+                if (responseStyleSuffix.isNotBlank()) {
+                    append("\n\n")
+                    append(responseStyleSuffix)
+                }
+            }.trimEnd()
+        }
+
         val core = when (tier) {
-            ModelTier.COMPACT  -> compactPrompt(pack)
+            ModelTier.COMPACT  -> compactPrompt(pack)  // unreachable; handled above
             ModelTier.STANDARD -> standardPrompt(pack)
             ModelTier.LARGE    -> largePrompt(pack)
         }
@@ -140,6 +163,10 @@ class SystemPromptProvider @Inject constructor() {
                 append("\n\n")
                 append(priorTurnsContext)
             }
+            if (responseStyleSuffix.isNotBlank()) {
+                append("\n\n")
+                append(responseStyleSuffix)
+            }
             if (languageInstruction.isNotBlank()) {
                 append("\n\n")
                 append(languageInstruction)
@@ -151,33 +178,17 @@ class SystemPromptProvider @Inject constructor() {
     // 1B models with ~512-token budgets must use every byte of system prompt
     // judiciously: too long here and the model has no room left to actually
     // answer. Persona only — no markers, no formatting rules, no disclaimers.
-    // Gemma 3 1B is too small to follow "You are X" persona prompts — it echoes
-    // them back literally when asked to introduce itself ("you are Saarthi…").
-    // Anchor the role in *first person* and keep instructions to a single
-    // sentence — this is the prompting style AI Edge Gallery uses for the same
-    // model class and the only one that survives a 1B model's ~512-token budget.
+    // Gemma 3 1B is too small to follow ANY instruction-style prompt — every
+    // word in the system message gets parroted back. The only thing it can
+    // safely carry is a one-line declarative identity. No behaviour rules,
+    // no negations ("never X"), no quoted examples. This matches the
+    // prompting approach AI Edge Gallery uses for the same model class.
     private fun compactPrompt(pack: PackType): String = when (pack) {
-        PackType.BASE ->
-            "I am Saarthi, a small offline AI assistant for users in India. " +
-            "I always speak about myself in first person (\"I am Saarthi\", \"I can help\") — " +
-            "never \"you are\". I keep replies short, friendly, and natural."
-        PackType.KNOWLEDGE ->
-            "I am Saarthi, a study helper for Indian students. " +
-            "I always speak about myself in first person. " +
-            "I explain in simple words with NCERT/CBSE examples."
-        PackType.MONEY ->
-            "I am Saarthi, a money guide for India. " +
-            "I always speak about myself in first person. " +
-            "I use rupees and mention UPI/SIP/FD/PPF when they fit."
-        PackType.KISAN ->
-            "I am Saarthi, a farming assistant for India. " +
-            "I always speak about myself in first person. " +
-            "I use simple words and help with crops, soil, mandi rates, and schemes."
-        PackType.FIELD_EXPERT ->
-            "I am Saarthi, a guide for skilled workers in India " +
-            "(electricians, plumbers, mechanics, masons). " +
-            "I always speak about myself in first person. " +
-            "I am practical and safety-first."
+        PackType.BASE       -> "My name is Saarthi. I help users in India."
+        PackType.KNOWLEDGE  -> "My name is Saarthi. I help Indian students with studies."
+        PackType.MONEY      -> "My name is Saarthi. I help with money matters in India."
+        PackType.KISAN      -> "My name is Saarthi. I help Indian farmers."
+        PackType.FIELD_EXPERT -> "My name is Saarthi. I help skilled workers in India."
     }
 
     // ── STANDARD (Gemma 3n E2B / E4B, Gemma 2, mid-tier) ─────────────────────

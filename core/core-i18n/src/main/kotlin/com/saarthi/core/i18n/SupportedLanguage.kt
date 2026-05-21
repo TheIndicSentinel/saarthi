@@ -114,6 +114,55 @@ enum class SupportedLanguage(
         ODIA     -> "ଭାବୁଛି…"
     }
 
+    /** Short native-script "Ask" word — used as the accent label in the chat empty state. */
+    val askPromptNative: String get() = when (this) {
+        ENGLISH  -> "Ask me"
+        HINDI    -> "पूछिए"
+        TAMIL    -> "கேளுங்கள்"
+        TELUGU   -> "అడగండి"
+        BENGALI  -> "জিজ্ঞাসা করুন"
+        MARATHI  -> "विचारा"
+        KANNADA  -> "ಕೇಳಿ"
+        GUJARATI -> "પૂછો"
+        PUNJABI  -> "ਪੁੱਛੋ"
+        ODIA     -> "ପଚାରନ୍ତୁ"
+    }
+
+    /** Empty-chat headline (e.g. "What's on your mind?"). */
+    val emptyChatHeadline: String get() = when (this) {
+        ENGLISH  -> "What's on your mind?"
+        HINDI    -> "क्या जानना चाहते हैं?"
+        TAMIL    -> "என்ன கேட்கணும்?"
+        TELUGU   -> "ఏం తెలుసుకోవాలి?"
+        BENGALI  -> "কী জানতে চান?"
+        MARATHI  -> "काय जाणायचंय?"
+        KANNADA  -> "ಏನು ತಿಳಿಯಬೇಕು?"
+        GUJARATI -> "શું જાણવું છે?"
+        PUNJABI  -> "ਕੀ ਜਾਣਨਾ ਹੈ?"
+        ODIA     -> "କ'ଣ ଜାଣିବାକୁ ଚାହାଁନ୍ତି?"
+    }
+
+    /** Empty-chat helper subtitle. */
+    val emptyChatSubtitle: String get() = when (this) {
+        ENGLISH  -> "I work entirely on your phone.\nAsk me anything — your privacy stays intact."
+        HINDI    -> "मैं पूरी तरह से आपके फ़ोन पर काम करता हूँ।\nकुछ भी पूछें — आपकी निजता सुरक्षित रहेगी।"
+        else     -> "I work entirely on your phone.\nAsk me anything — your privacy stays intact."
+    }
+
+    /** Section label above the suggestion chips. */
+    val tryTheseLabel: String get() = when (this) {
+        ENGLISH  -> "TRY THESE"
+        HINDI    -> "ये पूछ कर देखिए"
+        TAMIL    -> "இவற்றை முயற்சிக்கவும்"
+        TELUGU   -> "ఇవి ప్రయత్నించండి"
+        BENGALI  -> "এগুলো জিজ্ঞাসা করুন"
+        MARATHI  -> "हे विचारून पहा"
+        KANNADA  -> "ಇವುಗಳನ್ನು ಪ್ರಯತ್ನಿಸಿ"
+        GUJARATI -> "આ પૂછી જુઓ"
+        PUNJABI  -> "ਇਹ ਪੁੱਛੋ"
+        ODIA     -> "ଏଗୁଡ଼ିକ ପଚାରନ୍ତୁ"
+    }
+
     /** Input field placeholder. */
     val inputHint: String get() = when (this) {
         ENGLISH  -> "Ask me anything…"
