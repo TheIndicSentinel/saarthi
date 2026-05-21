@@ -223,6 +223,8 @@ fun AssistantScreen(
                     onSearchToggle = viewModel::toggleSearch,
                     onSearchQueryChange = viewModel::onSearchQueryChange,
                     onChangeModel = onChangeModel,
+                    onNewChat = viewModel::newChat,
+                    onShowConversations = viewModel::openDrawer,
                 )
             },
             snackbarHost = { SnackbarHost(snackbarHost) },
@@ -261,6 +263,7 @@ fun AssistantScreen(
                                 MessageBubble(
                                     message = msg,
                                     onDelete = { viewModel.deleteMessage(msg.id) },
+                                    onRetry = { viewModel.retryResponse(msg.id) },
                                     avatarLabel = currentLanguage.avatarLabel,
                                 )
                             }
@@ -532,6 +535,8 @@ private fun ChatTopBar(
     onSearchToggle: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onChangeModel: () -> Unit = {},
+    onNewChat: () -> Unit = {},
+    onShowConversations: () -> Unit = {},
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -582,11 +587,6 @@ private fun ChatTopBar(
                     tint = SaarthiColors.Text,
                 )
             }
-
-            // Small mandala mark — replaces the old gold-teal language-letter avatar.
-            com.saarthi.core.ui.components.SaarthiLogo(size = 30.dp)
-
-            Spacer(Modifier.width(4.dp))
 
             // Model selector pill — clickable, takes user to model picker.
             Row(
@@ -647,6 +647,25 @@ private fun ChatTopBar(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
                 ) {
+                    DropdownMenuItem(
+                        text = { Text("New chat", color = SaarthiColors.Text) },
+                        leadingIcon = { Icon(Icons.Default.Add, null, tint = SaarthiColors.Text2) },
+                        onClick = { onNewChat(); showMenu = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Conversations", color = SaarthiColors.Text) },
+                        leadingIcon = { Icon(Icons.Default.Chat, null, tint = SaarthiColors.Text2) },
+                        onClick = { onShowConversations(); showMenu = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Change model", color = SaarthiColors.Text) },
+                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = SaarthiColors.Text2) },
+                        onClick = { onChangeModel(); showMenu = false },
+                    )
+                    androidx.compose.material3.HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = SaarthiColors.Border,
+                    )
                     DropdownMenuItem(
                         text = { Text("Clear chat", color = SaarthiColors.Rose) },
                         leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.Rose) },

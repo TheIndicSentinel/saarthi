@@ -124,6 +124,26 @@ class AssistantViewModel @Inject constructor(
             }
     }
 
+    /**
+     * Retry an assistant message: delete the AI response + the user message
+     * that triggered it, then resend the user text fresh so the model produces
+     * a new reply.
+     */
+    fun retryResponse(messageId: String) {
+        if (_uiState.value.isStreaming) return
+        viewModelScope.launch {
+            val msgs = allMessages.value
+            val idx = msgs.indexOfFirst { it.id == messageId }
+            if (idx <= 0) return@launch
+            val previousUserMsg = msgs.subList(0, idx).lastOrNull { it.role == com.saarthi.feature.assistant.domain.MessageRole.USER }
+                ?: return@launch
+            chatRepository.deleteMessage(messageId)
+            chatRepository.deleteMessage(previousUserMsg.id)
+            _uiState.update { it.copy(inputText = previousUserMsg.content) }
+            sendMessage()
+        }
+    }
+
     // ── Attachments ───────────────────────────────────────────────────────────
     fun onAttachmentsPicked(uris: List<Uri>) {
         viewModelScope.launch {
@@ -173,9 +193,12 @@ class AssistantViewModel @Inject constructor(
                 override fun onResults(results: Bundle?) {
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val spoken = matches?.firstOrNull() ?: return
-                    // Listening ends but keep voice overlay open so the user
-                    // can review the captured text and tap Send.
                     _uiState.update { it.copy(inputText = spoken, isListening = false) }
+                    // Auto-send + close the voice overlay if it was the trigger.
+                    if (_uiState.value.showVoiceMode && spoken.isNotBlank()) {
+                        _uiState.update { it.copy(showVoiceMode = false) }
+                        sendMessage()
+                    }
                 }
                 override fun onError(error: Int) =
                     _uiState.update { it.copy(isListening = false, error = "Voice error: $error") }

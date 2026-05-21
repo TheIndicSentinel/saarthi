@@ -30,7 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -62,6 +61,7 @@ import com.saarthi.feature.assistant.domain.MessageRole
 fun MessageBubble(
     message: ChatMessage,
     onDelete: () -> Unit,
+    onRetry: () -> Unit = {},
     modifier: Modifier = Modifier,
     avatarLabel: String = "स",
 ) {
@@ -177,7 +177,7 @@ fun MessageBubble(
                 }
             }
 
-            // Visible Copy / Retry / Share actions under each AI bubble.
+            // Copy + Retry actions under each completed AI bubble.
             if (!isUser && message.content.isNotEmpty() && !message.isStreaming) {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -189,12 +189,7 @@ fun MessageBubble(
                     BubbleActionChip(
                         icon = Icons.Default.Refresh,
                         label = "Retry",
-                        onClick = { /* TODO: hook re-stream when VM exposes it */ },
-                    )
-                    BubbleActionChip(
-                        icon = Icons.Default.Share,
-                        label = "Share",
-                        onClick = { /* TODO: launch Intent.ACTION_SEND */ },
+                        onClick = onRetry,
                     )
                 }
             }

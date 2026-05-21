@@ -92,8 +92,8 @@ fun ChatInputBar(
         modifier = modifier
             .fillMaxWidth()
             .background(SaarthiColors.Bg)
-            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp)
-            .navigationBarsPadding(),
+            .navigationBarsPadding()
+            .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
     ) {
         AnimatedVisibility(
             visible = pendingAttachments.isNotEmpty(),
@@ -218,18 +218,6 @@ fun ChatInputBar(
             }
             } // end pill Row
         } // end outer Row (attach + pill)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Running offline · No data sent",
-            style = MaterialTheme.typography.labelSmall.copy(
-                color = SaarthiColors.Text4,
-                fontSize = 10.sp,
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
     }
 }
 
