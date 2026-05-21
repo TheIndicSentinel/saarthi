@@ -40,6 +40,9 @@ data class AssistantUiState(
     val pendingAttachments: List<AttachedFile> = emptyList(),
     val isStreaming: Boolean = false,
     val isListening: Boolean = false,
+    /** Voice overlay stays open even after listening ends, so the user can
+     *  review the captured text and tap Send. */
+    val showVoiceMode: Boolean = false,
     val tokensPerSecond: Float = 0f,
     val modelReady: Boolean = false,
     val activeModelName: String? = null,
@@ -138,6 +141,25 @@ class AssistantViewModel @Inject constructor(
         _uiState.update { it.copy(showAttachmentSheet = !it.showAttachmentSheet) }
 
     // ── Voice input ───────────────────────────────────────────────────────────
+
+    /** Open the full-screen voice overlay AND start listening. */
+    fun openVoiceMode() {
+        _uiState.update { it.copy(showVoiceMode = true, inputText = "") }
+        startListening()
+    }
+
+    /** Close the voice overlay (and stop listening if still active). */
+    fun closeVoiceMode(clearText: Boolean = false) {
+        speechRecognizer?.cancel()
+        _uiState.update {
+            it.copy(
+                showVoiceMode = false,
+                isListening = false,
+                inputText = if (clearText) "" else it.inputText,
+            )
+        }
+    }
+
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(getApplication())) {
             _uiState.update { it.copy(error = "Voice recognition not available on this device") }
@@ -151,6 +173,8 @@ class AssistantViewModel @Inject constructor(
                 override fun onResults(results: Bundle?) {
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val spoken = matches?.firstOrNull() ?: return
+                    // Listening ends but keep voice overlay open so the user
+                    // can review the captured text and tap Send.
                     _uiState.update { it.copy(inputText = spoken, isListening = false) }
                 }
                 override fun onError(error: Int) =
@@ -160,7 +184,13 @@ class AssistantViewModel @Inject constructor(
                 override fun onBeginningOfSpeech() = Unit
                 override fun onRmsChanged(v: Float) = Unit
                 override fun onBufferReceived(b: ByteArray?) = Unit
-                override fun onPartialResults(p: Bundle?) = Unit
+                override fun onPartialResults(p: Bundle?) {
+                    val matches = p?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val partial = matches?.firstOrNull().orEmpty()
+                    if (partial.isNotBlank()) {
+                        _uiState.update { it.copy(inputText = partial) }
+                    }
+                }
                 override fun onEvent(e: Int, b: Bundle?) = Unit
             })
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {

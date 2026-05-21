@@ -185,7 +185,12 @@ fun SaarthiNavHost(
             ResponseStyleScreen(onBack = { navController.popBackStack() })
         }
         composable(Route.Downloads.path) {
-            ManageDownloadsScreen(onBack = { navController.popBackStack() })
+            ManageDownloadsScreen(
+                onBack = { navController.popBackStack() },
+                onAddModel = {
+                    navController.navigate("${Route.Onboarding.path}?modelChange=true")
+                },
+            )
         }
         composable(Route.History.path) {
             HistoryScreen(onBack = { navController.popBackStack() })

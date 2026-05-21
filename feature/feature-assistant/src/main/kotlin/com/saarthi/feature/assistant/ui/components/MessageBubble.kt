@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -174,6 +177,28 @@ fun MessageBubble(
                 }
             }
 
+            // Visible Copy / Retry / Share actions under each AI bubble.
+            if (!isUser && message.content.isNotEmpty() && !message.isStreaming) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    BubbleActionChip(
+                        icon = Icons.Default.ContentCopy,
+                        label = "Copy",
+                        onClick = { clipboard.setText(AnnotatedString(message.content)) },
+                    )
+                    BubbleActionChip(
+                        icon = Icons.Default.Refresh,
+                        label = "Retry",
+                        onClick = { /* TODO: hook re-stream when VM exposes it */ },
+                    )
+                    BubbleActionChip(
+                        icon = Icons.Default.Share,
+                        label = "Share",
+                        onClick = { /* TODO: launch Intent.ACTION_SEND */ },
+                    )
+                }
+            }
+
             // Token count (debug aid — timestamp removed per UX preference)
             if (message.tokenCount > 0 && !isUser) {
                 Text(
@@ -193,22 +218,41 @@ fun MessageBubble(
 
 @Composable
 private fun AssistantAvatar(label: String, modifier: Modifier = Modifier) {
+    // The brand mandala IS the assistant avatar.
     Box(
         modifier = modifier
             .size(32.dp)
             .clip(CircleShape)
-            .background(SaarthiColors.Gold.copy(0.15f))
-            .border(1.dp, SaarthiColors.Gold.copy(0.3f), CircleShape),
+            .background(SaarthiColors.MarigoldSoft)
+            .border(1.dp, SaarthiColors.MarigoldBd, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
+        com.saarthi.core.ui.components.SaarthiLogo(size = 26.dp)
+    }
+}
+
+@Composable
+private fun BubbleActionChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(icon, null, tint = SaarthiColors.Text3, modifier = Modifier.size(13.dp))
         Text(
             label,
-            style = MaterialTheme.typography.labelLarge.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
+            style = MaterialTheme.typography.labelMedium.copy(
+                color = SaarthiColors.Text3,
+                fontSize = 11.sp,
             ),
-            color = SaarthiColors.Gold,
-            textAlign = TextAlign.Center,
         )
     }
 }

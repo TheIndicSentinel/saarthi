@@ -304,8 +304,7 @@ fun AssistantScreen(
                     onAttachClick = { scope.launch { attachmentSheetState.show() } },
                     onVoiceClick = {
                         if (micPermission.status.isGranted) {
-                            if (uiState.isListening) viewModel.stopListening()
-                            else viewModel.startListening()
+                            viewModel.openVoiceMode()
                         } else {
                             micPermission.launchPermissionRequest()
                         }
@@ -336,20 +335,19 @@ fun AssistantScreen(
         }
     }
 
-    // Voice mode overlay — full-screen while listening.
-    if (uiState.isListening) {
+    // Voice mode overlay — stays open after listening ends so the user can
+    // review the captured text and tap Send.
+    if (uiState.showVoiceMode) {
         com.saarthi.feature.assistant.ui.components.VoiceModeOverlay(
             transcribedText = uiState.inputText,
             isListening = uiState.isListening,
-            onClose = {
-                viewModel.stopListening()
-                viewModel.onInputChange("")
-            },
+            onClose = { viewModel.closeVoiceMode(clearText = true) },
             onSend = {
-                viewModel.stopListening()
+                viewModel.closeVoiceMode(clearText = false)
                 if (uiState.inputText.isNotBlank()) viewModel.sendMessage()
             },
             onStop = { viewModel.stopListening() },
+            onRestart = { viewModel.startListening() },
         )
     }
 

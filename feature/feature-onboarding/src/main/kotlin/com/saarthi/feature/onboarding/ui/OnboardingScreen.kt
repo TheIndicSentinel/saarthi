@@ -691,8 +691,8 @@ private fun ModelOption(
                 }
             }
             Column(modifier = Modifier.weight(1f)) {
-                // Title + tag + Ready chip — all in one row so height stays consistent
-                // regardless of whether the model is downloaded.
+                // Title row — title + the one tag chip. Fixed-height regardless
+                // of download state, so all model cards align.
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -705,13 +705,10 @@ private fun ModelOption(
                         ),
                     )
                     SaarthiChip(text = tag, tone = tone, small = true)
-                    if (downloaded) {
-                        SaarthiChip(text = "Ready", tone = ChipTone.Jade, small = true)
-                    }
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "${model.description} · ${model.fileSizeMb} MB",
+                    model.description,
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = SaarthiColors.Text3,
                         fontSize = 11.5.sp,
@@ -719,6 +716,40 @@ private fun ModelOption(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        "${model.fileSizeMb} MB",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = SaarthiColors.Text3,
+                            fontSize = 11.sp,
+                        ),
+                    )
+                    // Status text — always present so row height is uniform.
+                    val status = when {
+                        progress is DownloadProgress.Downloading -> "· Downloading ${progress.percent}%"
+                        progress is DownloadProgress.Paused -> "· Paused"
+                        progress is DownloadProgress.Failed -> "· Failed"
+                        downloaded -> "· Ready to use"
+                        else -> "· Not downloaded"
+                    }
+                    val statusColor = when {
+                        progress is DownloadProgress.Downloading -> SaarthiColors.Marigold
+                        progress is DownloadProgress.Failed -> SaarthiColors.Rose
+                        downloaded -> SaarthiColors.Jade
+                        else -> SaarthiColors.Text3
+                    }
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = statusColor,
+                            fontSize = 11.sp,
+                        ),
+                    )
+                }
             }
         }
         if (progress is DownloadProgress.Downloading) {

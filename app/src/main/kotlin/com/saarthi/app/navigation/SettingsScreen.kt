@@ -1,5 +1,6 @@
 package com.saarthi.app.navigation
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -643,19 +646,221 @@ private fun SegmentedCard(
 // ── Manage downloads ──────────────────────────────────────────────────────────
 
 @Composable
-fun ManageDownloadsScreen(onBack: () -> Unit) {
+fun ManageDownloadsScreen(
+    onBack: () -> Unit,
+    onAddModel: () -> Unit = {},
+    viewModel: com.saarthi.app.ManageDownloadsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val installedBytes = remember(state.installed) { state.installed.sumOf { it.sizeBytes } }
+    val totalGb = state.phoneTotalBytes / 1_073_741_824f
+    val freeGb = state.phoneFreeBytes / 1_073_741_824f
+    val saarthiGb = installedBytes / 1_073_741_824f
+    val saarthiFrac = if (state.phoneTotalBytes > 0) installedBytes.toFloat() / state.phoneTotalBytes else 0f
+    val otherFrac = if (state.phoneTotalBytes > 0)
+        ((state.phoneTotalBytes - state.phoneFreeBytes - installedBytes).coerceAtLeast(0L)).toFloat() / state.phoneTotalBytes
+    else 0f
+
     Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
-        SaarthiTopBar(title = "Manage downloads", subtitle = "Models stored on this device", onBack = onBack)
+        SaarthiTopBar(
+            title = "Manage downloads",
+            subtitle = "${state.installed.size} model${if (state.installed.size == 1) "" else "s"} · %.1f GB used".format(saarthiGb),
+            onBack = onBack,
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Phone storage card
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(SaarthiColors.Surface)
+                    .border(1.dp, SaarthiColors.Border, RoundedCornerShape(20.dp))
+                    .padding(16.dp),
+            ) {
+                Text(
+                    "PHONE STORAGE",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = SaarthiColors.Text3,
+                        letterSpacing = 1.4.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color(0x0FF5EEE3)),
+                ) {
+                    if (saarthiFrac > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .weight(saarthiFrac)
+                                .fillMaxHeight()
+                                .background(SaarthiColors.Marigold),
+                        )
+                    }
+                    if (otherFrac > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .weight(otherFrac)
+                                .fillMaxHeight()
+                                .background(Color(0x2EF5EEE3)),
+                        )
+                    }
+                    val freeFrac = (1f - saarthiFrac - otherFrac).coerceAtLeast(0.001f)
+                    Box(modifier = Modifier.weight(freeFrac).fillMaxHeight())
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    StorageLegend(color = SaarthiColors.Marigold, label = "Saarthi models · %.1f GB".format(saarthiGb))
+                    StorageLegend(color = Color(0x2EF5EEE3), label = "Other")
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "%.1f GB free of %.0f GB total".format(freeGb, totalGb),
+                    style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text2),
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
             Text(
-                "Use the model picker to manage downloads. Settings → Active model lets you switch which model is loaded.",
-                style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2),
+                "INSTALLED MODELS",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = SaarthiColors.Text3,
+                    letterSpacing = 1.4.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+            )
+
+            if (state.installed.isEmpty()) {
+                Text(
+                    "No models downloaded yet.",
+                    style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text3),
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.installed.forEach { m ->
+                        InstalledModelRow(
+                            model = m,
+                            onDelete = { viewModel.deleteModel(m.entry) },
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            // "Download more models" footer button — opens picker
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(
+                        androidx.compose.foundation.BorderStroke(1.dp, SaarthiColors.BorderHi),
+                        RoundedCornerShape(16.dp),
+                    )
+                    .clickable(onClick = onAddModel)
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.CloudDownload,
+                    null,
+                    tint = SaarthiColors.Text2,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Download more models",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        color = SaarthiColors.Text2,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun StorageLegend(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        Box(modifier = Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(color))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium.copy(
+                color = SaarthiColors.Text3,
+                fontSize = 11.sp,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun InstalledModelRow(
+    model: com.saarthi.app.DownloadedModel,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(SaarthiColors.Surface)
+            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(SaarthiColors.MarigoldSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Memory, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(18.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    model.entry.displayName,
+                    style = MaterialTheme.typography.titleSmall.copy(color = SaarthiColors.Text),
+                )
+                if (model.active) {
+                    SaarthiChip(text = "Active", tone = ChipTone.Jade, small = true)
+                }
+            }
+            Text(
+                "%.2f GB".format(model.sizeBytes / 1_073_741_824f),
+                style = MaterialTheme.typography.labelMedium.copy(
+                    color = SaarthiColors.Text3,
+                    fontSize = 11.sp,
+                ),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (model.active) Color(0x0AF5EEE3) else SaarthiColors.RoseSoft)
+                .clickable(enabled = !model.active, onClick = onDelete),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Outlined.Delete,
+                "Delete",
+                tint = if (model.active) SaarthiColors.Text4 else SaarthiColors.Rose,
+                modifier = Modifier.size(16.dp),
             )
         }
     }

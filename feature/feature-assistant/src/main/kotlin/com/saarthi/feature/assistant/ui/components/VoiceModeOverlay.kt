@@ -58,6 +58,7 @@ fun VoiceModeOverlay(
     onClose: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    onRestart: () -> Unit = {},
 ) {
     val transition = rememberInfiniteTransition(label = "voice")
     val pulse1 by transition.animateFloat(
@@ -118,10 +119,10 @@ fun VoiceModeOverlay(
                         modifier = Modifier
                             .size(7.dp)
                             .clip(CircleShape)
-                            .background(if (isListening) SaarthiColors.Rose else SaarthiColors.Text3),
+                            .background(if (isListening) SaarthiColors.Rose else SaarthiColors.Jade),
                     )
                     Text(
-                        if (isListening) "LISTENING" else "READY",
+                        if (isListening) "LISTENING" else "CAPTURED",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = SaarthiColors.Text2,
                             letterSpacing = 1.4.sp,
@@ -137,19 +138,31 @@ fun VoiceModeOverlay(
             // Transcribed text
             Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "I hear you saying…",
+                    if (transcribedText.isBlank() && isListening) "Listening…"
+                    else "I hear you saying…",
                     style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3),
                 )
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    if (transcribedText.isBlank()) "Speak now" else "“$transcribedText”",
-                    style = MaterialTheme.typography.displayMedium.copy(
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = SaarthiColors.Text,
-                    ),
-                    textAlign = TextAlign.Center,
-                )
+                if (transcribedText.isNotBlank()) {
+                    Text(
+                        "“$transcribedText”",
+                        style = MaterialTheme.typography.displayMedium.copy(
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SaarthiColors.Text,
+                        ),
+                        textAlign = TextAlign.Center,
+                    )
+                } else {
+                    Text(
+                        "Speak now — your words will appear here",
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            color = SaarthiColors.Text3,
+                            fontSize = 14.sp,
+                        ),
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 Spacer(Modifier.height(16.dp))
                 Text(
                     "हिन्दी · English · or any mix",
@@ -170,14 +183,19 @@ fun VoiceModeOverlay(
                     modifier = Modifier
                         .size(88.dp)
                         .clip(CircleShape)
-                        .background(SaarthiColors.Marigold)
-                        .border(2.dp, SaarthiColors.MarigoldBd, CircleShape),
+                        .background(if (isListening) SaarthiColors.Marigold else SaarthiColors.Surface)
+                        .border(
+                            2.dp,
+                            if (isListening) SaarthiColors.MarigoldBd else SaarthiColors.BorderHi,
+                            CircleShape,
+                        )
+                        .clickable(enabled = !isListening, onClick = onRestart),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Default.Mic,
                         "Mic",
-                        tint = SaarthiColors.OnMarigold,
+                        tint = if (isListening) SaarthiColors.OnMarigold else SaarthiColors.Marigold,
                         modifier = Modifier.size(36.dp),
                     )
                 }
