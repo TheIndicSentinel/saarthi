@@ -3,30 +3,53 @@ package com.saarthi.core.ui.theme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-private val SaarthiDarkColorScheme = darkColorScheme(
-    primary          = SaarthiColors.Marigold,
-    onPrimary        = SaarthiColors.OnMarigold,
-    primaryContainer = SaarthiColors.MarigoldDim,
-    onPrimaryContainer = SaarthiColors.Text,
-    secondary        = SaarthiColors.Terracotta,
-    onSecondary      = SaarthiColors.OnMarigold,
-    tertiary         = SaarthiColors.Indigo,
-    onTertiary       = SaarthiColors.Text,
-    background       = SaarthiColors.Bg,
-    onBackground     = SaarthiColors.Text,
-    surface          = SaarthiColors.Surface,
-    onSurface        = SaarthiColors.Text,
-    surfaceVariant   = SaarthiColors.SurfaceHi,
-    onSurfaceVariant = SaarthiColors.Text2,
-    error            = SaarthiColors.Rose,
-    onError          = SaarthiColors.Text,
-    outline          = SaarthiColors.Border,
-    outlineVariant   = SaarthiColors.BorderHi,
+private fun darkScheme() = darkColorScheme(
+    primary          = DarkPalette.marigold,
+    onPrimary        = DarkPalette.onMarigold,
+    primaryContainer = DarkPalette.marigoldDim,
+    onPrimaryContainer = DarkPalette.text,
+    secondary        = DarkPalette.terracotta,
+    onSecondary      = DarkPalette.onMarigold,
+    tertiary         = DarkPalette.indigo,
+    onTertiary       = DarkPalette.text,
+    background       = DarkPalette.bg,
+    onBackground     = DarkPalette.text,
+    surface          = DarkPalette.surface,
+    onSurface        = DarkPalette.text,
+    surfaceVariant   = DarkPalette.surfaceHi,
+    onSurfaceVariant = DarkPalette.text2,
+    error            = DarkPalette.rose,
+    onError          = DarkPalette.text,
+    outline          = DarkPalette.border,
+    outlineVariant   = DarkPalette.borderHi,
+)
+
+private fun lightScheme() = lightColorScheme(
+    primary          = LightPalette.marigold,
+    onPrimary        = LightPalette.onMarigold,
+    primaryContainer = LightPalette.marigoldDim,
+    onPrimaryContainer = LightPalette.text,
+    secondary        = LightPalette.terracotta,
+    onSecondary      = LightPalette.onMarigold,
+    tertiary         = LightPalette.indigo,
+    onTertiary       = LightPalette.text,
+    background       = LightPalette.bg,
+    onBackground     = LightPalette.text,
+    surface          = LightPalette.surface,
+    onSurface        = LightPalette.text,
+    surfaceVariant   = LightPalette.surfaceHi,
+    onSurfaceVariant = LightPalette.text2,
+    error            = LightPalette.rose,
+    onError          = LightPalette.onMarigold,
+    outline          = LightPalette.border,
+    outlineVariant   = LightPalette.borderHi,
 )
 
 data class SaarthiExtendedColors(
@@ -55,44 +78,54 @@ data class SaarthiExtendedColors(
 
 val LocalSaarthiColors = staticCompositionLocalOf {
     SaarthiExtendedColors(
-        marigold     = SaarthiColors.Marigold,
-        marigoldDim  = SaarthiColors.MarigoldDim,
-        marigoldSoft = SaarthiColors.MarigoldSoft,
-        terracotta   = SaarthiColors.Terracotta,
-        indigo       = SaarthiColors.Indigo,
-        jade         = SaarthiColors.Jade,
-        rose         = SaarthiColors.Rose,
-        text         = SaarthiColors.Text,
-        text2        = SaarthiColors.Text2,
-        text3        = SaarthiColors.Text3,
-        text4        = SaarthiColors.Text4,
-        // Legacy
-        goldAccent      = SaarthiColors.Marigold,
-        cyberTeal       = SaarthiColors.Jade,
-        glassSurface    = SaarthiColors.Surface,
-        glassBorder     = SaarthiColors.Border,
-        textMuted       = SaarthiColors.Text3,
-        knowledgePurple = SaarthiColors.Indigo,
-        moneyGreen      = SaarthiColors.Jade,
-        kisanEarth      = SaarthiColors.Terracotta,
-        fieldBlue       = SaarthiColors.Indigo,
+        marigold     = DarkPalette.marigold,
+        marigoldDim  = DarkPalette.marigoldDim,
+        marigoldSoft = DarkPalette.marigoldSoft,
+        terracotta   = DarkPalette.terracotta,
+        indigo       = DarkPalette.indigo,
+        jade         = DarkPalette.jade,
+        rose         = DarkPalette.rose,
+        text         = DarkPalette.text,
+        text2        = DarkPalette.text2,
+        text3        = DarkPalette.text3,
+        text4        = DarkPalette.text4,
+        goldAccent      = DarkPalette.marigold,
+        cyberTeal       = DarkPalette.jade,
+        glassSurface    = DarkPalette.surface,
+        glassBorder     = DarkPalette.border,
+        textMuted       = DarkPalette.text3,
+        knowledgePurple = DarkPalette.indigo,
+        moneyGreen      = DarkPalette.jade,
+        kisanEarth      = DarkPalette.terracotta,
+        fieldBlue       = DarkPalette.indigo,
     )
 }
 
+/**
+ * Apply the Saarthi theme. The active palette is keyed off [mode]; flipping
+ * it re-runs [SaarthiColors.applyPalette] and the snapshot system propagates
+ * the new colors through every composable that reads from `SaarthiColors`.
+ */
 @Composable
-fun SaarthiTheme(content: @Composable () -> Unit) {
+fun SaarthiTheme(
+    mode: ThemeMode = ThemeMode.DARK,
+    content: @Composable () -> Unit,
+) {
+    LaunchedEffect(mode) {
+        SaarthiColors.applyPalette(if (mode == ThemeMode.DARK) DarkPalette else LightPalette)
+    }
+    val colorScheme = if (mode == ThemeMode.DARK) darkScheme() else lightScheme()
     CompositionLocalProvider(LocalSaarthiColors provides LocalSaarthiColors.current) {
         MaterialTheme(
-            colorScheme = SaarthiDarkColorScheme,
+            colorScheme = colorScheme,
             typography  = SaarthiTypography,
         ) {
-            // Surface paints the window with the warm dark ink so navigation
-            // transitions never flash a lighter background.
-            Surface(color = SaarthiColors.Bg, content = content)
+            // Surface paints the window with the warm background so navigation
+            // transitions never flash a contrasting color.
+            Surface(color = if (mode == ThemeMode.DARK) DarkPalette.bg else LightPalette.bg, content = content)
         }
     }
 }
 
-// Convenience accessor
 val MaterialTheme.saarthiColors: SaarthiExtendedColors
     @Composable get() = LocalSaarthiColors.current

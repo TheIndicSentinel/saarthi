@@ -273,26 +273,39 @@ fun AssistantScreen(
                         }
 
 
-                        // Scroll-to-bottom FAB
-                        val showScrollFab = remember { derivedStateOf { listState.firstVisibleItemIndex > 2 } }
+                        // Scroll-to-bottom FAB — smooth fade + slide so it
+                        // doesn't pop in/out abruptly.
+                        val showScrollFab = remember {
+                            derivedStateOf { listState.firstVisibleItemIndex > 2 }
+                        }
                         androidx.compose.animation.AnimatedVisibility(
                             visible = showScrollFab.value,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
-                            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+                            enter = androidx.compose.animation.fadeIn(
+                                animationSpec = androidx.compose.animation.core.tween(220),
+                            ) + androidx.compose.animation.slideInVertically(
+                                animationSpec = androidx.compose.animation.core.tween(220),
+                                initialOffsetY = { it / 2 },
+                            ),
+                            exit = androidx.compose.animation.fadeOut(
+                                animationSpec = androidx.compose.animation.core.tween(160),
+                            ) + androidx.compose.animation.slideOutVertically(
+                                animationSpec = androidx.compose.animation.core.tween(160),
+                                targetOffsetY = { it / 2 },
+                            ),
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                         ) {
                             IconButton(
                                 onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(CircleShape)
-                                    .background(SaarthiColors.NavyLight.copy(alpha = 0.9f))
-                                    .border(1.dp, SaarthiColors.Gold.copy(alpha = 0.4f), CircleShape)
+                                    .background(SaarthiColors.Surface)
+                                    .border(1.dp, SaarthiColors.MarigoldBd, CircleShape),
                             ) {
                                 Icon(
                                     Icons.Default.ArrowDownward,
                                     null,
-                                    tint = SaarthiColors.Gold
+                                    tint = SaarthiColors.Marigold,
                                 )
                             }
                         }
@@ -656,7 +669,7 @@ private fun ChatTopBar(
                     )
                     DropdownMenuItem(
                         text = { Text("Conversations", color = SaarthiColors.Text) },
-                        leadingIcon = { Icon(Icons.Default.Chat, null, tint = SaarthiColors.Text2) },
+                        leadingIcon = { Icon(Icons.Default.Chat, null, tint = SaarthiColors.Marigold) },
                         onClick = { onShowConversations(); showMenu = false },
                     )
                     DropdownMenuItem(

@@ -73,10 +73,14 @@ fun SettingsScreen(
     onChangeModel: () -> Unit,
     currentLanguage: com.saarthi.core.i18n.SupportedLanguage = com.saarthi.core.i18n.SupportedLanguage.HINDI,
     onChangeLanguage: (com.saarthi.core.i18n.SupportedLanguage) -> Unit = {},
+    settingsViewModel: com.saarthi.app.SettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+    themeViewModel: com.saarthi.app.ThemeViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     var notifOn by remember { mutableStateOf(true) }
-    var darkOn by remember { mutableStateOf(true) }
     var showLangPicker by remember { mutableStateOf(false) }
+    var showClearDialog by remember { mutableStateOf(false) }
+    val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
+    val darkOn = themeMode == com.saarthi.core.ui.theme.ThemeMode.DARK
 
     Column(
         modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg),
@@ -139,7 +143,9 @@ fun SettingsScreen(
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.DarkMode, null) },
                 title = "Dark theme",
-                trailing = { SaarthiToggle(on = darkOn, onToggle = { darkOn = !darkOn }) },
+                subtitle = if (darkOn) "On — warm dark ink"
+                           else "Off — daylight-friendly light",
+                trailing = { SaarthiToggle(on = darkOn, onToggle = { themeViewModel.toggle() }) },
             )
 
             SectionLabel("Privacy")
@@ -158,6 +164,7 @@ fun SettingsScreen(
                 tone = ChipTone.Rose,
                 danger = true,
                 trailing = { ChevronRight() },
+                onClick = { showClearDialog = true },
             )
 
             SectionLabel("About")
@@ -211,6 +218,33 @@ fun SettingsScreen(
                 showLangPicker = false
             },
             onDismiss = { showLangPicker = false },
+        )
+    }
+
+    if (showClearDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            containerColor = SaarthiColors.Bg2,
+            title = { Text("Clear chat history?", color = SaarthiColors.Text) },
+            text = {
+                Text(
+                    "This permanently deletes every saved conversation across all sessions. The active model stays loaded.",
+                    color = SaarthiColors.Text2,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    settingsViewModel.clearAllChatHistory()
+                    showClearDialog = false
+                }) {
+                    Text("Delete all", color = SaarthiColors.Rose, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showClearDialog = false }) {
+                    Text("Cancel", color = SaarthiColors.Text2)
+                }
+            },
         )
     }
 }

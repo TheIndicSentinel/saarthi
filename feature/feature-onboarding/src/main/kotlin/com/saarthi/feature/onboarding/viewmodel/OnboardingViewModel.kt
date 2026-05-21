@@ -92,6 +92,11 @@ class OnboardingViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(
         OnboardingUiState(
             step = if (isModelChangeMode) OnboardingStep.MODEL_PICK else OnboardingStep.SPLASH,
+            // Seed with the language the user already picked. Otherwise
+            // re-entering onboarding for a model change (or any subsequent
+            // run) would default the in-memory selection to HINDI, and
+            // completeOnboarding() would clobber the saved language.
+            selectedLanguage = languageManager.selectedLanguage.value,
         )
     )
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
@@ -527,7 +532,12 @@ class OnboardingViewModel @Inject constructor(
 
     fun completeOnboarding() {
         viewModelScope.launch {
-            repository.completeOnboarding(_uiState.value.selectedLanguage)
+            // Defensive: prefer the currently-saved language over the in-memory
+            // selection, so a model change flow that never touched the language
+            // step cannot clobber the user's onboarding choice.
+            val resolved = if (isModelChangeMode) languageManager.selectedLanguage.value
+                           else _uiState.value.selectedLanguage
+            repository.completeOnboarding(resolved)
             _uiState.update { it.copy(step = OnboardingStep.DONE) }
         }
     }

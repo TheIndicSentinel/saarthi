@@ -1,83 +1,193 @@
 package com.saarthi.core.ui.theme
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
 /**
- * Marigold-dark palette — warm dark ink with saffron primary.
- * Names mirror the design spec tokens 1:1 (see SAARTHI_HANDOFF.md §2).
- * Legacy "deep space / gold" names are kept as aliases at the bottom
- * for back-compat with screens not yet migrated.
+ * Snapshot of every Saarthi color token at a single point in time.
+ * Two snapshots are defined below — DarkPalette and LightPalette — and the
+ * live [SaarthiColors] object swaps between them when the user toggles the
+ * theme. Composables that read `SaarthiColors.Marigold` etc. are tracked
+ * through Compose's snapshot system, so flipping the palette recomposes the
+ * whole UI automatically.
+ */
+data class SaarthiPalette(
+    val bg: Color,
+    val bg2: Color,
+    val bg3: Color,
+    val surface: Color,
+    val surfaceHi: Color,
+    val border: Color,
+    val borderHi: Color,
+    val marigold: Color,
+    val marigoldDim: Color,
+    val marigoldSoft: Color,
+    val marigoldGlow: Color,
+    val marigoldBd: Color,
+    val terracotta: Color,
+    val terracottaSoft: Color,
+    val terracottaBd: Color,
+    val indigo: Color,
+    val indigoSoft: Color,
+    val indigoBd: Color,
+    val jade: Color,
+    val jadeSoft: Color,
+    val jadeBd: Color,
+    val rose: Color,
+    val roseSoft: Color,
+    val roseBd: Color,
+    val text: Color,
+    val text2: Color,
+    val text3: Color,
+    val text4: Color,
+    val onMarigold: Color,
+    val glassSurface: Color,
+)
+
+/** Warm dark ink — the default brand experience. */
+val DarkPalette = SaarthiPalette(
+    bg            = Color(0xFF0E0B07),
+    bg2           = Color(0xFF161310),
+    bg3           = Color(0xFF1F1A14),
+    surface       = Color(0xFF1B1611),
+    surfaceHi     = Color(0xFF241E16),
+    border        = Color(0x12F4EEE3),
+    borderHi      = Color(0x24F4EEE3),
+    marigold      = Color(0xFFF4A52E),
+    marigoldDim   = Color(0xFFC8841E),
+    marigoldSoft  = Color(0x1FF4A52E),
+    marigoldGlow  = Color(0x38F4A52E),
+    marigoldBd    = Color(0x40F4A52E),
+    terracotta    = Color(0xFFD67152),
+    terracottaSoft = Color(0x24D67152),
+    terracottaBd  = Color(0x40D67152),
+    indigo        = Color(0xFF7A8DE8),
+    indigoSoft    = Color(0x247A8DE8),
+    indigoBd      = Color(0x407A8DE8),
+    jade          = Color(0xFF5DD3A8),
+    jadeSoft      = Color(0x245DD3A8),
+    jadeBd        = Color(0x405DD3A8),
+    rose          = Color(0xFFE07A8A),
+    roseSoft      = Color(0x24E07A8A),
+    roseBd        = Color(0x40E07A8A),
+    text          = Color(0xFFF5EEE3),
+    text2         = Color(0xB3F5EEE3),
+    text3         = Color(0x73F5EEE3),
+    text4         = Color(0x47F5EEE3),
+    onMarigold    = Color(0xFF1A1206),
+    glassSurface  = Color(0x0DFFFFFF),
+)
+
+/** Modern professional light — warm ivory bg, deeper marigold accent, dark ink. */
+val LightPalette = SaarthiPalette(
+    bg            = Color(0xFFFBF6EC),
+    bg2           = Color(0xFFF4ECDD),
+    bg3           = Color(0xFFEEE3CE),
+    surface       = Color(0xFFFFFFFF),
+    surfaceHi     = Color(0xFFFAF3E4),
+    border        = Color(0x141F1A0F),
+    borderHi      = Color(0x241F1A0F),
+    marigold      = Color(0xFFC8841E),
+    marigoldDim   = Color(0xFFA56A0E),
+    marigoldSoft  = Color(0x1FC8841E),
+    marigoldGlow  = Color(0x38C8841E),
+    marigoldBd    = Color(0x40C8841E),
+    terracotta    = Color(0xFFB05432),
+    terracottaSoft = Color(0x1FB05432),
+    terracottaBd  = Color(0x40B05432),
+    indigo        = Color(0xFF4F61C9),
+    indigoSoft    = Color(0x1F4F61C9),
+    indigoBd      = Color(0x404F61C9),
+    jade          = Color(0xFF1FA77B),
+    jadeSoft      = Color(0x1F1FA77B),
+    jadeBd        = Color(0x401FA77B),
+    rose          = Color(0xFFC9576A),
+    roseSoft      = Color(0x1FC9576A),
+    roseBd        = Color(0x40C9576A),
+    text          = Color(0xFF1F1A0F),
+    text2         = Color(0xB31F1A0F),
+    text3         = Color(0x801F1A0F),
+    text4         = Color(0x551F1A0F),
+    onMarigold    = Color(0xFFFFFFFF),
+    glassSurface  = Color(0x0D1F1A0F),
+)
+
+/**
+ * Public color tokens — these are var-backed by Compose state, so reads from
+ * any @Composable are tracked. [SaarthiTheme] flips the active palette via
+ * [applyPalette] and the entire UI recomposes with the new colors.
+ *
+ * The legacy aliases (Gold, NavyMid, …) are still here for any code that
+ * hasn't migrated to the new names.
  */
 object SaarthiColors {
-    // ── Surfaces — warm dark ink ──────────────────────────────────────────
-    val Bg        = Color(0xFF0E0B07)  // deepest app background
-    val Bg2       = Color(0xFF161310)  // modal / sheet background
-    val Bg3       = Color(0xFF1F1A14)  // input fields, pressed surfaces
-    val Surface   = Color(0xFF1B1611)  // card background
-    val SurfaceHi = Color(0xFF241E16)  // card hover / pressed
-    val Border    = Color(0x12F4EEE3)  // ivory @ 7%
-    val BorderHi  = Color(0x24F4EEE3)  // ivory @ 14%
+    private var palette by mutableStateOf(DarkPalette)
 
-    // ── Brand — marigold ──────────────────────────────────────────────────
-    val Marigold     = Color(0xFFF4A52E)  // primary CTA
-    val MarigoldDim  = Color(0xFFC8841E)  // pressed / hover
-    val MarigoldSoft = Color(0x1FF4A52E)  // marigold @ 12% — tinted bg
-    val MarigoldGlow = Color(0x38F4A52E)  // marigold @ 22% — drop-shadow glow
-    val MarigoldBd   = Color(0x40F4A52E)  // marigold @ 25% — borders
+    internal fun applyPalette(p: SaarthiPalette) { palette = p }
 
-    // ── Semantic accents (single chroma family) ───────────────────────────
-    val Terracotta     = Color(0xFFD67152)
-    val TerracottaSoft = Color(0x24D67152)  // 14%
-    val TerracottaBd   = Color(0x40D67152)
+    val Bg        get() = palette.bg
+    val Bg2       get() = palette.bg2
+    val Bg3       get() = palette.bg3
+    val Surface   get() = palette.surface
+    val SurfaceHi get() = palette.surfaceHi
+    val Border    get() = palette.border
+    val BorderHi  get() = palette.borderHi
 
-    val Indigo     = Color(0xFF7A8DE8)
-    val IndigoSoft = Color(0x247A8DE8)
-    val IndigoBd   = Color(0x407A8DE8)
+    val Marigold     get() = palette.marigold
+    val MarigoldDim  get() = palette.marigoldDim
+    val MarigoldSoft get() = palette.marigoldSoft
+    val MarigoldGlow get() = palette.marigoldGlow
+    val MarigoldBd   get() = palette.marigoldBd
 
-    val Jade     = Color(0xFF5DD3A8)
-    val JadeSoft = Color(0x245DD3A8)
-    val JadeBd   = Color(0x405DD3A8)
+    val Terracotta     get() = palette.terracotta
+    val TerracottaSoft get() = palette.terracottaSoft
+    val TerracottaBd   get() = palette.terracottaBd
 
-    val Rose     = Color(0xFFE07A8A)
-    val RoseSoft = Color(0x24E07A8A)
-    val RoseBd   = Color(0x40E07A8A)
+    val Indigo     get() = palette.indigo
+    val IndigoSoft get() = palette.indigoSoft
+    val IndigoBd   get() = palette.indigoBd
 
-    // ── Text — ivory ──────────────────────────────────────────────────────
-    val Text  = Color(0xFFF5EEE3)
-    val Text2 = Color(0xB3F5EEE3)  // 70%
-    val Text3 = Color(0x73F5EEE3)  // 45%
-    val Text4 = Color(0x47F5EEE3)  // 28%
+    val Jade     get() = palette.jade
+    val JadeSoft get() = palette.jadeSoft
+    val JadeBd   get() = palette.jadeBd
 
-    // ── Status ────────────────────────────────────────────────────────────
-    val Error   = Rose
-    val Success = Jade
-    val Warning = Marigold
+    val Rose     get() = palette.rose
+    val RoseSoft get() = palette.roseSoft
+    val RoseBd   get() = palette.roseBd
 
-    // ── Dark ink (for text on marigold buttons) ───────────────────────────
-    val OnMarigold = Color(0xFF1A1206)
+    val Text  get() = palette.text
+    val Text2 get() = palette.text2
+    val Text3 get() = palette.text3
+    val Text4 get() = palette.text4
 
-    // ──────────────────────────────────────────────────────────────────────
-    // Legacy aliases — keep old screens compiling while we migrate.
-    // ──────────────────────────────────────────────────────────────────────
-    val DeepSpace        = Bg
-    val NavyDark         = Bg2
-    val NavyMid          = Surface
-    val NavyLight        = SurfaceHi
-    val Gold             = Marigold
-    val GoldLight        = Color(0xFFFFC274)
-    val GoldDim          = MarigoldDim
-    val CyberTeal        = Jade
-    val CyberTealDim     = Color(0xFF3DA886)
-    val KnowledgePurple  = Indigo
-    val MoneyGreen       = Jade
-    val KisanEarth       = Terracotta
-    val FieldBlue        = Indigo
-    val TextPrimary      = Text
-    val TextSecondary    = Text2
-    val TextMuted        = Text3
-    val GlassSurface     = Color(0x0DFFFFFF)
-    val GlassBorder      = Border
-    val GlassSurfaceHover = BorderHi
-    val Saffron          = Marigold
-    val TulsiGreen       = Jade
+    val Error   get() = palette.rose
+    val Success get() = palette.jade
+    val Warning get() = palette.marigold
+
+    val OnMarigold get() = palette.onMarigold
+
+    // ── Legacy aliases ──────────────────────────────────────────────────
+    val DeepSpace        get() = palette.bg
+    val NavyDark         get() = palette.bg2
+    val NavyMid          get() = palette.surface
+    val NavyLight        get() = palette.surfaceHi
+    val Gold             get() = palette.marigold
+    val GoldLight        get() = palette.marigold
+    val GoldDim          get() = palette.marigoldDim
+    val CyberTeal        get() = palette.jade
+    val CyberTealDim     get() = palette.jade
+    val KnowledgePurple  get() = palette.indigo
+    val MoneyGreen       get() = palette.jade
+    val KisanEarth       get() = palette.terracotta
+    val FieldBlue        get() = palette.indigo
+    val TextPrimary      get() = palette.text
+    val TextSecondary    get() = palette.text2
+    val TextMuted        get() = palette.text3
+    val GlassSurface     get() = palette.glassSurface
+    val GlassBorder      get() = palette.border
+    val GlassSurfaceHover get() = palette.borderHi
+    val Saffron          get() = palette.marigold
+    val TulsiGreen       get() = palette.jade
 }

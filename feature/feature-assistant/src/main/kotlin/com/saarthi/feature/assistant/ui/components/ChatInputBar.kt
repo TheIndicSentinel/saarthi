@@ -88,9 +88,9 @@ fun ChatInputBar(
     val hasText = inputText.isNotBlank() || pendingAttachments.isNotEmpty()
     val canSend = hasText && !isStreaming
 
-    // Note: Scaffold.innerPadding (applied by the parent screen) already
-    // consumes the navigation-bar inset, so we deliberately do NOT add
-    // .navigationBarsPadding() here — that would double the bottom gap.
+    // Parent chat column already applies the union of navigationBars + ime
+    // insets, so this component should add NO bottom system inset of its own —
+    // doing so would create a gap above the keyboard.
     Column(
         modifier = modifier
             .fillMaxWidth()
