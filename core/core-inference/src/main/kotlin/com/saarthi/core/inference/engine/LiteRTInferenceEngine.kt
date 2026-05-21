@@ -483,7 +483,28 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 val crashedDuringGen  = wasKilledDuringGeneration()
                 val crashedDuringInit = wasKilledDuringInit()
-                if (crashedDuringGen || crashedDuringInit) {
+                // ── JVM crash filter ──────────────────────────────────────
+                // SaarthiApp's uncaught-exception handler stamps this flag
+                // before the process dies. A JVM-side Throwable (NPE, OOM in
+                // Kotlin code, anything Compose blows up on) is NOT a fault
+                // of the inference engine — the engine had nothing to do with
+                // it. Without this check, an unrelated JVM crash would land us
+                // here, see a stale `wasUsingGpu=true` from a previous session's
+                // successful generation, and ban the GPU for 24h on a perfectly
+                // healthy device.
+                val lastCrashWasJvm = enginePrefs.getBoolean("saarthi_last_crash_was_jvm", false)
+                if (lastCrashWasJvm) {
+                    val cls = enginePrefs.getString("saarthi_last_crash_class", "?")
+                    DebugLogger.log("LITERT", "[RECOVERY] Last crash was JVM ($cls) — engine not at fault. Skipping ban / count logic.")
+                    enginePrefs.edit()
+                        .remove("saarthi_last_crash_was_jvm")
+                        .remove("saarthi_last_crash_class")
+                        .putBoolean("litert_init_pending", false)
+                        .putBoolean("litert_gen_pending", false)
+                        .commit()
+                }
+
+                if ((crashedDuringGen || crashedDuringInit) && !lastCrashWasJvm) {
                     val wasGpuOrNpu = wasUsingGpuAtCrash()
                     val crashedModelPath = enginePrefs.getString("litert_crash_model_path", "") ?: ""
                     val crashWasThisModel = (crashedDuringGen || crashedDuringInit) &&
@@ -501,10 +522,16 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "  crashCount=${getCrashCount(config.modelPath)}  gpuBanned=${gpuPreviouslyCrashedDuringGen(config.modelPath)}")
                     DebugLogger.log("LITERT", "  batteryOptExempt=$batteryExempt")
 
+                    // Only attribute GPU fault when a *generation* was actively
+                    // running on the GPU. wasUsingGpuAtCrash() can be stale from
+                    // a prior session's successful gen — gating on
+                    // crashedDuringGen here prevents that misattribution.
+                    val gpuActuallyAtFault = crashedDuringGen && wasGpuOrNpu && crashWasThisModel
+
                     val likelyCause = when {
-                        crashWasThisModel && wasGpuOrNpu ->
+                        gpuActuallyAtFault ->
                             "GPU/NPU_FAULT: inference caused SIGKILL on GPU/NPU backend — banning GPU for 24h."
-                        crashWasThisModel && !wasGpuOrNpu ->
+                        crashedDuringGen && crashWasThisModel ->
                             "CPU_CRASH: Process killed during CPU generation. " +
                             "Possible OEM watchdog, OOM, or native LiteRT issue."
                         crashedDuringInit ->
@@ -516,8 +543,8 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "=== END CRASH RECOVERY ===")
 
                     if (crashWasThisModel) {
-                        incrementCrashCount(config.modelPath, wasGpuOrNpu)
-                        if (wasGpuOrNpu) {
+                        incrementCrashCount(config.modelPath, gpuActuallyAtFault)
+                        if (gpuActuallyAtFault) {
                             val convWasReady = wasConvReadyAtCrash()
                             if (convWasReady) {
                                 // Crash happened inside sendMessageAsync — GPU actually ran but died
@@ -724,6 +751,22 @@ class LiteRTInferenceEngine @Inject constructor(
                     _activeModelNameFlow.value = config.modelName
                     _isFreshConversation = true   // brand-new Conversation, no turns in KV
                     markInitEnded()
+                    // ── Stale-ban self-heal ──────────────────────────────
+                    // If a previous session left a GPU ban + crash count on
+                    // this model (e.g. from a misattributed JVM crash), the
+                    // very fact that init just completed proves the device
+                    // can load it. Clear both so the next session tries GPU
+                    // again instead of permanently downgrading to CPU.
+                    runCatching {
+                        if (gpuPreviouslyCrashedDuringGen(config.modelPath)) {
+                            DebugLogger.log("LITERT", "[RECOVERY] Init succeeded — clearing stale GPU ban for ${modelKey(config.modelPath)}")
+                            clearGpuGenCrashedFlag(config.modelPath)
+                        }
+                        if (getCrashCount(config.modelPath) > 0) {
+                            DebugLogger.log("LITERT", "[RECOVERY] Init succeeded — resetting stale crash count")
+                            resetCrashCount(config.modelPath)
+                        }
+                    }
                     setReady(true)
                     DebugLogger.log("LITERT", "Model ready & pre-warmed  $profile  backend=${backendLabel()}")
                 } catch (e: Throwable) {

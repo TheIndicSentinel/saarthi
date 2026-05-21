@@ -36,6 +36,21 @@ class SaarthiApp : Application() {
     private fun installCrashLogger() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            // ── JVM-crash signal for the inference engine ─────────────────
+            // The engine's crash-recovery layer (LiteRTInferenceEngine) looks at
+            // SharedPreferences flags on the next launch to decide whether the
+            // crash was a native SIGKILL (GPU/NPU fault) or something else.
+            // If we just died from a Kotlin Throwable, the engine had nothing
+            // to do with it — stamp this flag so the recovery layer skips the
+            // GPU ban entirely. Without it, an unrelated JVM bug bans the GPU
+            // for 24h and the user wonders why their fast backend disappeared.
+            runCatching {
+                getSharedPreferences("litert_engine_prefs", MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("saarthi_last_crash_was_jvm", true)
+                    .putString("saarthi_last_crash_class", throwable.javaClass.name)
+                    .commit()
+            }
             try {
                 DebugLogger.log("CRASH", "UNCAUGHT on thread=${thread.name}")
                 DebugLogger.log("CRASH", "Type: ${throwable.javaClass.name}")

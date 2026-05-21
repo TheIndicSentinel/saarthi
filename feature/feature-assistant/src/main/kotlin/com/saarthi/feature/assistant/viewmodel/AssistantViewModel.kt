@@ -73,38 +73,10 @@ class AssistantViewModel @Inject constructor(
     private val _speakingMessageId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
 
-    init {
-        observeTtsState()
-        observeAutoSpeak()
-    }
-
-    private fun observeTtsState() {
-        // Clear the highlighted message-id as soon as TTS reports it's no longer
-        // speaking (natural end, error, or stop()).
-        ttsManager.isSpeaking
-            .onEach { speaking -> if (!speaking) _speakingMessageId.value = null }
-            .launchIn(viewModelScope)
-    }
-
-    /** When Settings → "Read replies aloud" is on, auto-speak each assistant
-     *  reply once it finishes streaming. We hook into the message list and
-     *  fire on the *transition* from streaming → done for the latest message. */
-    private fun observeAutoSpeak() {
-        var lastFinalizedId: String? = null
-        allMessages
-            .onEach { msgs ->
-                if (!ttsPreference.autoSpeakReplies.value) return@onEach
-                val last = msgs.lastOrNull { it.role == com.saarthi.feature.assistant.domain.MessageRole.ASSISTANT }
-                    ?: return@onEach
-                if (last.isStreaming) return@onEach
-                if (last.content.isBlank()) return@onEach
-                if (last.id == lastFinalizedId) return@onEach
-                lastFinalizedId = last.id
-                _speakingMessageId.value = last.id
-                ttsManager.speak(last.content, currentLanguage.value)
-            }
-            .launchIn(viewModelScope)
-    }
+    // NOTE: TTS observation hooks live in the main `init {}` block at the
+    // bottom of the constructor — running them here would NPE because
+    // [allMessages] / [currentLanguage] are still null at this point in
+    // Kotlin's property-initializer order.
 
     private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
@@ -146,6 +118,32 @@ class AssistantViewModel @Inject constructor(
         // Observe active model name changes
         inferenceEngine.activeModelNameFlow
             .onEach { name -> _uiState.update { it.copy(activeModelName = name) } }
+            .launchIn(viewModelScope)
+
+        // TTS — clear the highlighted message-id as soon as TTS reports it's
+        // no longer speaking (natural end, error, or stop()).
+        ttsManager.isSpeaking
+            .onEach { speaking -> if (!speaking) _speakingMessageId.value = null }
+            .launchIn(viewModelScope)
+
+        // TTS — when "Read replies aloud" is on, auto-speak each assistant
+        // reply once it finishes streaming. Fires on the *transition* from
+        // streaming → done for the latest message. Lives here (not in an
+        // earlier init block) because [allMessages] / [currentLanguage] are
+        // initialised above; reading them from an earlier init block NPEs.
+        var lastFinalizedId: String? = null
+        allMessages
+            .onEach { msgs ->
+                if (!ttsPreference.autoSpeakReplies.value) return@onEach
+                val last = msgs.lastOrNull { it.role == com.saarthi.feature.assistant.domain.MessageRole.ASSISTANT }
+                    ?: return@onEach
+                if (last.isStreaming) return@onEach
+                if (last.content.isBlank()) return@onEach
+                if (last.id == lastFinalizedId) return@onEach
+                lastFinalizedId = last.id
+                _speakingMessageId.value = last.id
+                ttsManager.speak(last.content, currentLanguage.value)
+            }
             .launchIn(viewModelScope)
     }
 
