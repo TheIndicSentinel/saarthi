@@ -48,7 +48,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName(
+                if (System.getenv("KEYSTORE_PATH") != null) "release" else "debug"
+            )
         }
         debug {
             // Keep debug fast — no R8, no obfuscation. Same APK we ship to
