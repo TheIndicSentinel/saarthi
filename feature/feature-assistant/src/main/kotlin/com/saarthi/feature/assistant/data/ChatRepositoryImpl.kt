@@ -82,6 +82,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val deviceProfiler: DeviceProfiler,
     private val systemPromptProvider: SystemPromptProvider,
     private val responseStyleManager: com.saarthi.core.i18n.ResponseStyleManager,
+    private val personalityPreference: com.saarthi.core.i18n.PersonalityPreference,
 ) : ChatRepository {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -420,8 +421,14 @@ class ChatRepositoryImpl @Inject constructor(
             val systemInstructions = buildSystemPrompt(memoryContext, priorTurns)
             DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  attachments=${attachments.size}  recapTurns=${priorTurns.isNotEmpty()}")
             buildString {
-                append(systemInstructions)
-                append("\n\n")
+                // Only emit the system block if non-blank — Compact tier
+                // returns empty (see SystemPromptProvider) and leading
+                // whitespace before the user message would look like garbage
+                // input to the model.
+                if (systemInstructions.isNotBlank()) {
+                    append(systemInstructions)
+                    append("\n\n")
+                }
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
             }.let { prompt ->
@@ -556,6 +563,13 @@ class ChatRepositoryImpl @Inject constructor(
         // training mix (we saw English-selected users getting Hindi replies).
         val langLine = currentLanguage.systemPromptInstruction
         val styleSuffix = buildResponseStyleSuffix()
+        // Personality Pal: read the user's selected persona; SystemPromptProvider
+        // gates COMPACT tier so 1B always gets an empty system block regardless.
+        // For STANDARD/LARGE BASE, the override replaces the default Saarthi
+        // identity paragraph while every behaviour/tool rule stays intact.
+        val persona = personalityPreference.selected.value
+        val personalityOverride = if (persona.id == com.saarthi.core.i18n.PersonalityCatalog.SAARTHI.id)
+            "" else persona.systemPersona
         return systemPromptProvider.build(
             modelName = modelName,
             pack = PackType.BASE,
@@ -564,6 +578,7 @@ class ChatRepositoryImpl @Inject constructor(
             priorTurnsContext = priorTurnsContext,
             timeContext = timeContext,
             responseStyleSuffix = styleSuffix,
+            personalityOverride = personalityOverride,
         )
     }
 

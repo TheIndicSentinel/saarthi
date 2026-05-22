@@ -106,6 +106,8 @@ import com.saarthi.feature.assistant.ui.components.ChatInputBar
 import com.saarthi.feature.assistant.ui.components.MessageBubble
 import com.saarthi.feature.assistant.ui.components.ModelStatusChip
 import com.saarthi.feature.assistant.viewmodel.AssistantViewModel
+import com.saarthi.feature.assistant.viewmodel.PersonalityViewModel
+import com.saarthi.feature.assistant.ui.components.PersonalityPickerSheet
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -144,6 +146,13 @@ fun AssistantScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
     val haptic = LocalHapticFeedback.current
+
+    // ── Personality Pal ─────────────────────────────────────────────────────
+    val personalityVm: PersonalityViewModel = hiltViewModel()
+    val activePersonality by personalityVm.selected.collectAsStateWithLifecycle()
+    val personalitySupported by personalityVm.supportedForCurrentModel.collectAsStateWithLifecycle()
+    var showPersonalitySheet by remember { mutableStateOf(false) }
+    val personalitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Sync drawer open/close with VM state
     LaunchedEffect(uiState.showDrawer) {
@@ -238,6 +247,9 @@ fun AssistantScreen(
                     onChangeModel = onChangeModel,
                     onNewChat = viewModel::newChat,
                     onShowConversations = viewModel::openDrawer,
+                    onChangePersonality = { showPersonalitySheet = true },
+                    activePersonalityEmoji = activePersonality.emoji,
+                    activePersonalityName = activePersonality.displayName,
                 )
             },
             snackbarHost = { SnackbarHost(snackbarHost) },
@@ -371,6 +383,24 @@ fun AssistantScreen(
                 onPickFiles = { filePicker.launch("*/*") },
                 onPickImages = { filePicker.launch("image/*") },
                 onDismiss = { scope.launch { attachmentSheetState.hide() } },
+            )
+        }
+    }
+
+    // Personality Pal picker sheet
+    if (showPersonalitySheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showPersonalitySheet = false },
+            sheetState = personalitySheetState,
+            containerColor = SaarthiColors.Bg2,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = SaarthiColors.BorderHi) },
+        ) {
+            PersonalityPickerSheet(
+                personalities = personalityVm.all,
+                selectedId = activePersonality.id,
+                supportedForCurrentModel = personalitySupported,
+                onPick = { id -> personalityVm.select(id) },
+                onDismiss = { showPersonalitySheet = false },
             )
         }
     }
@@ -621,6 +651,9 @@ private fun ChatTopBar(
     onChangeModel: () -> Unit = {},
     onNewChat: () -> Unit = {},
     onShowConversations: () -> Unit = {},
+    onChangePersonality: () -> Unit = {},
+    activePersonalityEmoji: String = "🪔",
+    activePersonalityName: String = "Saarthi",
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -748,6 +781,18 @@ private fun ChatTopBar(
                         text = { Text("Change model", color = SaarthiColors.Text) },
                         leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = SaarthiColors.Marigold) },
                         onClick = { onChangeModel(); showMenu = false },
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                "Personality · ${activePersonalityName}",
+                                color = SaarthiColors.Text,
+                            )
+                        },
+                        leadingIcon = {
+                            Text(activePersonalityEmoji, modifier = Modifier.size(20.dp))
+                        },
+                        onClick = { onChangePersonality(); showMenu = false },
                     )
                     androidx.compose.material3.HorizontalDivider(
                         modifier = Modifier.padding(vertical = 4.dp),

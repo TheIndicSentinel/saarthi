@@ -121,6 +121,25 @@ fun SettingsScreen(
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("response-style") },
             )
+            // Personality Pal — read-only summary; tapping opens chat where
+            // the picker sheet lives (single source of truth for selection +
+            // session reset).
+            val settingsPersonaVm: com.saarthi.app.SettingsPersonalityViewModel =
+                androidx.hilt.navigation.compose.hiltViewModel()
+            val activePersona by settingsPersonaVm.active.collectAsStateWithLifecycle()
+            SaarthiListRow(
+                leadingIcon = {
+                    Text(
+                        activePersona.emoji,
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
+                    )
+                },
+                title = "Personality",
+                subtitle = "${activePersona.displayName} · ${activePersona.tagline}",
+                tone = ChipTone.Indigo,
+                trailing = { ChevronRight() },
+                onClick = { onNavigate("assistant") },
+            )
 
             SectionLabel("App")
             SaarthiListRow(
