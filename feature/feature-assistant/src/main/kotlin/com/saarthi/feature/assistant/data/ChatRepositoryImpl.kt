@@ -90,6 +90,19 @@ class ChatRepositoryImpl @Inject constructor(
     private val _tokensPerSecond = MutableStateFlow(0f)
     private val _currentSessionId = MutableStateFlow("default")
 
+    // ── RAG session store ────────────────────────────────────────────────────
+    // Documents the user attached to a chat. The previous design only injected
+    // file context on the turn the file was attached — every follow-up
+    // question lost the document and the model fell back to general knowledge
+    // ("attachments=0" in the logs after turn 1). We now keep the extracted
+    // text per session and re-score the chunks against EACH new user query so
+    // every turn has fresh, query-relevant excerpts.
+    //
+    // Process-lifetime only — cleared on createSession() / deleteSession() /
+    // clearHistory(). No DB persistence in v1; the extracted text is large
+    // and the user can re-attach if they reopen the app.
+    private val sessionDocuments: MutableMap<String, List<AttachedFile>> = mutableMapOf()
+
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
     private val currentLanguage: SupportedLanguage
@@ -149,6 +162,7 @@ class ChatRepositoryImpl @Inject constructor(
         // groceries" bug class users reported.
         conversationDao.deleteBySession(sessionId)
         memoryRepository.deleteForSession(sessionId)
+        sessionDocuments.remove(sessionId)  // drop pinned RAG docs for this chat
         chatSessionDao.deleteById(sessionId)
         if (_currentSessionId.value == sessionId) {
             val remaining = chatSessionDao.getAll()
@@ -162,6 +176,16 @@ class ChatRepositoryImpl @Inject constructor(
 
     override fun streamResponse(userMessage: String, attachments: List<AttachedFile>): Flow<String> {
         val sessionId = _currentSessionId.value
+        // Pin any newly-attached files to the session so follow-up turns can
+        // re-inject relevant excerpts. Once pinned, we keep them for the life
+        // of the session even though pendingAttachments clears in the VM.
+        if (attachments.isNotEmpty()) {
+            val existing = sessionDocuments[sessionId].orEmpty()
+            // Dedupe by uri so re-sending the same file doesn't duplicate it.
+            val merged = (existing + attachments).distinctBy { it.uri.toString() }
+            sessionDocuments[sessionId] = merged
+            DebugLogger.log("RAG", "Pinned ${attachments.size} doc(s) to session=$sessionId — total now ${merged.size}")
+        }
         val userMsg = ChatMessage(content = userMessage, role = MessageRole.USER, attachments = attachments)
         _history.update { it + userMsg }
         
@@ -323,6 +347,7 @@ class ChatRepositoryImpl @Inject constructor(
         // the model could still see facts from messages the user just
         // cleared.
         memoryRepository.deleteForSession(sessionId)
+        sessionDocuments.remove(sessionId)  // drop pinned RAG docs too
         chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
@@ -339,7 +364,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val maxPromptChars: Int
         get() {
             val modelName = inferenceEngine.activeModelName ?: ""
-            return when {
+            val baseBudget = when {
                 modelName.contains("Gemma 4", ignoreCase = true) -> MAX_PROMPT_CHARS_LARGE
                 modelName.contains("Gemma 2", ignoreCase = true) -> MAX_PROMPT_CHARS_2048
                 // 3n must be matched BEFORE generic "Gemma 3" — its E2B/E4B
@@ -351,6 +376,16 @@ class ChatRepositoryImpl @Inject constructor(
                 // accidentally inheriting the standard 5 k ceiling.
                 else                                              -> MAX_PROMPT_CHARS_COMPACT
             }
+            // When the session has documents pinned, the prompt carries dense
+            // RAG content (code, tables, lists) whose chars/token ratio is
+            // closer to 3.5:1 instead of the usual 4:1 for prose. The old
+            // 8000-char ceiling on LARGE tier hit the native KV cache at
+            // 2068 tokens (cap is 2048) and the engine rejected the prompt
+            // with `Input token ids are too long` — visible in the user log
+            // at 18:36:29. Drop the ceiling by 30% whenever docs are active
+            // so RAG content stays well under the native limit.
+            val hasDocs = sessionDocuments[_currentSessionId.value]?.isNotEmpty() == true
+            return if (hasDocs) (baseBudget * 0.7).toInt() else baseBudget
         }
 
     // DeviceProfiler.profile() makes several system calls (MemoryInfo, thermal,
@@ -397,8 +432,42 @@ class ChatRepositoryImpl @Inject constructor(
 
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
         val isFresh = inferenceEngine.isFreshConversation
-        val fileContext = if (attachments.isNotEmpty())
-            fileContentExtractor.buildRagContext(attachments, userMessage)
+        val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+
+        // ── Compact (Gemma 3 1B) transcript priming ──────────────────────
+        // The model is too small to follow a system-prompt persona — but
+        // it DOES follow a transcript-style in-context example because the
+        // pattern is concrete and pre-fills its "Assistant turn" position.
+        // The whole string gets wrapped in <user>…<end><model> by the chat
+        // template, so the model picks up after "Saarthi:" naturally.
+        //
+        // Only FRESH turns need the priming — the KV cache from turn 1
+        // carries the "Saarthi:" pattern into follow-up turns, where we
+        // can send just the user message.
+        if (tier == com.saarthi.core.inference.prompt.SystemPromptProvider.ModelTier.COMPACT) {
+            return if (isFresh) {
+                "Below is a chat between User and Saarthi, a friendly Indian AI assistant. " +
+                "Saarthi gives short, helpful, friendly answers in a natural conversational tone.\n\n" +
+                "User: $userMessage\n" +
+                "Saarthi:"
+            } else {
+                userMessage
+            }
+        }
+        // Use session-pinned docs (set in streamResponse), NOT just this
+        // turn's attachments. This is the core RAG fix — every follow-up
+        // question gets the document re-scored against the new query, so
+        // "give overview", "what tech is needed", "what's the salary" each
+        // pull a different relevant slice of the same PDF.
+        val sessionDocs = sessionDocuments[_currentSessionId.value].orEmpty()
+        val docsForThisTurn: List<AttachedFile> = when {
+            sessionDocs.isNotEmpty() -> sessionDocs   // re-inject across turns
+            attachments.isNotEmpty() -> attachments   // fallback (shouldn't happen — already pinned)
+            else                     -> emptyList()
+        }
+        val hasDocs = docsForThisTurn.isNotEmpty()
+        val fileContext = if (hasDocs)
+            fileContentExtractor.buildRagContext(docsForThisTurn, userMessage)
         else ""
 
         // OFFICIAL APPROACH (matches Google AI Edge Gallery's AI Chat):
@@ -419,7 +488,7 @@ class ChatRepositoryImpl @Inject constructor(
             val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
             val priorTurns = buildPriorTurnsRecap()
             val systemInstructions = buildSystemPrompt(memoryContext, priorTurns)
-            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  attachments=${attachments.size}  recapTurns=${priorTurns.isNotEmpty()}")
+            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  docsPinned=${docsForThisTurn.size}  recapTurns=${priorTurns.isNotEmpty()}")
             buildString {
                 // Only emit the system block if non-blank — Compact tier
                 // returns empty (see SystemPromptProvider) and leading
