@@ -434,26 +434,6 @@ class ChatRepositoryImpl @Inject constructor(
         val isFresh = inferenceEngine.isFreshConversation
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
 
-        // ── Compact (Gemma 3 1B) transcript priming ──────────────────────
-        // The model is too small to follow a system-prompt persona — but
-        // it DOES follow a transcript-style in-context example because the
-        // pattern is concrete and pre-fills its "Assistant turn" position.
-        // The whole string gets wrapped in <user>…<end><model> by the chat
-        // template, so the model picks up after "Saarthi:" naturally.
-        //
-        // Only FRESH turns need the priming — the KV cache from turn 1
-        // carries the "Saarthi:" pattern into follow-up turns, where we
-        // can send just the user message.
-        if (tier == com.saarthi.core.inference.prompt.SystemPromptProvider.ModelTier.COMPACT) {
-            return if (isFresh) {
-                "Below is a chat between User and Saarthi, a friendly Indian AI assistant. " +
-                "Saarthi gives short, helpful, friendly answers in a natural conversational tone.\n\n" +
-                "User: $userMessage\n" +
-                "Saarthi:"
-            } else {
-                userMessage
-            }
-        }
         // Use session-pinned docs (set in streamResponse), NOT just this
         // turn's attachments. This is the core RAG fix — every follow-up
         // question gets the document re-scored against the new query, so
@@ -469,6 +449,38 @@ class ChatRepositoryImpl @Inject constructor(
         val fileContext = if (hasDocs)
             fileContentExtractor.buildRagContext(docsForThisTurn, userMessage)
         else ""
+
+        // ── Compact (Gemma 3 1B) transcript priming ──────────────────────
+        // litertlm wraps everything in <start_of_turn>user … <start_of_turn>model,
+        // so we prime the 1B model via a "transcript" pattern: identity header +
+        // optional recap + user question in "User: …\nSaarthi:" form. The model
+        // continues from the "Saarthi:" anchor, which is far more reliable than
+        // a real system prompt for a 1B (which the model parrots back verbatim).
+        //
+        // Two critical anti-hallucination constraints required for 1B models:
+        //  1. Explicit Google/company denial — base training has "designed by
+        //     Google" deeply embedded; without a hard negation the model leaks it
+        //     on "tell me about yourself" questions.
+        //  2. Uncertainty gate — 1B confidently fills in numbers it doesn't know
+        //     (e.g. "8 states, 9 UTs"). Forcing "I'm not certain" is more honest
+        //     than a wrong confident answer and is the industry-standard fix for
+        //     small-model hallucination ("I don't know" beats "I made it up").
+        //
+        // isFreshConversation is always true here because the Conversation is
+        // recycled on every onDone() callback — see LiteRTInferenceEngine. The
+        // prior-turn recap compensates by injecting one turn of context so the
+        // model is not cold on turn 2+.
+        if (tier == com.saarthi.core.inference.prompt.SystemPromptProvider.ModelTier.COMPACT) {
+            val identity = "You are Saarthi, a private offline AI assistant. " +
+                "You are NOT made by Google, Meta, OpenAI, or any company. " +
+                "Rules: only state facts you are certain of; if unsure, say " +
+                "\"I'm not certain about that\" and do not guess; " +
+                "never invent numbers, statistics, or names; be direct and concise."
+            val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
+            val ragPart = if (hasDocs) "\n\nAnswer using ONLY this document context:\n$fileContext" else ""
+            val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
+            return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = "User: $userMessage\nSaarthi:")
+        }
 
         // OFFICIAL APPROACH (matches Google AI Edge Gallery's AI Chat):
         // The Conversation maintains the chat history in its KV cache. Each turn we
