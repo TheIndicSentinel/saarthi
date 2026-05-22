@@ -62,41 +62,59 @@ class FileContentExtractor @Inject constructor(
     }
 
     /**
-     * Builds prompt context using keyword-aware RAG chunking.
-     * For small files: includes full content.
-     * For large files: scores chunks by query keyword overlap, takes top N.
+     * Builds prompt context using keyword-aware RAG chunking and emits each
+     * chunk under a numbered `[Source N]` label. The chat prompt then carries
+     * a citation directive (see [com.saarthi.feature.assistant.data.ChatRepositoryImpl.buildPrompt])
+     * telling the model to reference these sources as `[N]` inline.
+     *
+     * For small files: the full content is emitted as a single source.
+     * For large files: top-K relevant chunks are scored by keyword overlap.
      */
     fun buildRagContext(files: List<AttachedFile>, query: String = ""): String {
         if (files.isEmpty()) return ""
+        var sourceNo = 0
         return buildString {
-            appendLine("--- Attached Files ---")
-            files.forEachIndexed { i, file ->
-                appendLine("File ${i + 1}: ${file.name} (${file.mimeType})")
+            appendLine("--- ATTACHED SOURCES ---")
+            appendLine("The user has attached the following sources. Answer their question USING THESE SOURCES.")
+            appendLine("When you draw on a source, cite it inline as [N] where N is the source number.")
+            appendLine("If the sources don't contain the answer, say so plainly instead of guessing.")
+            appendLine()
+            files.forEach { file ->
                 when {
                     file.extractedText != null -> {
                         val content = file.extractedText
                         if (content.length <= MAX_DIRECT_CHARS) {
-                            appendLine("Content:")
-                            appendLine("```")
-                            appendLine(content)
-                            appendLine("```")
+                            sourceNo += 1
+                            appendLine("[Source $sourceNo] (${file.name})")
+                            appendLine(content.trim())
+                            appendLine()
                         } else {
-                            // RAG: extract relevant chunks based on query keywords
                             val chunks = extractRelevantChunks(content, query)
-                            appendLine("Relevant excerpts (${file.name}):")
-                            chunks.forEachIndexed { idx, chunk ->
-                                appendLine("[Excerpt ${idx + 1}]")
+                            chunks.forEach { chunk ->
+                                sourceNo += 1
+                                appendLine("[Source $sourceNo] (${file.name})")
                                 appendLine(chunk.trim())
+                                appendLine()
                             }
                         }
                     }
-                    file.isImage ->
-                        appendLine("[Image: ${file.name} — text was extracted if available. If the image contains no readable text, ask the user to describe what they want to know.]")
-                    else ->
-                        appendLine("[Binary file: ${file.name} — content not extractable. Ask the user to provide the relevant text or a brief description of what they need from this file.]")
+                    file.isImage -> {
+                        sourceNo += 1
+                        appendLine("[Source $sourceNo] (image: ${file.name})")
+                        appendLine("This is an image. Any readable text was OCR'd above. If the image has no readable text, ask the user to describe what they need from it.")
+                        appendLine()
+                    }
+                    else -> {
+                        sourceNo += 1
+                        appendLine("[Source $sourceNo] (${file.name} — binary)")
+                        appendLine("Content not extractable. Ask the user for the relevant text or a brief description.")
+                        appendLine()
+                    }
                 }
             }
-            appendLine("--- End of Files ---")
+            appendLine("--- END OF SOURCES ---")
+            appendLine()
+            appendLine("Now answer the user's question, citing [N] inline after each fact you take from a source.")
         }
     }
 

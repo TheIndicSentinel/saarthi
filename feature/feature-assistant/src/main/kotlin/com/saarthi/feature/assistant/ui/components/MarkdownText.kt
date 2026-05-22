@@ -166,10 +166,25 @@ private val NUMBERED_REGEX = Regex("""^\d+\.\s""")
  * during streaming) are dropped silently so streamed output never shows raw
  * asterisks.
  */
+private val CITATION_REGEX = Regex("""\[(\d{1,2})\]""")
+
 private fun AnnotatedString.Builder.appendInline(text: String) {
     var i = 0
     while (i < text.length) {
         when {
+            // [N] inline citation — marigold-bold so RAG references stand out
+            // from regular brackets. Capped at 2 digits to avoid swallowing
+            // unrelated bracketed text like "[…]" or "[note 100]".
+            text[i] == '[' && CITATION_REGEX.matchAt(text, i) != null -> {
+                val m = CITATION_REGEX.matchAt(text, i)!!
+                withStyle(
+                    SpanStyle(
+                        color = com.saarthi.core.ui.theme.SaarthiColors.Marigold,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                ) { append(m.value) }
+                i += m.value.length
+            }
             // **bold** — must check before single *italic*
             i + 1 < text.length && text[i] == '*' && text[i + 1] == '*' -> {
                 val end = text.indexOf("**", i + 2)

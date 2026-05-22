@@ -568,8 +568,13 @@ class ChatRepositoryImpl @Inject constructor(
         // For STANDARD/LARGE BASE, the override replaces the default Saarthi
         // identity paragraph while every behaviour/tool rule stays intact.
         val persona = personalityPreference.selected.value
-        val personalityOverride = if (persona.id == com.saarthi.core.i18n.PersonalityCatalog.SAARTHI.id)
-            "" else persona.systemPersona
+        // Default persona uses Saarthi's built-in identity + no extra rules.
+        // Non-default personas inject BOTH the identity AND the behavior
+        // anchors (end-of-prompt) — that's what actually moves the model's
+        // voice turn-by-turn, not the identity paragraph in isolation.
+        val isDefaultPersona = persona.id == com.saarthi.core.i18n.PersonalityCatalog.SAARTHI.id
+        val personalityOverride = if (isDefaultPersona) "" else persona.systemPersona
+        val personalityRules = if (isDefaultPersona) emptyList() else persona.behaviorRules
         return systemPromptProvider.build(
             modelName = modelName,
             pack = PackType.BASE,
@@ -579,6 +584,7 @@ class ChatRepositoryImpl @Inject constructor(
             timeContext = timeContext,
             responseStyleSuffix = styleSuffix,
             personalityOverride = personalityOverride,
+            personalityBehaviorRules = personalityRules,
         )
     }
 

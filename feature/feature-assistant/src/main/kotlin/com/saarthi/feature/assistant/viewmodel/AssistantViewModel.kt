@@ -64,6 +64,7 @@ class AssistantViewModel @Inject constructor(
     private val memoryRepository: MemoryRepository,
     private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
     private val ttsPreference: com.saarthi.core.i18n.TtsPreference,
+    private val personalityPreference: com.saarthi.core.i18n.PersonalityPreference,
 ) : AndroidViewModel(application) {
 
     val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
@@ -142,7 +143,11 @@ class AssistantViewModel @Inject constructor(
                 if (last.id == lastFinalizedId) return@onEach
                 lastFinalizedId = last.id
                 _speakingMessageId.value = last.id
-                ttsManager.speak(last.content, currentLanguage.value)
+                ttsManager.speak(
+                    last.content,
+                    currentLanguage.value,
+                    personalityPreference.selected.value.voiceHint,
+                )
             }
             .launchIn(viewModelScope)
     }
@@ -194,7 +199,7 @@ class AssistantViewModel @Inject constructor(
             return
         }
         _speakingMessageId.value = messageId
-        ttsManager.speak(text, currentLanguage.value)
+        ttsManager.speak(text, currentLanguage.value, personalityPreference.selected.value.voiceHint)
     }
 
     fun stopSpeaking() = ttsManager.stop()

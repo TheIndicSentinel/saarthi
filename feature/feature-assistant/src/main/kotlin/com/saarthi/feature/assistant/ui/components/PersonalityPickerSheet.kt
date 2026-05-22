@@ -13,8 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,13 +35,12 @@ import com.saarthi.core.i18n.PersonalityAccent
 import com.saarthi.core.ui.theme.SaarthiColors
 
 /**
- * Bottom-sheet content for picking a Personality Pal. Caller wraps this in a
- * ModalBottomSheet. Renders a horizontal carousel of cards keyed by accent;
- * the active personality has a checkmark + tinted ring.
+ * Bottom-sheet for picking a persona. Vertical list — every persona visible
+ * via scroll, no horizontal hidden cards. Each row shows emoji avatar +
+ * name + one-line tagline. Active row has a marigold-tinted background
+ * and a check badge.
  *
- * If [supportedForCurrentModel] is false (Compact / 1B tier), the carousel
- * is shown with a disabled scrim + an explanatory line so the user knows the
- * feature exists but doesn't work on this model.
+ * On Compact (1B) tier, rows are dimmed + an inline banner explains why.
  */
 @Composable
 fun PersonalityPickerSheet(
@@ -56,12 +54,12 @@ fun PersonalityPickerSheet(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .padding(bottom = 24.dp, top = 4.dp),
+            .padding(top = 4.dp, bottom = 16.dp),
     ) {
         Text(
-            "Choose a personality",
+            "Pick a persona",
             style = MaterialTheme.typography.titleMedium.copy(
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = SaarthiColors.Text,
             ),
@@ -69,22 +67,23 @@ fun PersonalityPickerSheet(
         Spacer(Modifier.height(4.dp))
         Text(
             if (supportedForCurrentModel)
-                "Switching starts a new chat. Your existing conversations stay saved."
+                "Switching starts a new chat. Existing conversations stay saved."
             else
-                "The compact model can't sustain a persona. Switch to Gemma 3n or Gemma 4 to use this feature.",
+                "The compact 1B model can't sustain a persona — switch to Gemma 3n or Gemma 4 to use this.",
             style = MaterialTheme.typography.bodySmall.copy(
                 color = if (supportedForCurrentModel) SaarthiColors.Text3 else SaarthiColors.Rose,
                 fontSize = 12.sp,
             ),
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(end = 4.dp),
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 8.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             items(personalities, key = { it.id }) { p ->
-                PersonalityCard(
+                PersonalityRow(
                     personality = p,
                     selected = p.id == selectedId,
                     enabled = supportedForCurrentModel,
@@ -101,77 +100,83 @@ fun PersonalityPickerSheet(
 }
 
 @Composable
-private fun PersonalityCard(
+private fun PersonalityRow(
     personality: Personality,
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
     val tone = accentColor(personality.accent)
-    val toneBg = accentSoftBg(personality.accent)
-    val borderColor = when {
-        !enabled -> SaarthiColors.Border
-        selected -> tone
-        else -> SaarthiColors.Border
+    val toneSoftBg = accentSoftBg(personality.accent)
+    val bg = when {
+        !enabled -> SaarthiColors.Surface.copy(alpha = 0.5f)
+        selected -> toneSoftBg
+        else     -> SaarthiColors.Surface
     }
-    val cardAlpha = if (enabled) 1f else 0.45f
+    val border = when {
+        selected -> tone
+        else     -> SaarthiColors.Border
+    }
+    val titleColor = if (enabled) SaarthiColors.Text else SaarthiColors.Text.copy(alpha = 0.5f)
+    val taglineColor = if (enabled) SaarthiColors.Text3 else SaarthiColors.Text4
 
-    Column(
+    Row(
         modifier = Modifier
-            .width(168.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(SaarthiColors.Surface.copy(alpha = if (enabled) 1f else 0.5f))
-            .border(if (selected) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(20.dp))
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(bg)
+            .border(if (selected) 1.5.dp else 1.dp, border, RoundedCornerShape(16.dp))
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Avatar — large emoji on a tone-soft tile.
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(toneSoftBg)
+                .border(1.dp, tone.copy(alpha = 0.22f), RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(personality.emoji, style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp))
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                personality.displayName,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = titleColor,
+                ),
+            )
+            Text(
+                personality.tagline,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = taglineColor,
+                    fontSize = 12.5.sp,
+                ),
+            )
+        }
+
+        if (selected && enabled) {
             Box(
                 modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(toneBg),
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(tone),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    personality.emoji,
-                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 20.sp),
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "Selected persona",
+                    tint = SaarthiColors.OnMarigold,
+                    modifier = Modifier.size(14.dp),
                 )
             }
-            Spacer(Modifier.width(8.dp))
-            if (selected && enabled) {
-                Box(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clip(CircleShape)
-                        .background(tone),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = "Selected",
-                        tint = SaarthiColors.OnMarigold,
-                        modifier = Modifier.size(12.dp),
-                    )
-                }
-            }
         }
-        Text(
-            personality.displayName,
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (enabled) SaarthiColors.Text else SaarthiColors.Text.copy(alpha = cardAlpha),
-            ),
-        )
-        Text(
-            personality.tagline,
-            style = MaterialTheme.typography.bodySmall.copy(
-                color = SaarthiColors.Text3.copy(alpha = cardAlpha),
-                fontSize = 11.5.sp,
-            ),
-        )
     }
 }
 

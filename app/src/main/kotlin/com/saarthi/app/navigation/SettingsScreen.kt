@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Memory
@@ -128,13 +129,8 @@ fun SettingsScreen(
                 androidx.hilt.navigation.compose.hiltViewModel()
             val activePersona by settingsPersonaVm.active.collectAsStateWithLifecycle()
             SaarthiListRow(
-                leadingIcon = {
-                    Text(
-                        activePersona.emoji,
-                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
-                    )
-                },
-                title = "Personality",
+                leadingIcon = { Icon(Icons.Outlined.Face, contentDescription = null) },
+                title = "Persona",
                 subtitle = "${activePersona.displayName} · ${activePersona.tagline}",
                 tone = ChipTone.Indigo,
                 trailing = { ChevronRight() },

@@ -78,10 +78,19 @@ class TtsManager @Inject constructor(
 
     /**
      * Speak [text] in [language]'s locale if available; falls back to device
-     * default otherwise. Returns the utteranceId so callers can correlate
-     * progress events with a specific message bubble.
+     * default otherwise. [voiceHint] controls pitch / speech-rate / preferred
+     * voice gender — when non-null, the manager picks the closest matching
+     * on-device voice and applies pitch + rate so spoken replies match the
+     * active persona (Pandit ji = low male, Dadi Maa = warm female, etc.).
+     *
+     * Returns the utteranceId so callers can correlate progress events with
+     * a specific message bubble.
      */
-    fun speak(text: String, language: SupportedLanguage): String {
+    fun speak(
+        text: String,
+        language: SupportedLanguage,
+        voiceHint: com.saarthi.core.i18n.VoiceHint? = null,
+    ): String {
         if (text.isBlank()) return ""
         val id = UUID.randomUUID().toString()
         ensureInitialized {
@@ -92,6 +101,20 @@ class TtsManager @Inject constructor(
             } else {
                 DebugLogger.log("TTS", "Language ${locale.language} unavailable — using device default")
             }
+            // Apply the persona's voice hint (or neutral defaults). pitch /
+            // rate are applied unconditionally; voice selection only when
+            // the device exposes at least one matching voice.
+            val hint = voiceHint ?: com.saarthi.core.i18n.VoiceHint(
+                com.saarthi.core.i18n.VoiceGender.NEUTRAL, 1.0f, 1.0f,
+            )
+            tts?.setPitch(hint.pitch)
+            tts?.setSpeechRate(hint.rate)
+            if (hint.gender != com.saarthi.core.i18n.VoiceGender.NEUTRAL) {
+                pickVoiceByGender(locale, hint.gender)?.let { v ->
+                    tts?.voice = v
+                    DebugLogger.log("TTS", "Voice → ${v.name}  (${hint.gender})  pitch=${hint.pitch}  rate=${hint.rate}")
+                }
+            }
             // QUEUE_FLUSH replaces any in-progress utterance — matches "tap
             // Listen on a different bubble while one is already playing".
             val params = Bundle().apply {
@@ -100,6 +123,35 @@ class TtsManager @Inject constructor(
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, id)
         }
         return id
+    }
+
+    /**
+     * Find the best on-device voice for [locale] matching the requested
+     * gender. Android's `Voice.features` set contains `"male"` / `"female"`
+     * tags on most stock voices; we fall back to name-pattern heuristics
+     * (`#male`, `#female`, locale `_m_` / `_f_`) for OEM TTS engines that
+     * don't expose features. Returns null if nothing matches — caller keeps
+     * the current voice.
+     */
+    private fun pickVoiceByGender(
+        locale: Locale,
+        gender: com.saarthi.core.i18n.VoiceGender,
+    ): android.speech.tts.Voice? {
+        val engine = tts ?: return null
+        val want = if (gender == com.saarthi.core.i18n.VoiceGender.MALE) "male" else "female"
+        val candidates = runCatching { engine.voices }.getOrNull().orEmpty()
+            .filter {
+                // Locale match (language-only — region-strict is too restrictive
+                // for the long tail of TTS voice naming).
+                it.locale.language == locale.language && !it.isNetworkConnectionRequired
+            }
+        if (candidates.isEmpty()) return null
+        return candidates.firstOrNull { v ->
+            val features = runCatching { v.features }.getOrNull().orEmpty()
+            features.any { it.equals(want, ignoreCase = true) } ||
+                v.name.contains("#$want", ignoreCase = true) ||
+                v.name.contains("_${want.first()}_", ignoreCase = true)
+        } ?: candidates.firstOrNull()  // No tagged match — pick any local voice for the locale.
     }
 
     fun stop() {

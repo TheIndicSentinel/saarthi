@@ -88,16 +88,23 @@ class SystemPromptProvider @Inject constructor() {
         timeContext: String = "",
         responseStyleSuffix: String = "",
         /**
-         * Personality Pal override. When non-blank AND the tier supports it
-         * (STANDARD or LARGE), this string REPLACES the default Saarthi
-         * identity paragraph at the top of [standardPrompt] / [largePrompt].
-         * The universal behaviour, tool, memory, recap, and language blocks
-         * stay intact — so a non-default persona still speaks Hindi, reads
-         * PDFs, sets reminders, and remembers facts the user shared.
-         *
-         * COMPACT tier ignores this; see [compactPrompt] for why.
+         * Persona identity block. When non-blank AND the tier supports it
+         * (STANDARD or LARGE), REPLACES the default Saarthi identity
+         * paragraph at the top of [standardPrompt] / [largePrompt]. The
+         * universal behaviour, tool, memory, recap, and language blocks stay
+         * intact — so a non-default persona still speaks Hindi, reads PDFs,
+         * sets reminders, and remembers facts the user shared.
          */
         personalityOverride: String = "",
+        /**
+         * Concrete DO/DON'T anchors specific to the active persona, e.g.
+         * Coach Singh's "EVERY reply MUST end with one concrete next step".
+         * Placed at the *end* of the system prompt (just before the bottom
+         * language directive) because end-of-prompt attention is strongest
+         * on Gemma 4 / 3n — this is what actually moves the model's voice
+         * on a turn-by-turn basis, not the identity paragraph alone.
+         */
+        personalityBehaviorRules: List<String> = emptyList(),
     ): String {
         val tier = tierFor(modelName)
 
@@ -121,6 +128,28 @@ class SystemPromptProvider @Inject constructor() {
             ModelTier.STANDARD -> standardPrompt(pack, personalityOverride)
             ModelTier.LARGE    -> largePrompt(pack, personalityOverride)
         }
+
+        // Render the persona behaviour rules + response-style suffix as a
+        // single "PERSONA BEHAVIOUR" block at the very end of the system
+        // prompt (just before the bottom language directive). End-of-prompt
+        // attention is strongest on Gemma 4 / 3n, so this is what actually
+        // makes the persona feel different in the reply — not the identity
+        // paragraph alone.
+        val finalBehaviourBlock = buildString {
+            if (personalityBehaviorRules.isNotEmpty()) {
+                append("PERSONA BEHAVIOUR (apply on EVERY reply, in this order of priority):\n")
+                personalityBehaviorRules.forEach { rule ->
+                    append("- ")
+                    append(rule)
+                    append('\n')
+                }
+            }
+            if (responseStyleSuffix.isNotBlank()) {
+                if (isNotEmpty()) append('\n')
+                append("REPLY-STYLE CONSTRAINTS (the user has set these in Settings — honour them):\n")
+                append(responseStyleSuffix)
+            }
+        }.trimEnd()
         // Sandwich layout — language directive at BOTH ends of the prompt.
         //
         //   1. TOP language directive — anchors the model's output language
@@ -168,9 +197,9 @@ class SystemPromptProvider @Inject constructor() {
                 append("\n\n")
                 append(priorTurnsContext)
             }
-            if (responseStyleSuffix.isNotBlank()) {
+            if (finalBehaviourBlock.isNotBlank()) {
                 append("\n\n")
-                append(responseStyleSuffix)
+                append(finalBehaviourBlock)
             }
             if (languageInstruction.isNotBlank()) {
                 append("\n\n")
@@ -226,7 +255,7 @@ class SystemPromptProvider @Inject constructor() {
             """
             $identity
 
-            Be warm and genuinely conversational. Engage directly with what the user said. Do not begin replies by introducing yourself, by stating how you are, or by describing your role or capabilities. Mirror the user's tone and length — short casual messages get short casual replies.
+            Maintain the voice and style of the identity paragraph above on EVERY reply — that is your persona; do not drift to a generic "helpful assistant" tone. Engage directly with what the user said. Do not begin replies by introducing yourself, by stating how you are, or by describing your role or capabilities.
 
             When the user asks who or what you are, or to introduce yourself ("who are you", "introduce yourself", "tell me about yourself", or the equivalent in their language), give a fresh one- or two-sentence introduction consistent with the identity paragraph above. Vary the wording each time — never reuse the exact same intro sentence twice. Do not start an introduction with text from the user's most recent message; ignore the previous topic entirely and just introduce yourself.
 
@@ -317,7 +346,7 @@ class SystemPromptProvider @Inject constructor() {
             """
             $identity
 
-            Be natural and conversational, not robotic. Talk like a thoughtful friend. Engage with what the user actually said. Do not open replies by introducing yourself, by saying how you are, or with boilerplate openings. Mirror the user's tone and length — short casual messages get short casual replies; longer questions get fuller answers. Mention how you are doing only if the user just asked.
+            Maintain the voice and style of the identity paragraph above on EVERY reply — that is your persona; do not drift to a generic "helpful assistant" tone. Engage with what the user actually said. Do not open replies by introducing yourself, by saying how you are, or with boilerplate openings. Mention how you are doing only if the user just asked.
 
             When the user asks who or what you are, or to introduce yourself ("who are you", "introduce yourself", "tell me about yourself", or the equivalent in their language), give a fresh one- or two-sentence introduction consistent with the identity paragraph above. Vary the wording each time — never reuse the exact same intro sentence twice. Do not start an introduction with text from the user's most recent message; ignore the previous topic and just introduce yourself cleanly.
 

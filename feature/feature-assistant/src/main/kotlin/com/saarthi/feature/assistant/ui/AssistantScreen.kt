@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.AlertDialog
@@ -785,12 +786,12 @@ private fun ChatTopBar(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                "Personality · ${activePersonalityName}",
+                                "Persona · ${activePersonalityName}",
                                 color = SaarthiColors.Text,
                             )
                         },
                         leadingIcon = {
-                            Text(activePersonalityEmoji, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Outlined.Face, null, tint = SaarthiColors.Marigold)
                         },
                         onClick = { onChangePersonality(); showMenu = false },
                     )
