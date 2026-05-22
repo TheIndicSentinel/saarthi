@@ -49,9 +49,25 @@ private const val MAX_HISTORY_TURNS = 6  // reduced adaptively for small-context
 // System prompt ~90 tokens, leaving ~400 tokens for history + user + response.
 // At 3.5 chars/token: 400 × 3.5 = 1400 chars total; minus ~300 chars system = 1100 for history+user.
 // Use 1000 to be safe (leaves ~286 tokens for history+user, ~226 for response).
-private const val MAX_PROMPT_CHARS_1280 = 3_000  // Increased from 1k for stable history/context
-private const val MAX_PROMPT_CHARS_2048 = 4_500  // 2048-ctx models (Gemma 2)
-private const val MAX_PROMPT_CHARS_LARGE = 8_000 // Large-ctx models (Gemma 4)
+// Char-budget per model class. Each is sized to the model's actual token
+// context, NOT shared via aliases — the previous shared "1280" alias meant a
+// budget bump for Gemma 3n silently widened Gemma 1B's ceiling too, even
+// though 1B's engine is configured for 512 tokens total. A long user message
+// could then overflow the native KV cache and crash or truncate badly.
+//
+// Sizing rationale (≈4 chars/token):
+//   COMPACT  1500 chars ≈ 375 tok  →  fits inside 1B's 512-tok budget with
+//                                     ~140 tok left for the reply.
+//   STANDARD 5000 chars ≈ 1.25k tok →  fits inside 3n's 2048-tok budget with
+//                                      ~800 tok for reply; large enough for
+//                                      the 3.1k-char standardPrompt + user +
+//                                      recap (previously 3k → truncated user).
+//   2048    5500 chars ≈ 1.4k tok  →  Gemma 2 (2048 tok).
+//   LARGE   8000 chars ≈ 2k tok    →  Gemma 4 (2048+ tok).
+private const val MAX_PROMPT_CHARS_COMPACT  = 1_500   // Gemma 3 1B (512-tok)
+private const val MAX_PROMPT_CHARS_STANDARD = 5_000   // Gemma 3n E2B/E4B
+private const val MAX_PROMPT_CHARS_2048     = 5_500   // Gemma 2
+private const val MAX_PROMPT_CHARS_LARGE    = 8_000   // Gemma 4
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
@@ -325,7 +341,14 @@ class ChatRepositoryImpl @Inject constructor(
             return when {
                 modelName.contains("Gemma 4", ignoreCase = true) -> MAX_PROMPT_CHARS_LARGE
                 modelName.contains("Gemma 2", ignoreCase = true) -> MAX_PROMPT_CHARS_2048
-                else -> MAX_PROMPT_CHARS_1280  // Gemma 3/3n default
+                // 3n must be matched BEFORE generic "Gemma 3" — its E2B/E4B
+                // variants have a 2048-token context, much larger than the 1B.
+                modelName.contains("3n", ignoreCase = true)      -> MAX_PROMPT_CHARS_STANDARD
+                // Everything else (Gemma 3 1B / Compact / unknown small
+                // models) gets the tight 1.5 k budget — safe for a 512-tok
+                // engine and prevents a future "Gemma 3 ???" model from
+                // accidentally inheriting the standard 5 k ceiling.
+                else                                              -> MAX_PROMPT_CHARS_COMPACT
             }
         }
 
@@ -356,15 +379,17 @@ class ChatRepositoryImpl @Inject constructor(
             // 2. Otherwise, use the model's full safe capacity.
             return if (profile.availableRamMb < 3500) {
                 when (budget) {
-                    MAX_PROMPT_CHARS_1280 -> 1 // bare minimum on low-RAM
-                    MAX_PROMPT_CHARS_2048 -> 2
-                    else -> 3
+                    MAX_PROMPT_CHARS_COMPACT  -> 0 // no history — 1B has no room for it on low-RAM
+                    MAX_PROMPT_CHARS_STANDARD -> 1 // bare minimum for 3n on low-RAM
+                    MAX_PROMPT_CHARS_2048     -> 2
+                    else                       -> 3
                 }
             } else {
                 when (budget) {
-                    MAX_PROMPT_CHARS_1280 -> 2   
-                    MAX_PROMPT_CHARS_2048 -> 4   
-                    else -> MAX_HISTORY_TURNS    
+                    MAX_PROMPT_CHARS_COMPACT  -> 1 // 1 turn of recap is all 1B can carry
+                    MAX_PROMPT_CHARS_STANDARD -> 2
+                    MAX_PROMPT_CHARS_2048     -> 4
+                    else                       -> MAX_HISTORY_TURNS
                 }
             }
         }
@@ -401,12 +426,14 @@ class ChatRepositoryImpl @Inject constructor(
                 append(userMessage)
             }.let { prompt ->
                 val budget = maxPromptChars
-                // trimPrompt() preserves complete <start_of_turn> blocks — it
-                // drops middle history first, then the oldest turn, and only
-                // hard-truncates as a last resort. The previous take(budget)
-                // path would slice mid-sentence and confuse the model on every
-                // long context.
-                val finalPrompt = trimPrompt(prompt, budget)
+                // trimPrompt() preserves complete <start_of_turn> blocks for
+                // multi-turn prompts. For FRESH prompts (no turn markers), we
+                // also need to guarantee the *user message* survives any
+                // truncation — otherwise the model has nothing to answer and
+                // ends up reading the system prompt back to itself ("Okay, I
+                // understand! I'm ready to be Saarthi…"). Pass userMessage so
+                // it can be pinned to the tail of the trimmed prompt.
+                val finalPrompt = trimPrompt(prompt, budget, pinnedTail = userMessage)
                 DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget")
                 finalPrompt
             }
@@ -626,15 +653,37 @@ class ChatRepositoryImpl @Inject constructor(
         return s.substring(0, last)
     }
 
-    private fun trimPrompt(prompt: String, budget: Int = 3000): String {
+    private fun trimPrompt(prompt: String, budget: Int = 3000, pinnedTail: String = ""): String {
         if (prompt.length <= budget) return prompt
 
         val marker = "<start_of_turn>"
         val turns = prompt.split(marker).filter { it.isNotBlank() }.map { marker + it }
 
         if (turns.size < 2) {
-            DebugLogger.log("PROMPT", "WARN: single-turn prompt (${prompt.length}c) exceeds budget ($budget) — hard truncating")
-            return prompt.take(budget)
+            DebugLogger.log("PROMPT", "WARN: single-turn prompt (${prompt.length}c) exceeds budget ($budget) — preserving user tail")
+            // Critical: when the FRESH prompt is one big concatenated block
+            // (system + "\n\n" + userMessage), the user message lives at the
+            // end. take(budget) would chop the tail off and the model would
+            // read the system prompt aloud. Instead, KEEP the user tail intact
+            // and squeeze the system prefix to whatever room is left.
+            //
+            // We require at least 32 chars of system prefix; if pinnedTail
+            // alone would blow the budget, fall back to keeping the LAST
+            // `budget` chars of the prompt (still tail-aligned — guarantees
+            // the user message is the most-recent thing the model sees).
+            if (pinnedTail.isNotBlank() && prompt.endsWith(pinnedTail)) {
+                val tailLen = pinnedTail.length
+                val systemRoom = budget - tailLen - 4  // " … " separator
+                return if (systemRoom >= 32) {
+                    val systemPrefix = prompt.substring(0, prompt.length - tailLen)
+                    val trimmedSystem = systemPrefix.take(systemRoom)
+                    "$trimmedSystem … \n$pinnedTail"
+                } else {
+                    // User message alone is larger than budget — keep the tail.
+                    prompt.substring(prompt.length - budget)
+                }
+            }
+            return prompt.takeLast(budget)
         }
 
         val systemTurn  = turns.first()
