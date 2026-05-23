@@ -25,10 +25,17 @@ class FileContentExtractor @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     companion object {
-        private const val MAX_DIRECT_CHARS = 3_000   // ~750 tokens — include whole file
-        private const val MAX_RAG_FILE_CHARS = 80_000 // read up to 80K for chunking
-        private const val RAG_CHUNK_SIZE = 800        // chars per chunk
-        private const val RAG_TOP_CHUNKS = 4          // max chunks to inject
+        // Hard caps surfaced to the user. Bigger files are rejected with
+        // an error string on AttachedFile.error — the UI renders the
+        // chip with that message instead of pretending the file is
+        // ingestible.
+        const val MAX_FILE_BYTES = 20L * 1024L * 1024L   // 20 MB raw file
+        const val MAX_EXTRACTED_CHARS = 100_000          // ~25k tokens worth of text
+        const val MAX_PDF_PAGES = 25                     // raised from 5; bounded by char cap
+
+        // Small-file fast-path used by the prompt builder to skip BM25
+        // and emit the whole file when it comfortably fits.
+        const val WHOLE_FILE_CHARS = 3_000
 
         private val TEXT_MIME_TYPES = setOf(
             "text/plain", "text/markdown", "text/csv", "text/html",
@@ -39,13 +46,30 @@ class FileContentExtractor @Inject constructor(
 
     suspend fun extract(uri: Uri): AttachedFile {
         val (name, size, mime) = queryMetadata(uri)
+        val isImage = mime.startsWith("image/")
+
+        // Size gate up front — never read a 200 MB PDF into memory.
+        // Images are exempt because OCR processes them as scaled bitmaps;
+        // we still cap downstream by extracted-char count.
+        if (!isImage && size > MAX_FILE_BYTES) {
+            val mb = MAX_FILE_BYTES / (1024 * 1024)
+            return AttachedFile(
+                uri = uri,
+                name = name,
+                mimeType = mime,
+                sizeBytes = size,
+                extractedText = null,
+                isImage = false,
+                error = "File too large (${formatMb(size)}). Maximum supported size is ${mb} MB.",
+            )
+        }
+
         val isText = TEXT_MIME_TYPES.any { mime.startsWith(it) } ||
                 name.endsWithAny(".txt", ".md", ".csv", ".json", ".xml", ".kt", ".py",
                     ".js", ".ts", ".yaml", ".yml", ".html", ".log")
-        val isImage = mime.startsWith("image/")
 
         val extractedText = when {
-            isText -> readTextContent(uri, MAX_RAG_FILE_CHARS)
+            isText -> readTextContent(uri, MAX_EXTRACTED_CHARS)
             mime == "application/pdf" -> extractPdfText(uri)
             isImage -> extractImageText(uri)
             else -> null
@@ -61,87 +85,9 @@ class FileContentExtractor @Inject constructor(
         )
     }
 
-    /**
-     * Builds prompt context using keyword-aware RAG chunking and emits each
-     * chunk under a numbered `[Source N]` label. The chat prompt then carries
-     * a citation directive (see [com.saarthi.feature.assistant.data.ChatRepositoryImpl.buildPrompt])
-     * telling the model to reference these sources as `[N]` inline.
-     *
-     * For small files: the full content is emitted as a single source.
-     * For large files: top-K relevant chunks are scored by keyword overlap.
-     */
-    fun buildRagContext(files: List<AttachedFile>, query: String = ""): String {
-        if (files.isEmpty()) return ""
-        var sourceNo = 0
-        return buildString {
-            appendLine("--- ATTACHED SOURCES ---")
-            appendLine("The user has attached the following sources. Answer their question USING THESE SOURCES.")
-            appendLine("When you draw on a source, cite it inline as [N] where N is the source number.")
-            appendLine("If the sources don't contain the answer, say so plainly instead of guessing.")
-            appendLine()
-            files.forEach { file ->
-                when {
-                    file.extractedText != null -> {
-                        val content = file.extractedText
-                        if (content.length <= MAX_DIRECT_CHARS) {
-                            sourceNo += 1
-                            appendLine("[Source $sourceNo] (${file.name})")
-                            appendLine(content.trim())
-                            appendLine()
-                        } else {
-                            val chunks = extractRelevantChunks(content, query)
-                            chunks.forEach { chunk ->
-                                sourceNo += 1
-                                appendLine("[Source $sourceNo] (${file.name})")
-                                appendLine(chunk.trim())
-                                appendLine()
-                            }
-                        }
-                    }
-                    file.isImage -> {
-                        sourceNo += 1
-                        appendLine("[Source $sourceNo] (image: ${file.name})")
-                        appendLine("This is an image. Any readable text was OCR'd above. If the image has no readable text, ask the user to describe what they need from it.")
-                        appendLine()
-                    }
-                    else -> {
-                        sourceNo += 1
-                        appendLine("[Source $sourceNo] (${file.name} — binary)")
-                        appendLine("Content not extractable. Ask the user for the relevant text or a brief description.")
-                        appendLine()
-                    }
-                }
-            }
-            appendLine("--- END OF SOURCES ---")
-            appendLine()
-            appendLine("Now answer the user's question, citing [N] inline after each fact you take from a source.")
-        }
-    }
-
-    private fun extractRelevantChunks(text: String, query: String): List<String> {
-        val chunks = text.chunked(RAG_CHUNK_SIZE)
-        if (chunks.size <= RAG_TOP_CHUNKS) return chunks
-
-        val queryWords = query.lowercase()
-            .split(Regex("\\W+"))
-            .filter { it.length > 3 }
-            .toSet()
-
-        if (queryWords.isEmpty()) {
-            // No query keywords: return first + last chunks (likely intro + conclusion)
-            return (listOf(chunks.first()) + chunks.takeLast(RAG_TOP_CHUNKS - 1)).distinct()
-        }
-
-        return chunks
-            .mapIndexed { idx, chunk ->
-                val lower = chunk.lowercase()
-                val score = queryWords.count { word -> lower.contains(word) }
-                Triple(idx, chunk, score)
-            }
-            .sortedWith(compareByDescending<Triple<Int, String, Int>> { it.third }.thenBy { it.first })
-            .take(RAG_TOP_CHUNKS)
-            .sortedBy { it.first } // restore reading order
-            .map { it.second }
+    private fun formatMb(bytes: Long): String {
+        val mb = bytes.toDouble() / (1024.0 * 1024.0)
+        return "%.1f MB".format(mb)
     }
 
     private fun queryMetadata(uri: Uri): Triple<String, Long, String> {
@@ -170,7 +116,7 @@ class FileContentExtractor @Inject constructor(
         runCatching {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
                 android.graphics.pdf.PdfRenderer(descriptor).use { renderer ->
-                    val pagesToScan = minOf(renderer.pageCount, 5)
+                    val pagesToScan = minOf(renderer.pageCount, MAX_PDF_PAGES)
                     if (pagesToScan == 0) throw IllegalStateException("PDF has no pages")
 
                     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -197,12 +143,12 @@ class FileContentExtractor @Inject constructor(
                                 extracted.append(result.text)
                             }
                         }
-                        if (extracted.length >= MAX_RAG_FILE_CHARS) break
+                        if (extracted.length >= MAX_EXTRACTED_CHARS) break
                     }
-                    
+
                     val finalResult = extracted.toString()
-                    if (finalResult.isBlank()) "[PDF: No readable text found]" 
-                    else finalResult.take(MAX_RAG_FILE_CHARS)
+                    if (finalResult.isBlank()) "[PDF: No readable text found]"
+                    else finalResult.take(MAX_EXTRACTED_CHARS)
                 }
             } ?: "[PDF: Could not open file descriptor]"
         }.getOrElse { e ->
@@ -220,7 +166,7 @@ class FileContentExtractor @Inject constructor(
                 .addOnFailureListener { cont.resumeWithException(it) }
         }
         if (result.text.isNotBlank()) {
-            "[Extracted from image]:\n${result.text.take(MAX_DIRECT_CHARS)}"
+            "[Extracted from image]:\n${result.text.take(WHOLE_FILE_CHARS)}"
         } else {
             "[Image: No text detected in this image]"
         }

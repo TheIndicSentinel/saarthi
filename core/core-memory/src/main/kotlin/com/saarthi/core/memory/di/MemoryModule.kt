@@ -5,6 +5,8 @@ import androidx.room.Room
 import com.saarthi.core.memory.db.ChatSessionDao
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.MemoryDao
+import com.saarthi.core.memory.db.MIGRATION_4_5
+import com.saarthi.core.memory.db.RagChunkDao
 import com.saarthi.core.memory.db.SaarthiDatabase
 import com.saarthi.core.memory.domain.MemoryRepository
 import com.saarthi.core.memory.domain.MemoryRepositoryImpl
@@ -23,6 +25,12 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SaarthiDatabase =
         Room.databaseBuilder(context, SaarthiDatabase::class.java, "saarthi.db")
+            // Real migration for v4 → v5 (adds rag_chunks). Without this,
+            // fallbackToDestructiveMigration below would wipe chat history
+            // on upgrade — bad UX for an offline assistant.
+            .addMigrations(MIGRATION_4_5)
+            // Last-resort safety net for unforeseen schema drift; the real
+            // migration takes priority and runs first.
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
@@ -34,6 +42,9 @@ object DatabaseModule {
 
     @Provides
     fun provideChatSessionDao(db: SaarthiDatabase): ChatSessionDao = db.chatSessionDao()
+
+    @Provides
+    fun provideRagChunkDao(db: SaarthiDatabase): RagChunkDao = db.ragChunkDao()
 }
 
 @Module

@@ -9,8 +9,15 @@ data class AttachedFile(
     val name: String,
     val mimeType: String,
     val sizeBytes: Long,
-    val extractedText: String? = null,   // null if binary/image
+    val extractedText: String? = null,   // null if binary/image/error
     val isImage: Boolean = mimeType.startsWith("image/"),
+    /**
+     * User-facing failure surfaced from the extractor (file too large,
+     * unsupported format, etc.). When non-null, [extractedText] is null
+     * and callers should render this message instead of trying to use
+     * the file as RAG context.
+     */
+    val error: String? = null,
 ) {
     val displaySize: String get() {
         val kb = sizeBytes / 1024

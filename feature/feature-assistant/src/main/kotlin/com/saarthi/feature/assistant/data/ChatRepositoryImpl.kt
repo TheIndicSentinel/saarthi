@@ -75,7 +75,6 @@ class ChatRepositoryImpl @Inject constructor(
     private val conversationDao: ConversationDao,
     private val chatSessionDao: ChatSessionDao,
     private val memoryRepository: MemoryRepository,
-    private val fileContentExtractor: FileContentExtractor,
     private val languageManager: LanguageManager,
     private val inferenceEngine: InferenceEngine,
     private val reminderManager: ReminderManager,
@@ -83,6 +82,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val systemPromptProvider: SystemPromptProvider,
     private val responseStyleManager: com.saarthi.core.i18n.ResponseStyleManager,
     private val personalityPreference: com.saarthi.core.i18n.PersonalityPreference,
+    private val ragRepository: RagDocumentRepository,
 ) : ChatRepository {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -90,18 +90,15 @@ class ChatRepositoryImpl @Inject constructor(
     private val _tokensPerSecond = MutableStateFlow(0f)
     private val _currentSessionId = MutableStateFlow("default")
 
-    // ── RAG session store ────────────────────────────────────────────────────
-    // Documents the user attached to a chat. The previous design only injected
-    // file context on the turn the file was attached — every follow-up
-    // question lost the document and the model fell back to general knowledge
-    // ("attachments=0" in the logs after turn 1). We now keep the extracted
-    // text per session and re-score the chunks against EACH new user query so
-    // every turn has fresh, query-relevant excerpts.
-    //
-    // Process-lifetime only — cleared on createSession() / deleteSession() /
-    // clearHistory(). No DB persistence in v1; the extracted text is large
-    // and the user can re-attach if they reopen the app.
-    private val sessionDocuments: MutableMap<String, List<AttachedFile>> = mutableMapOf()
+    // ── RAG persistence ──────────────────────────────────────────────────────
+    // Document chunks now live in Room (`rag_chunks`) via [RagDocumentRepository].
+    // The old in-memory sessionDocuments map dropped extracted text on every
+    // process restart — the user had to re-attach the same PDF after every
+    // app swipe. Persistence + per-query BM25 retrieval is the production
+    // path. We keep a tiny in-process cache of "have we already indexed this
+    // file under this session?" so the per-send DAO upsert is a cheap no-op
+    // after the first turn that attached the file.
+    private val indexedDocsByUri: MutableMap<String, MutableSet<String>> = mutableMapOf()
 
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
@@ -162,7 +159,8 @@ class ChatRepositoryImpl @Inject constructor(
         // groceries" bug class users reported.
         conversationDao.deleteBySession(sessionId)
         memoryRepository.deleteForSession(sessionId)
-        sessionDocuments.remove(sessionId)  // drop pinned RAG docs for this chat
+        ragRepository.deleteForSession(sessionId)
+        indexedDocsByUri.remove(sessionId)
         chatSessionDao.deleteById(sessionId)
         if (_currentSessionId.value == sessionId) {
             val remaining = chatSessionDao.getAll()
@@ -176,15 +174,22 @@ class ChatRepositoryImpl @Inject constructor(
 
     override fun streamResponse(userMessage: String, attachments: List<AttachedFile>): Flow<String> {
         val sessionId = _currentSessionId.value
-        // Pin any newly-attached files to the session so follow-up turns can
-        // re-inject relevant excerpts. Once pinned, we keep them for the life
-        // of the session even though pendingAttachments clears in the VM.
+        // Persist newly-attached files into the Room-backed RAG index so
+        // follow-up turns — and the next process launch — can still answer
+        // questions about them. Indexing is idempotent (countByDoc gate)
+        // so re-attaching is a cheap no-op.
         if (attachments.isNotEmpty()) {
-            val existing = sessionDocuments[sessionId].orEmpty()
-            // Dedupe by uri so re-sending the same file doesn't duplicate it.
-            val merged = (existing + attachments).distinctBy { it.uri.toString() }
-            sessionDocuments[sessionId] = merged
-            DebugLogger.log("RAG", "Pinned ${attachments.size} doc(s) to session=$sessionId — total now ${merged.size}")
+            val indexed = indexedDocsByUri.getOrPut(sessionId) { mutableSetOf() }
+            scope.launch {
+                attachments.forEach { file ->
+                    val key = file.uri.toString()
+                    if (key in indexed) return@forEach
+                    runCatching { ragRepository.indexIfNeeded(sessionId, file) }
+                        .onSuccess { indexed += key }
+                        .onFailure { DebugLogger.log("RAG", "Index failed for ${file.name}: ${it.message}") }
+                }
+            }
+            DebugLogger.log("RAG", "Indexing ${attachments.size} doc(s) for session=$sessionId")
         }
         val userMsg = ChatMessage(content = userMessage, role = MessageRole.USER, attachments = attachments)
         _history.update { it + userMsg }
@@ -347,7 +352,8 @@ class ChatRepositoryImpl @Inject constructor(
         // the model could still see facts from messages the user just
         // cleared.
         memoryRepository.deleteForSession(sessionId)
-        sessionDocuments.remove(sessionId)  // drop pinned RAG docs too
+        ragRepository.deleteForSession(sessionId)
+        indexedDocsByUri.remove(sessionId)
         chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
@@ -378,13 +384,13 @@ class ChatRepositoryImpl @Inject constructor(
             }
             // When the session has documents pinned, the prompt carries dense
             // RAG content (code, tables, lists) whose chars/token ratio is
-            // closer to 3.5:1 instead of the usual 4:1 for prose. The old
-            // 8000-char ceiling on LARGE tier hit the native KV cache at
-            // 2068 tokens (cap is 2048) and the engine rejected the prompt
-            // with `Input token ids are too long` — visible in the user log
-            // at 18:36:29. Drop the ceiling by 30% whenever docs are active
-            // so RAG content stays well under the native limit.
-            val hasDocs = sessionDocuments[_currentSessionId.value]?.isNotEmpty() == true
+            // closer to 3.5:1 instead of the usual 4:1 for prose. Drop the
+            // ceiling by 30% whenever docs are active so RAG content stays
+            // well under the native KV cache cap. The cached `indexedDocsByUri`
+            // set is the synchronous gate — populated by streamResponse() the
+            // moment an attachment lands, so the budget tightens on the very
+            // first send and stays tight for the rest of the session.
+            val hasDocs = indexedDocsByUri[_currentSessionId.value]?.isNotEmpty() == true
             return if (hasDocs) (baseBudget * 0.7).toInt() else baseBudget
         }
 
@@ -433,22 +439,20 @@ class ChatRepositoryImpl @Inject constructor(
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
         val isFresh = inferenceEngine.isFreshConversation
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+        val sessionId = _currentSessionId.value
 
-        // Use session-pinned docs (set in streamResponse), NOT just this
-        // turn's attachments. This is the core RAG fix — every follow-up
-        // question gets the document re-scored against the new query, so
-        // "give overview", "what tech is needed", "what's the salary" each
-        // pull a different relevant slice of the same PDF.
-        val sessionDocs = sessionDocuments[_currentSessionId.value].orEmpty()
-        val docsForThisTurn: List<AttachedFile> = when {
-            sessionDocs.isNotEmpty() -> sessionDocs   // re-inject across turns
-            attachments.isNotEmpty() -> attachments   // fallback (shouldn't happen — already pinned)
-            else                     -> emptyList()
-        }
-        val hasDocs = docsForThisTurn.isNotEmpty()
-        val fileContext = if (hasDocs)
-            fileContentExtractor.buildRagContext(docsForThisTurn, userMessage)
-        else ""
+        // ── RAG (BM25, persisted) ────────────────────────────────────────
+        // The session's indexed chunks live in Room. Score every chunk
+        // against this turn's query so each follow-up gets a fresh slice
+        // of the document — "give overview", "what tech is needed",
+        // "what's the salary" all pull different chunks of the same PDF.
+        // Files attached on THIS turn are surfaced as error/unindexable
+        // notes (binary, oversize) so the model knows they exist even
+        // when there is no text to retrieve.
+        val retrieved = runCatching { ragRepository.search(sessionId, userMessage) }.getOrDefault(emptyList())
+        val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
+        val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier)
+        val hasDocs = fileContext.isNotEmpty()
 
         // ── Compact (Gemma 3 1B) transcript priming ──────────────────────
         // litertlm wraps everything in <start_of_turn>user … <start_of_turn>model,
@@ -485,7 +489,7 @@ class ChatRepositoryImpl @Inject constructor(
                 "Saarthi: Hi! I'm Saarthi, your private AI assistant living right on your phone. How can I help you today?"
 
             val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
-            val ragPart = if (hasDocs) "\n\nUse ONLY the document context below to answer:\n$fileContext" else ""
+            val ragPart = if (hasDocs) "\n\n$fileContext" else ""
             val fullPrompt = "$identity\n\n$example$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
             return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = "User: $userMessage\nSaarthi:")
         }
@@ -508,7 +512,7 @@ class ChatRepositoryImpl @Inject constructor(
             val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
             val priorTurns = buildPriorTurnsRecap()
             val systemInstructions = buildSystemPrompt(memoryContext, priorTurns)
-            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  docsPinned=${docsForThisTurn.size}  recapTurns=${priorTurns.isNotEmpty()}")
+            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  recapTurns=${priorTurns.isNotEmpty()}")
             buildString {
                 // Only emit the system block if non-blank — Compact tier
                 // returns empty (see SystemPromptProvider) and leading
@@ -540,6 +544,60 @@ class ChatRepositoryImpl @Inject constructor(
                 append(userMessage)
             }
         }
+    }
+
+    /**
+     * Strict-mode RAG block. Renders the BM25-retrieved chunks (and any
+     * unreadable attachments) as a numbered source list with hard rules:
+     *  • Answer ONLY from the excerpts. No general knowledge.
+     *  • Cite [N] for every fact.
+     *  • If not in excerpts, reply with the exact "not in documents" line.
+     *
+     * COMPACT (Gemma 3 1B) gets a shortened version — the 1B model can't
+     * carry the full rule list inside its 512-token budget without crowding
+     * out the actual chunks. Larger tiers (3n, 4) get the full block.
+     *
+     * Returns "" when there is nothing to inject (no indexed chunks and no
+     * unreadable-this-turn attachments) so the call site can skip a blank
+     * paragraph entirely.
+     */
+    private fun buildRagPromptBlock(
+        retrieved: List<com.saarthi.feature.assistant.data.RetrievedChunk>,
+        unreadableThisTurn: List<AttachedFile>,
+        tier: SystemPromptProvider.ModelTier,
+    ): String {
+        if (retrieved.isEmpty() && unreadableThisTurn.isEmpty()) return ""
+
+        val noMatchLine = "I don't see that in your documents."
+        return buildString {
+            if (tier == SystemPromptProvider.ModelTier.COMPACT) {
+                appendLine("Attached document excerpts. Answer ONLY from these. Cite [N]. If not here, reply: \"$noMatchLine\"")
+            } else {
+                appendLine("=== ATTACHED DOCUMENT EXCERPTS (strict mode) ===")
+                appendLine("Rules for this turn — non-negotiable:")
+                appendLine("1. Answer ONLY using the excerpts below. Do NOT use general knowledge.")
+                appendLine("2. Cite the source number inline for every claim, e.g. [1], [2].")
+                appendLine("3. If the answer is not in the excerpts, reply EXACTLY: \"$noMatchLine\" — do not guess, do not paraphrase, do not draw on outside knowledge.")
+                appendLine("4. Quote short phrases verbatim when accuracy matters (numbers, names, dates).")
+                appendLine()
+            }
+            retrieved.forEachIndexed { i, chunk ->
+                appendLine("[${i + 1}] from \"${chunk.docName}\"")
+                appendLine(chunk.text.trim())
+                appendLine()
+            }
+            if (unreadableThisTurn.isNotEmpty()) {
+                appendLine("Files attached this turn that could NOT be read (do not pretend to know their contents):")
+                unreadableThisTurn.forEach { f ->
+                    val why = f.error ?: "unsupported format — Saarthi cannot read binary files yet"
+                    appendLine("  - ${f.name}: $why")
+                }
+                appendLine()
+            }
+            if (tier != SystemPromptProvider.ModelTier.COMPACT) {
+                appendLine("=== END OF EXCERPTS ===")
+            }
+        }.trimEnd()
     }
 
     /**
