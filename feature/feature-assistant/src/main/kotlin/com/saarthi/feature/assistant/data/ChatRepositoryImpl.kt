@@ -607,12 +607,14 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     private val REMINDER_TRIGGER_PHRASES = listOf(
-        // English
-        "remind me", "remind us", "set a reminder", "set reminder",
-        "alert me", "notify me", "wake me", "ping me",
-        "set an alarm", "set alarm",
+        // English — direct request verbs.
+        "remind me", "remind us", "reminder for", "reminder to", "reminder at",
+        "set a reminder", "set reminder", "schedule a reminder", "schedule reminder",
+        "alert me", "notify me", "ping me",
+        "wake me", "wake me up",
+        "set an alarm", "set alarm", "alarm at", "alarm for",
         // Hindi (Latin + Devanagari)
-        "yaad dila", "yaad rakh", "yaad dilana", "yaad dilao",
+        "yaad dila", "yaad rakh", "yaad dilana", "yaad dilao", "yaad karwa",
         "याद दिला", "याद रख", "रिमाइंडर", "अलार्म",
         // Tamil / Telugu / Bengali / Marathi / Kannada / Gujarati / Punjabi / Odia
         // — common transliterated forms users actually type
