@@ -452,33 +452,41 @@ class ChatRepositoryImpl @Inject constructor(
 
         // ── Compact (Gemma 3 1B) transcript priming ──────────────────────
         // litertlm wraps everything in <start_of_turn>user … <start_of_turn>model,
-        // so we prime the 1B model via a "transcript" pattern: identity header +
-        // optional recap + user question in "User: …\nSaarthi:" form. The model
-        // continues from the "Saarthi:" anchor, which is far more reliable than
-        // a real system prompt for a 1B (which the model parrots back verbatim).
+        // so we prime the 1B model via a "transcript" pattern: a narrative
+        // identity paragraph + one demonstration turn + the user's question
+        // in "User: …\nSaarthi:" form. The model continues from the "Saarthi:"
+        // anchor.
         //
-        // Two critical anti-hallucination constraints required for 1B models:
-        //  1. Explicit Google/company denial — base training has "designed by
-        //     Google" deeply embedded; without a hard negation the model leaks it
-        //     on "tell me about yourself" questions.
-        //  2. Uncertainty gate — 1B confidently fills in numbers it doesn't know
-        //     (e.g. "8 states, 9 UTs"). Forcing "I'm not certain" is more honest
-        //     than a wrong confident answer and is the industry-standard fix for
-        //     small-model hallucination ("I don't know" beats "I made it up").
+        // Why narrative + demonstration (and NOT instructions / negations):
+        //  • 1B-scale models cannot reliably separate system text from user text
+        //    — anything written as "Rules: …", "You are NOT …", "Always do X"
+        //    gets parroted back in the reply or, worse, the negated concept
+        //    leaks (negation often acts as priming on small models).
+        //  • A single in-context demonstration turn moves the model's tone more
+        //    than any amount of imperative prose; this is the industry-standard
+        //    in-context-learning pattern for 1B-class instruction tuning.
+        //  • The persona is written in third person so the model treats it as
+        //    background description, not as a script to copy verbatim.
+        //  • For uncertainty, we *show* the desired behaviour in the example
+        //    rather than telling the model what to do.
         //
         // isFreshConversation is always true here because the Conversation is
         // recycled on every onDone() callback — see LiteRTInferenceEngine. The
-        // prior-turn recap compensates by injecting one turn of context so the
-        // model is not cold on turn 2+.
+        // prior-turn recap compensates by injecting topic context so the model
+        // is not cold on turn 2+.
         if (tier == com.saarthi.core.inference.prompt.SystemPromptProvider.ModelTier.COMPACT) {
-            val identity = "You are Saarthi, a private offline AI assistant. " +
-                "You are NOT made by Google, Meta, OpenAI, or any company. " +
-                "Rules: only state facts you are certain of; if unsure, say " +
-                "\"I'm not certain about that\" and do not guess; " +
-                "never invent numbers, statistics, or names; be direct and concise."
+            val identity = "Saarthi is a friendly, private AI assistant made for users in India. " +
+                "Saarthi runs entirely on this phone, so every chat stays on the device. " +
+                "Saarthi replies in a warm, conversational tone — short, clear, and helpful. " +
+                "If Saarthi is not sure of a fact, Saarthi simply says \"I'm not sure about that\" instead of guessing."
+
+            val example =
+                "User: Hi, who are you?\n" +
+                "Saarthi: Hi! I'm Saarthi, your private AI assistant living right on your phone. How can I help you today?"
+
             val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
-            val ragPart = if (hasDocs) "\n\nAnswer using ONLY this document context:\n$fileContext" else ""
-            val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
+            val ragPart = if (hasDocs) "\n\nUse ONLY the document context below to answer:\n$fileContext" else ""
+            val fullPrompt = "$identity\n\n$example$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
             return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = "User: $userMessage\nSaarthi:")
         }
 
@@ -540,10 +548,16 @@ class ChatRepositoryImpl @Inject constructor(
      * [LiteRTInferenceEngine.generateStream] for why we recycle).
      *
      * Sized per tier:
-     *  • COMPACT (1B): just the user's last question (~120 chars). 1B doesn't
-     *    benefit much from re-reading its own previous reply, but it does
-     *    benefit from knowing what topic the user was on.
-     *  • STANDARD / LARGE: last 2 user/assistant pairs in full.
+     *  • COMPACT (1B): the user's last question only (~120 chars), framed as
+     *    a third-person note so the 1B model treats it as background rather
+     *    than as a transcript to continue.
+     *  • STANDARD / LARGE: the user's recent QUESTIONS only — NOT the model's
+     *    own prior replies. Including the assistant text as "You: …" caused
+     *    Gemma 4 to literally echo the entire prior reply at the start of
+     *    every next turn (the prompt looked like a transcript and the model
+     *    "continued" by reproducing the existing assistant turn before
+     *    answering the new question). Keeping only the user side preserves
+     *    topic awareness without giving the model a template to copy.
      */
     private fun buildPriorTurnsRecap(): String {
         val complete = buildCompleteHistoryPairs(
@@ -553,25 +567,27 @@ class ChatRepositoryImpl @Inject constructor(
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
         if (tier == SystemPromptProvider.ModelTier.COMPACT) {
             val lastUser = complete.lastOrNull { it.role == MessageRole.USER } ?: return ""
-            return "Earlier the user asked: \"${lastUser.content.take(120)}\""
+            return "(Earlier in this chat, the user asked: \"${lastUser.content.take(120)}\")"
         }
-        val pairsToKeep = 2
-        val perMsgChars = 400
-        val recent = complete.takeLast(pairsToKeep * 2)
+        // STANDARD / LARGE — user questions only, three most recent.
+        val questionsToKeep = 3
+        val perMsgChars = 300
+        // Defensive: pass each message through stripForDisplay. Normally clean
+        // text is stored (parse().cleanText is called on completion), but
+        // crash / truncated-stream paths can leave a half-formed
+        // `[SAARTHI_MEMORY key="…"` fragment in history. Without this, that
+        // fragment goes back into the next FRESH system prompt and the model
+        // may treat it as a fresh marker instruction.
+        val recentUserMessages = complete
+            .filter { it.role == MessageRole.USER }
+            .takeLast(questionsToKeep)
+        if (recentUserMessages.isEmpty()) return ""
         return buildString {
-            append("Recap of the user's most recent exchange with you (continue naturally — do not repeat it):\n")
-            recent.forEach { msg ->
-                val who = if (msg.role == MessageRole.USER) "User" else "You"
-                // Defensive: pass each message through stripForDisplay before
-                // recapping. Normally clean text is stored (parse().cleanText
-                // is called on completion), but crash / truncated-stream paths
-                // can leave a half-formed `[SAARTHI_MEMORY key="…"` fragment
-                // in history. Without this, that fragment goes straight back
-                // into the next FRESH system prompt and the model may treat
-                // it as a fresh marker instruction.
+            append("Recent questions the user asked earlier in this chat (topic context only — answer the NEW question below in a fresh way, do not restate or quote your previous replies):\n")
+            recentUserMessages.forEach { msg ->
                 val sanitized = ResponseMarkerParser.stripForDisplay(msg.content, streaming = false)
                 val body = sanitized.take(perMsgChars)
-                append("$who: $body\n")
+                append("- \"$body\"\n")
             }
         }.trimEnd()
     }
