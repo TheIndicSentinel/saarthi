@@ -461,6 +461,21 @@ class ChatRepositoryImpl @Inject constructor(
         val retrieved = runCatching { ragRepository.search(sessionId, userMessage) }.getOrDefault(emptyList())
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
 
+        // Per-chunk retrieval log — names + chunk index + BM25 score +
+        // page range + a short text preview. Lets us diagnose "model
+        // cited wrong source" complaints without having to rerun the
+        // session: the log shows exactly which chunks the model was
+        // given on each turn.
+        if (retrieved.isNotEmpty()) {
+            DebugLogger.log("RAG", "retrieved ${retrieved.size} chunk(s) for query=\"${userMessage.take(80)}\"")
+            retrieved.forEachIndexed { i, c ->
+                val ref = if (c.chunkIndex < 0) "outline" else "part ${c.chunkIndex + 1}"
+                val pages = extractPageRange(c.text)?.let { " · $it" } ?: ""
+                val preview = c.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)?.trim() ?: ""
+                DebugLogger.log("RAG", "  [${i + 1}] ${c.docName} · $ref$pages  score=${"%.2f".format(c.score)}  preview=\"$preview…\"")
+            }
+        }
+
         // ── Compact (Gemma 3 1B) transcript priming ──────────────────────
         // litertlm wraps everything in <start_of_turn>user … <start_of_turn>model,
         // so we prime the 1B model via a "transcript" pattern: a narrative
@@ -525,7 +540,16 @@ class ChatRepositoryImpl @Inject constructor(
             // Memory is scoped to THIS chat — never read another chat's memories.
             val currentSession = _currentSessionId.value
             val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
-            val priorTurns = buildPriorTurnsRecap()
+            // When docs are pinned, the RAG chunks ARE the topic context —
+            // recap becomes redundant and was eating ~150–250 c that the
+            // chunks need. Production log 03:47:37–03:52:25 showed
+            // systemChars≈3700 vs ragBudget≈1700: system prompt was 2×
+            // larger than the actual evidence the model is supposed to use.
+            // Dropping the recap on doc-pinned turns lets one more chunk
+            // fit and gives the model a clearer "your only source is the
+            // excerpts" signal.
+            val docsPinned = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty()
+            val priorTurns = if (docsPinned) "" else buildPriorTurnsRecap()
             val systemInstructions = buildSystemPrompt(memoryContext, priorTurns)
             val budget = maxPromptChars
             // Size the RAG block to fit the remaining budget AFTER the
@@ -573,6 +597,25 @@ class ChatRepositoryImpl @Inject constructor(
                 append(userMessage)
             }
         }
+    }
+
+    /**
+     * Inline `--- Page X ---` markers come from `FileContentExtractor.extractPdfText`
+     * — when a chunk straddles one or more pages, this surfaces the page
+     * range so the citation header can read "pp.5-7" instead of just
+     * "part 3". The model sees the page numbers in the chunk text anyway;
+     * lifting them into the header makes the cite [N, p.X] pattern
+     * trivial to follow.
+     */
+    private val PAGE_MARKER_REGEX = Regex("---\\s*Page\\s+(\\d+)\\s*---", RegexOption.IGNORE_CASE)
+    private fun extractPageRange(text: String): String? {
+        val pages = PAGE_MARKER_REGEX.findAll(text)
+            .mapNotNull { it.groupValues[1].toIntOrNull() }
+            .toList()
+        if (pages.isEmpty()) return null
+        val lo = pages.min()
+        val hi = pages.max()
+        return if (lo == hi) "p.$lo" else "pp.$lo-$hi"
     }
 
     /**
@@ -639,12 +682,18 @@ class ChatRepositoryImpl @Inject constructor(
             for ((i, chunk) in retrieved.withIndex()) {
                 val text = chunk.text.trim()
                 // Stable provenance per chunk so the model can cite at
-                // doc-name + position granularity, not just [N]. The
-                // OUTLINE_CHUNK_INDEX sentinel (-1) is rendered as
-                // "outline" so the model knows that source is the auto-
-                // extracted heading list, not a content paragraph.
-                val ref = if (chunk.chunkIndex < 0) "outline"
-                          else "part ${chunk.chunkIndex + 1}"
+                // doc-name + position + page granularity, not just [N].
+                //   • OUTLINE_CHUNK_INDEX sentinel (-1) → "outline"
+                //   • Page range pulled from inline `--- Page X ---`
+                //     markers that extractPdfText injects during OCR.
+                val ref = buildString {
+                    if (chunk.chunkIndex < 0) {
+                        append("outline")
+                    } else {
+                        append("part ").append(chunk.chunkIndex + 1)
+                    }
+                    extractPageRange(text)?.let { append(" · ").append(it) }
+                }
                 val header = "[${i + 1}] ${chunk.docName} · $ref\n"
                 val total = header.length + text.length + 2  // +2 for trailing "\n\n"
                 if (total > remaining) break  // never half-emit a chunk

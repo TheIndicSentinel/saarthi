@@ -47,7 +47,15 @@ object Bm25Retriever {
         val avgDl = if (docLens.isEmpty()) 0.0 else docLens.average()
         val n = corpus.size
 
-        val queryTerms = tokenise(query).distinct()
+        // Query-side stemming: expand each English token with its plural
+        // / singular partner so "penalties" matches a corpus chunk that
+        // only says "penalty", "fines" matches "fine", "issues" matches
+        // "issue", and so on. Corpus tokenisation is left vanilla — we
+        // only widen the query, never narrow the index. Devanagari and
+        // other non-ASCII scripts are skipped (different morphology).
+        val queryTerms = tokenise(query)
+            .flatMap { listOf(it, lightStem(it)) }
+            .distinct()
         if (queryTerms.isEmpty()) return emptyList()
 
         // Pre-compute document frequency and IDF for every query term.
@@ -90,4 +98,28 @@ object Bm25Retriever {
         text.lowercase()
             .split(Regex("[^\\p{L}\\p{N}]+"))
             .filter { it.length >= 2 }
+
+    /**
+     * Minimal English plural stemmer. Query-side only — never apply to
+     * the corpus, because the asymmetry is what gives us recall without
+     * losing precision (an exact-match query token still scores higher
+     * than its stemmed sibling thanks to TF saturation).
+     *
+     * Skips non-ASCII tokens (Devanagari, Tamil, Bengali) entirely
+     * because their morphology is different and suffix-stripping would
+     * mangle them. Returns the token unchanged when no rule applies.
+     */
+    private fun lightStem(token: String): String {
+        if (token.length < 4) return token
+        if (token.any { it.code > 127 }) return token   // ASCII only
+        return when {
+            token.endsWith("ies")                                                  -> token.dropLast(3) + "y"   // penalties → penalty
+            token.endsWith("ches") || token.endsWith("shes") ||
+            token.endsWith("ses")  || token.endsWith("xes")  ||
+            token.endsWith("zes")                                                  -> token.dropLast(2)         // boxes → box, lashes → lash
+            token.endsWith("es")   && token.length > 3                             -> token.dropLast(1)         // fines → fine, issues → issue
+            token.endsWith("s")    && token.length > 3 && !token.endsWith("ss")    -> token.dropLast(1)         // cats → cat (but not "loss")
+            else                                                                   -> token
+        }
+    }
 }
