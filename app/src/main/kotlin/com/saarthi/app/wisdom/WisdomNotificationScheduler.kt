@@ -52,10 +52,10 @@ class WisdomNotificationScheduler @Inject constructor(
     /** Cancel any pending daily wisdom alarm. Safe to call when nothing is armed. */
     fun disable() {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        am.cancel(buildPendingIntent(flags = PendingIntent.FLAG_NO_CREATE))
-        // Also cancel via the same intent shape we used to schedule, in case
-        // FLAG_NO_CREATE returned null because the system has nothing matching:
-        am.cancel(buildPendingIntent(flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+        // Look up the existing PendingIntent with FLAG_NO_CREATE; null means
+        // nothing is currently armed (clean state, no-op). Otherwise cancel.
+        buildPendingIntent(flags = PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+            ?.also { am.cancel(it); it.cancel() }
         Timber.d("WisdomScheduler: disabled — pending alarm cancelled")
     }
 
