@@ -1,10 +1,17 @@
 package com.saarthi.app
 
 import android.app.Application
+import com.saarthi.app.wisdom.WisdomNotificationScheduler
+import com.saarthi.core.i18n.WisdomNotificationPreference
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.feature.assistant.data.ReminderManager
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -13,12 +20,16 @@ class SaarthiApp : Application() {
 
     @Inject lateinit var reminderManager: ReminderManager
     @Inject lateinit var crashReporter: com.saarthi.core.common.CrashReporter
+    @Inject lateinit var wisdomPreference: WisdomNotificationPreference
+    @Inject lateinit var wisdomScheduler: WisdomNotificationScheduler
 
     // Eagerly construct the chat repository at app start so its Room queries
     // (default session + last conversation) run in parallel with model init,
     // not on the user's first chat tap. ChatRepositoryImpl is @Singleton, so
     // referencing it here just wakes up its init block once.
     @Inject lateinit var chatRepositoryWarmup: com.saarthi.feature.assistant.domain.ChatRepository
+
+    private val appScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     override fun onCreate() {
         super.onCreate()
@@ -31,6 +42,12 @@ class SaarthiApp : Application() {
         installCrashLogger()
         // Ensures the notification channel exists before any reminder fires
         reminderManager.createNotificationChannel()
+        // Re-arm the daily wisdom alarm if the user has it on. Idempotent:
+        // setExactAndAllowWhileIdle with the same request code just replaces
+        // the existing pending intent, so repeated launches are safe.
+        appScope.launch {
+            if (wisdomPreference.enabled.first()) wisdomScheduler.enable()
+        }
     }
 
     private fun installCrashLogger() {

@@ -456,6 +456,11 @@ private fun SpecialistTile(
 
 @Composable
 private fun ThoughtOfTheDay() {
+    // Cycles deterministically by day-of-year — same wisdom everywhere on
+    // the same calendar day, no per-device drift, no random feel. The
+    // catalog lives in core-i18n so the daily notification can pull the
+    // exact same entry without duplicating the list.
+    val wisdom = remember { com.saarthi.core.i18n.DailyWisdomCatalog.forDate() }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -484,12 +489,12 @@ private fun ThoughtOfTheDay() {
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                "विद्या ददाति विनयम्",
+                wisdom.sanskrit,
                 style = DisplayAccent.copy(fontSize = 18.sp, color = SaarthiColors.Text),
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "\"Knowledge gives humility\"",
+                "\"${wisdom.english}\"",
                 style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
             )
         }

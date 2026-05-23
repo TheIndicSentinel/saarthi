@@ -78,11 +78,17 @@ fun SettingsScreen(
     settingsViewModel: com.saarthi.app.SettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
     themeViewModel: com.saarthi.app.ThemeViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
-    var notifOn by remember { mutableStateOf(true) }
     var showLangPicker by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
     val darkOn = themeMode == com.saarthi.core.ui.theme.ThemeMode.DARK
+    // Daily wisdom notification — preference-backed (DataStore) and tied
+    // to AlarmManager via WisdomNotificationScheduler. Previously this was
+    // a `mutableStateOf` that did nothing; now the toggle actually
+    // arms/cancels the 8 AM alarm.
+    val wisdomVm: com.saarthi.app.wisdom.WisdomSettingsViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel()
+    val notifOn by wisdomVm.enabled.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg),
@@ -154,7 +160,9 @@ fun SettingsScreen(
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Notifications, null) },
                 title = "Daily wisdom notifications",
-                trailing = { SaarthiToggle(on = notifOn, onToggle = { notifOn = !notifOn }) },
+                subtitle = if (notifOn) "A Sanskrit thought every morning at 8 AM"
+                           else "Off — no daily notification",
+                trailing = { SaarthiToggle(on = notifOn, onToggle = { wisdomVm.setEnabled(!notifOn) }) },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.DarkMode, null) },

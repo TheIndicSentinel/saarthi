@@ -9,7 +9,14 @@
         solid black silhouette, no gradients, no extra strokes.
         Inset by 4dp on every side to survive launcher mask clipping.
     -->
-    <group android:translateX="4" android:translateY="4">
+    <!-- Same safe-zone fit as ic_saarthi_logo.xml: scale 0.66 + center 21
+         so the silhouette never gets clipped by tight circular launcher
+         masks on stock Pixel / OneUI / MIUI. -->
+    <group
+        android:translateX="21"
+        android:translateY="21"
+        android:scaleX="0.66"
+        android:scaleY="0.66">
         <path
             android:fillColor="#FF000000"
             android:pathData="M 50 6 C 34 22, 24 42, 24 60 C 24 78, 36 92, 50 92 C 64 92, 76 78, 76 60 C 76 42, 66 22, 50 6 Z"/>

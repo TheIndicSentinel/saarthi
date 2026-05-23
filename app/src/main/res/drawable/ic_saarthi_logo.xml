@@ -20,11 +20,26 @@
           6. White-hot core + pinpoint (ellipse + circle)
     -->
 
+    <!--
+        Adaptive-icon safe zone fit.
+        Android's 108×108 viewport is divided into:
+          • outer 108×108  — bleed area, may be cropped by ANY launcher mask
+                             (circle, squircle, square, teardrop, etc.).
+          • inner 72×72    — guaranteed visible on most masks.
+          • inner 66×66    — guaranteed visible on EVERY mask incl. tight circles.
+
+        Previous version had `translateX/Y=4 scale=1.0`, which packed the
+        100-unit flame into 100 of 108 dp — far outside the safe zone and
+        the tip + base were clipped on most launchers. We now scale to 0.66
+        (so the 100-unit flame fits in 66 dp) and center inside 108 dp via
+        translate=21 = (108−66)/2. The halo edges fade through transparent
+        so any soft bleed past the 66dp inscribed circle is invisible.
+    -->
     <group
-        android:translateX="4"
-        android:translateY="4"
-        android:scaleX="1.0"
-        android:scaleY="1.0">
+        android:translateX="21"
+        android:translateY="21"
+        android:scaleX="0.66"
+        android:scaleY="0.66">
 
         <!-- 1 · Ambient halo -->
         <path android:pathData="M 50 60 m -48 0 a 48 40 0 1 0 96 0 a 48 40 0 1 0 -96 0 Z">

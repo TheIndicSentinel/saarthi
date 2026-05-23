@@ -25,6 +25,8 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Keep alarms alive through Doze mode -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Re-arm the daily wisdom alarm after device reboot (cleared by the OS). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!--
         Foreground service keeps the app alive during heavy AI inference.
         Without this, Android 14+/Samsung OneUI kills the process within 2–10 s.
@@ -90,12 +92,33 @@
             </intent-filter>
         </activity>
 
-        <!-- Reminder alarm receiver -->
+        <!--
+            Reminder + daily-wisdom alarm receiver.
+            Two actions land here:
+              · com.saarthi.app.REMINDER       — user-scheduled reminder
+              · com.saarthi.app.DAILY_WISDOM   — 8 AM daily wisdom card
+            The receiver itself routes by action; one class, one channel.
+        -->
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.saarthi.app.REMINDER" />
+                <action android:name="com.saarthi.app.DAILY_WISDOM" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Re-arms the daily wisdom alarm on reboot. Must be exported=true
+            because BOOT_COMPLETED is delivered by the system, and gated by
+            the RECEIVE_BOOT_COMPLETED permission so only the system can fire it.
+        -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 
