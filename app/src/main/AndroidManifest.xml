@@ -118,5 +118,24 @@
                 android:value="On-device AI model inference (LLM text generation)" />
         </service>
 
+        <!--
+            WorkManager uses this internal service to run Foreground Workers
+            (ModelDownloadWorker). Override is required to declare the correct
+            foregroundServiceType before Android 14+ enforces the type.
+
+            Same reasoning as InferenceService: specialUse is stable on API 29–36+.
+            DATA_SYNC was removed in Android 16 and must NOT be added here.
+            tools:node="merge" preserves WorkManager's own service attributes
+            (exported, process, etc.) while adding our type + special-use property.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="specialUse"
+            tools:node="merge">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="AI model file download (background, resumable via OkHttp)" />
+        </service>
+
     </application>
 </manifest>

@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0D1321</color>
+    <!-- Saarthi warm dark ink — matches the in-app `bg` token and the
+         radial halo of the flame foreground. Was #0D1321 (cool blue-black);
+         changed to the brand's warm ink so the launcher tile feels like the
+         diya glow it carries. -->
+    <color name="ic_launcher_background">#0E0B07</color>
 </resources>

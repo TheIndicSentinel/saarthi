@@ -66,15 +66,33 @@ object ResponseMarkerParser {
 
     // Defensive net for everything the strict regexes might miss. ANY block
     // that looks like a SAARTHI marker — well-formed or not — must be wiped
-    // from the rendered chat bubble. Without this, malformed markers from
-    // weaker-instruction-following languages (Telugu has been the reproducer)
-    // show up as raw "[SAARTHI_REMINDER text = ""...]" text in the chat.
+    // from the rendered chat bubble.
     //
-    // Greedy-bounded: closes on the first `]` so it can't swallow normal
-    // text that uses brackets later in the response.
+    // The brackets are OPTIONAL. We saw production leaks like:
+    //   "saarthi_reminder text=\"India has...\" delay_minutes=\"60\""  (no [ at all)
+    //   "[SAARTHI_REMINDER text=\"...\" delay_minutes=\"60\""           (no closing ])
+    //   "SAARTHI_REMINDER text=\"...\"]"                                 (no opening [)
+    // The earlier strict-bracket pattern matched none of these and the
+    // fragment landed in the visible bubble. Both brackets are now optional;
+    // the match terminates at the first `]` OR end-of-line so it cannot
+    // swallow unrelated text further down the response.
     private val ANY_SAARTHI_MARKER_REGEX = Regex(
-        """\[\s*SAARTHI_(?:REMINDER|MEMORY)\b[^\]]*\]""",
+        """\[?\s*SAARTHI_(?:REMINDER|MEMORY)\b[^\]\n]*\]?""",
         RegexOption.IGNORE_CASE,
+    )
+
+    // Orphan attribute lines. When the marker spans two lines and the strict
+    // regexes don't match (or when the model emits only a fragment), a stray
+    // line like:
+    //     delay_minutes="60"]
+    //     time="18:00"
+    //     text="Take medicine" delay_minutes="30"
+    // can survive the bracket-optional pass above. A line consisting ONLY of
+    // one of our known marker attributes (with optional trailing `]`) is a
+    // leak by definition — strip the whole line. Multiline mode + anchored
+    // ^...$ keeps this from chewing on prose that happens to contain `key=`.
+    private val ORPHAN_MARKER_ATTRIBUTE_LINE = Regex(
+        """(?m)^\s*(?:text|key|value|time|delay_minutes)\s*=\s*"[^"\n]*"(?:\s+(?:text|key|value|time|delay_minutes)\s*=\s*"[^"\n]*")*\s*\]?\s*$""",
     )
 
     /**
@@ -270,11 +288,15 @@ object ResponseMarkerParser {
             .replace(MEMORY_REGEX, "")
             .replace(REMINDER_ABS_REGEX, "")
             .replace(REMINDER_REL_REGEX, "")
-            // Defensive net — any [SAARTHI_*] block of any shape must NOT
+            // Defensive net — any SAARTHI_* block of any shape must NOT
             // reach the rendered bubble. Catches malformed markers the strict
             // regexes above miss (empty values, wrong spacing, partial fields,
-            // curly quotes) — the actual user-visible bug in Telugu sessions.
+            // curly quotes, missing brackets).
             .replace(ANY_SAARTHI_MARKER_REGEX, "")
+            // Second defensive pass — wipe lines that consist solely of one
+            // or more marker attribute fragments. Covers the multi-line-leak
+            // case where the marker keyword landed on a prior line.
+            .replace(ORPHAN_MARKER_ATTRIBUTE_LINE, "")
         for (token in GEMMA_SPECIAL_TOKENS) {
             out = out.replace(token, "")
         }

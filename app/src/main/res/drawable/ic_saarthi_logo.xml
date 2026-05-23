@@ -1,18 +1,120 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Flame outer — Saffron/Kesari -->
-    <path
-        android:fillColor="#FF6B2C"
-        android:pathData="M54,16 C46,28 28,46 28,64 C28,80 39.6,92 54,92 C68.4,92 80,80 80,64 C80,46 62,28 54,16 Z"/>
-    <!-- Flame mid — Sacred Gold -->
-    <path
-        android:fillColor="#D4A843"
-        android:pathData="M54,30 C46,42 36,54 36,66 C36,76 43.8,84 54,84 C64.2,84 72,76 72,66 C72,54 62,42 54,30 Z"/>
-    <!-- Flame core — Warm Cream -->
-    <path
-        android:fillColor="#FFF3C4"
-        android:pathData="M54,52 C49,58 45,64 45,69 C45,74.3 49,79 54,79 C59,79 63,74.3 63,69 C63,64 59,58 54,52 Z"/>
+
+    <!--
+        Saarthi "Flame & Petals" — final identity, just the lit flame.
+        The 100x100 design viewport is centered inside Android's 108x108
+        adaptive-icon viewport with a 4dp safe-area inset on each side so
+        the mark survives circular / squircle / squared launcher masks.
+
+        Layers, base → wick:
+          1. Ambient halo  (ellipse, soft radial)
+          2. Outer halo    (ellipse, warmer radial)
+          3. Outer flame   (path, linear gradient ember → marigold → deep)
+          4. Mid flame     (path, linear gradient cream → marigold → ember)
+          5. Inner hot     (path, radial cream → soft amber)
+          6. White-hot core + pinpoint (ellipse + circle)
+    -->
+
+    <group
+        android:translateX="4"
+        android:translateY="4"
+        android:scaleX="1.0"
+        android:scaleY="1.0">
+
+        <!-- 1 · Ambient halo -->
+        <path android:pathData="M 50 60 m -48 0 a 48 40 0 1 0 96 0 a 48 40 0 1 0 -96 0 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="50" android:centerY="60"
+                    android:gradientRadius="48">
+                    <item android:offset="0.0" android:color="#8CFFB94B"/>
+                    <item android:offset="0.4" android:color="#3FF4A52E"/>
+                    <item android:offset="1.0" android:color="#00F4A52E"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- 2 · Outer halo -->
+        <path android:pathData="M 50 65 m -32 0 a 32 36 0 1 0 64 0 a 32 36 0 1 0 -64 0 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="50" android:centerY="65"
+                    android:gradientRadius="36">
+                    <item android:offset="0.0" android:color="#BFFFD580"/>
+                    <item android:offset="0.6" android:color="#52FF8A3C"/>
+                    <item android:offset="1.0" android:color="#00FF8A3C"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- 3 · Outer flame body (ember edge → deep amber base) -->
+        <path android:pathData="M 50 6 C 34 22, 24 42, 24 60 C 24 78, 36 92, 50 92 C 64 92, 76 78, 76 60 C 76 42, 66 22, 50 6 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="50" android:startY="6"
+                    android:endX="50" android:endY="92">
+                    <item android:offset="0.0"  android:color="#FFFF8A3C"/>
+                    <item android:offset="0.55" android:color="#FFF4A52E"/>
+                    <item android:offset="1.0"  android:color="#FFB8580C"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- 4 · Mid flame body (marigold heart) -->
+        <path android:pathData="M 50 18 C 38 30, 32 46, 32 60 C 32 74, 40 86, 50 86 C 60 86, 68 74, 68 60 C 68 46, 62 30, 50 18 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="50" android:startY="18"
+                    android:endX="50" android:endY="86">
+                    <item android:offset="0.0"  android:color="#FFFFD580"/>
+                    <item android:offset="0.6"  android:color="#FFF4A52E"/>
+                    <item android:offset="1.0"  android:color="#FFE27349"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- 5 · Inner hot zone (cream radial) -->
+        <path android:pathData="M 50 32 C 42 42, 38 54, 38 64 C 38 76, 44 84, 50 84 C 56 84, 62 76, 62 64 C 62 54, 58 42, 50 32 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="50" android:centerY="65"
+                    android:gradientRadius="28">
+                    <item android:offset="0.0"  android:color="#FFFFF8E1"/>
+                    <item android:offset="0.35" android:color="#FFFFEDC4"/>
+                    <item android:offset="0.8"  android:color="#99FFD580"/>
+                    <item android:offset="1.0"  android:color="#00FFD580"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- 6a · White-hot core (ellipse near wick) -->
+        <path android:pathData="M 50 74 m -7 0 a 7 11 0 1 0 14 0 a 7 11 0 1 0 -14 0 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="50" android:centerY="76"
+                    android:gradientRadius="11">
+                    <item android:offset="0.0"  android:color="#FFFFFFFF"/>
+                    <item android:offset="0.5"  android:color="#FFFFF8E1"/>
+                    <item android:offset="1.0"  android:color="#00FFEDC4"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- 6b · Pinpoint -->
+        <path
+            android:pathData="M 50 78 m -2.4 0 a 2.4 2.4 0 1 0 4.8 0 a 2.4 2.4 0 1 0 -4.8 0 Z"
+            android:fillColor="#D9FFFFFF"/>
+
+    </group>
 </vector>

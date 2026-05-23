@@ -52,4 +52,11 @@ dependencies {
 
     // LiteRT-LM: Google AI Edge inference library (same runtime as AI Edge Gallery)
     implementation(libs.litertlm)
+
+    // WorkManager + OkHttp: reliable background downloads for 2.5 GB+ model files.
+    // Replaces DownloadManager which stalls on Samsung OneUI (Doze pauses the queue).
+    // OkHttp Range headers enable resumption from the byte offset if the download
+    // is interrupted; WorkManager enqueues the job persistently across reboots.
+    implementation(libs.workmanager)
+    implementation(libs.okhttp)
 }

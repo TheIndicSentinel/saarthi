@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!--
+        Android 13+ themed-icon silhouette. The system tints this single
+        path with the user's wallpaper-derived accent — so it must be a
+        solid black silhouette, no gradients, no extra strokes.
+        Inset by 4dp on every side to survive launcher mask clipping.
+    -->
+    <group android:translateX="4" android:translateY="4">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M 50 6 C 34 22, 24 42, 24 60 C 24 78, 36 92, 50 92 C 64 92, 76 78, 76 60 C 76 42, 66 22, 50 6 Z"/>
+    </group>
+</vector>

@@ -84,9 +84,13 @@ fun MessageBubble(
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom,
     ) {
-        // Assistant avatar
+        // Assistant avatar — flame at rest, petal-loader while streaming.
         if (!isUser) {
-            AssistantAvatar(label = avatarLabel, modifier = Modifier.padding(end = 8.dp, bottom = 4.dp))
+            AssistantAvatar(
+                label = avatarLabel,
+                isStreaming = message.isStreaming,
+                modifier = Modifier.padding(end = 8.dp, bottom = 4.dp),
+            )
         } else {
             Spacer(Modifier.width(48.dp))
         }
@@ -235,8 +239,16 @@ fun MessageBubble(
 }
 
 @Composable
-private fun AssistantAvatar(label: String, modifier: Modifier = Modifier) {
-    // The brand mandala IS the assistant avatar.
+private fun AssistantAvatar(
+    @Suppress("UNUSED_PARAMETER") label: String,
+    isStreaming: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    // "Flame at rest, petals while thinking" — the avatar swap is the
+    // app's primary signal that the model is generating. The avatar
+    // tile (circle, soft marigold wash, marigold border) is identical
+    // in both states so the swap reads as the same character changing
+    // expression, not a new bubble.
     Box(
         modifier = modifier
             .size(32.dp)
@@ -245,7 +257,11 @@ private fun AssistantAvatar(label: String, modifier: Modifier = Modifier) {
             .border(1.dp, SaarthiColors.MarigoldBd, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        com.saarthi.core.ui.components.SaarthiLogo(size = 26.dp)
+        if (isStreaming) {
+            com.saarthi.core.ui.components.SaarthiPetalLoader(size = 28.dp)
+        } else {
+            com.saarthi.core.ui.components.SaarthiFlame(size = 24.dp)
+        }
     }
 }
 
