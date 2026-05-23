@@ -174,23 +174,14 @@ class ChatRepositoryImpl @Inject constructor(
 
     override fun streamResponse(userMessage: String, attachments: List<AttachedFile>): Flow<String> {
         val sessionId = _currentSessionId.value
-        // Persist newly-attached files into the Room-backed RAG index so
-        // follow-up turns — and the next process launch — can still answer
-        // questions about them. Indexing is idempotent (countByDoc gate)
-        // so re-attaching is a cheap no-op.
-        if (attachments.isNotEmpty()) {
-            val indexed = indexedDocsByUri.getOrPut(sessionId) { mutableSetOf() }
-            scope.launch {
-                attachments.forEach { file ->
-                    val key = file.uri.toString()
-                    if (key in indexed) return@forEach
-                    runCatching { ragRepository.indexIfNeeded(sessionId, file) }
-                        .onSuccess { indexed += key }
-                        .onFailure { DebugLogger.log("RAG", "Index failed for ${file.name}: ${it.message}") }
-                }
-            }
-            DebugLogger.log("RAG", "Indexing ${attachments.size} doc(s) for session=$sessionId")
-        }
+        // NOTE: actual indexing happens INSIDE the flow's withContext block
+        // below — see the comment around buildPrompt. Previously this ran
+        // fire-and-forget on `scope.launch`, which meant the very first
+        // send after an attach saw `ragChunks=0` because the BM25 search
+        // executed before the chunks landed in Room (visible at 02:33:48,
+        // 02:34:38, 02:38:05, 02:41:27 in the production log). Doing it
+        // inline costs 1–3 s on the first turn for a large PDF and gives
+        // the user a correctly-grounded answer instead of a wrong one.
         val userMsg = ChatMessage(content = userMessage, role = MessageRole.USER, attachments = attachments)
         _history.update { it + userMsg }
         
@@ -229,8 +220,26 @@ class ChatRepositoryImpl @Inject constructor(
             }
 
 
-        // Build prompt using adaptive budget based on model's context length
-        val prompt = withContext(Dispatchers.IO) { buildPrompt(userMessage, attachments) }
+        // Build prompt using adaptive budget based on model's context length.
+        // Index any newly-attached files FIRST (synchronously, on IO) so
+        // BM25 search inside buildPrompt sees the chunks. Idempotent —
+        // the per-session in-process cache prevents re-chunking on every
+        // turn after the first.
+        val prompt = withContext(Dispatchers.IO) {
+            if (attachments.isNotEmpty()) {
+                val indexed = indexedDocsByUri.getOrPut(sessionId) { mutableSetOf() }
+                var newCount = 0
+                for (file in attachments) {
+                    val key = file.uri.toString()
+                    if (key in indexed) continue
+                    runCatching { ragRepository.indexIfNeeded(sessionId, file) }
+                        .onSuccess { indexed += key; newCount += 1 }
+                        .onFailure { DebugLogger.log("RAG", "Index failed for ${file.name}: ${it.message}") }
+                }
+                if (newCount > 0) DebugLogger.log("RAG", "Indexed $newCount doc(s) inline before retrieval  session=$sessionId")
+            }
+            buildPrompt(userMessage, attachments)
+        }
         DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
 
         val startTime = System.currentTimeMillis()
@@ -601,8 +610,13 @@ class ChatRepositoryImpl @Inject constructor(
         val rulesHeader = if (tier == SystemPromptProvider.ModelTier.COMPACT) {
             "Attached excerpts — answer ONLY from these. Cite [N]. If the answer isn't here, reply: \"$noMatchLine\"\n\n"
         } else {
-            "ATTACHED EXCERPTS — answer ONLY from these, cite [N] for every claim, " +
-                "reply EXACTLY \"$noMatchLine\" if the answer isn't here. " +
+            // Page-cite hint ([N, p.X]): chunks from OCR'd PDFs carry
+            // `--- Page X ---` markers inline, so a model that follows
+            // this rule gives the user a click-checkable reference
+            // rather than the bare [N] which was getting cross-wired.
+            "ATTACHED EXCERPTS — answer ONLY from these. Cite [N] for every claim " +
+                "(use [N, p.X] when the excerpt contains 'Page X'). " +
+                "If the answer isn't here, reply EXACTLY \"$noMatchLine\". " +
                 "Quote numbers, names, and dates verbatim.\n\n"
         }
 
@@ -624,7 +638,14 @@ class ChatRepositoryImpl @Inject constructor(
         val chunksBlock = buildString {
             for ((i, chunk) in retrieved.withIndex()) {
                 val text = chunk.text.trim()
-                val header = "[${i + 1}] from \"${chunk.docName}\"\n"
+                // Stable provenance per chunk so the model can cite at
+                // doc-name + position granularity, not just [N]. The
+                // OUTLINE_CHUNK_INDEX sentinel (-1) is rendered as
+                // "outline" so the model knows that source is the auto-
+                // extracted heading list, not a content paragraph.
+                val ref = if (chunk.chunkIndex < 0) "outline"
+                          else "part ${chunk.chunkIndex + 1}"
+                val header = "[${i + 1}] ${chunk.docName} · $ref\n"
                 val total = header.length + text.length + 2  // +2 for trailing "\n\n"
                 if (total > remaining) break  // never half-emit a chunk
                 append(header)

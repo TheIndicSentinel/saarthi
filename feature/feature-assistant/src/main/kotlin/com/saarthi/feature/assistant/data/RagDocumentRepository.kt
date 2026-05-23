@@ -53,24 +53,35 @@ class RagDocumentRepository @Inject constructor(
         // from a regular content chunk.
         private const val OUTLINE_CHUNK_INDEX = -1
 
-        // Queries that demand a STRUCTURAL view of the doc — not BM25.
-        // BM25 fails on these by definition: the query terms ("sections",
-        // "overview") almost never appear in the doc body. Detect them up
-        // front and route to structural sampling instead so the user gets
-        // a useful answer about doc shape rather than the BM25 fallback's
-        // generic first-chunk hand-back.
-        private val META_QUERY_PHRASES = listOf(
+        // Token triggers — if ANY of these tokens appears as a standalone
+        // word in the query, route to structural sampling instead of BM25.
+        // Token-based (not phrase-based) so "Summarise document content"
+        // — which has no "summarise this"-style anchor — still hits the
+        // meta path. The phrase list below catches multi-word forms.
+        private val META_TOKEN_TRIGGERS = setOf(
             // English
-            "what sections", "what section", "list sections", "list section",
-            "what chapters", "list chapters", "table of contents", " toc ", "the toc",
-            "summarize this", "summarise this", "summary of this", "summary of the",
-            "give an overview", "give me an overview", "give overview",
-            "what's in this", "what is in this", "what does this cover",
-            "what topics", "what is this document", "describe this document",
-            "outline of this", "outline this", "what are the headings",
-            // Hindi (Latin + Devanagari)
-            "saar batao", "saaransh", "kya likha", "vishaysuchi",
-            "अनुक्रम", "विषयसूची", "सारांश",
+            "summarise", "summarize", "summary", "synopsis",
+            "tldr", "tl;dr", "overview", "outline", "toc",
+            "sections", "chapters", "headings",
+            // Hindi (Latin transliteration)
+            "saaransh", "vishaysuchi", "anukramani",
+        )
+
+        // Devanagari triggers — match as substring because Devanagari
+        // morphology often glues these to suffixes without whitespace.
+        private val META_DEVANAGARI_PATTERN = Regex("(अनुक्रम|सारांश|विषयसूची|सार)")
+
+        // Multi-word phrase triggers — catch turns of phrase the token
+        // list can't ("what is this document about", "tell me about this
+        // document"). Kept short; tokens above carry most of the weight.
+        private val META_QUERY_PHRASES = listOf(
+            "what's this", "what is this",
+            "what are the sections", "what are the chapters", "what are the headings",
+            "table of contents",
+            "tell me about this document", "tell me what this",
+            "what does this cover", "what does it cover",
+            "describe this document", "describe the document",
+            "give me an overview", "give an overview",
         )
     }
 
@@ -164,21 +175,61 @@ class RagDocumentRepository @Inject constructor(
         if (contentChunks.isEmpty()) return emptyList()
 
         val ranked = Bm25Retriever.rank(contentChunks.map { it.text }, query, topK)
-        if (ranked.isNotEmpty()) {
-            return ranked.map { (idx, score) ->
-                val e = contentChunks[idx]
-                RetrievedChunk(e.text, e.docName, score)
-            }
+        val bm25Hits = ranked.map { (idx, score) ->
+            val e = contentChunks[idx]
+            RetrievedChunk(e.text, e.docName, score, e.chunkIndex)
         }
 
-        // Fallback: no query term matched. Hand the model the first
-        // chunk of each document so it can still answer general intent
-        // questions without going fully off-doc.
-        return contentChunks
-            .groupBy { it.docUri }
-            .map { (_, byDoc) -> byDoc.minByOrNull { it.chunkIndex }!! }
-            .take(topK)
-            .map { RetrievedChunk(it.text, it.docName, score = 0.0) }
+        // If BM25 fully populated the slot, return as-is — adding
+        // structural padding here would dilute strong signal with
+        // unrelated chunks.
+        if (bm25Hits.size >= topK) return bm25Hits
+
+        // BM25 under-covered the query (0 or weak hits). Pad with
+        // structural context — outline first, then first/middle/last
+        // per doc — so the model has surrounding evidence to reason
+        // against. Without this, a query with 1 weak BM25 hit gave the
+        // model 1 chunk + ~1000c of unused budget (visible at 02:35:34
+        // / 02:38:24 in the production log), which is exactly when the
+        // model started inventing citations.
+        val usedIds = ranked.map { contentChunks[it.index].id }.toMutableSet()
+        val padding = mutableListOf<RetrievedChunk>()
+
+        // Outline (if extracted at index time) is the highest-value
+        // padding item — gives the model a structural map of the doc.
+        all.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX }?.let { o ->
+            padding.add(RetrievedChunk(o.text, o.docName, 0.0, OUTLINE_CHUNK_INDEX))
+        }
+
+        // Then structural samples per doc, skipping anything BM25
+        // already returned.
+        val byDoc = contentChunks.groupBy { it.docUri }
+        val docCount = byDoc.size.coerceAtLeast(1)
+        for ((_, docChunks) in byDoc) {
+            val sorted = docChunks.sortedBy { it.chunkIndex }
+            val perDoc = ((topK - bm25Hits.size - padding.size + docCount - 1) / docCount).coerceAtLeast(2)
+            for (s in pickStructuralSamples(sorted, perDoc)) {
+                if (s.id in usedIds) continue
+                padding.add(RetrievedChunk(s.text, s.docName, 0.0, s.chunkIndex))
+                usedIds.add(s.id)
+                if (bm25Hits.size + padding.size >= topK) break
+            }
+            if (bm25Hits.size + padding.size >= topK) break
+        }
+        return bm25Hits + padding
+    }
+
+    /**
+     * Evenly-spaced sample including first and last from a list of chunks
+     * already sorted by chunkIndex. Used by both meta-query structural
+     * sampling and BM25 padding.
+     */
+    private fun pickStructuralSamples(sorted: List<RagChunkEntity>, count: Int): List<RagChunkEntity> {
+        if (sorted.size <= count) return sorted
+        val indices = (0 until count).map { i ->
+            ((i.toDouble() / (count - 1).coerceAtLeast(1)) * (sorted.size - 1)).toInt()
+        }.distinct()
+        return indices.map { sorted[it] }
     }
 
     /**
@@ -197,29 +248,32 @@ class RagDocumentRepository @Inject constructor(
         val result = mutableListOf<RetrievedChunk>()
         for ((_, docChunks) in byDoc) {
             // Outline first if we extracted one at index time.
-            val outline = docChunks.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX }
-            if (outline != null) {
-                result.add(RetrievedChunk(outline.text, outline.docName, score = 1.0))
+            docChunks.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX }?.let { o ->
+                result.add(RetrievedChunk(o.text, o.docName, 1.0, OUTLINE_CHUNK_INDEX))
             }
             val content = docChunks.filter { it.chunkIndex >= 0 }.sortedBy { it.chunkIndex }
             if (content.isEmpty()) continue
-            val samples = if (content.size <= perDoc) {
-                content
-            } else {
-                // Evenly-spaced indices including first and last.
-                val indices = (0 until perDoc).map { i ->
-                    ((i.toDouble() / (perDoc - 1).coerceAtLeast(1)) * (content.size - 1)).toInt()
-                }.distinct()
-                indices.map { content[it] }
+            pickStructuralSamples(content, perDoc).forEach {
+                result.add(RetrievedChunk(it.text, it.docName, 0.0, it.chunkIndex))
             }
-            samples.forEach { result.add(RetrievedChunk(it.text, it.docName, score = 0.0)) }
         }
         return result
     }
 
     private fun isMetaQuery(query: String): Boolean {
-        val q = " ${query.lowercase().trim()} "  // pad so " toc " matches as a token
-        return META_QUERY_PHRASES.any { q.contains(it) }
+        val lower = query.lowercase().trim()
+        if (lower.isEmpty()) return false
+        // 1. Token-level: split on non-letter/digit so "Summarise document content"
+        //    decomposes to {"summarise", "document", "content"} and "summarise"
+        //    matches the trigger. Substring matching missed this — that was the
+        //    02:38:24 production miss where ragChunks=1 instead of the structural
+        //    sample.
+        val tokens = lower.split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
+        if (tokens.any { it in META_TOKEN_TRIGGERS }) return true
+        // 2. Devanagari script regex (whitespace-free morphology).
+        if (META_DEVANAGARI_PATTERN.containsMatchIn(lower)) return true
+        // 3. Multi-word phrase fallback.
+        return META_QUERY_PHRASES.any { lower.contains(it) }
     }
 
     /**
@@ -322,4 +376,11 @@ data class RetrievedChunk(
     val text: String,
     val docName: String,
     val score: Double,
+    /**
+     * Position of this chunk inside its document. -1 = auto-extracted
+     * outline; ≥ 0 = sequential content chunk (0 is the first chunk).
+     * Exposed so the prompt builder can emit a stable citation label
+     * ("part 3 of 12") instead of just `[N]`.
+     */
+    val chunkIndex: Int = 0,
 )
