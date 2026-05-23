@@ -451,8 +451,6 @@ class ChatRepositoryImpl @Inject constructor(
         // when there is no text to retrieve.
         val retrieved = runCatching { ragRepository.search(sessionId, userMessage) }.getOrDefault(emptyList())
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
-        val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier)
-        val hasDocs = fileContext.isNotEmpty()
 
         // ── Compact (Gemma 3 1B) transcript priming ──────────────────────
         // litertlm wraps everything in <start_of_turn>user … <start_of_turn>model,
@@ -489,7 +487,15 @@ class ChatRepositoryImpl @Inject constructor(
                 "Saarthi: Hi! I'm Saarthi, your private AI assistant living right on your phone. How can I help you today?"
 
             val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
-            val ragPart = if (hasDocs) "\n\n$fileContext" else ""
+            // Compute the budget left for RAG after identity / example /
+            // recap / user / scaffolding — pass it to the block builder
+            // so chunks are dropped at boundaries rather than sliced
+            // mid-text by the final trimPrompt safety net.
+            val scaffolding = identity.length + example.length + recap.length +
+                userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
+            val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
+            val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
+            val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
             val fullPrompt = "$identity\n\n$example$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
             return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = "User: $userMessage\nSaarthi:")
         }
@@ -512,7 +518,21 @@ class ChatRepositoryImpl @Inject constructor(
             val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
             val priorTurns = buildPriorTurnsRecap()
             val systemInstructions = buildSystemPrompt(memoryContext, priorTurns)
-            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  recapTurns=${priorTurns.isNotEmpty()}")
+            val budget = maxPromptChars
+            // Size the RAG block to fit the remaining budget AFTER the
+            // system prompt and the user message have claimed their space.
+            // Without this, the verbose Gemma 4 BASE persona (~3700c) +
+            // 4 chunks (~2400c) overflowed the with-docs 5600c budget and
+            // trimPrompt sliced mid-chunk → repetition loop at 01:38:26
+            // and 01:41:26 in the user's log. The block builder now
+            // includes chunks greedily and never cuts one in half.
+            val systemPlusMargin = systemInstructions.length +
+                (if (systemInstructions.isNotBlank()) 2 else 0) +   // "\n\n"
+                userMessage.length + 1 +                              // userMessage + 1c
+                160                                                   // safety margin
+            val ragBudget = (budget - systemPlusMargin).coerceAtLeast(0)
+            val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
+            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()}")
             buildString {
                 // Only emit the system block if non-blank — Compact tier
                 // returns empty (see SystemPromptProvider) and leading
@@ -525,20 +545,20 @@ class ChatRepositoryImpl @Inject constructor(
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
             }.let { prompt ->
-                val budget = maxPromptChars
-                // trimPrompt() preserves complete <start_of_turn> blocks for
-                // multi-turn prompts. For FRESH prompts (no turn markers), we
-                // also need to guarantee the *user message* survives any
-                // truncation — otherwise the model has nothing to answer and
-                // ends up reading the system prompt back to itself ("Okay, I
-                // understand! I'm ready to be Saarthi…"). Pass userMessage so
-                // it can be pinned to the tail of the trimmed prompt.
+                // trimPrompt() is now a safety net rather than the primary
+                // cutter — the RAG block was already sized to fit.
                 val finalPrompt = trimPrompt(prompt, budget, pinnedTail = userMessage)
                 DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget")
                 finalPrompt
             }
         } else {
-            DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  (KV cache holds prior history)")
+            // CONTINUE: KV cache already holds the system prompt + prior
+            // turns. Only RAG + user message go in this turn. The whole
+            // budget is available for RAG, minus the user message.
+            val budget = maxPromptChars
+            val ragBudget = (budget - userMessage.length - 80).coerceAtLeast(0)
+            val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
+            DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  (KV cache holds prior history)")
             buildString {
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
@@ -547,57 +567,80 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Strict-mode RAG block. Renders the BM25-retrieved chunks (and any
+     * Strict-mode RAG block. Renders BM25-retrieved chunks (and any
      * unreadable attachments) as a numbered source list with hard rules:
-     *  • Answer ONLY from the excerpts. No general knowledge.
-     *  • Cite [N] for every fact.
-     *  • If not in excerpts, reply with the exact "not in documents" line.
+     * answer ONLY from excerpts, cite [N], reply with the exact
+     * "not in documents" line otherwise.
      *
-     * COMPACT (Gemma 3 1B) gets a shortened version — the 1B model can't
-     * carry the full rule list inside its 512-token budget without crowding
-     * out the actual chunks. Larger tiers (3n, 4) get the full block.
+     * Budget-aware — the caller passes [charBudget] computed as
+     * `totalPromptBudget − systemPromptLen − userMessageLen − safety`,
+     * and this builder includes chunks greedily until that budget is
+     * exhausted. Chunks are NEVER sliced mid-text: dropping a whole
+     * chunk from the tail is always preferred over emitting a half-
+     * truncated paragraph that puts the model into a repetition loop
+     * (observed at 01:38:26 / 01:41:26 in the production log).
      *
-     * Returns "" when there is nothing to inject (no indexed chunks and no
-     * unreadable-this-turn attachments) so the call site can skip a blank
-     * paragraph entirely.
+     * COMPACT (Gemma 3 1B) gets a one-liner rule header — the 1B model
+     * can't carry the full rule list inside its 512-tok budget without
+     * crowding out the actual chunks. Larger tiers get a tighter, single-
+     * sentence rule header (was 5 lines / ~470c; now ~200c).
      */
     private fun buildRagPromptBlock(
         retrieved: List<com.saarthi.feature.assistant.data.RetrievedChunk>,
         unreadableThisTurn: List<AttachedFile>,
         tier: SystemPromptProvider.ModelTier,
+        charBudget: Int,
     ): String {
         if (retrieved.isEmpty() && unreadableThisTurn.isEmpty()) return ""
+        // If there is literally no room for even the rule header + one
+        // small chunk, drop the block rather than emit a meaningless
+        // header-only fragment that wastes tokens.
+        if (charBudget < 200) return ""
 
         val noMatchLine = "I don't see that in your documents."
-        return buildString {
-            if (tier == SystemPromptProvider.ModelTier.COMPACT) {
-                appendLine("Attached document excerpts. Answer ONLY from these. Cite [N]. If not here, reply: \"$noMatchLine\"")
-            } else {
-                appendLine("=== ATTACHED DOCUMENT EXCERPTS (strict mode) ===")
-                appendLine("Rules for this turn — non-negotiable:")
-                appendLine("1. Answer ONLY using the excerpts below. Do NOT use general knowledge.")
-                appendLine("2. Cite the source number inline for every claim, e.g. [1], [2].")
-                appendLine("3. If the answer is not in the excerpts, reply EXACTLY: \"$noMatchLine\" — do not guess, do not paraphrase, do not draw on outside knowledge.")
-                appendLine("4. Quote short phrases verbatim when accuracy matters (numbers, names, dates).")
-                appendLine()
-            }
-            retrieved.forEachIndexed { i, chunk ->
-                appendLine("[${i + 1}] from \"${chunk.docName}\"")
-                appendLine(chunk.text.trim())
-                appendLine()
-            }
-            if (unreadableThisTurn.isNotEmpty()) {
+        val rulesHeader = if (tier == SystemPromptProvider.ModelTier.COMPACT) {
+            "Attached excerpts — answer ONLY from these. Cite [N]. If the answer isn't here, reply: \"$noMatchLine\"\n\n"
+        } else {
+            "ATTACHED EXCERPTS — answer ONLY from these, cite [N] for every claim, " +
+                "reply EXACTLY \"$noMatchLine\" if the answer isn't here. " +
+                "Quote numbers, names, and dates verbatim.\n\n"
+        }
+
+        // Unreadable-file notes are short, high-signal, and small. Reserve
+        // their length upfront so we don't drop them in favour of one more
+        // chunk — the model needs to know which files were unreadable to
+        // explain itself.
+        val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {
+            buildString {
                 appendLine("Files attached this turn that could NOT be read (do not pretend to know their contents):")
                 unreadableThisTurn.forEach { f ->
                     val why = f.error ?: "unsupported format — Saarthi cannot read binary files yet"
                     appendLine("  - ${f.name}: $why")
                 }
-                appendLine()
+            }.trimEnd() + "\n\n"
+        } else ""
+
+        var remaining = charBudget - rulesHeader.length - unreadableBlock.length
+        val chunksBlock = buildString {
+            for ((i, chunk) in retrieved.withIndex()) {
+                val text = chunk.text.trim()
+                val header = "[${i + 1}] from \"${chunk.docName}\"\n"
+                val total = header.length + text.length + 2  // +2 for trailing "\n\n"
+                if (total > remaining) break  // never half-emit a chunk
+                append(header)
+                append(text)
+                append("\n\n")
+                remaining -= total
             }
-            if (tier != SystemPromptProvider.ModelTier.COMPACT) {
-                appendLine("=== END OF EXCERPTS ===")
-            }
-        }.trimEnd()
+        }
+
+        // If the budget was so tight that not a single chunk fit, drop
+        // the whole RAG block — emitting "ATTACHED EXCERPTS — answer ONLY
+        // from these" with no excerpts puts the model into refusal mode
+        // on every question. Better to fall back to the general prompt.
+        if (chunksBlock.isEmpty() && unreadableBlock.isEmpty()) return ""
+
+        return (rulesHeader + chunksBlock + unreadableBlock).trimEnd()
     }
 
     /**
