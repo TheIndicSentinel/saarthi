@@ -253,7 +253,23 @@ fun AssistantScreen(
                     activePersonalityName = activePersonality.displayName,
                 )
             },
-            snackbarHost = { SnackbarHost(snackbarHost) },
+            snackbarHost = {
+                // Explicit Snackbar with our own colors — the previous
+                // "SnackbarHost(snackbarHost)" relied on Material 3
+                // picking up `inverseSurface` / `inverseOnSurface` from
+                // our theme, which it wasn't doing reliably and produced
+                // a white-on-white invisible toast. Passing the colors
+                // directly bypasses every theme path.
+                SnackbarHost(snackbarHost) { data ->
+                    androidx.compose.material3.Snackbar(
+                        snackbarData = data,
+                        containerColor = SaarthiColors.Surface,
+                        contentColor = SaarthiColors.Text,
+                        actionColor = SaarthiColors.Marigold,
+                        dismissActionContentColor = SaarthiColors.Text2,
+                    )
+                }
+            },
             containerColor = SaarthiColors.DeepSpace,
         ) { innerPadding ->
             Column(
