@@ -420,6 +420,46 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun samplerForActiveModel(): SamplerConfig? =
         samplerFor(activeModelName ?: loadedModelPath ?: "")
 
+    /**
+     * Tighter sampler for RAG-grounded turns. Used when the incoming
+     * prompt carries the strict-mode "ATTACHED EXCERPTS" header so the
+     * detection is automatic and no API change is needed.
+     *
+     * Why a separate sampler for RAG mode:
+     *  • The default Gemma 3/4 sampler (temp=1.0, topK=64, topP=0.95) is
+     *    optimised for creative chat — it tolerates high-probability
+     *    diversion. Inside RAG mode that diversion turns into the
+     *    repetition loops we kept seeing ("[REP] Loop detected at 82
+     *    tokens" on the latest production log).
+     *  • Industry standard for document-grounded Q&A is temp ≈ 0.3–0.5
+     *    with tighter top-p — pulls the model toward verbatim quotation
+     *    of the cited excerpt, which is exactly what we want when we've
+     *    already told it "answer ONLY from these excerpts".
+     *  • NPU still returns null (Hexagon does sampling on-chip).
+     */
+    private fun groundedSamplerFor(modelPath: String): SamplerConfig? {
+        if (usingNpu) return null
+        return SamplerConfig(topK = 40, topP = 0.85, temperature = 0.4)
+    }
+
+    /**
+     * Marker baked into [ChatRepositoryImpl.buildRagPromptBlock] for the
+     * LARGE/STANDARD strict-mode block. Detecting this here keeps the
+     * engine API unchanged — no new parameter on `generateStream()` — and
+     * automatically swaps in the grounded sampler whenever RAG context is
+     * present. False-positive risk is negligible: the literal phrase
+     * "ATTACHED EXCERPTS" doesn't appear in normal chat content.
+     */
+    private fun isGroundedPrompt(prompt: String): Boolean =
+        prompt.contains("ATTACHED EXCERPTS")
+
+    /**
+     * Tracks the sampler mode the live [activeConversation] was created
+     * with so we know when to recycle on a mode flip (normal ↔ grounded).
+     * Volatile because the per-turn onDone callback also touches it.
+     */
+    @Volatile private var conversationIsGrounded: Boolean = false
+
     // ── Streaming repetition guard ────────────────────────────────────────────
     //
     // Two cheap O(n) checks over the most recent ~400 chars of streamed output:
@@ -688,13 +728,41 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 val xnnpackBanned = cpuCrashCount >= 2
 
-                // GPU VRAM safety for large models on memory-tight devices.
-                // Gemma 4 (~3.5 GB) needs ~4.5 GB peak memory for GPU load. When
-                // the model is more than 60 % of available RAM, prefer CPU to
-                // avoid OOM. Independent of battery state.
-                val memoryPressureBannedGpu = sizeMb > (profile.availableRamMb * 0.6)
+                // GPU VRAM safety for large models. Tier-aware because the
+                // 60 % multiplier was unfairly banning Gemma 4 E4B (3490 MB)
+                // from GPU on Galaxy S23+ class devices (12 GB total RAM,
+                // ~5.3 GB free) — the model fits comfortably but the gate
+                // forced the CPU/XNNPACK path, which dropped throughput
+                // from ~17 tps to ~3 tps and gave the "stops responding"
+                // impression. Flagship phones hold the rest of total RAM
+                // in reclaimable system caches, so we can stretch
+                // availableRamMb further without OOM risk.
+                val gpuMemMultiplier = when (profile.tier) {
+                    com.saarthi.core.inference.model.DeviceTier.FLAGSHIP -> 0.85
+                    com.saarthi.core.inference.model.DeviceTier.MID      -> 0.70
+                    else                                                 -> 0.60
+                }
+                val memoryPressureBannedGpu = sizeMb > (profile.availableRamMb * gpuMemMultiplier)
                 if (memoryPressureBannedGpu && sizeMb > 2000) {
-                    DebugLogger.log("LITERT", "[GPU] BANNED: Model size (${sizeMb}MB) is too large for available RAM (${profile.availableRamMb}MB). Falling back to CPU.")
+                    DebugLogger.log("LITERT", "[GPU] BANNED: Model size (${sizeMb}MB) > availRam (${profile.availableRamMb}MB) × ${gpuMemMultiplier} on tier=${profile.tier}. Falling back to CPU.")
+                }
+
+                // Pre-load memory trim — large models (>1.5 GB) benefit from
+                // a GC pass before the native engine claims its working set.
+                // Often reclaims 200-500 MB on Android and is the difference
+                // between a clean GPU load and the gate above flipping to CPU.
+                // No-op when memory is already plentiful; cheap (~200 ms).
+                if (sizeMb > 1500) {
+                    System.gc()
+                    Thread.sleep(80)
+                    System.gc()
+                    Thread.sleep(80)
+                    runCatching {
+                        val am = context.getSystemService(android.app.ActivityManager::class.java)
+                        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+                        val freshAvailMb = mi.availMem / 1_048_576
+                        DebugLogger.log("LITERT", "[MEM] pre-load trim: availRam ${profile.availableRamMb}MB → ${freshAvailMb}MB")
+                    }
                 }
 
                 DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
@@ -970,12 +1038,29 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                 }
 
-                // Use the persistent activeConversation.
-                // If null (shouldn't happen), create one as safety fallback.
+                // Pick sampler based on whether this turn is RAG-grounded
+                // (prompt carries the strict-mode "ATTACHED EXCERPTS"
+                // header). When mode flips from the previously-cached
+                // conversation, recycle so the new sampler actually
+                // takes effect — `createConversation` is the only place
+                // the sampler is bound.
+                val groundedNow = isGroundedPrompt(prompt)
+                val desiredSampler = if (groundedNow) groundedSamplerFor(loadedModelPath ?: "")
+                                     else samplerForActiveModel()
+                if (activeConversation != null && conversationIsGrounded != groundedNow) {
+                    DebugLogger.log("LITERT", "[SAMPLER] mode flipped (grounded=$groundedNow) — recycling conversation")
+                    runCatching { activeConversation?.close() }
+                    activeConversation = runCatching {
+                        eng.createConversation(ConversationConfig(samplerConfig = desiredSampler))
+                    }.getOrNull()
+                    conversationIsGrounded = groundedNow
+                }
+                // Safety fallback when there's no conversation yet (very
+                // first send after init, or after a recycle failure).
                 if (activeConversation == null) {
-                    val sc = samplerForActiveModel()
-                    activeConversation = eng.createConversation(ConversationConfig(samplerConfig = sc))
-                    DebugLogger.log("LITERT", "[GEN] Safety fallback: created new conversation")
+                    activeConversation = eng.createConversation(ConversationConfig(samplerConfig = desiredSampler))
+                    conversationIsGrounded = groundedNow
+                    DebugLogger.log("LITERT", "[GEN] Safety fallback: created new conversation  grounded=$groundedNow")
                 }
                 val conversation = activeConversation!!
 
@@ -1042,7 +1127,12 @@ class LiteRTInferenceEngine @Inject constructor(
                         // mutex that LiteRT holds until this callback returns.
                         CoroutineScope(Dispatchers.IO).launch {
                             runCatching { conversation.close() }
-                            val sc = samplerForActiveModel()
+                            // Preserve the sampler mode the just-completed turn
+                            // used — if the user is in a doc-Q&A session their
+                            // next turn is very likely also grounded, and we
+                            // avoid an extra recycle at the top of generateStream.
+                            val sc = if (conversationIsGrounded) groundedSamplerFor(loadedModelPath ?: "")
+                                     else samplerForActiveModel()
                             activeConversation = runCatching {
                                 eng.createConversation(ConversationConfig(samplerConfig = sc))
                             }.getOrNull()
@@ -1077,7 +1167,12 @@ class LiteRTInferenceEngine @Inject constructor(
                         // until this callback returns; createConversation() needs that mutex).
                         CoroutineScope(Dispatchers.IO).launch {
                             runCatching { conversation.close() }
-                            val sc = samplerForActiveModel()
+                            // Preserve the sampler mode the just-completed turn
+                            // used — if the user is in a doc-Q&A session their
+                            // next turn is very likely also grounded, and we
+                            // avoid an extra recycle at the top of generateStream.
+                            val sc = if (conversationIsGrounded) groundedSamplerFor(loadedModelPath ?: "")
+                                     else samplerForActiveModel()
                             activeConversation = runCatching {
                                 eng.createConversation(ConversationConfig(samplerConfig = sc))
                             }.getOrNull()

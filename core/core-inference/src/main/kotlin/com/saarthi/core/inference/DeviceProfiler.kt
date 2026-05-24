@@ -52,9 +52,23 @@ class DeviceProfiler @Inject constructor(
         val availRamMb = memInfo.availMem / 1_048_576
 
         // ── Safe Model Budget ────────────────────────────────────────────────
-        // Rule: Use at most 75% of currently free RAM, but never more than
-        // 60% of total RAM. This ensures the OS always has breathing room.
-        val budgetFromAvail = (availRamMb * 75) / 100
+        // Rule (tier-aware): use up to N% of available RAM, but never more
+        // than 60% of total RAM.
+        //   • Flagship phones (10 GB+ total RAM) hold large amounts in
+        //     reclaimable caches — 85% of `availMem` is genuinely
+        //     available because the OS evicts caches on memory pressure.
+        //     The previous 75% was too conservative and was hiding
+        //     Gemma 4 E4B (3490 MB) from the picker on Galaxy S23+ class
+        //     devices, forcing the user to manually clear RAM repeatedly.
+        //   • Mid-tier keeps 75% (the previous default).
+        //   • Low/minimal RAM devices stay at 65% so the OS isn't pushed
+        //     into a thrash / LMK cycle by a borderline model.
+        val availMultiplier = when {
+            totalRamMb >= 10_000L -> 85
+            totalRamMb >= 6_000L  -> 75
+            else                  -> 65
+        }
+        val budgetFromAvail = (availRamMb * availMultiplier) / 100
         val budgetFromTotal = (totalRamMb * 60) / 100
         val safeModelBudgetMb = minOf(budgetFromAvail, budgetFromTotal)
 

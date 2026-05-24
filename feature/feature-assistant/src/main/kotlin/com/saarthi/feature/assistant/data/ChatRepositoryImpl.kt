@@ -653,19 +653,19 @@ class ChatRepositoryImpl @Inject constructor(
         val rulesHeader = if (tier == SystemPromptProvider.ModelTier.COMPACT) {
             "Attached excerpts — base your answer on these. Cite [N]. If the exact answer isn't here, say so and summarise the closest related content from the excerpts.\n\n"
         } else {
-            // Softer than the previous hard refusal rule. The earlier
-            // "reply EXACTLY 'I don't see that in your documents.'" line
-            // made the model bail with a 13-token refusal even when
-            // related content was right there in chunks 1-4 (production
-            // log at 12:25:38 for "What is the conclusion?"). Now: model
-            // may say "not directly stated" + summarise the closest
-            // related content from the excerpts. Hallucinating facts
-            // that aren't in the excerpts is still forbidden.
+            // Softer than the previous hard refusal rule + a worked
+            // citation example. Gemma 4 follows `[N, p.X]` on its first
+            // sentence and then drops to bare `[N]` — the in-prompt
+            // example below shows the exact pattern we want repeated so
+            // the model has something to mirror instead of inferring.
             "ATTACHED EXCERPTS — base every claim on these excerpts ONLY. " +
-                "Cite [N] for every claim (use [N, p.X] when the excerpt contains 'Page X' — keep this format on EVERY citation, not just the first). " +
+                "Cite [N] for every claim (use [N, p.X] when the excerpt shows 'Page X'). " +
+                "Repeat the full [N] or [N, p.X] form on EVERY claim — never drop to a bare number later in the reply. " +
                 "If the exact answer isn't in the excerpts, begin with \"$noMatchLine\" and then summarise the closest related content from the excerpts with citations. " +
                 "Never invent facts that aren't in the excerpts. " +
-                "Quote numbers, names, and dates verbatim.\n\n"
+                "Quote numbers, names, and dates verbatim.\n\n" +
+                "Example of the citation style required throughout the reply:\n" +
+                "  \"Under [1, p.3], a Data Fiduciary must obtain consent. Significant Data Fiduciaries also appoint a DPO [2, p.4]. Penalties go up to ₹250 crore [3, p.6].\"\n\n"
         }
 
         // Unreadable-file notes are short, high-signal, and small. Reserve
