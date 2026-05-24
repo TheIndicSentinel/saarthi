@@ -54,7 +54,13 @@ fun renderMarkdown(input: String): AnnotatedString = buildAnnotatedString {
         withStyle(
             SpanStyle(
                 fontFamily = FontFamily.Monospace,
-                background = Color(0x33000000),
+                // Marigold-tinted background — visible on both the dark
+                // assistant bubble (NavyMid) and the light theme without
+                // depending on theme tokens. Previous 0x33000000 (20%
+                // black) was nearly invisible on the dark bubble; this
+                // 33% marigold tint keeps code blocks clearly delimited
+                // and matches the brand accent.
+                background = Color(0x55F4A52E),
             )
         ) { append(codeBody) }
     }
@@ -243,7 +249,13 @@ private fun AnnotatedString.Builder.appendInline(text: String) {
                     withStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
-                            background = Color(0x33000000),
+                            // Marigold-tinted background — visible on both the dark
+                // assistant bubble (NavyMid) and the light theme without
+                // depending on theme tokens. Previous 0x33000000 (20%
+                // black) was nearly invisible on the dark bubble; this
+                // 33% marigold tint keeps code blocks clearly delimited
+                // and matches the brand accent.
+                background = Color(0x55F4A52E),
                         )
                     ) { append(text.substring(i + 1, end)) }
                     i = end + 1

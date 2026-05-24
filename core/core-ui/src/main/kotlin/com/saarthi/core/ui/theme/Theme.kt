@@ -29,6 +29,14 @@ private fun darkScheme() = darkColorScheme(
     onError          = DarkPalette.text,
     outline          = DarkPalette.border,
     outlineVariant   = DarkPalette.borderHi,
+    // Snackbar uses these by default. Without them Material 3 falls back
+    // to its built-in defaults (white-on-white in a custom-theme dark
+    // scheme) which made every snackbar invisible. On dark theme the
+    // inverse pair is a LIGHT surface + DARK text so the snackbar
+    // contrasts with the warm dark UI underneath.
+    inverseSurface   = DarkPalette.text,
+    inverseOnSurface = DarkPalette.bg,
+    inversePrimary   = DarkPalette.marigoldDim,
 )
 
 private fun lightScheme() = lightColorScheme(
@@ -50,6 +58,11 @@ private fun lightScheme() = lightColorScheme(
     onError          = LightPalette.onMarigold,
     outline          = LightPalette.border,
     outlineVariant   = LightPalette.borderHi,
+    // On light theme, inverse is DARK surface + LIGHT text — same
+    // reasoning as the dark scheme but flipped.
+    inverseSurface   = LightPalette.text,
+    inverseOnSurface = LightPalette.bg,
+    inversePrimary   = LightPalette.marigoldDim,
 )
 
 data class SaarthiExtendedColors(

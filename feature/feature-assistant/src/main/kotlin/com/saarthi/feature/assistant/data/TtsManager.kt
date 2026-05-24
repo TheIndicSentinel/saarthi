@@ -127,31 +127,71 @@ class TtsManager @Inject constructor(
 
     /**
      * Find the best on-device voice for [locale] matching the requested
-     * gender. Android's `Voice.features` set contains `"male"` / `"female"`
-     * tags on most stock voices; we fall back to name-pattern heuristics
-     * (`#male`, `#female`, locale `_m_` / `_f_`) for OEM TTS engines that
-     * don't expose features. Returns null if nothing matches — caller keeps
-     * the current voice.
+     * gender. Three-tier match strategy:
+     *
+     *   1. Strict feature/name tag for the WANTED gender → pick it.
+     *   2. Any voice that is NOT clearly the opposite gender → pick it.
+     *   3. No match at all → return null so the system default plays.
+     *
+     * The previous version fell back to `candidates.firstOrNull()` on no
+     * gender match — on most Android devices the first voice in the
+     * list is FEMALE (e.g. `en-us-x-tpf-local`), which is why Pandit ji,
+     * Kathakar, and Coach Singh were all playing in a female voice
+     * despite their `VoiceHint(gender = MALE, …)` data. Tier 2's
+     * anti-pattern filter prevents that flip.
+     *
+     * Within each tier we sort by `Voice.quality` DESC so the best-
+     * sounding local voice wins — Android exposes VERY_HIGH/HIGH/NORMAL
+     * /LOW/VERY_LOW and the picker now actually prefers higher tiers.
+     * That's the only practical lever we have for "less robotic" on an
+     * offline-first app (network-connected voices are intentionally
+     * excluded — they require connectivity we don't promise).
      */
     private fun pickVoiceByGender(
         locale: Locale,
         gender: com.saarthi.core.i18n.VoiceGender,
     ): android.speech.tts.Voice? {
         val engine = tts ?: return null
-        val want = if (gender == com.saarthi.core.i18n.VoiceGender.MALE) "male" else "female"
+        val wantMale = gender == com.saarthi.core.i18n.VoiceGender.MALE
+
+        // Filter to local voices for this language; sort by quality DESC.
         val candidates = runCatching { engine.voices }.getOrNull().orEmpty()
             .filter {
-                // Locale match (language-only — region-strict is too restrictive
-                // for the long tail of TTS voice naming).
                 it.locale.language == locale.language && !it.isNetworkConnectionRequired
             }
+            .sortedByDescending { runCatching { it.quality }.getOrDefault(0) }
         if (candidates.isEmpty()) return null
-        return candidates.firstOrNull { v ->
+
+        // Indic-aware Google TTS voice-ID hints. en-in / en-us / hi-in
+        // gendered voices follow these naming infixes; the regexes also
+        // match Samsung TTS naming conventions.
+        val malePattern   = Regex("(?:^|[-_#])(male|iol|iom|tpd|and|ene|mlc|mlh)(?:[-_#]|$)", RegexOption.IGNORE_CASE)
+        val femalePattern = Regex("(?:^|[-_#])(female|tpf|tpc|iog|cxx|flc|flh)(?:[-_#]|$)", RegexOption.IGNORE_CASE)
+        val wantPattern = if (wantMale) malePattern else femalePattern
+        val antiPattern = if (wantMale) femalePattern else malePattern
+
+        fun matchesGender(v: android.speech.tts.Voice, pattern: Regex, label: String): Boolean {
             val features = runCatching { v.features }.getOrNull().orEmpty()
-            features.any { it.equals(want, ignoreCase = true) } ||
-                v.name.contains("#$want", ignoreCase = true) ||
-                v.name.contains("_${want.first()}_", ignoreCase = true)
-        } ?: candidates.firstOrNull()  // No tagged match — pick any local voice for the locale.
+            if (features.any { it.equals(label, ignoreCase = true) }) return true
+            return pattern.containsMatchIn(v.name)
+        }
+
+        // Tier 1: explicitly the wanted gender.
+        val wantedLabel = if (wantMale) "male" else "female"
+        candidates.firstOrNull { matchesGender(it, wantPattern, wantedLabel) }?.let { return it }
+
+        // Tier 2: NOT clearly the opposite gender. Saves us from the
+        // old "fallback to first voice (usually female)" failure mode.
+        val antiLabel = if (wantMale) "female" else "male"
+        candidates.firstOrNull { !matchesGender(it, antiPattern, antiLabel) }?.let { return it }
+
+        // Tier 3: no acceptable voice exists locally — keep the system
+        // default so we don't silently play the wrong gender.
+        DebugLogger.log(
+            "TTS",
+            "No $wantedLabel voice found among ${candidates.size} candidate(s); keeping system default",
+        )
+        return null
     }
 
     fun stop() {
