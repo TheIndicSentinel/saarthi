@@ -59,10 +59,20 @@ class RagDocumentRepository @Inject constructor(
         // — which has no "summarise this"-style anchor — still hits the
         // meta path. The phrase list below catches multi-word forms.
         private val META_TOKEN_TRIGGERS = setOf(
-            // English
+            // Whole-doc summary
             "summarise", "summarize", "summary", "synopsis",
             "tldr", "tl;dr", "overview", "outline", "toc",
+            // Structure
             "sections", "chapters", "headings",
+            // Positional — bottom of the doc. "What is the conclusion?"
+            // at 12:25:34 went through BM25 and got a refusal; structural
+            // sampling always includes the last chunks so positional
+            // queries land on the actual ending material.
+            "conclusion", "concluding", "conclude", "conclusions",
+            "ending", "endings", "final", "wrap-up", "wrapup",
+            // Positional — top of the doc.
+            "introduction", "intro", "preface", "foreword", "beginning",
+            "preamble", "opening",
             // Hindi (Latin transliteration)
             "saaransh", "vishaysuchi", "anukramani",
         )
@@ -138,7 +148,14 @@ class RagDocumentRepository @Inject constructor(
         }
         ragChunkDao.insertAll(entities)
         val hasOutline = entities.firstOrNull()?.chunkIndex == OUTLINE_CHUNK_INDEX
-        Timber.d("RAG: indexed ${entities.size} chunks (outline=$hasOutline) for ${file.name} (session=$sessionId)")
+        val totalChars = entities.sumOf { it.text.length }
+        // DebugLogger so it surfaces in the user-visible saarthi_debug.log
+        // — Timber alone is invisible in production captures.
+        com.saarthi.core.inference.DebugLogger.log(
+            "RAG",
+            "indexed ${entities.size} chunks (${totalChars}c, outline=$hasOutline) for ${file.name} (session=$sessionId)"
+        )
+        Timber.d("RAG: indexed ${entities.size} chunks (${totalChars}c, outline=$hasOutline) for ${file.name}")
     }
 
     /**
@@ -175,24 +192,52 @@ class RagDocumentRepository @Inject constructor(
         if (contentChunks.isEmpty()) return emptyList()
 
         val ranked = Bm25Retriever.rank(contentChunks.map { it.text }, query, topK)
-        val bm25Hits = ranked.map { (idx, score) ->
-            val e = contentChunks[idx]
-            RetrievedChunk(e.text, e.docName, score, e.chunkIndex)
+
+        // Neighbor expansion: for the top BM25 hits, also include the
+        // *next* chunk in the same document. Answers often straddle a
+        // chunk boundary — the keyword lands in chunk 5 but the actual
+        // sentence finishes in chunk 6 (or the relevant numbers / table
+        // sits one chunk later). Pulling in the immediate neighbor at
+        // half-score is cheap insurance against missing the conclusion
+        // of the matched passage.
+        val docChunksByUri = contentChunks.groupBy { it.docUri }
+            .mapValues { (_, list) -> list.sortedBy { it.chunkIndex } }
+
+        val usedIds = LinkedHashSet<Long>()
+        val bm25Hits = mutableListOf<RetrievedChunk>()
+        for ((rank, scored) in ranked.withIndex()) {
+            val entity = contentChunks[scored.index]
+            if (usedIds.add(entity.id)) {
+                bm25Hits.add(RetrievedChunk(entity.text, entity.docName, scored.score, entity.chunkIndex))
+            }
+            // Only the top-2 hits get neighbor expansion — beyond that
+            // BM25 itself is probably surfacing the relevant chunks.
+            if (rank < 2) {
+                val docChunks = docChunksByUri[entity.docUri] ?: continue
+                val posInDoc = docChunks.indexOfFirst { it.id == entity.id }
+                docChunks.getOrNull(posInDoc + 1)?.let { neighbor ->
+                    if (usedIds.add(neighbor.id)) {
+                        bm25Hits.add(
+                            RetrievedChunk(
+                                neighbor.text, neighbor.docName,
+                                score = scored.score * 0.5,    // half-credit; neighbour, not exact match
+                                chunkIndex = neighbor.chunkIndex,
+                            )
+                        )
+                    }
+                }
+            }
         }
 
-        // If BM25 fully populated the slot, return as-is — adding
-        // structural padding here would dilute strong signal with
-        // unrelated chunks.
-        if (bm25Hits.size >= topK) return bm25Hits
+        // If BM25 + neighbors fully populated the slot, return as-is —
+        // adding structural padding here would dilute strong signal.
+        if (bm25Hits.size >= topK) return bm25Hits.take(topK)
 
-        // BM25 under-covered the query (0 or weak hits). Pad with
+        // BM25 (+ neighbors) under-covered the query. Pad with
         // structural context — outline first, then first/middle/last
         // per doc — so the model has surrounding evidence to reason
-        // against. Without this, a query with 1 weak BM25 hit gave the
-        // model 1 chunk + ~1000c of unused budget (visible at 02:35:34
-        // / 02:38:24 in the production log), which is exactly when the
-        // model started inventing citations.
-        val usedIds = ranked.map { contentChunks[it.index].id }.toMutableSet()
+        // against. Reuses `usedIds` populated by the neighbor-expansion
+        // pass above so we never re-emit the same chunk.
         val padding = mutableListOf<RetrievedChunk>()
 
         // Outline (if extracted at index time) is the highest-value
@@ -350,24 +395,79 @@ class RagDocumentRepository @Inject constructor(
     // ── Internal ─────────────────────────────────────────────────────────
 
     /**
-     * Char-based overlapping chunker. Word-aware splits matter for some
-     * embedders but BM25 tokenises internally anyway, so we keep the
-     * chunker plain-char for simplicity. The +overlap window preserves
-     * the answer across boundaries.
+     * Sentence/word-aware overlapping chunker.
+     *
+     * Previous version did pure char slicing every 600 chars, which cut
+     * "personal" into "per" + "sonal" and "have" into "ha" + "ve" — the
+     * resulting chunk fragments could not match BM25 query tokens, so
+     * relevant chunks scored 0. Visible in the production log at
+     * 04:41:59 / 12:21:01: previews like `"sonal data is processed…"`
+     * and `"ve, manage, review…"` came straight from mid-word cuts.
+     *
+     * Now: end each chunk at a sentence boundary (`.`, `!`, `?`, `\n`)
+     * within the latter half of the chunk, or — if no sentence end is
+     * found — at a word boundary. The next chunk also starts at a word
+     * boundary so the overlap window doesn't reintroduce the fragment.
      */
     private fun chunkText(text: String): List<String> {
         val cleaned = text.trim()
         if (cleaned.length <= CHUNK_SIZE) return listOf(cleaned)
+
         val chunks = ArrayList<String>(cleaned.length / CHUNK_SIZE + 1)
         var start = 0
         while (start < cleaned.length) {
-            val end = (start + CHUNK_SIZE).coerceAtMost(cleaned.length)
+            // Skip leading whitespace so a chunk never starts with a blank.
+            while (start < cleaned.length && cleaned[start].isWhitespace()) start++
+            if (start >= cleaned.length) break
+
+            val hardEnd = (start + CHUNK_SIZE).coerceAtMost(cleaned.length)
+            val end = when {
+                hardEnd >= cleaned.length -> hardEnd
+                else -> {
+                    // Prefer sentence end inside [start + half, hardEnd].
+                    val sentenceEnd = findSentenceBoundary(cleaned, start + CHUNK_SIZE / 2, hardEnd)
+                    if (sentenceEnd > 0) sentenceEnd
+                    // Fall back to next whitespace after hardEnd — never cut a word.
+                    else findWordBoundary(cleaned, hardEnd)
+                }
+            }
+
             val piece = cleaned.substring(start, end).trim()
             if (piece.isNotBlank()) chunks += piece
-            if (end == cleaned.length) break
-            start = end - CHUNK_OVERLAP
+            if (end >= cleaned.length) break
+
+            // Overlap window also starts at a word boundary.
+            val overlapAnchor = (end - CHUNK_OVERLAP).coerceAtLeast(start + 1)
+            start = skipToWordStart(cleaned, overlapAnchor)
         }
         return chunks
+    }
+
+    /** Latest position in `[lo, hi)` that ends a sentence (returns char AFTER the terminator), or 0 if none. */
+    private fun findSentenceBoundary(text: String, lo: Int, hi: Int): Int {
+        if (lo >= hi) return 0
+        for (i in (hi - 1) downTo lo.coerceAtLeast(0)) {
+            val c = text[i]
+            if (c == '.' || c == '!' || c == '?' || c == '\n') {
+                val next = i + 1
+                if (next >= text.length || text[next].isWhitespace()) return next
+            }
+        }
+        return 0
+    }
+
+    /** Walk RIGHT from `idx` until the first whitespace — returns that position so chunks end on whole words. */
+    private fun findWordBoundary(text: String, idx: Int): Int {
+        var i = idx.coerceAtMost(text.length)
+        while (i < text.length && !text[i].isWhitespace()) i++
+        return i
+    }
+
+    /** Walk RIGHT from `idx` past any whitespace — returns the first non-space position so chunks start on a word. */
+    private fun skipToWordStart(text: String, idx: Int): Int {
+        var i = idx.coerceAtLeast(0)
+        while (i < text.length && text[i].isWhitespace()) i++
+        return i
     }
 }
 

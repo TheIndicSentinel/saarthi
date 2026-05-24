@@ -649,17 +649,22 @@ class ChatRepositoryImpl @Inject constructor(
         // header-only fragment that wastes tokens.
         if (charBudget < 200) return ""
 
-        val noMatchLine = "I don't see that in your documents."
+        val noMatchLine = "I don't see that directly in your documents"
         val rulesHeader = if (tier == SystemPromptProvider.ModelTier.COMPACT) {
-            "Attached excerpts — answer ONLY from these. Cite [N]. If the answer isn't here, reply: \"$noMatchLine\"\n\n"
+            "Attached excerpts — base your answer on these. Cite [N]. If the exact answer isn't here, say so and summarise the closest related content from the excerpts.\n\n"
         } else {
-            // Page-cite hint ([N, p.X]): chunks from OCR'd PDFs carry
-            // `--- Page X ---` markers inline, so a model that follows
-            // this rule gives the user a click-checkable reference
-            // rather than the bare [N] which was getting cross-wired.
-            "ATTACHED EXCERPTS — answer ONLY from these. Cite [N] for every claim " +
-                "(use [N, p.X] when the excerpt contains 'Page X'). " +
-                "If the answer isn't here, reply EXACTLY \"$noMatchLine\". " +
+            // Softer than the previous hard refusal rule. The earlier
+            // "reply EXACTLY 'I don't see that in your documents.'" line
+            // made the model bail with a 13-token refusal even when
+            // related content was right there in chunks 1-4 (production
+            // log at 12:25:38 for "What is the conclusion?"). Now: model
+            // may say "not directly stated" + summarise the closest
+            // related content from the excerpts. Hallucinating facts
+            // that aren't in the excerpts is still forbidden.
+            "ATTACHED EXCERPTS — base every claim on these excerpts ONLY. " +
+                "Cite [N] for every claim (use [N, p.X] when the excerpt contains 'Page X' — keep this format on EVERY citation, not just the first). " +
+                "If the exact answer isn't in the excerpts, begin with \"$noMatchLine\" and then summarise the closest related content from the excerpts with citations. " +
+                "Never invent facts that aren't in the excerpts. " +
                 "Quote numbers, names, and dates verbatim.\n\n"
         }
 
