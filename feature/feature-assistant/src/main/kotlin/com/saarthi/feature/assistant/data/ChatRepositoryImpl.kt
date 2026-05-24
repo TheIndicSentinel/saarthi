@@ -407,15 +407,29 @@ class ChatRepositoryImpl @Inject constructor(
                 else                                              -> MAX_PROMPT_CHARS_COMPACT
             }
             // When the session has documents pinned, the prompt carries dense
-            // RAG content (code, tables, lists) whose chars/token ratio is
-            // closer to 3.5:1 instead of the usual 4:1 for prose. Drop the
-            // ceiling by 30% whenever docs are active so RAG content stays
-            // well under the native KV cache cap. The cached `indexedDocsByUri`
-            // set is the synchronous gate — populated by streamResponse() the
-            // moment an attachment lands, so the budget tightens on the very
-            // first send and stays tight for the rest of the session.
+            // RAG content whose chars/token ratio is closer to 3:1 instead of
+            // ~4:1 for prose, so we trim the budget to stay under the native
+            // KV-cache cap. The cached `indexedDocsByUri` set is the
+            // synchronous gate — populated by streamResponse() the moment an
+            // attachment lands.
+            //
+            // Tier-aware multiplier (was a flat 0.7 for every tier). The
+            // flat value was correct for LARGE (8000 × 0.7 = 5600 leaves
+            // room for system + chunks) but broken for STANDARD: 5000 × 0.7
+            // = 3500 c, while Gemma 3n's STANDARD system prompt is ~3769 c —
+            // already over budget by itself, leaving zero room for RAG.
+            // Visible in the production log at 21:48:16 as
+            // `ragBudget=0 ragChars=0`, after which the model responded
+            // about the time-context line because it had no doc context.
             val hasDocs = indexedDocsByUri[_currentSessionId.value]?.isNotEmpty() == true
-            return if (hasDocs) (baseBudget * 0.7).toInt() else baseBudget
+            if (!hasDocs) return baseBudget
+            val docsMultiplier = when (baseBudget) {
+                MAX_PROMPT_CHARS_COMPACT  -> 0.70    // 1500 → 1050 — COMPACT no longer attaches anyway
+                MAX_PROMPT_CHARS_STANDARD -> 0.92    // 5000 → 4600 — leaves ~600 c for RAG over Gemma 3n's verbose prompt
+                MAX_PROMPT_CHARS_2048     -> 0.85    // 5500 → 4675 — Gemma 2
+                else                       -> 0.70    // 8000 → 5600 — LARGE (Gemma 4), unchanged
+            }
+            return (baseBudget * docsMultiplier).toInt()
         }
 
     // DeviceProfiler.profile() makes several system calls (MemoryInfo, thermal,
