@@ -175,8 +175,26 @@ class RagDocumentRepository @Inject constructor(
         sessionId: String,
         query: String,
         topK: Int = DEFAULT_TOP_K,
+        /**
+         * Restricts retrieval to chunks belonging to these document URIs.
+         * Used so that when the user attaches a new PDF, follow-up turns
+         * focus on that PDF instead of dredging up earlier-attached docs
+         * from the same session — without this, attaching `JobDesc.pdf`
+         * and asking "Give overview" returned DPDP chunks first because
+         * the older DPDP outline outranked everything else.
+         *
+         * Pass `null` (or an empty set) for the legacy behaviour: search
+         * across every chunk in the session.
+         */
+        restrictToDocUris: Set<String>? = null,
     ): List<RetrievedChunk> {
-        val all = ragChunkDao.getBySession(sessionId)
+        val raw = ragChunkDao.getBySession(sessionId)
+        // Defensive: if the URI restriction produces an empty set (e.g.
+        // the focused doc was deleted from Room since being marked) fall
+        // back to the full corpus rather than returning no context at all.
+        val all = if (!restrictToDocUris.isNullOrEmpty()) {
+            raw.filter { it.docUri in restrictToDocUris }.ifEmpty { raw }
+        } else raw
         if (all.isEmpty()) return emptyList()
 
         if (isMetaQuery(query)) {

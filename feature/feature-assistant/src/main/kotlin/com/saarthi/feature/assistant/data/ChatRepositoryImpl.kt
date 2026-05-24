@@ -100,6 +100,14 @@ class ChatRepositoryImpl @Inject constructor(
     // after the first turn that attached the file.
     private val indexedDocsByUri: MutableMap<String, MutableSet<String>> = mutableMapOf()
 
+    // The doc URIs the user MOST RECENTLY attached in each session — these
+    // become the "focus" set: subsequent RAG searches restrict to these
+    // until the user attaches a different batch. Without this, attaching
+    // a second PDF and asking "Give overview" pulled chunks from the FIRST
+    // PDF because they were still indexed under the same session.
+    // Memory-only by design — fresh chat / fresh launch resets focus.
+    private val focusedDocsBySession: MutableMap<String, Set<String>> = mutableMapOf()
+
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
     private val currentLanguage: SupportedLanguage
@@ -161,6 +169,7 @@ class ChatRepositoryImpl @Inject constructor(
         memoryRepository.deleteForSession(sessionId)
         ragRepository.deleteForSession(sessionId)
         indexedDocsByUri.remove(sessionId)
+        focusedDocsBySession.remove(sessionId)
         chatSessionDao.deleteById(sessionId)
         if (_currentSessionId.value == sessionId) {
             val remaining = chatSessionDao.getAll()
@@ -237,6 +246,11 @@ class ChatRepositoryImpl @Inject constructor(
                         .onFailure { DebugLogger.log("RAG", "Index failed for ${file.name}: ${it.message}") }
                 }
                 if (newCount > 0) DebugLogger.log("RAG", "Indexed $newCount doc(s) inline before retrieval  session=$sessionId")
+                // Set this batch as the active focus — every subsequent
+                // turn searches only inside these docs until the user
+                // attaches a different set or clears the chat.
+                focusedDocsBySession[sessionId] = attachments.map { it.uri.toString() }.toSet()
+                DebugLogger.log("RAG", "Focus set to ${attachments.size} doc(s) for session=$sessionId")
             }
             buildPrompt(userMessage, attachments)
         }
@@ -363,6 +377,7 @@ class ChatRepositoryImpl @Inject constructor(
         memoryRepository.deleteForSession(sessionId)
         ragRepository.deleteForSession(sessionId)
         indexedDocsByUri.remove(sessionId)
+        focusedDocsBySession.remove(sessionId)
         chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
@@ -458,7 +473,10 @@ class ChatRepositoryImpl @Inject constructor(
         // Files attached on THIS turn are surfaced as error/unindexable
         // notes (binary, oversize) so the model knows they exist even
         // when there is no text to retrieve.
-        val retrieved = runCatching { ragRepository.search(sessionId, userMessage) }.getOrDefault(emptyList())
+        val focusUris = focusedDocsBySession[sessionId]
+        val retrieved = runCatching {
+            ragRepository.search(sessionId, userMessage, restrictToDocUris = focusUris)
+        }.getOrDefault(emptyList())
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
 
         // Per-chunk retrieval log — names + chunk index + BM25 score +
