@@ -354,7 +354,22 @@ fun AssistantScreen(
                     inputText = uiState.inputText,
                     onInputChange = viewModel::onInputChange,
                     onSend = viewModel::sendMessage,
-                    onAttachClick = { scope.launch { attachmentSheetState.show() } },
+                    onAttachClick = {
+                        // COMPACT-tier (Gemma 1B) can't usefully process
+                        // RAG context inside its 512-tok budget — it
+                        // returns "I'm not sure about that" even when
+                        // the chunks contain the answer. Block the attach
+                        // sheet and tell the user how to fix it.
+                        if (!uiState.attachmentsEnabled) {
+                            scope.launch {
+                                snackbarHost.showSnackbar(
+                                    "Attachments need a larger model — switch to Gemma 4 from Settings → Models.",
+                                )
+                            }
+                        } else {
+                            scope.launch { attachmentSheetState.show() }
+                        }
+                    },
                     onVoiceClick = {
                         if (micPermission.status.isGranted) {
                             viewModel.openVoiceMode()

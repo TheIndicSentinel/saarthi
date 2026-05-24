@@ -64,13 +64,38 @@ class FileContentExtractor @Inject constructor(
             )
         }
 
+        val lowerName = name.lowercase()
         val isText = TEXT_MIME_TYPES.any { mime.startsWith(it) } ||
                 name.endsWithAny(".txt", ".md", ".csv", ".json", ".xml", ".kt", ".py",
                     ".js", ".ts", ".yaml", ".yml", ".html", ".log")
+        // .docx — modern Word documents are ZIP archives containing
+        // word/document.xml. Native parsing keeps it dep-free (no
+        // Apache POI / +5 MB APK).
+        val isDocx = mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                lowerName.endsWith(".docx")
+        // Legacy .doc binary format requires Apache POI to parse; surface
+        // a clear user-facing error rather than the generic "binary" path
+        // so the user knows to re-save the file.
+        val isLegacyDoc = !isDocx && (
+            mime == "application/msword" ||
+                (lowerName.endsWith(".doc") && !lowerName.endsWith(".docx"))
+        )
+        if (isLegacyDoc) {
+            return AttachedFile(
+                uri = uri,
+                name = name,
+                mimeType = mime,
+                sizeBytes = size,
+                extractedText = null,
+                isImage = false,
+                error = "Legacy .doc isn't supported yet. Save the file as .docx (File → Save As → Word Document) and re-attach.",
+            )
+        }
 
         val extractedText = when {
             isText -> readTextContent(uri, MAX_EXTRACTED_CHARS)
             mime == "application/pdf" -> extractPdfText(uri)
+            isDocx -> extractDocxText(uri)
             isImage -> extractImageText(uri)
             else -> null
         }
@@ -189,6 +214,73 @@ class FileContentExtractor @Inject constructor(
             Timber.e(e, "PDF OCR failed")
             "[PDF: Could not read file contents]"
         }
+    }
+
+    /**
+     * .docx (Word) text extraction without an external library.
+     *
+     * A .docx file is a ZIP archive whose `word/document.xml` entry
+     * carries the document body in OOXML. We open the ZIP via
+     * `java.util.zip.ZipInputStream` (stdlib), pull that one entry,
+     * strip the XML tags, and decode the standard entities. Paragraph
+     * (`</w:p>`) and table-row (`</w:tr>`) ends become newlines so
+     * the BM25 chunker sees real paragraph boundaries downstream.
+     *
+     * Raw XML is capped at ~600 KB before parsing so a pathologically
+     * large doc can't OOM the process even though the source file is
+     * already bounded by [MAX_FILE_BYTES] above.
+     */
+    private suspend fun extractDocxText(uri: Uri): String = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                java.util.zip.ZipInputStream(input).use { zis ->
+                    val xmlCapBytes = MAX_EXTRACTED_CHARS * 6  // ~600 KB ceiling
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        if (entry.name == "word/document.xml") {
+                            val out = java.io.ByteArrayOutputStream(64 * 1024)
+                            val buf = ByteArray(8 * 1024)
+                            var total = 0
+                            var n = zis.read(buf)
+                            while (n >= 0 && total < xmlCapBytes) {
+                                val take = minOf(n, xmlCapBytes - total)
+                                out.write(buf, 0, take)
+                                total += take
+                                n = zis.read(buf)
+                            }
+                            return@runCatching parseDocxXml(out.toString(Charsets.UTF_8.name()))
+                        }
+                        entry = zis.nextEntry
+                    }
+                    "[Word document: could not locate document body — file may be corrupt]"
+                }
+            } ?: "[Word document: could not open file]"
+        }.getOrElse { e ->
+            Timber.e(e, "DOCX extract failed")
+            "[Word document: could not read contents]"
+        }
+    }
+
+    /** Convert OOXML body to plain text, preserving paragraph breaks. */
+    private fun parseDocxXml(xml: String): String {
+        val withBreaks = xml
+            .replace("</w:p>", "\n")
+            .replace("</w:tr>", "\n")
+            .replace(Regex("<w:tab[^/]*/>"), "\t")
+            .replace(Regex("<w:br[^/]*/>"), "\n")
+        val stripped = Regex("<[^>]+>").replace(withBreaks, "")
+        val decoded = stripped
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+        val cleaned = decoded
+            .replace(Regex("[ \\t]+"), " ")
+            .replace(Regex("\\n[ \\t]+"), "\n")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+        return if (cleaned.length > MAX_EXTRACTED_CHARS) cleaned.take(MAX_EXTRACTED_CHARS) else cleaned
     }
 
     private suspend fun extractImageText(uri: Uri): String? = runCatching {

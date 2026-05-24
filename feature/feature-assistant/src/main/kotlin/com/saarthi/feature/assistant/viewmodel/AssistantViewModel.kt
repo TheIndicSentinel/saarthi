@@ -46,6 +46,14 @@ data class AssistantUiState(
     val tokensPerSecond: Float = 0f,
     val modelReady: Boolean = false,
     val activeModelName: String? = null,
+    /**
+     * False when the active model is the COMPACT tier (Gemma 3 1B etc.) —
+     * the 512-tok budget can't carry a system prompt + RAG chunks + user
+     * message without the answer becoming "I'm not sure about that".
+     * The UI uses this to gate the attach-file button + show a hint that
+     * the user should switch to Gemma 4 to use attachments.
+     */
+    val attachmentsEnabled: Boolean = true,
     val error: String? = null,
     val showAttachmentSheet: Boolean = false,
     val showClearDialog: Boolean = false,
@@ -116,9 +124,19 @@ class AssistantViewModel @Inject constructor(
             .onEach { ready -> _uiState.update { it.copy(modelReady = ready) } }
             .launchIn(viewModelScope)
 
-        // Observe active model name changes
+        // Observe active model name changes — and derive the attachment
+        // gate from it. COMPACT tier (1B-class models) can't reliably
+        // handle RAG context; the chat repository's prompt budget would
+        // crowd the chunks out anyway, so we disable the attach button.
         inferenceEngine.activeModelNameFlow
-            .onEach { name -> _uiState.update { it.copy(activeModelName = name) } }
+            .onEach { name ->
+                _uiState.update {
+                    it.copy(
+                        activeModelName = name,
+                        attachmentsEnabled = !isCompactModel(name),
+                    )
+                }
+            }
             .launchIn(viewModelScope)
 
         // TTS — clear the highlighted message-id as soon as TTS reports it's
@@ -368,5 +386,15 @@ class AssistantViewModel @Inject constructor(
         speechRecognizer?.destroy()
         ttsManager.stop()
         super.onCleared()
+    }
+
+    /**
+     * COMPACT-tier detector — mirrors [SystemPromptProvider.tierFor] for
+     * the only branch the UI needs to gate on. Kept inline to avoid
+     * adding SystemPromptProvider to the constructor for one boolean.
+     */
+    private fun isCompactModel(name: String?): Boolean {
+        val n = (name ?: "").lowercase()
+        return n.contains("1b") || n.contains("compact")
     }
 }
