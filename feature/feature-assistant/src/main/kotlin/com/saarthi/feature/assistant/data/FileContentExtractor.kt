@@ -122,30 +122,64 @@ class FileContentExtractor @Inject constructor(
                     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                     val extracted = StringBuilder()
 
+                    // Cap rendered bitmap to ~16 MP / ~64 MB so a high-DPI
+                    // multi-page PDF can't OOM the process. Within that
+                    // cap, render at the highest scale that fits — small
+                    // pages get 4×, A4 at 72-dpi gets ~4×, huge scanned
+                    // pages auto-shrink.
+                    val maxDim = 4096
+
                     for (pageIndex in 0 until pagesToScan) {
                         renderer.openPage(pageIndex).use { page ->
-                            // Render page at 2x scale for better OCR accuracy
+                            // CRITICAL: this scale + white-fill combo is what
+                            // makes ML Kit actually return text. The previous
+                            // version created an ARGB_8888 bitmap that started
+                            // FULLY TRANSPARENT (alpha = 0); PdfRenderer's
+                            // render() draws the page contents but does NOT
+                            // paint the implicit white background that PDFs
+                            // assume. ML Kit OCR then saw dark glyphs on a
+                            // transparent canvas with near-zero contrast and
+                            // missed most of the text — the production log
+                            // showed only 2185 c extracted from a 6-page PDF.
+                            // Pre-erasing to WHITE gives the OCR proper
+                            // contrast and unlocks the rest of the document.
+                            val scale = (maxDim.toFloat() / maxOf(page.width, page.height, 1))
+                                .coerceIn(2f, 4f)
+                            val bw = (page.width * scale).toInt().coerceAtLeast(1)
+                            val bh = (page.height * scale).toInt().coerceAtLeast(1)
                             val bitmap = android.graphics.Bitmap.createBitmap(
-                                page.width * 2, page.height * 2, android.graphics.Bitmap.Config.ARGB_8888
+                                bw, bh, android.graphics.Bitmap.Config.ARGB_8888,
                             )
-                            page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            try {
+                                bitmap.eraseColor(android.graphics.Color.WHITE)
+                                page.render(
+                                    bitmap, null, null,
+                                    android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                                )
 
-                            val result = suspendCancellableCoroutine<com.google.mlkit.vision.text.Text> { cont ->
-                                val image = InputImage.fromBitmap(bitmap, 0)
-                                recognizer.process(image)
-                                    .addOnSuccessListener { cont.resume(it) }
-                                    .addOnFailureListener { cont.resumeWithException(it) }
-                            }
+                                val result = suspendCancellableCoroutine<com.google.mlkit.vision.text.Text> { cont ->
+                                    val image = InputImage.fromBitmap(bitmap, 0)
+                                    recognizer.process(image)
+                                        .addOnSuccessListener { cont.resume(it) }
+                                        .addOnFailureListener { cont.resumeWithException(it) }
+                                }
 
-                            if (result.text.isNotBlank()) {
-                                if (extracted.isNotEmpty()) extracted.appendLine()
-                                extracted.appendLine("--- Page ${pageIndex + 1} ---")
-                                extracted.append(result.text)
+                                if (result.text.isNotBlank()) {
+                                    if (extracted.isNotEmpty()) extracted.appendLine()
+                                    extracted.appendLine("--- Page ${pageIndex + 1} ---")
+                                    extracted.append(result.text)
+                                }
+                            } finally {
+                                // Free native bitmap memory immediately — at
+                                // 4× scale + 25-page limit the cumulative
+                                // pressure is significant without recycle().
+                                bitmap.recycle()
                             }
                         }
                         if (extracted.length >= MAX_EXTRACTED_CHARS) break
                     }
 
+                    Timber.d("PDF OCR: extracted ${extracted.length} chars from $pagesToScan page(s)")
                     val finalResult = extracted.toString()
                     if (finalResult.isBlank()) "[PDF: No readable text found]"
                     else finalResult.take(MAX_EXTRACTED_CHARS)
