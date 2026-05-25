@@ -36,7 +36,16 @@ sealed class Route(val path: String) {
     data object Onboarding   : Route("onboarding")
     data object Home         : Route("home")
     data object Assistant    : Route("assistant")
+    // Specialist-pack routes. Kisan tile bypasses its placeholder route
+    // and opens AssistantScreen directly with the Kisan persona pre-
+    // selected (so the curated farming pack auto-merges into RAG).
+    // The placeholder route below stays as a defensive fallback for
+    // anything that still navigates to it (e.g. deep links).
     data object KisanSaathi  : Route("kisan_saathi")
+    data object Vidya        : Route("vidya")
+    data object Karigar      : Route("karigar")
+    data object Swasth       : Route("swasth")
+    // Older route names — kept so any existing deep links don't 404.
     data object Knowledge    : Route("knowledge")
     data object FieldExpert  : Route("field_expert")
     data object Settings     : Route("settings")
@@ -142,6 +151,9 @@ fun SaarthiNavHost(
         }
 
         composable(Route.Home.path) {
+            // Pulled in inside the composable scope so the Hilt graph for
+            // PersonalityViewModel is correctly tied to this nav entry.
+            val personalityVm: com.saarthi.feature.assistant.viewmodel.PersonalityViewModel = hiltViewModel()
             HomeScreen(
                 onNavigate = { route -> navController.navigate(route.path) },
                 onChangeModel = {
@@ -149,6 +161,16 @@ fun SaarthiNavHost(
                 },
                 onChangeLanguage = { lang -> mainViewModel.setLanguage(lang) },
                 onOpenSettings = { navController.navigate(Route.Settings.path) },
+                // Kisan tile is the only LIVE pack today: pre-select the
+                // Kisan persona (which `ChatRepositoryImpl` reads via
+                // `PackId.forPersona` to merge the curated farm pack into
+                // RAG), then open the chat. `personalityVm.select` resets
+                // the session so the new persona authors its KV cache
+                // from turn one.
+                onKisanTap = {
+                    personalityVm.select(com.saarthi.core.i18n.PersonalityCatalog.KISAN.id)
+                    navController.navigate(Route.Assistant.path)
+                },
                 currentLanguage = currentLanguage,
                 greeting = currentLanguage.greeting,
                 exploreSubtitle = currentLanguage.exploreSubtitle,
@@ -209,7 +231,20 @@ fun SaarthiNavHost(
         }
 
         composable(Route.KisanSaathi.path) {
+            // Defensive fallback only — the Kisan tile now goes straight
+            // to AssistantScreen via onKisanTap above. Anything that
+            // still routes here lands on a friendly stub that tells the
+            // user how to reach Kisan mode.
             KisanSaathiPlaceholder(onBack = { navController.popBackStack() })
+        }
+        composable(Route.Vidya.path) {
+            VidyaPlaceholder(onBack = { navController.popBackStack() })
+        }
+        composable(Route.Karigar.path) {
+            KarigarPlaceholder(onBack = { navController.popBackStack() })
+        }
+        composable(Route.Swasth.path) {
+            SwasthPlaceholder(onBack = { navController.popBackStack() })
         }
 
         composable(Route.Knowledge.path) {

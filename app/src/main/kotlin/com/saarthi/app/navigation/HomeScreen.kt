@@ -68,6 +68,13 @@ fun HomeScreen(
     onChangeModel: () -> Unit = {},
     onChangeLanguage: (SupportedLanguage) -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    /**
+     * Kisan tile does more than navigate — it also pre-selects the
+     * Kisan persona so the curated farming pack auto-merges into RAG
+     * the moment the chat opens. Handled in [SaarthiNavHost] where the
+     * persona ViewModel is in scope.
+     */
+    onKisanTap: () -> Unit = { onNavigate(Route.KisanSaathi) },
     currentLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     greeting: String = currentLanguage.greeting,
     exploreSubtitle: String = currentLanguage.exploreSubtitle,
@@ -119,10 +126,18 @@ fun HomeScreen(
                             fontWeight = FontWeight.Bold,
                         ),
                     )
-                    SaarthiChip(text = "Coming soon", tone = ChipTone.Indigo, small = true)
+                    // Was "Coming soon" — Kisan is now live, so we mark
+                    // the section as Kisan-only with the others queued
+                    // as individual coming-soon stubs you tap into.
+                    SaarthiChip(text = "Kisan live", tone = ChipTone.Jade, small = true)
                 }
                 Spacer(Modifier.height(10.dp))
-                SpecialistsGrid(onClick = { onNavigate(Route.KisanSaathi) })
+                SpecialistsGrid(
+                    onKisanClick   = onKisanTap,
+                    onVidyaClick   = { onNavigate(Route.Vidya) },
+                    onKarigarClick = { onNavigate(Route.Karigar) },
+                    onSwasthClick  = { onNavigate(Route.Swasth) },
+                )
                 Spacer(Modifier.height(18.dp))
 
                 ThoughtOfTheDay()
@@ -343,29 +358,34 @@ private fun SuggestionPill(text: String) {
 }
 
 @Composable
-private fun SpecialistsGrid(onClick: () -> Unit) {
+private fun SpecialistsGrid(
+    onKisanClick: () -> Unit,
+    onVidyaClick: () -> Unit,
+    onKarigarClick: () -> Unit,
+    onSwasthClick: () -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SpecialistTile(
                 Icons.Outlined.Spa, "Kisan", "Farming · Mandi · Schemes",
-                tone = ChipTone.Jade, onClick = onClick,
+                tone = ChipTone.Jade, onClick = onKisanClick,
                 modifier = Modifier.weight(1f),
             )
             SpecialistTile(
                 Icons.AutoMirrored.Outlined.MenuBook, "Vidya", "NCERT · Science · GK",
-                tone = ChipTone.Indigo, onClick = onClick,
+                tone = ChipTone.Indigo, onClick = onVidyaClick,
                 modifier = Modifier.weight(1f),
             )
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SpecialistTile(
                 Icons.Outlined.Build, "Karigar", "Manuals · Error codes",
-                tone = ChipTone.Terracotta, onClick = onClick,
+                tone = ChipTone.Terracotta, onClick = onKarigarClick,
                 modifier = Modifier.weight(1f),
             )
             SpecialistTile(
                 Icons.Outlined.Favorite, "Swasth", "Wellness · First-aid",
-                tone = ChipTone.Marigold, onClick = onClick,
+                tone = ChipTone.Marigold, onClick = onSwasthClick,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -592,10 +612,53 @@ private fun LanguagePickerDialog(
 
 // ── Placeholder destinations (Kisan / Knowledge / Field) ─────────────────────
 
+// ── Pack landing placeholders ─────────────────────────────────────────
+// Kisan is LIVE — its tile opens AssistantScreen with the Kisan persona
+// pre-selected (see SaarthiNavHost.onKisanTap). The legacy
+// `KisanSaathiPlaceholder` route is kept as a defensive fallback for
+// any deep-link / cached intent that still points there.
 @Composable
-fun KisanSaathiPlaceholder(onBack: () -> Unit) = PackPlaceholder("Kisan Saathi", "Coming soon — farming guidance, mandi prices, govt schemes.", SaarthiColors.Jade, onBack)
-@Composable fun KnowledgePlaceholder(onBack: () -> Unit) = PackPlaceholder("Knowledge", "Coming soon — NCERT, science, general knowledge.", SaarthiColors.Indigo, onBack)
-@Composable fun FieldExpertPlaceholder(onBack: () -> Unit) = PackPlaceholder("Field Expert", "Coming soon — technical manuals, error codes.", SaarthiColors.Terracotta, onBack)
+fun KisanSaathiPlaceholder(onBack: () -> Unit) = PackPlaceholder(
+    name = "Kisan Saathi",
+    sub = "Tap the Kisan tile on Home to start a farming chat — the curated pack auto-loads.",
+    accent = SaarthiColors.Jade,
+    onBack = onBack,
+)
+@Composable
+fun KnowledgePlaceholder(onBack: () -> Unit) = PackPlaceholder(
+    name = "Knowledge",
+    sub = "Coming soon — NCERT, science, and general knowledge curated by subject.",
+    accent = SaarthiColors.Indigo,
+    onBack = onBack,
+)
+@Composable
+fun FieldExpertPlaceholder(onBack: () -> Unit) = PackPlaceholder(
+    name = "Field Expert",
+    sub = "Coming soon — technical manuals, error codes, repair walkthroughs.",
+    accent = SaarthiColors.Terracotta,
+    onBack = onBack,
+)
+@Composable
+fun VidyaPlaceholder(onBack: () -> Unit) = PackPlaceholder(
+    name = "Vidya",
+    sub = "Coming soon — NCERT-aligned study companion for students.",
+    accent = SaarthiColors.Indigo,
+    onBack = onBack,
+)
+@Composable
+fun KarigarPlaceholder(onBack: () -> Unit) = PackPlaceholder(
+    name = "Karigar",
+    sub = "Coming soon — technical manuals, error codes, and field-repair walkthroughs.",
+    accent = SaarthiColors.Terracotta,
+    onBack = onBack,
+)
+@Composable
+fun SwasthPlaceholder(onBack: () -> Unit) = PackPlaceholder(
+    name = "Swasth",
+    sub = "Coming soon — wellness tips and first-aid guidance, offline.",
+    accent = SaarthiColors.Marigold,
+    onBack = onBack,
+)
 
 @Composable
 private fun PackPlaceholder(name: String, sub: String, accent: Color, onBack: () -> Unit) {
