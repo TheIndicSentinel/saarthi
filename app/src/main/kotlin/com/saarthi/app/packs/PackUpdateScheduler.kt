@@ -38,7 +38,14 @@ class PackUpdateScheduler @Inject constructor(
 
     fun schedule() {
         val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.UNMETERED)
+            // CONNECTED (any network: Wi-Fi or mobile data) per product
+            // intent — Saarthi is fully offline at runtime, so the only
+            // moments network is touched are explicit model downloads
+            // and pack-update polls; gating those on Wi-Fi-only would
+            // strand users on mobile-only plans without ever updating.
+            // The 24 h cadence + small pack size (a few KB to a couple
+            // of MB at most) keep cellular impact negligible.
+            .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
             .build()
         val request = PeriodicWorkRequestBuilder<PackUpdateWorker>(
