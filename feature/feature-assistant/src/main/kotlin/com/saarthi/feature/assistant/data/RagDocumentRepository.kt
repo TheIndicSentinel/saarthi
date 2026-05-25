@@ -187,14 +187,34 @@ class RagDocumentRepository @Inject constructor(
          * across every chunk in the session.
          */
         restrictToDocUris: Set<String>? = null,
+        /**
+         * Additional knowledge-pack sessionIds whose chunks should be
+         * unioned with the user's chat-session chunks before BM25 ranks
+         * them. Drives the Personality-Pal-bundled content (Kisan,
+         * Money Mentor, etc.) — when the active persona ships a pack,
+         * its sentinel `global_pack_*` sessionId lands here.
+         *
+         * The doc-URI restriction above does NOT apply to pack chunks:
+         * if the user attached a doc this turn we still want the
+         * persona's curated content available alongside it.
+         */
+        additionalPackSessionIds: List<String> = emptyList(),
     ): List<RetrievedChunk> {
         val raw = ragChunkDao.getBySession(sessionId)
         // Defensive: if the URI restriction produces an empty set (e.g.
         // the focused doc was deleted from Room since being marked) fall
         // back to the full corpus rather than returning no context at all.
-        val all = if (!restrictToDocUris.isNullOrEmpty()) {
+        val chatScopedRaw = if (!restrictToDocUris.isNullOrEmpty()) {
             raw.filter { it.docUri in restrictToDocUris }.ifEmpty { raw }
         } else raw
+
+        // Pack chunks union in WITHOUT being filtered by docUri — the
+        // pack content is curated, not user-attached, so it isn't part
+        // of the doc-focus narrowing logic.
+        val packRaw: List<RagChunkEntity> = if (additionalPackSessionIds.isNotEmpty()) {
+            runCatching { ragChunkDao.getBySessions(additionalPackSessionIds) }.getOrDefault(emptyList())
+        } else emptyList()
+        val all = chatScopedRaw + packRaw
         if (all.isEmpty()) return emptyList()
 
         if (isMetaQuery(query)) {

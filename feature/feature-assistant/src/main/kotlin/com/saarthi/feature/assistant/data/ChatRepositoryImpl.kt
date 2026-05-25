@@ -499,8 +499,22 @@ class ChatRepositoryImpl @Inject constructor(
         // notes (binary, oversize) so the model knows they exist even
         // when there is no text to retrieve.
         val focusUris = focusedDocsBySession[sessionId]
+        // Personality-bundled knowledge packs: if the user is in a
+        // persona that ships a pack (Kisan today; Money / Knowledge
+        // / Field-Expert can join later), include that pack's
+        // sentinel sessionId so its curated chunks are merged with
+        // the chat's chunks before BM25 ranks them.
+        val packSessionIds = com.saarthi.core.i18n.PackId
+            .forPersona(personalityPreference.selected.value.id)
+            ?.let { listOf(it.sessionId) }
+            .orEmpty()
         val retrieved = runCatching {
-            ragRepository.search(sessionId, userMessage, restrictToDocUris = focusUris)
+            ragRepository.search(
+                sessionId = sessionId,
+                query = userMessage,
+                restrictToDocUris = focusUris,
+                additionalPackSessionIds = packSessionIds,
+            )
         }.getOrDefault(emptyList())
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
 

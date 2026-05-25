@@ -16,6 +16,15 @@ interface RagChunkDao {
     @Query("SELECT * FROM rag_chunks WHERE sessionId = :sessionId ORDER BY id ASC")
     suspend fun getBySession(sessionId: String): List<RagChunkEntity>
 
+    /**
+     * Every chunk across multiple sessions — used when a persona-packaged
+     * knowledge bundle ([PackId] sentinel sessions like `global_pack_kisan`)
+     * needs to be merged into the user's current chat corpus before BM25.
+     * The composite (sessionId, docUri) index covers the WHERE clause.
+     */
+    @Query("SELECT * FROM rag_chunks WHERE sessionId IN (:sessionIds) ORDER BY sessionId ASC, id ASC")
+    suspend fun getBySessions(sessionIds: List<String>): List<RagChunkEntity>
+
     /** Idempotency check — has this exact file already been indexed for this chat? */
     @Query("SELECT COUNT(*) FROM rag_chunks WHERE sessionId = :sessionId AND docUri = :docUri")
     suspend fun countByDoc(sessionId: String, docUri: String): Int

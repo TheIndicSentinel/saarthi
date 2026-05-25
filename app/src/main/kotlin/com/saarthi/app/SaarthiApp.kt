@@ -22,6 +22,8 @@ class SaarthiApp : Application() {
     @Inject lateinit var crashReporter: com.saarthi.core.common.CrashReporter
     @Inject lateinit var wisdomPreference: WisdomNotificationPreference
     @Inject lateinit var wisdomScheduler: WisdomNotificationScheduler
+    @Inject lateinit var kisanPackInstaller: com.saarthi.feature.assistant.data.KisanPackInstaller
+    @Inject lateinit var packUpdateScheduler: com.saarthi.app.packs.PackUpdateScheduler
 
     // Eagerly construct the chat repository at app start so its Room queries
     // (default session + last conversation) run in parallel with model init,
@@ -48,6 +50,17 @@ class SaarthiApp : Application() {
         appScope.launch {
             if (wisdomPreference.enabled.first()) wisdomScheduler.enable()
         }
+        // First-launch seed install of the Kisan pack so the persona is
+        // useful out-of-the-box. Idempotent — bails immediately if any
+        // version is already installed. The seed lives in assets so the
+        // feature works with zero network.
+        appScope.launch {
+            runCatching { kisanPackInstaller.installSeedIfAbsent() }
+        }
+        // Periodic Kisan-pack update poll. Idempotent (KEEP policy);
+        // no-op when no manifest URL is configured via BuildConfig, so
+        // it's safe to enqueue unconditionally.
+        runCatching { packUpdateScheduler.schedule() }
     }
 
     private fun installCrashLogger() {

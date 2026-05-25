@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("saarthi.android.application")
     id("saarthi.android.compose")
@@ -17,10 +19,25 @@ if (firebaseConfigured) {
 
 android {
     namespace = "com.saarthi.app"
+    buildFeatures {
+        buildConfig = true
+    }
     defaultConfig {
         applicationId = "com.saarthi.app"
         versionCode = 25
         versionName = "1.0.24"
+        // Kisan knowledge-pack manifest URL. Empty by default (in which
+        // case PackUpdateWorker is a no-op and users only ever see the
+        // bundled seed pack). When the server is live, set this via:
+        //   local.properties → kisan.pack.manifest.url=https://…/manifest.json
+        //   CI env           → KISAN_PACK_MANIFEST_URL=https://…/manifest.json
+        val kisanManifestUrl = System.getenv("KISAN_PACK_MANIFEST_URL")
+            ?: (rootProject.file("local.properties").takeIf { it.exists() }?.let { f ->
+                Properties().apply { f.inputStream().use { load(it) } }
+                    .getProperty("kisan.pack.manifest.url")
+            })
+            ?: ""
+        buildConfigField("String", "KISAN_PACK_MANIFEST_URL", "\"$kisanManifestUrl\"")
 
         // Ship only arm64-v8a. Every Android 7.0+ device that can run a
         // 1B+ on-device LLM has a 64-bit ARM CPU — keeping armeabi-v7a /
@@ -102,6 +119,9 @@ dependencies {
     implementation(libs.lifecycle.runtime.ktx)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.timber)
+    // WorkManager — used by PackUpdateWorker to periodically refresh
+    // the Kisan knowledge pack on UNMETERED Wi-Fi.
+    implementation(libs.workmanager)
 
     // Core modules
     implementation(project(":core:core-common"))
