@@ -603,8 +603,11 @@ private fun StatTile(num: String, sub: String, modifier: Modifier = Modifier) {
 fun ResponseStyleScreen(
     onBack: () -> Unit,
     viewModel: com.saarthi.app.ResponseStyleViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+    genViewModel: com.saarthi.app.GenerationSettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val style by viewModel.style.collectAsStateWithLifecycle()
+    val temperature by genViewModel.temperature.collectAsStateWithLifecycle()
+    val isAutoTemp by genViewModel.isAuto.collectAsStateWithLifecycle()
     Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
         SaarthiTopBar(title = "Response style", subtitle = "How Saarthi talks to you", onBack = onBack)
         Column(
@@ -632,6 +635,15 @@ fun ResponseStyleScreen(
                 value = style.languageMix,
                 onChange = viewModel::setLanguageMix,
                 options = listOf("pure" to "Pure", "mix" to "Hinglish", "eng" to "English"),
+            )
+
+            Spacer(Modifier.height(14.dp))
+            CreativityCard(
+                temperature = temperature,
+                isAuto = isAutoTemp,
+                onPreset = genViewModel::setTemperature,
+                onSlide = genViewModel::setTemperature,
+                onReset = genViewModel::resetToAuto,
             )
 
             Spacer(Modifier.height(20.dp))
@@ -817,6 +829,130 @@ private fun SegmentedCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * Sampling-temperature control for normal chat. Presets cover the common
+ * intents; the slider gives exact control. While [isAuto] the slider sits on
+ * the model's recommended value (shown as "Auto") so it reflects what's in
+ * effect before any override.
+ */
+@Composable
+private fun CreativityCard(
+    temperature: Float,
+    isAuto: Boolean,
+    onPreset: (Float) -> Unit,
+    onSlide: (Float) -> Unit,
+    onReset: () -> Unit,
+) {
+    val presets = listOf(
+        Triple("Precise", 0.3f, "Focused & repeatable"),
+        Triple("Balanced", 0.7f, "Everyday default"),
+        Triple("Creative", 1.0f, "Varied & expressive"),
+    )
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Response creativity",
+                style = MaterialTheme.typography.titleSmall.copy(color = SaarthiColors.Text),
+                modifier = Modifier.weight(1f),
+            )
+            if (!isAuto) {
+                Text(
+                    "Reset",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = SaarthiColors.Marigold,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onReset)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            presets.forEach { (label, value, hint) ->
+                // Highlight the preset the current temperature sits on (±0.05),
+                // even in Auto mode if the model default happens to match.
+                val selected = kotlin.math.abs(temperature - value) < 0.05f
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) SaarthiColors.MarigoldSoft else Color.Transparent)
+                        .border(
+                            1.dp,
+                            if (selected) SaarthiColors.MarigoldBd else SaarthiColors.Border,
+                            RoundedCornerShape(12.dp),
+                        )
+                        .clickable { onPreset(value) }
+                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = if (selected) SaarthiColors.Marigold else SaarthiColors.Text2,
+                            ),
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            hint,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.5.sp,
+                                color = SaarthiColors.Text3,
+                            ),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Temperature",
+                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text2),
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (isAuto) "Auto · %.2f".format(temperature) else "%.2f".format(temperature),
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = if (isAuto) SaarthiColors.Text3 else SaarthiColors.Marigold,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+        }
+        androidx.compose.material3.Slider(
+            value = temperature,
+            onValueChange = { onSlide((it * 100).toInt() / 100f) },
+            valueRange = 0f..1.5f,
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                thumbColor = SaarthiColors.Marigold,
+                activeTrackColor = SaarthiColors.Marigold,
+                inactiveTrackColor = SaarthiColors.Border,
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        )
+        Text(
+            "Lower keeps answers focused and consistent; higher makes them more varied and creative. Applies to normal chat — document and Kisan answers stay precise.",
+            style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3, lineHeight = 14.sp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        )
     }
 }
 

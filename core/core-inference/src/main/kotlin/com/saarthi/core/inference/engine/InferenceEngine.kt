@@ -23,6 +23,14 @@ interface InferenceEngine {
         get() = kotlinx.coroutines.flow.flow { emit(activeModelName) }
 
     /**
+     * The sampling temperature the active model would use by default
+     * (Google's recommended value for that model family). The user's
+     * temperature setting overrides this; the Settings UI reads it to
+     * display the "current temperature" before any override is chosen.
+     */
+    val activeModelDefaultTemperature: Float get() = 1.0f
+
+    /**
      * True while the native inference thread is computing (i.e. after generateResponseAsync is
      * called and before the 'done' callback fires). Distinct from [isReady] and coroutine state.
      *

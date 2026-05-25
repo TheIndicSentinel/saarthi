@@ -69,6 +69,7 @@ enum class CrashStage { MODEL_LOAD, GPU_INIT, CPU_INIT, CREATE_CONVERSATION, WAR
 class LiteRTInferenceEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val deviceProfiler: DeviceProfiler,
+    private val generationPreference: com.saarthi.core.inference.GenerationPreference,
 ) : InferenceEngine, ComponentCallbacks2 {
 
     init {
@@ -407,15 +408,27 @@ class LiteRTInferenceEngine @Inject constructor(
     private fun samplerFor(modelPath: String): SamplerConfig? {
         if (usingNpu) return null
         val name = modelPath.lowercase()
-        return when {
-            name.contains("gemma3") || name.contains("gemma-3") || name.contains("gemma 3") ->
-                SamplerConfig(topK = 64, topP = 0.95, temperature = 1.0)
-            name.contains("gemma4") || name.contains("gemma-4") || name.contains("gemma 4") ->
-                SamplerConfig(topK = 64, topP = 0.95, temperature = 1.0)
-            else ->
-                SamplerConfig(topK = 40, topP = 0.95, temperature = 0.8)
-        }
+        val isLargeGemma = name.contains("gemma3") || name.contains("gemma-3") || name.contains("gemma 3") ||
+            name.contains("gemma4") || name.contains("gemma-4") || name.contains("gemma 4")
+        val topK = if (isLargeGemma) 64 else 40
+        // User temperature override (Settings → Response style). A value >= 0
+        // replaces the model's recommended default; AUTO (-1) defers to it,
+        // so users who never touch the slider keep the prior behaviour.
+        // topK/topP stay model-tuned — only the temperature is user-facing.
+        val userTemp = generationPreference.temperature.value
+        val temp = (if (userTemp >= 0f) userTemp else baseTemperatureFor(name)).toDouble()
+        return SamplerConfig(topK = topK, topP = 0.95, temperature = temp)
     }
+
+    /** Google's recommended temperature per Gemma family — the AUTO baseline. */
+    private fun baseTemperatureFor(modelNameLower: String): Float = when {
+        modelNameLower.contains("gemma3") || modelNameLower.contains("gemma-3") || modelNameLower.contains("gemma 3") -> 1.0f
+        modelNameLower.contains("gemma4") || modelNameLower.contains("gemma-4") || modelNameLower.contains("gemma 4") -> 1.0f
+        else -> 0.8f
+    }
+
+    override val activeModelDefaultTemperature: Float
+        get() = baseTemperatureFor((activeModelName ?: loadedModelPath ?: "").lowercase())
 
     private fun samplerForActiveModel(): SamplerConfig? =
         samplerFor(activeModelName ?: loadedModelPath ?: "")

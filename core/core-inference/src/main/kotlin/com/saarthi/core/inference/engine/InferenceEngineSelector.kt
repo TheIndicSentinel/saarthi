@@ -16,6 +16,7 @@ class InferenceEngineSelector @Inject constructor(
 
     override val activeModelName: String? get() = liteRtEngine.activeModelName
     override val activeModelNameFlow: Flow<String?> get() = liteRtEngine.activeModelNameFlow
+    override val activeModelDefaultTemperature: Float get() = liteRtEngine.activeModelDefaultTemperature
 
     override val isNativeGenerating: Boolean get() = liteRtEngine.isNativeGenerating
     override val isFreshConversation: Boolean get() = liteRtEngine.isFreshConversation

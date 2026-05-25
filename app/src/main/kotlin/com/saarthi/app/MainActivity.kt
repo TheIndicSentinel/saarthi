@@ -8,13 +8,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saarthi.app.navigation.SaarthiNavHost
 import com.saarthi.core.ui.theme.SaarthiTheme
+import com.saarthi.core.ui.theme.ThemeMode
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -46,6 +49,20 @@ class MainActivity : ComponentActivity() {
             val themeViewModel: ThemeViewModel = hiltViewModel()
             val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
             SaarthiTheme(mode = themeMode) {
+                // enableEdgeToEdge() makes the status/navigation bars
+                // transparent and picks icon contrast from the *system*
+                // dark-mode flag — so when the app is in LIGHT theme but the
+                // phone is in dark mode, the bar icons (clock, battery,
+                // signal) stay white and vanish over our cream background.
+                // Re-derive the contrast from the in-app theme instead:
+                // dark icons on the light theme, light icons on the dark one.
+                val lightBars = themeMode == ThemeMode.LIGHT
+                SideEffect {
+                    WindowCompat.getInsetsController(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = lightBars
+                        isAppearanceLightNavigationBars = lightBars
+                    }
+                }
                 SaarthiNavHost()
             }
         }
