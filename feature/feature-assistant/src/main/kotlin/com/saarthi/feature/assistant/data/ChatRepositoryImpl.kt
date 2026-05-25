@@ -504,10 +504,24 @@ class ChatRepositoryImpl @Inject constructor(
         // / Field-Expert can join later), include that pack's
         // sentinel sessionId so its curated chunks are merged with
         // the chat's chunks before BM25 ranks them.
-        val packSessionIds = com.saarthi.core.i18n.PackId
+        //
+        // Capability gate: the persona picker UI already greys out
+        // non-default personas on COMPACT (1B), but a persona selected
+        // on a bigger model persists when the user switches DOWN to
+        // 1B. Skip pack merge whenever the live model's tier doesn't
+        // meet the pack's declared `minimumModelTier` — a pack ranked
+        // on a 1B that can't fit RAG chunks would give worse answers
+        // than the pack's curated content deserves.
+        val activePack = com.saarthi.core.i18n.PackId
             .forPersona(personalityPreference.selected.value.id)
-            ?.let { listOf(it.sessionId) }
-            .orEmpty()
+        val packSessionIds = if (activePack != null && tierSupportsPack(tier, activePack)) {
+            listOf(activePack.sessionId)
+        } else {
+            if (activePack != null) {
+                DebugLogger.log("RAG", "Pack ${activePack.name} skipped — tier=$tier below minimum=${activePack.minimumModelTier}")
+            }
+            emptyList()
+        }
         val retrieved = runCatching {
             ragRepository.search(
                 sessionId = sessionId,
@@ -1110,4 +1124,27 @@ class ChatRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
+
+    /**
+     * Capability bridge for pack gating. `core-i18n` (where PackId lives)
+     * is forbidden from depending on `core-inference` (where ModelTier
+     * lives), so the mapping is done here, on the chat side where both
+     * are in scope. Ordered: COMPACT < STANDARD < LARGE.
+     */
+    private fun tierSupportsPack(
+        tier: SystemPromptProvider.ModelTier,
+        pack: com.saarthi.core.i18n.PackId,
+    ): Boolean {
+        val liveRank = when (tier) {
+            SystemPromptProvider.ModelTier.COMPACT  -> 0
+            SystemPromptProvider.ModelTier.STANDARD -> 1
+            SystemPromptProvider.ModelTier.LARGE    -> 2
+        }
+        val packRank = when (pack.minimumModelTier) {
+            com.saarthi.core.i18n.PackId.MinimumTier.COMPACT  -> 0
+            com.saarthi.core.i18n.PackId.MinimumTier.STANDARD -> 1
+            com.saarthi.core.i18n.PackId.MinimumTier.LARGE    -> 2
+        }
+        return liveRank >= packRank
+    }
 }
