@@ -113,24 +113,16 @@ fun HomeScreen(
                 HeroComposer(onClick = { onNavigate(Route.Assistant) })
                 Spacer(Modifier.height(20.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        "SPECIALIST MODES",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = SaarthiColors.Text3,
-                            letterSpacing = 1.4.sp,
-                            fontWeight = FontWeight.Bold,
-                        ),
-                    )
-                    // Was "Coming soon" — Kisan is now live, so we mark
-                    // the section as Kisan-only with the others queued
-                    // as individual coming-soon stubs you tap into.
-                    SaarthiChip(text = "Kisan live", tone = ChipTone.Jade, small = true)
-                }
+                Text(
+                    "SPECIALIST MODES",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = SaarthiColors.Text3,
+                        letterSpacing = 1.4.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+                // Per-tile "Live" / "Soon" badges now communicate status,
+                // so the section-level chip is gone (it was redundant).
                 Spacer(Modifier.height(10.dp))
                 SpecialistsGrid(
                     onKisanClick   = onKisanTap,
@@ -369,6 +361,7 @@ private fun SpecialistsGrid(
             SpecialistTile(
                 Icons.Outlined.Spa, "Kisan", "Farming · Mandi · Schemes",
                 tone = ChipTone.Jade, onClick = onKisanClick,
+                comingSoon = false,   // Kisan is LIVE
                 modifier = Modifier.weight(1f),
             )
             SpecialistTile(
@@ -400,6 +393,7 @@ private fun SpecialistTile(
     tone: ChipTone,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    comingSoon: Boolean = true,
 ) {
     val toneColor = when (tone) {
         ChipTone.Marigold -> SaarthiColors.Marigold
@@ -452,19 +446,37 @@ private fun SpecialistTile(
                         color = SaarthiColors.Text,
                     ),
                 )
-                Text(
-                    "Soon",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = SaarthiColors.Text3,
-                        fontSize = 9.5.sp,
-                        letterSpacing = 1.2.sp,
-                    ),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0x0DF5EEE3))
-                        .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
-                        .padding(horizontal = 7.dp, vertical = 3.dp),
-                )
+                if (comingSoon) {
+                    Text(
+                        "Soon",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = SaarthiColors.Text3,
+                            fontSize = 9.5.sp,
+                            letterSpacing = 1.2.sp,
+                        ),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color(0x0DF5EEE3))
+                            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    )
+                } else {
+                    // LIVE pill — toned to the tile's accent (jade for Kisan).
+                    Text(
+                        "Live",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = toneColor,
+                            fontSize = 9.5.sp,
+                            letterSpacing = 1.2.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(toneBg)
+                            .border(1.dp, toneColor.copy(alpha = 0.35f), RoundedCornerShape(999.dp))
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    )
+                }
             }
             Text(
                 sub,

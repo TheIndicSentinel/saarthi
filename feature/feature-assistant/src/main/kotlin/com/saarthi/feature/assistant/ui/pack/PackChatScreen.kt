@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,6 +70,7 @@ fun PackChatScreen(
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
+    val language by viewModel.language.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
 
@@ -104,6 +106,18 @@ fun PackChatScreen(
                     "Answers from the offline farming pack",
                     style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                 )
+            }
+            // Clear / start-fresh — the "manage conversation" action. The
+            // chat is otherwise persisted across navigation, so this is the
+            // only way to wipe it.
+            if (messages.isNotEmpty() && !isGenerating) {
+                IconButton(onClick = { viewModel.clear() }) {
+                    Icon(
+                        Icons.Outlined.DeleteOutline,
+                        contentDescription = "Clear conversation",
+                        tint = SaarthiColors.Text3,
+                    )
+                }
             }
         }
 
@@ -148,7 +162,7 @@ fun PackChatScreen(
                 value = input,
                 onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask about farming…", color = SaarthiColors.Text3) },
+                placeholder = { Text(language.inputHint, color = SaarthiColors.Text3) },
                 shape = RoundedCornerShape(24.dp),
                 singleLine = false,
                 maxLines = 4,

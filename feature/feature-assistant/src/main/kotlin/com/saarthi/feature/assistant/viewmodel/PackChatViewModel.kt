@@ -3,17 +3,22 @@ package com.saarthi.feature.assistant.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.PackId
+import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.memory.db.ConversationDao
+import com.saarthi.core.memory.db.ConversationEntity
 import com.saarthi.feature.assistant.data.RagDocumentRepository
 import com.saarthi.feature.assistant.data.RetrievedChunk
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.MessageRole
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +27,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 
@@ -29,37 +35,53 @@ import javax.inject.Inject
  * Self-contained Q&A engine for a knowledge pack (Kisan today).
  *
  * Deliberately INDEPENDENT of the main chat:
- *   • Does NOT use ChatRepository, chat sessions, or the persisted
- *     conversation history — its message list lives only here, in memory.
- *   • Does NOT read or write the global Personality preference — so
- *     opening a pack chat can never bleed a persona / context into the
- *     user's normal chat.
- *   • Reuses ONLY the shared low-level [InferenceEngine] (the model
- *     itself) and [RagDocumentRepository] BM25 search scoped to the
- *     pack's own sentinel sessionId.
+ *   • Reuses ONLY the shared low-level [InferenceEngine] (the model) and
+ *     [RagDocumentRepository] BM25 scoped to the pack's sentinel
+ *     sessionId.
+ *   • Reads / writes its OWN persisted conversation under a DEDICATED
+ *     sessionId ([PACK_CHAT_SESSION]) that is never a chat-session row —
+ *     so it survives navigation + app restart, is manageable (clear),
+ *     and yet never appears in the main chat's session list nor bleeds
+ *     persona / context into normal chats.
+ *   • Honours the user's selected language: the pack's curated content
+ *     stays English, but the model is instructed to ANSWER in the
+ *     selected language (standard cross-lingual RAG — Gemma reads the
+ *     English source and replies in Hindi / Tamil / etc.).
  *
- * The pack chat and the main chat never run at the same time (one
- * screen on top at a time) and the engine recycles its conversation
- * after every turn, so sharing the engine is safe — no KV-cache bleed.
- *
- * Generalisable: the only pack-specific bits are [packSessionId] and
- * the system-prompt preamble. A future MoneyPackChatViewModel etc.
- * would differ only in those two constants.
+ * Generalisable: only [packSessionId], [PACK_CHAT_SESSION] and the
+ * prompt preamble are pack-specific.
  */
 @HiltViewModel
 class PackChatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val inferenceEngine: InferenceEngine,
     private val ragRepository: RagDocumentRepository,
+    private val conversationDao: ConversationDao,
+    private val languageManager: LanguageManager,
 ) : ViewModel() {
 
-    private val packSessionId = PackId.KISAN.sessionId
+    private val packSessionId = PackId.KISAN.sessionId            // RAG chunks
+    private val chatSessionId = PACK_CHAT_SESSION                 // persisted messages
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
+
+    /** Selected language — the screen uses it for the localized input hint. */
+    val language: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
+
+    init {
+        // Restore the persisted pack conversation so "go back and return"
+        // shows the prior chat (the gap the user reported).
+        viewModelScope.launch {
+            val saved = runCatching { conversationDao.getBySession(chatSessionId) }.getOrDefault(emptyList())
+            if (saved.isNotEmpty()) {
+                _messages.value = saved.map { it.toChatMessage() }
+            }
+        }
+    }
 
     fun ask(rawQuestion: String) {
         val question = rawQuestion.trim()
@@ -71,14 +93,20 @@ class PackChatViewModel @Inject constructor(
         _messages.update { it + userMsg + placeholder }
         _isGenerating.value = true
 
+        // Persist the user turn immediately so it survives even if the
+        // app is killed mid-generation.
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                runCatching { conversationDao.insert(userMsg.toEntity(chatSessionId)) }
+            }
+        }
+
         viewModelScope.launch {
             if (!inferenceEngine.isReady) {
                 finish(streamingId, "Please download and load a model first from Settings → Models, then come back to ask about farming.")
                 return@launch
             }
 
-            // BM25 over the pack's own chunks ONLY — never the user's
-            // chat documents. (search reads ragChunkDao.getBySession.)
             val chunks = runCatching { ragRepository.search(packSessionId, question, topK = 5) }
                 .getOrDefault(emptyList())
             if (chunks.isEmpty()) {
@@ -86,14 +114,10 @@ class PackChatViewModel @Inject constructor(
                 return@launch
             }
 
-            val prompt = buildPackPrompt(question, chunks)
-            DebugLogger.log("PACK", "Kisan pack Q&A — chunks=${chunks.size} promptChars=${prompt.length}")
+            val prompt = buildPackPrompt(question, chunks, languageManager.selectedLanguage.value)
+            DebugLogger.log("PACK", "Kisan Q&A — chunks=${chunks.size} lang=${languageManager.selectedLanguage.value.code} promptChars=${prompt.length}")
 
-            // FGS so Samsung doesn't kill the process mid-generation.
-            // The engine's onDone stops it; we also stop defensively in
-            // catch/onCompletion if the native thread already finished.
             InferenceService.startGenerating(context)
-
             val acc = StringBuilder()
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
@@ -112,8 +136,14 @@ class PackChatViewModel @Inject constructor(
         }
     }
 
+    /** Wipe the pack conversation — the "manage / start fresh" action. */
     fun clear() {
         _messages.update { emptyList() }
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                runCatching { conversationDao.deleteBySession(chatSessionId) }
+            }
+        }
     }
 
     // ── Internal ─────────────────────────────────────────────────────
@@ -125,22 +155,25 @@ class PackChatViewModel @Inject constructor(
     }
 
     private fun finish(id: String, finalText: String) {
-        _messages.update { list ->
-            list.map { if (it.id == id) it.copy(content = finalText, isStreaming = false) else it }
-        }
+        val finalMsg = _messages.value.firstOrNull { it.id == id }
+            ?.copy(content = finalText, isStreaming = false)
+        _messages.update { list -> list.map { if (it.id == id) (finalMsg ?: it) else it } }
         _isGenerating.value = false
+        // Persist the completed assistant turn so it reloads on return.
+        if (finalMsg != null) {
+            viewModelScope.launch {
+                withContext(NonCancellable) {
+                    runCatching { conversationDao.insert(finalMsg.toEntity(chatSessionId)) }
+                }
+            }
+        }
     }
 
-    /**
-     * Pack-only prompt. Self-contained — does not touch SystemPromptProvider
-     * (which is persona / session aware). The whole instruction set lives
-     * here so the pack experience is fully decoupled.
-     *
-     * Chunk budget: cap the source block at ~2,800 chars so the prompt
-     * stays inside Gemma 3n / Gemma 4's input budget. Chunks are added
-     * whole until the cap; partial chunks are never emitted.
-     */
-    private fun buildPackPrompt(question: String, chunks: List<RetrievedChunk>): String {
+    private fun buildPackPrompt(
+        question: String,
+        chunks: List<RetrievedChunk>,
+        lang: SupportedLanguage,
+    ): String {
         val maxSourceChars = 2_800
         val sources = buildString {
             var used = 0
@@ -153,20 +186,55 @@ class PackChatViewModel @Inject constructor(
             }
         }.trim()
 
+        // Language directive — same mechanism the main chat uses. Sources
+        // remain in English (the curated pack), but the model answers in
+        // the user's selected language.
+        val langLine = lang.systemPromptInstruction
+
         return buildString {
+            if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
             append("You are Saarthi's Kisan Saathi — a practical farming advisor for Indian farmers. ")
             append("Answer the question using ONLY the FARM KNOWLEDGE SOURCES below. ")
             append("Cite the source number inline as [N] for every fact. ")
-            append("Quote scheme names, MSP figures, dose rates and dates exactly as written. ")
-            append("If the sources don't cover the question, reply exactly: ")
-            append("\"I don't have that in my farming knowledge yet — please check your local KVK or block agriculture office.\" ")
+            append("Quote scheme names, MSP figures, dose rates and dates exactly as written in the sources. ")
+            append("If the sources don't cover the question, reply that you don't have it in your farming knowledge yet and suggest the local KVK or block agriculture office. ")
             append("Keep the answer short and practical, the way you'd explain to a farmer on a phone in the field. ")
             append("Do not repeat these instructions.\n\n")
-            append("=== FARM KNOWLEDGE SOURCES ===\n")
+            append("=== FARM KNOWLEDGE SOURCES (in English) ===\n")
             append(sources)
             append("\n=== END SOURCES ===\n\n")
             append("Question: ")
             append(question)
+            if (langLine.isNotBlank()) { append("\n\n"); append(langLine) }
         }
+    }
+
+    private fun ChatMessage.toEntity(sessionId: String) = ConversationEntity(
+        id = id,
+        content = content,
+        role = role.name,
+        timestamp = timestamp,
+        tokenCount = tokenCount,
+        sessionId = sessionId,
+    )
+
+    private fun ConversationEntity.toChatMessage() = ChatMessage(
+        id = id,
+        content = content,
+        role = if (role == MessageRole.USER.name) MessageRole.USER else MessageRole.ASSISTANT,
+        isStreaming = false,
+        tokenCount = tokenCount,
+        timestamp = timestamp,
+    )
+
+    companion object {
+        /**
+         * Dedicated conversation sessionId for the Kisan pack chat.
+         * Distinct from the RAG chunk session (`global_pack_kisan`) and
+         * from every main-chat session — and we never create a
+         * ChatSessionEntity for it, so it never appears in the main
+         * chat's history list.
+         */
+        private const val PACK_CHAT_SESSION = "pack_chat_kisan"
     }
 }

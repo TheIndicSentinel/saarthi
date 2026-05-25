@@ -17,3 +17,6 @@
 local.properties
 keystore/*.jks
 keystore/*.keystore
+
+# Kotlin compiler transient session files
+.kotlin/
