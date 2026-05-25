@@ -499,35 +499,17 @@ class ChatRepositoryImpl @Inject constructor(
         // notes (binary, oversize) so the model knows they exist even
         // when there is no text to retrieve.
         val focusUris = focusedDocsBySession[sessionId]
-        // Personality-bundled knowledge packs: if the user is in a
-        // persona that ships a pack (Kisan today; Money / Knowledge
-        // / Field-Expert can join later), include that pack's
-        // sentinel sessionId so its curated chunks are merged with
-        // the chat's chunks before BM25 ranks them.
-        //
-        // Capability gate: the persona picker UI already greys out
-        // non-default personas on COMPACT (1B), but a persona selected
-        // on a bigger model persists when the user switches DOWN to
-        // 1B. Skip pack merge whenever the live model's tier doesn't
-        // meet the pack's declared `minimumModelTier` — a pack ranked
-        // on a 1B that can't fit RAG chunks would give worse answers
-        // than the pack's curated content deserves.
-        val activePack = com.saarthi.core.i18n.PackId
-            .forPersona(personalityPreference.selected.value.id)
-        val packSessionIds = if (activePack != null && tierSupportsPack(tier, activePack)) {
-            listOf(activePack.sessionId)
-        } else {
-            if (activePack != null) {
-                DebugLogger.log("RAG", "Pack ${activePack.name} skipped — tier=$tier below minimum=${activePack.minimumModelTier}")
-            }
-            emptyList()
-        }
+        // NOTE: knowledge packs (Kisan etc.) are intentionally NOT merged
+        // into the main chat here. Packs are a fully separate, modular
+        // subsystem with their own Q&A surface (PackChatScreen) — wiring
+        // them into the persona-driven main chat caused pack context to
+        // bleed into normal conversations. The main chat only ever
+        // retrieves the user's OWN attached documents for this session.
         val retrieved = runCatching {
             ragRepository.search(
                 sessionId = sessionId,
                 query = userMessage,
                 restrictToDocUris = focusUris,
-                additionalPackSessionIds = packSessionIds,
             )
         }.getOrDefault(emptyList())
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
@@ -1124,27 +1106,4 @@ class ChatRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
-
-    /**
-     * Capability bridge for pack gating. `core-i18n` (where PackId lives)
-     * is forbidden from depending on `core-inference` (where ModelTier
-     * lives), so the mapping is done here, on the chat side where both
-     * are in scope. Ordered: COMPACT < STANDARD < LARGE.
-     */
-    private fun tierSupportsPack(
-        tier: SystemPromptProvider.ModelTier,
-        pack: com.saarthi.core.i18n.PackId,
-    ): Boolean {
-        val liveRank = when (tier) {
-            SystemPromptProvider.ModelTier.COMPACT  -> 0
-            SystemPromptProvider.ModelTier.STANDARD -> 1
-            SystemPromptProvider.ModelTier.LARGE    -> 2
-        }
-        val packRank = when (pack.minimumModelTier) {
-            com.saarthi.core.i18n.PackId.MinimumTier.COMPACT  -> 0
-            com.saarthi.core.i18n.PackId.MinimumTier.STANDARD -> 1
-            com.saarthi.core.i18n.PackId.MinimumTier.LARGE    -> 2
-        }
-        return liveRank >= packRank
-    }
 }

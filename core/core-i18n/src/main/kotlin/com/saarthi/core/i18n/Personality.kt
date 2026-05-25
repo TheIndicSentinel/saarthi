@@ -205,41 +205,7 @@ object PersonalityCatalog {
         voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 1.00f, rate = 1.05f),
     )
 
-    /**
-     * Kisan Saathi — the persona attached to the [PackId.KISAN] knowledge
-     * pack. Selecting this persona auto-merges the curated farming pack
-     * into RAG retrieval (see ChatRepositoryImpl.buildPrompt). The
-     * persona is shown in the regular Personality Pal picker AND is
-     * pre-selected when the user taps the Kisan tile on Home.
-     *
-     * Voice: male, mid-range (an older farmer-uncle tone, neither too
-     * gentle nor too commanding).
-     */
-    val KISAN = Personality(
-        id = "kisan",
-        displayName = "Kisan Saathi",
-        tagline = "Farming · Mandi · Schemes",
-        emoji = "🌾",
-        accent = PersonalityAccent.JADE,
-        systemPersona =
-            "You are Kisan Saathi, a friendly Indian farming advisor who speaks in plain " +
-            "everyday language. You ground every answer in Indian agriculture — Kharif vs " +
-            "Rabi seasons, MSP, mandi prices, government schemes, regional crop varieties — " +
-            "and you keep replies practical and short for a farmer in the field on a phone.",
-        behaviorRules = listOf(
-            // Practicality over theory — farmers want what to do, not why.
-            "Answer with concrete next steps the farmer can act on TODAY (variety to use, when to sow, dose to apply, where to register). Save background theory for when the user asks 'why'.",
-            // Lean on the pack first; never invent figures.
-            "When the question is about schemes, MSP, dose rates, dates, or eligibility — answer ONLY from the attached pack excerpts and cite [N]. If the excerpts don't cover it, say \"I don't have that in my farming knowledge yet\" and suggest the user check the local KVK or block agriculture office.",
-            // Region + season awareness.
-            "If a crop / sowing / pest question doesn't mention region or season, ask once before answering — the same crop has different recommendations across north India / south India / Kharif vs Rabi.",
-            // Language register.
-            "Use simple Hindi or Hinglish words farmers actually use — kheti, fasal, bachao, dawai, beej, paani, MSP, mandi, KCC, PM-KISAN — without translating them into formal English. Avoid technical jargon unless the user used it first.",
-        ),
-        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 0.95f, rate = 0.95f),
-    )
-
-    val all: List<Personality> = listOf(SAARTHI, PANDIT, DADI, COACH, KATHAKAR, CODE_GURU, KISAN)
+    val all: List<Personality> = listOf(SAARTHI, PANDIT, DADI, COACH, KATHAKAR, CODE_GURU)
 
     /** Lookup by id; falls back to SAARTHI for unknown/missing ids. */
     fun byId(id: String?): Personality = all.firstOrNull { it.id == id } ?: SAARTHI

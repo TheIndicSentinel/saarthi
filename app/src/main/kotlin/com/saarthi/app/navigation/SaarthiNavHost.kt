@@ -42,6 +42,10 @@ sealed class Route(val path: String) {
     // The placeholder route below stays as a defensive fallback for
     // anything that still navigates to it (e.g. deep links).
     data object KisanSaathi  : Route("kisan_saathi")
+    /** Browseable Kisan pack landing page — destination of the Kisan tile. */
+    data object KisanPack    : Route("kisan_pack")
+    /** Self-contained Kisan pack chat — separate from the main assistant. */
+    data object PackChat     : Route("pack_chat")
     data object Vidya        : Route("vidya")
     data object Karigar      : Route("karigar")
     data object Swasth       : Route("swasth")
@@ -161,15 +165,15 @@ fun SaarthiNavHost(
                 },
                 onChangeLanguage = { lang -> mainViewModel.setLanguage(lang) },
                 onOpenSettings = { navController.navigate(Route.Settings.path) },
-                // Kisan tile is the only LIVE pack today: pre-select the
-                // Kisan persona (which `ChatRepositoryImpl` reads via
-                // `PackId.forPersona` to merge the curated farm pack into
-                // RAG), then open the chat. `personalityVm.select` resets
-                // the session so the new persona authors its KV cache
-                // from turn one.
+                // Kisan tile opens the Kisan-pack landing page (not
+                // chat directly). The landing page is the differentiator
+                // for what is, by design, a paid pack — users can see
+                // the curated topics, the Govt-data sources, and the
+                // suggested questions BEFORE deciding to send a message.
+                // The "Open Kisan chat" CTA on that page is what does
+                // the persona-select + chat navigation.
                 onKisanTap = {
-                    personalityVm.select(com.saarthi.core.i18n.PersonalityCatalog.KISAN.id)
-                    navController.navigate(Route.Assistant.path)
+                    navController.navigate(Route.KisanPack.path)
                 },
                 currentLanguage = currentLanguage,
                 greeting = currentLanguage.greeting,
@@ -231,11 +235,25 @@ fun SaarthiNavHost(
         }
 
         composable(Route.KisanSaathi.path) {
-            // Defensive fallback only — the Kisan tile now goes straight
-            // to AssistantScreen via onKisanTap above. Anything that
-            // still routes here lands on a friendly stub that tells the
-            // user how to reach Kisan mode.
+            // Defensive fallback only — the Kisan tile now goes to
+            // KisanPack (the live landing page) below. Anything that
+            // still routes here lands on a friendly stub.
             KisanSaathiPlaceholder(onBack = { navController.popBackStack() })
+        }
+        composable(Route.KisanPack.path) {
+            // Live pack landing page. The "Open chat" CTA opens the
+            // SELF-CONTAINED pack chat (PackChatScreen) — NOT the main
+            // assistant. No persona is touched, so the pack can never
+            // bleed into the user's normal chat.
+            com.saarthi.feature.assistant.ui.pack.KisanPackScreen(
+                onBack = { navController.popBackStack() },
+                onOpenKisanChat = { navController.navigate(Route.PackChat.path) },
+            )
+        }
+        composable(Route.PackChat.path) {
+            com.saarthi.feature.assistant.ui.pack.PackChatScreen(
+                onBack = { navController.popBackStack() },
+            )
         }
         composable(Route.Vidya.path) {
             VidyaPlaceholder(onBack = { navController.popBackStack() })

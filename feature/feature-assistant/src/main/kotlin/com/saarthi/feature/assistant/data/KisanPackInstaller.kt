@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import timber.log.Timber
+import java.io.File
 import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -69,9 +70,19 @@ class KisanPackInstaller @Inject constructor(
      * path AND by [PackUpdateWorker] after a successful HTTP download.
      * Returns the newly-installed pack version, or null if the stream
      * couldn't be parsed (old pack stays intact in that case).
+     *
+     * Side effect: writes the raw pack JSON to `filesDir/packs/kisan_active.json`
+     * so [loadInstalledPack] can read full structured metadata
+     * (topic / sourceUrl / tags) for the browsing screen. The RAG side
+     * keeps using the chunk table; this file is the UI's source of truth.
      */
     suspend fun installFrom(input: InputStream, source: String): Int? = withContext(Dispatchers.IO) {
-        val parsed = runCatching { parsePack(input) }.getOrNull()
+        val raw = runCatching { input.bufferedReader(Charsets.UTF_8).readText() }.getOrNull()
+            ?: run {
+                DebugLogger.log("PACK", "Kisan install failed: stream read error from $source")
+                return@withContext null
+            }
+        val parsed = runCatching { parsePackJson(raw) }.getOrNull()
             ?: run {
                 DebugLogger.log("PACK", "Kisan install failed: malformed pack JSON from $source")
                 return@withContext null
@@ -96,6 +107,14 @@ class KisanPackInstaller @Inject constructor(
         // a slightly-stale corpus for one turn.
         ragChunkDao.deleteBySession(PackId.KISAN.sessionId)
         ragChunkDao.insertAll(entities)
+        // Persist the raw pack JSON so the browse screen can render
+        // topic + sourceUrl + tags without re-parsing chunks. Failure
+        // here is non-fatal: install still succeeds, browsing just
+        // falls back to the bundled seed asset on next read.
+        runCatching {
+            val packsDir = File(context.filesDir, PACKS_DIR).apply { mkdirs() }
+            File(packsDir, ACTIVE_PACK_FILE).writeText(raw, Charsets.UTF_8)
+        }.onFailure { Timber.w(it, "Failed to persist raw Kisan pack to filesDir") }
         preference.recordInstall(version = parsed.version, language = parsed.language)
         DebugLogger.log(
             "PACK",
@@ -104,13 +123,71 @@ class KisanPackInstaller @Inject constructor(
         parsed.version
     }
 
+    /**
+     * Read back the currently-installed pack with full structured
+     * metadata (topic / content / sourceUrl / tags) for the browse
+     * screen. Reads from `filesDir/packs/kisan_active.json` written at
+     * install time; falls back to the bundled seed asset if the file
+     * isn't there yet (e.g. very first launch before
+     * [installSeedIfAbsent] has finished).
+     *
+     * Returns null only when both sources are unavailable / malformed —
+     * which in practice means the seed asset was not packaged. The
+     * browse screen handles that with an empty-state message.
+     */
+    suspend fun loadInstalledPack(): InstalledPack? = withContext(Dispatchers.IO) {
+        val activeFile = File(context.filesDir, "$PACKS_DIR/$ACTIVE_PACK_FILE")
+        val raw = if (activeFile.exists() && activeFile.length() > 0L) {
+            runCatching { activeFile.readText(Charsets.UTF_8) }.getOrNull()
+        } else null
+        val sourceLabel = if (raw != null) "filesDir/$PACKS_DIR/$ACTIVE_PACK_FILE" else "assets/$SEED_ASSET_PATH"
+        val text = raw
+            ?: runCatching { context.assets.open(SEED_ASSET_PATH).bufferedReader().use { it.readText() } }.getOrNull()
+            ?: return@withContext null
+        runCatching { parsePackJson(text).toInstalled(sourceLabel) }.getOrNull()
+    }
+
+    // ── Public domain model (for the browse screen) ────────────────
+
+    /** A pack snapshot as the UI sees it — full metadata, ready to render. */
+    data class InstalledPack(
+        val version: Int,
+        val language: String,
+        val title: String,
+        val source: String,
+        val publishedAt: String,
+        val entries: List<InstalledEntry>,
+        /** Human-readable label of where this data was loaded from. */
+        val loadedFrom: String,
+    )
+
+    data class InstalledEntry(
+        val topic: String,
+        val content: String,
+        val sourceUrl: String?,
+        val tags: List<String>,
+    )
+
     // ── Internal ─────────────────────────────────────────────────────
 
     private data class ParsedPack(
         val version: Int,
         val language: String,
+        val title: String,
+        val source: String,
+        val publishedAt: String,
         val entries: List<Entry>,
-    )
+    ) {
+        fun toInstalled(loadedFrom: String): InstalledPack = InstalledPack(
+            version     = version,
+            language    = language,
+            title       = title,
+            source      = source,
+            publishedAt = publishedAt,
+            entries     = entries.map { it.toPublic() },
+            loadedFrom  = loadedFrom,
+        )
+    }
 
     private data class Entry(
         val topic: String,
@@ -131,14 +208,17 @@ class KisanPackInstaller @Inject constructor(
                 append("\n\nTags: ").append(tags.joinToString(", "))
             }
         }
+        fun toPublic(): InstalledEntry = InstalledEntry(topic, content, sourceUrl, tags)
     }
 
-    private fun parsePack(input: InputStream): ParsedPack {
-        val raw = input.bufferedReader(Charsets.UTF_8).readText()
+    private fun parsePackJson(raw: String): ParsedPack {
         val root = JSONObject(raw)
         val version = root.optInt("version", 0).takeIf { it > 0 }
             ?: error("pack: missing or invalid 'version'")
         val language = root.optString("language", "en")
+        val title = root.optString("title", "Kisan Knowledge")
+        val source = root.optString("source", "")
+        val publishedAt = root.optString("publishedAt", "")
         val entriesJson = root.optJSONArray("entries")
             ?: error("pack: missing 'entries' array")
         val entries = buildList {
@@ -155,11 +235,13 @@ class KisanPackInstaller @Inject constructor(
                 add(Entry(topic, content, sourceUrl, tags))
             }
         }
-        return ParsedPack(version, language, entries)
+        return ParsedPack(version, language, title, source, publishedAt, entries)
     }
 
     companion object {
         private const val SEED_ASSET_PATH = "packs/kisan_seed.json"
         private const val MIME_PACK = "application/x-saarthi-pack"
+        private const val PACKS_DIR = "packs"
+        private const val ACTIVE_PACK_FILE = "kisan_active.json"
     }
 }
