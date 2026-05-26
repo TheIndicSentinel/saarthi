@@ -156,6 +156,14 @@ private inline fun AnnotatedString.Builder.stripFences(
 /** Apply line-level markdown (headings, bullets) then walk inline (bold/italic/code). */
 private fun AnnotatedString.Builder.appendLineMarkdown(rawLine: String) {
     val trimmed = rawLine.trimStart()
+
+    // Horizontal rule (`---`, `***`, `___`, any length ≥3) — models emit these
+    // as section separators. Rendering the raw dashes looked like clutter
+    // ("too many -"); drop the line so it reads as a clean paragraph break.
+    if (trimmed.length >= 3 && trimmed.all { it == '-' || it == '*' || it == '_' }) {
+        return
+    }
+
     val indent = rawLine.length - trimmed.length
     if (indent > 0) append(" ".repeat(indent))
 
