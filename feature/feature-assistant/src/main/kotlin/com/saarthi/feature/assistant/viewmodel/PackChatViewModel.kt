@@ -179,8 +179,15 @@ class PackChatViewModel @Inject constructor(
                 .onCompletion { throwable ->
                     if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
                     if (throwable == null) {
-                        val body = acc.toString().trim()
-                        val withSource = if (body.isBlank()) body else "$body\n\n_Source: ${sourceLabel}_"
+                        var body = acc.toString().trim()
+                        // The model prefixes [GENERAL] when it answered from
+                        // general knowledge rather than the pack — strip the
+                        // marker and label the source "General" so it never
+                        // shows a pack scheme for a non-pack answer.
+                        val fellBackToGeneral = body.startsWith("[GENERAL]")
+                        if (fellBackToGeneral) body = body.removePrefix("[GENERAL]").trimStart()
+                        val label = if (fellBackToGeneral) "General" else sourceLabel
+                        val withSource = if (body.isBlank()) body else "$body\n\n_Source: ${label}_"
                         finish(streamingId, withSource)
                     }
                 }
@@ -280,12 +287,15 @@ class PackChatViewModel @Inject constructor(
             append("- Use simple, field-usable words; briefly explain any technical term.\n")
             // Safe chemical/dose wording.
             append("- For any pesticide, fertilizer or chemical, add the label-dose / local-advice caution — never give overconfident or unsafe dosing.\n")
-            // Practical sequencing.
-            append("- Structure it as: what it is → what to do → when to do it → one key caution.\n")
+            // Natural tone — the what/what-to-do/when/caution flow is a GUIDE
+            // for procedural questions, not a template to stamp on every reply.
+            append("- Answer naturally and conversationally. For a how-to or scheme question it often helps to cover what it is, what to do, when, and one key caution — but only when it fits; do not force that structure on simple or general questions.\n")
             // The app prints the source — the model must not, and must never
             // echo the bracketed note names or use [1]-style citations.
             append("- Do NOT write a \"Source:\" line, do NOT use bracket citations like [1], and do NOT mention the reference notes or their headings — just answer.\n")
-            append("- If the notes don't cover the question, say plainly it isn't in your offline farming pack yet, then add a short careful answer under \"General information (not from the pack):\" and suggest the local KVK or block agriculture office.\n")
+            // When falling back to general knowledge, mark it so the app can
+            // label the source as General (not a pack scheme).
+            append("- If the notes don't cover the question, begin your reply with the exact tag [GENERAL] on the first line, then say plainly it isn't in your offline farming pack yet and give a short, careful general answer, suggesting the local KVK or block agriculture office.\n")
             append("- No greeting or opening line. No guarantees or \"works everywhere\" claims. Do not invent details. Do not repeat these instructions.\n\n")
             append("=== REFERENCE NOTES ===\n")
             append(sources)

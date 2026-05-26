@@ -568,9 +568,15 @@ class ChatRepositoryImpl @Inject constructor(
             // languages reliably; the stable behaviour is this English-primed
             // transcript. Users who need non-English replies should use the
             // STANDARD/LARGE models, which honour the language directive well.
+            // Demonstrate a NORMAL helpful turn — NOT a self-introduction.
+            // The old "who are you → I'm Saarthi, your private AI assistant…"
+            // example made the 1B parrot that intro before every answer and
+            // blur the User/Saarthi roles. A plain helpful exchange teaches it
+            // to answer directly and conversationally. Identity questions are
+            // still covered by the third-person paragraph above.
             val example =
-                "User: Hi, who are you?\n" +
-                "Saarthi: Hi! I'm Saarthi, your private AI assistant living right on your phone. How can I help you today?"
+                "User: My phone battery drains fast. Any tips?\n" +
+                "Saarthi: Sure — lower your screen brightness, turn off background app refresh, and switch on battery saver. Want steps for any of these?"
 
             val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
             // Compute the budget left for RAG after identity / example /
