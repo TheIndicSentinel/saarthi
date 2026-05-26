@@ -230,7 +230,8 @@ private fun GreetingBlock(lang: SupportedLanguage) {
             com.saarthi.core.ui.components.SaarthiLogo(size = 22.dp)
             Text(
                 text = greetHi,
-                style = DisplayAccent.copy(fontSize = 18.sp),
+                // Sized to sit level with the 22.dp logo beside it.
+                style = DisplayAccent.copy(fontSize = 22.sp, lineHeight = 22.sp),
             )
         }
         Spacer(Modifier.height(6.dp))
@@ -261,13 +262,9 @@ private fun resolveGreetings(lang: SupportedLanguage): Pair<String, String> {
         h < 17 -> "Good afternoon"
         else -> "Good evening"
     }
-    val hi = when {
-        h < 12 -> "सुप्रभात"
-        h < 17 -> "नमस्ते"
-        else -> "शुभ संध्या"
-    }
-    // `lang` is reserved for per-language nuance later; ignored for now.
-    return en to hi
+    // Accent greeting follows the selected language (falls back to Hindi
+    // wording only for HINDI itself); the big line below stays English.
+    return en to lang.timeGreeting(h)
 }
 
 @Composable

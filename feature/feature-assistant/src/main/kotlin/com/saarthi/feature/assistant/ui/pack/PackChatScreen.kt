@@ -179,6 +179,11 @@ fun PackChatScreen(
                     unfocusedTextColor = SaarthiColors.Text,
                     cursorColor = SaarthiColors.Marigold,
                 ),
+                // Pin the glyph colour to the theme's text token. Without an
+                // explicit textStyle colour the field inherits an unspecified
+                // default that renders near-white in light mode — invisible
+                // on the white input surface. Matches ChatInputBar.
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text),
             )
             Spacer(Modifier.width(8.dp))
             Box(

@@ -72,6 +72,27 @@ enum class SupportedLanguage(
         ODIA     -> "ନମସ୍କାର 🪔"
     }
 
+    /**
+     * Time-of-day greeting in this language (morning / afternoon / evening),
+     * chosen by [hour] (0..23). Used on the home header so the accent line
+     * beside the logo tracks the selected language.
+     */
+    fun timeGreeting(hour: Int): String {
+        val slot = when { hour < 12 -> 0; hour < 17 -> 1; else -> 2 }
+        return when (this) {
+            ENGLISH  -> listOf("Good morning", "Good afternoon", "Good evening")
+            HINDI    -> listOf("सुप्रभात", "नमस्ते", "शुभ संध्या")
+            TAMIL    -> listOf("காலை வணக்கம்", "மதிய வணக்கம்", "மாலை வணக்கம்")
+            TELUGU   -> listOf("శుభోదయం", "శుభ మధ్యాహ్నం", "శుభ సాయంత్రం")
+            BENGALI  -> listOf("সুপ্রভাত", "শুভ অপরাহ্ন", "শুভ সন্ধ্যা")
+            MARATHI  -> listOf("सुप्रभात", "शुभ दुपार", "शुभ संध्याकाळ")
+            KANNADA  -> listOf("ಶುಭೋದಯ", "ಶುಭ ಮಧ್ಯಾಹ್ನ", "ಶುಭ ಸಂಜೆ")
+            GUJARATI -> listOf("સુપ્રભાત", "શુભ બપોર", "શુભ સાંજ")
+            PUNJABI  -> listOf("ਸ਼ੁਭ ਸਵੇਰ", "ਸ਼ੁਭ ਦੁਪਹਿਰ", "ਸ਼ੁਭ ਸ਼ਾਮ")
+            ODIA     -> listOf("ଶୁଭ ସକାଳ", "ଶୁଭ ଅପରାହ୍ନ", "ଶୁଭ ସନ୍ଧ୍ୟା")
+        }[slot]
+    }
+
     /** Home-screen "what would you like to explore?" subtitle. */
     val exploreSubtitle: String get() = when (this) {
         ENGLISH  -> "What would you like to explore?"
