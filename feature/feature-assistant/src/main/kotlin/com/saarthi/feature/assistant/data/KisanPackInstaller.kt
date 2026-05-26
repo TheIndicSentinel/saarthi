@@ -57,9 +57,19 @@ class KisanPackInstaller @Inject constructor(
     private val preference: KisanPackPreference,
 ) {
 
-    /** Install the seed pack bundled in app assets — used on first launch. */
+    /**
+     * Install the bundled seed pack on first launch, OR re-install it when the
+     * bundled seed is a NEWER version than what's installed — so seed content
+     * updates (new tags, fixed entries) shipped in an app update actually reach
+     * existing users, not just fresh installs. A remotely-downloaded pack
+     * (PackUpdateWorker) sets a higher version and is left untouched.
+     */
     suspend fun installSeedIfAbsent() = withContext(Dispatchers.IO) {
-        if (preference.installedVersion.value > 0) return@withContext
+        val bundledVersion = runCatching {
+            context.assets.open(SEED_ASSET_PATH).bufferedReader().use { JSONObject(it.readText()).optInt("version", 0) }
+        }.getOrDefault(0)
+        if (bundledVersion <= 0) return@withContext
+        if (preference.installedVersion.value >= bundledVersion) return@withContext
         runCatching {
             context.assets.open(SEED_ASSET_PATH).use { installFrom(it, source = "seed:$SEED_ASSET_PATH") }
         }.onFailure { Timber.w(it, "Kisan seed pack not bundled — skipping") }
