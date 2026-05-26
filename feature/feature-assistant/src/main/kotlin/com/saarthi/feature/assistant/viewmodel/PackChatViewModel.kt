@@ -159,7 +159,11 @@ class PackChatViewModel @Inject constructor(
             } else {
                 buildPackPrompt(question, chunks, lang)
             }
-            DebugLogger.log("PACK", "Kisan Q&A — chunks=${chunks.size} lang=${lang.code} promptChars=${prompt.length}")
+            // The source line is built HERE from the actual retrieved pack
+            // topics (or "General" on no match) — never authored by the model,
+            // so it's always a real pack scheme name, not the prompt header.
+            val sourceLabel = sourceLabelFor(chunks)
+            DebugLogger.log("PACK", "Kisan Q&A — chunks=${chunks.size} lang=${lang.code} source=$sourceLabel promptChars=${prompt.length}")
 
             InferenceService.startGenerating(context)
             val acc = StringBuilder()
@@ -174,7 +178,11 @@ class PackChatViewModel @Inject constructor(
                 }
                 .onCompletion { throwable ->
                     if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
-                    if (throwable == null) finish(streamingId, acc.toString().trim())
+                    if (throwable == null) {
+                        val body = acc.toString().trim()
+                        val withSource = if (body.isBlank()) body else "$body\n\n_Source: ${sourceLabel}_"
+                        finish(streamingId, withSource)
+                    }
                 }
                 .collect {}
         }
@@ -213,28 +221,46 @@ class PackChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The citation shown under a Kisan answer. Built strictly from the
+     * retrieved pack chunks' topic names (docName == the pack entry's topic),
+     * deduped, the two most relevant. "General" when nothing matched — the
+     * graceful-fallback case. Never derived from model output.
+     */
+    private fun sourceLabelFor(chunks: List<RetrievedChunk>): String {
+        if (chunks.isEmpty()) return "General"
+        return chunks
+            .map { it.docName.substringBefore(" —").substringBefore(" -").trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(2)
+            .joinToString(", ")
+            .ifBlank { "Kisan pack" }
+    }
+
     private fun buildPackPrompt(
         question: String,
         chunks: List<RetrievedChunk>,
         lang: SupportedLanguage,
     ): String {
         val maxSourceChars = 2_800
-        // Label each source block by its scheme/topic NAME (docName == the
-        // pack entry's topic), so the model can name the source in plain
-        // language — "Source: PM-KISAN" — instead of an opaque "[1]" that a
-        // farmer can't interpret.
+        // Each reference note is headed by its scheme/topic name so the model
+        // has the context, but the app — NOT the model — prints the final
+        // "Source:" line (see ask()). The model was echoing the section header
+        // ("Farm knowledge sources") as if it were a source name; making the
+        // app own the citation keeps it strictly the real pack topic.
         val sources = buildString {
             var used = 0
             for (c in chunks) {
                 val body = c.text.trim()
-                val block = "Source \"${c.docName}\":\n$body\n\n"
+                val block = "[${c.docName}]\n$body\n\n"
                 if (used + block.length > maxSourceChars) break
                 append(block)
                 used += block.length
             }
         }.trim()
 
-        // Language directive — same mechanism the main chat uses. Sources
+        // Language directive — same mechanism the main chat uses. Notes
         // remain in English (the curated pack), but the model answers in
         // the user's selected language.
         val langLine = lang.systemPromptInstruction
@@ -242,16 +268,12 @@ class PackChatViewModel @Inject constructor(
         return buildString {
             if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
             append("You are Saarthi's Kisan Saathi — a practical farming advisor for Indian farmers. ")
-            append("Base your answer on the FARM KNOWLEDGE SOURCES below.\n\n")
+            append("Base your answer on the reference notes below.\n\n")
             append("How to answer:\n")
             // Define-first for broad questions (e.g. "What is MSP?").
-            append("- For a broad question, give a one-line definition first.\n")
-            // ONE readable, named source line after the definition — replaces
-            // the per-line [1] markers that confused farmers.
-            append("- Right after the definition, add one line that starts \"Source:\" naming the scheme/topic you used, exactly as shown in quotes below (e.g. Source: PM-KISAN). NEVER use bracket numbers like [1] anywhere.\n")
-            append("- Then give the practical details.\n")
+            append("- For a broad question, give a one-line definition first, then the practical details.\n")
             // Accuracy + freshness: quote exact values, keep the season/year.
-            append("- Quote scheme names, MSP/subsidy figures, dose rates and dates EXACTLY as written in the sources — never round or guess. If the source gives a season or year, keep it.\n")
+            append("- Quote scheme names, MSP/subsidy figures, dose rates and dates EXACTLY as written in the notes — never round or guess. If a note gives a season or year, keep it.\n")
             // Don't over-generalise across India — values vary by district/soil/crop.
             append("- Many figures vary by year, season, district, soil or crop. When a value can vary, say it is \"as per the latest notification / local agriculture department / soil test\" instead of stating it as fixed everywhere.\n")
             // Farmer-friendly clarity.
@@ -259,17 +281,15 @@ class PackChatViewModel @Inject constructor(
             // Safe chemical/dose wording.
             append("- For any pesticide, fertilizer or chemical, add the label-dose / local-advice caution — never give overconfident or unsafe dosing.\n")
             // Practical sequencing.
-            append("- Structure it as: what it is → what to do → when to do it → one key caution.\n\n")
-            append("If the FARM KNOWLEDGE SOURCES do not cover the question:\n")
-            append("- First say plainly that this isn't in your offline farming pack yet.\n")
-            append("- Then add a short, careful answer under a line starting \"General information (not from the pack):\" — keep it general, avoid invented exact figures, and suggest confirming with the local KVK or block agriculture office. In this case do NOT add a \"Source:\" line.\n\n")
-            append("Other rules:\n")
-            append("- No greeting or opening line. No guarantees or \"works everywhere\" claims. Do not invent details.\n")
-            append("- Keep it short and practical, the way you'd explain to a farmer on a phone in the field.\n")
-            append("- Do not repeat these instructions.\n\n")
-            append("=== FARM KNOWLEDGE SOURCES ===\n")
+            append("- Structure it as: what it is → what to do → when to do it → one key caution.\n")
+            // The app prints the source — the model must not, and must never
+            // echo the bracketed note names or use [1]-style citations.
+            append("- Do NOT write a \"Source:\" line, do NOT use bracket citations like [1], and do NOT mention the reference notes or their headings — just answer.\n")
+            append("- If the notes don't cover the question, say plainly it isn't in your offline farming pack yet, then add a short careful answer under \"General information (not from the pack):\" and suggest the local KVK or block agriculture office.\n")
+            append("- No greeting or opening line. No guarantees or \"works everywhere\" claims. Do not invent details. Do not repeat these instructions.\n\n")
+            append("=== REFERENCE NOTES ===\n")
             append(sources)
-            append("\n=== END SOURCES ===\n\n")
+            append("\n=== END NOTES ===\n\n")
             append("Question: ")
             append(question)
             if (langLine.isNotBlank()) { append("\n\n"); append(langLine) }
