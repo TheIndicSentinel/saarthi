@@ -559,36 +559,24 @@ class ChatRepositoryImpl @Inject constructor(
                 "Saarthi replies in a warm, conversational tone — short, clear, and helpful. " +
                 "If Saarthi is not sure of a fact, Saarthi simply says \"I'm not sure about that\" instead of guessing."
 
-            // Single English demonstration turn. NOTE: we deliberately do NOT
-            // try to coerce the 1B into the selected language here. The earlier
-            // attempt (drop the English identity + lead with a localized
-            // example + a native "reply in X" directive) pushed Gemma 3 1B into
-            // repetition loops / parroting on non-English turns — see the
-            // "[REP] Loop detected" reports. A 1B is too small to switch
-            // languages reliably; the stable behaviour is this English-primed
-            // transcript. Users who need non-English replies should use the
-            // STANDARD/LARGE models, which honour the language directive well.
-            // Demonstrate a NORMAL helpful turn — NOT a self-introduction.
-            // The old "who are you → I'm Saarthi, your private AI assistant…"
-            // example made the 1B parrot that intro before every answer and
-            // blur the User/Saarthi roles. A plain helpful exchange teaches it
-            // to answer directly and conversationally. Identity questions are
-            // still covered by the third-person paragraph above.
-            val example =
-                "User: My phone battery drains fast. Any tips?\n" +
-                "Saarthi: Sure — lower your screen brightness, turn off background app refresh, and switch on battery saver. Want steps for any of these?"
-
+            // NO canned demonstration turn. A fixed example gets parroted by
+            // the 1B as its (especially first) reply — it echoed the old
+            // "who are you → I'm Saarthi…" intro, then echoed a battery-tips
+            // example. The third-person identity paragraph alone primes the
+            // persona; the model then answers the user's ACTUAL question.
+            // (We also deliberately don't coerce the 1B into a non-English
+            // language here — pushing that caused repetition loops; reliable
+            // multilingual output is the STANDARD/LARGE models' job.)
             val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
-            // Compute the budget left for RAG after identity / example /
-            // recap / user / scaffolding — pass it to the block builder
-            // so chunks are dropped at boundaries rather than sliced
-            // mid-text by the final trimPrompt safety net.
-            val scaffolding = identity.length + example.length + recap.length +
+            // Compute the budget left for RAG after identity / recap / user /
+            // scaffolding — pass it to the block builder so chunks are dropped
+            // at boundaries rather than sliced mid-text by trimPrompt.
+            val scaffolding = identity.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
             val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
-            val fullPrompt = "$identity\n\n$example$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
+            val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
             return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = "User: $userMessage\nSaarthi:")
         }
 

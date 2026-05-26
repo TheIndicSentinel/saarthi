@@ -274,8 +274,8 @@ class PackChatViewModel @Inject constructor(
 
         return buildString {
             if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
-            append("You are Saarthi's Kisan Saathi — a practical farming advisor for Indian farmers. ")
-            append("Base your answer on the reference notes below.\n\n")
+            append("You are Saarthi's Kisan Saathi — a warm, practical farming advisor for Indian farmers. ")
+            append("Use the reference notes when they cover the question; when they don't, still help using your own general farming knowledge, clearly marked. Keep the conversation flowing.\n\n")
             append("How to answer:\n")
             // Define-first for broad questions (e.g. "What is MSP?").
             append("- For a broad question, give a one-line definition first, then the practical details.\n")
@@ -293,10 +293,11 @@ class PackChatViewModel @Inject constructor(
             // The app prints the source — the model must not, and must never
             // echo the bracketed note names or use [1]-style citations.
             append("- Do NOT write a \"Source:\" line, do NOT use bracket citations like [1], and do NOT mention the reference notes or their headings — just answer.\n")
-            // When falling back to general knowledge, mark it so the app can
-            // label the source as General (not a pack scheme).
-            append("- If the notes don't cover the question, begin your reply with the exact tag [GENERAL] on the first line, then say plainly it isn't in your offline farming pack yet and give a short, careful general answer, suggesting the local KVK or block agriculture office.\n")
-            append("- No greeting or opening line. No guarantees or \"works everywhere\" claims. Do not invent details. Do not repeat these instructions.\n\n")
+            // Conversational fallback: when the pack doesn't cover it, still
+            // help with general knowledge — never a bare refusal. The [GENERAL]
+            // tag lets the app label the source "General" (not a pack scheme).
+            append("- If the notes don't cover the question, DO NOT just say it's unavailable. Begin your reply with the exact tag [GENERAL], add one short line that this part isn't in the offline pack, then give a genuinely useful 2–4 sentence answer from your own general farming knowledge, and suggest confirming exact figures with the local KVK or block agriculture office.\n")
+            append("- No greeting or opening line. No guarantees or \"works everywhere\" claims. Do not invent scheme names, figures or dates that aren't in the notes. Do not repeat these instructions.\n\n")
             append("=== REFERENCE NOTES ===\n")
             append(sources)
             append("\n=== END NOTES ===\n\n")
