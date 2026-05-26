@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -58,6 +59,7 @@ class PackChatViewModel @Inject constructor(
     private val ragRepository: RagDocumentRepository,
     private val conversationDao: ConversationDao,
     private val languageManager: LanguageManager,
+    private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
 ) : ViewModel() {
 
     private val packSessionId = PackId.KISAN.sessionId            // RAG chunks
@@ -68,6 +70,10 @@ class PackChatViewModel @Inject constructor(
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
+
+    /** Id of the message currently being read aloud, or null. */
+    private val _speakingMessageId = MutableStateFlow<String?>(null)
+    val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
 
     /** Selected language — the screen uses it for the localized input hint. */
     val language: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
@@ -80,6 +86,40 @@ class PackChatViewModel @Inject constructor(
             if (saved.isNotEmpty()) {
                 _messages.value = saved.map { it.toChatMessage() }
             }
+        }
+        // Clear the speaking highlight when TTS finishes / is stopped.
+        ttsManager.isSpeaking
+            .onEach { speaking -> if (!speaking) _speakingMessageId.value = null }
+            .launchIn(viewModelScope)
+    }
+
+    /** Listen / stop on a Kisan answer bubble. */
+    fun toggleSpeak(messageId: String, text: String) {
+        if (_speakingMessageId.value == messageId) {
+            ttsManager.stop()
+            return
+        }
+        _speakingMessageId.value = messageId
+        ttsManager.speak(text, languageManager.selectedLanguage.value)
+    }
+
+    /**
+     * Retry an answer: drop the assistant reply and the user question that
+     * produced it (in memory + DB), then re-ask that question fresh.
+     */
+    fun retry(messageId: String) {
+        if (_isGenerating.value) return
+        val msgs = _messages.value
+        val idx = msgs.indexOfFirst { it.id == messageId }
+        if (idx <= 0) return
+        val prevUser = msgs.subList(0, idx).lastOrNull { it.role == MessageRole.USER } ?: return
+        _messages.update { list -> list.filterNot { it.id == messageId || it.id == prevUser.id } }
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                runCatching { conversationDao.deleteById(messageId) }
+                runCatching { conversationDao.deleteById(prevUser.id) }
+            }
+            ask(prevUser.content)
         }
     }
 

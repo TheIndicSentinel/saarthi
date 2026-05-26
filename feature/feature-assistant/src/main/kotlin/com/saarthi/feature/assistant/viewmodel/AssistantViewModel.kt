@@ -150,16 +150,27 @@ class AssistantViewModel @Inject constructor(
         // streaming → done for the latest message. Lives here (not in an
         // earlier init block) because [allMessages] / [currentLanguage] are
         // initialised above; reading them from an earlier init block NPEs.
-        var lastFinalizedId: String? = null
+        // Only auto-speak replies that were actually GENERATED live on this
+        // screen — never history loaded when a chat is opened/switched.
+        // We mark an id as "live" the moment we see it streaming, and only
+        // speak it (once) on its streaming→done transition. This fixes the
+        // bug where opening any chat read its last reply aloud repeatedly.
+        val streamedLive = mutableSetOf<String>()
+        val autoSpoken = mutableSetOf<String>()
         allMessages
             .onEach { msgs ->
                 if (!ttsPreference.autoSpeakReplies.value) return@onEach
+                msgs.forEach { m ->
+                    if (m.role == com.saarthi.feature.assistant.domain.MessageRole.ASSISTANT && m.isStreaming) {
+                        streamedLive.add(m.id)
+                    }
+                }
                 val last = msgs.lastOrNull { it.role == com.saarthi.feature.assistant.domain.MessageRole.ASSISTANT }
                     ?: return@onEach
-                if (last.isStreaming) return@onEach
-                if (last.content.isBlank()) return@onEach
-                if (last.id == lastFinalizedId) return@onEach
-                lastFinalizedId = last.id
+                if (last.isStreaming || last.content.isBlank()) return@onEach
+                if (last.id !in streamedLive) return@onEach   // loaded history, not live → don't read
+                if (last.id in autoSpoken) return@onEach
+                autoSpoken.add(last.id)
                 _speakingMessageId.value = last.id
                 ttsManager.speak(
                     last.content,
@@ -187,7 +198,15 @@ class AssistantViewModel @Inject constructor(
             .launchIn(viewModelScope)
             .also { job ->
                 job.invokeOnCompletion { throwable ->
-                    _uiState.update { it.copy(isStreaming = false, error = throwable?.message) }
+                    // A user-initiated Stop cancels the coroutine → don't
+                    // surface that as an error. Only genuine failures get a
+                    // short, professional message (never a raw stack message).
+                    val friendly = when {
+                        throwable == null -> null
+                        throwable is kotlinx.coroutines.CancellationException -> null
+                        else -> "Couldn't finish that response. Please try again."
+                    }
+                    _uiState.update { it.copy(isStreaming = false, error = friendly) }
                 }
             }
     }

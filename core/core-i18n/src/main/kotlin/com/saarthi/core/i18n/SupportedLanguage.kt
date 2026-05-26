@@ -93,6 +93,84 @@ enum class SupportedLanguage(
         }[slot]
     }
 
+    /** Kisan pack empty-state heading. */
+    val kisanAskTitle: String get() = when (this) {
+        ENGLISH  -> "Ask Kisan Saathi"
+        HINDI    -> "किसान साथी से पूछें"
+        TAMIL    -> "கிசான் சாத்தியிடம் கேளுங்கள்"
+        TELUGU   -> "కిసాన్ సాథీని అడగండి"
+        BENGALI  -> "কিষাণ সাথীকে জিজ্ঞাসা করুন"
+        MARATHI  -> "किसान साथीला विचारा"
+        KANNADA  -> "ಕಿಸಾನ್ ಸಾಥಿಯನ್ನು ಕೇಳಿ"
+        GUJARATI -> "કિસાન સાથીને પૂછો"
+        PUNJABI  -> "ਕਿਸਾਨ ਸਾਥੀ ਨੂੰ ਪੁੱਛੋ"
+        ODIA     -> "କିସାନ ସାଥୀଙ୍କୁ ପଚାରନ୍ତୁ"
+    }
+
+    /** Kisan pack starter questions shown on the empty chat screen. */
+    val kisanStarters: List<String> get() = when (this) {
+        ENGLISH  -> listOf(
+            "What is PM-KISAN and how do I apply?",
+            "What is the MSP for wheat?",
+            "How do I get a Kisan Credit Card?",
+            "How do I control fall armyworm in maize?",
+        )
+        HINDI    -> listOf(
+            "PM-KISAN क्या है और आवेदन कैसे करें?",
+            "गेहूं का MSP कितना है?",
+            "किसान क्रेडिट कार्ड कैसे बनवाएं?",
+            "मक्का में फॉल आर्मीवर्म कैसे रोकें?",
+        )
+        TAMIL    -> listOf(
+            "PM-KISAN என்றால் என்ன, எப்படி விண்ணப்பிப்பது?",
+            "கோதுமையின் MSP எவ்வளவு?",
+            "கிசான் கிரெடிட் கார்டு எப்படி பெறுவது?",
+            "சோளத்தில் ஃபால் ஆர்மிவார்ம் பூச்சியை எப்படி கட்டுப்படுத்துவது?",
+        )
+        TELUGU   -> listOf(
+            "PM-KISAN అంటే ఏమిటి, ఎలా దరఖాస్తు చేయాలి?",
+            "గోధుమ MSP ఎంత?",
+            "కిసాన్ క్రెడిట్ కార్డ్ ఎలా పొందాలి?",
+            "మొక్కజొన్నలో ఫాల్ ఆర్మీవార్మ్‌ను ఎలా నియంత్రించాలి?",
+        )
+        BENGALI  -> listOf(
+            "PM-KISAN কী এবং কীভাবে আবেদন করব?",
+            "গমের MSP কত?",
+            "কিষাণ ক্রেডিট কার্ড কীভাবে পাব?",
+            "ভুট্টায় ফল আর্মিওয়ার্ম কীভাবে নিয়ন্ত্রণ করব?",
+        )
+        MARATHI  -> listOf(
+            "PM-KISAN म्हणजे काय आणि अर्ज कसा करावा?",
+            "गव्हाचा MSP किती आहे?",
+            "किसान क्रेडिट कार्ड कसे मिळवावे?",
+            "मक्यातील फॉल आर्मीवर्म कसे नियंत्रित करावे?",
+        )
+        KANNADA  -> listOf(
+            "PM-KISAN ಎಂದರೇನು ಮತ್ತು ಹೇಗೆ ಅರ್ಜಿ ಸಲ್ಲಿಸುವುದು?",
+            "ಗೋಧಿಯ MSP ಎಷ್ಟು?",
+            "ಕಿಸಾನ್ ಕ್ರೆಡಿಟ್ ಕಾರ್ಡ್ ಹೇಗೆ ಪಡೆಯುವುದು?",
+            "ಜೋಳದಲ್ಲಿ ಫಾಲ್ ಆರ್ಮಿವರ್ಮ್ ಅನ್ನು ಹೇಗೆ ನಿಯಂತ್ರಿಸುವುದು?",
+        )
+        GUJARATI -> listOf(
+            "PM-KISAN શું છે અને કેવી રીતે અરજી કરવી?",
+            "ઘઉંનો MSP કેટલો છે?",
+            "કિસાન ક્રેડિટ કાર્ડ કેવી રીતે મેળવવું?",
+            "મકાઈમાં ફોલ આર્મીવોર્મ કેવી રીતે કાબૂમાં રાખવું?",
+        )
+        PUNJABI  -> listOf(
+            "PM-KISAN ਕੀ ਹੈ ਅਤੇ ਕਿਵੇਂ ਅਰਜ਼ੀ ਦੇਣੀ ਹੈ?",
+            "ਕਣਕ ਦਾ MSP ਕਿੰਨਾ ਹੈ?",
+            "ਕਿਸਾਨ ਕ੍ਰੈਡਿਟ ਕਾਰਡ ਕਿਵੇਂ ਲੈਣਾ ਹੈ?",
+            "ਮੱਕੀ ਵਿੱਚ ਫਾਲ ਆਰਮੀਵਰਮ ਨੂੰ ਕਿਵੇਂ ਕੰਟਰੋਲ ਕਰਨਾ ਹੈ?",
+        )
+        ODIA     -> listOf(
+            "PM-KISAN କ'ଣ ଏବଂ କିପରି ଆବେଦନ କରିବି?",
+            "ଗହମର MSP କେତେ?",
+            "କିସାନ କ୍ରେଡିଟ କାର୍ଡ କିପରି ପାଇବି?",
+            "ମକାରେ ଫଲ ଆର୍ମିୱର୍ମ କିପରି ନିୟନ୍ତ୍ରଣ କରିବି?",
+        )
+    }
+
     /** Home-screen "what would you like to explore?" subtitle. */
     val exploreSubtitle: String get() = when (this) {
         ENGLISH  -> "What would you like to explore?"

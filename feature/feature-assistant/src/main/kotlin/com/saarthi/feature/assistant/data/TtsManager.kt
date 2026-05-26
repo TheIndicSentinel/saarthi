@@ -91,7 +91,11 @@ class TtsManager @Inject constructor(
         language: SupportedLanguage,
         voiceHint: com.saarthi.core.i18n.VoiceHint? = null,
     ): String {
-        if (text.isBlank()) return ""
+        // Strip markdown / code / symbols so the engine doesn't read out
+        // "asterisk", "hash", "[1]", bullet dashes or emoji — which sounded
+        // like noise mid-sentence. Indic combining marks are preserved.
+        val spoken = sanitizeForSpeech(text)
+        if (spoken.isBlank()) return ""
         val id = UUID.randomUUID().toString()
         ensureInitialized {
             val locale = ttsLocaleFor(language)
@@ -120,9 +124,33 @@ class TtsManager @Inject constructor(
             val params = Bundle().apply {
                 putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, id)
             }
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, id)
+            tts?.speak(spoken, TextToSpeech.QUEUE_FLUSH, params, id)
         }
         return id
+    }
+
+    /**
+     * Turn a markdown/rich chat reply into plain prose the TTS engine can read
+     * naturally. Removes code fences, emphasis/heading/table punctuation,
+     * `[1]`-style citations, bullet markers and emoji; turns links into their
+     * label and blank lines into sentence pauses. Letters, digits, ordinary
+     * punctuation, ₹/% and Indic combining marks are all kept.
+     */
+    private fun sanitizeForSpeech(raw: String): String {
+        var t = raw
+        t = t.replace(Regex("```[\\s\\S]*?```"), " ")            // drop code blocks
+        t = t.replace(Regex("`+"), "")                             // inline code ticks
+        t = t.replace(Regex("\\[([^\\]]+)\\]\\([^)]*\\)"), "$1")  // [label](url) → label
+        t = t.replace(Regex("\\[\\s*\\d+(?:\\s*,\\s*\\d+)*\\s*\\]"), "") // [1] / [1, 2] citations
+        t = t.replace(Regex("(?m)^\\s*[-*•]\\s+"), "")            // list bullets
+        t = t.replace(Regex("[*_#~>|]+"), " ")                    // emphasis / heading / quote / table
+        // Emoji & pictographic symbols (NOT Indic marks, which are Mn/Mc).
+        t = t.replace(Regex("[\\x{1F000}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\x{2190}-\\x{21FF}\\x{FE00}-\\x{FE0F}\\x{200D}]"), "")
+        t = t.replace(Regex("\\p{So}"), "")
+        t = t.replace(Regex("\\n{2,}"), ". ").replace('\n', ' ')  // paragraph → pause
+        t = t.replace(Regex("[ \\t]{2,}"), " ")
+        t = t.replace(Regex("\\s+([.,!?;:।])"), "$1")             // tidy space before punctuation
+        return t.trim()
     }
 
     /**

@@ -71,6 +71,7 @@ fun PackChatScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val language by viewModel.language.collectAsStateWithLifecycle()
+    val speakingId by viewModel.speakingMessageId.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
 
@@ -125,6 +126,8 @@ fun PackChatScreen(
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (messages.isEmpty()) {
                 EmptyState(
+                    title = language.kisanAskTitle,
+                    starters = language.kisanStarters,
                     onPick = { q -> if (!isGenerating) viewModel.ask(q) },
                     modifier = Modifier.fillMaxSize().padding(20.dp),
                 )
@@ -141,8 +144,9 @@ fun PackChatScreen(
                         MessageBubble(
                             message = msg,
                             onDelete = {},
-                            onRetry = {},
-                            onListen = {},
+                            onRetry = { viewModel.retry(msg.id) },
+                            onListen = { viewModel.toggleSpeak(msg.id, msg.content) },
+                            isSpeaking = speakingId == msg.id,
                             avatarLabel = "🌾",
                         )
                     }
@@ -208,14 +212,12 @@ fun PackChatScreen(
 }
 
 @Composable
-private fun EmptyState(onPick: (String) -> Unit, modifier: Modifier = Modifier) {
-    // Representative starter questions covering the seed pack's spread.
-    val starters = listOf(
-        "What is PM-KISAN and how do I apply?",
-        "What's the MSP for wheat this year?",
-        "How do I get a Kisan Credit Card?",
-        "How do I control fall armyworm in maize?",
-    )
+private fun EmptyState(
+    title: String,
+    starters: List<String>,
+    onPick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.Center,
@@ -223,7 +225,7 @@ private fun EmptyState(onPick: (String) -> Unit, modifier: Modifier = Modifier) 
         Text("🌾", style = MaterialTheme.typography.displayLarge.copy(fontSize = 52.sp))
         Spacer(Modifier.height(10.dp))
         Text(
-            "Ask Kisan Saathi",
+            title,
             style = MaterialTheme.typography.titleMedium.copy(
                 color = SaarthiColors.Text, fontWeight = FontWeight.SemiBold,
             ),

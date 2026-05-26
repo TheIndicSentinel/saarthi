@@ -485,6 +485,35 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
+    /**
+     * One-turn self-introduction example for the COMPACT (1B) prompt, written
+     * in [lang]'s script. Used as in-context learning to anchor the model's
+     * reply language — the most reliable lever on a 1B, which parrots
+     * imperative instructions but mimics demonstrated output.
+     */
+    private fun compactIntroExample(lang: SupportedLanguage): String = when (lang) {
+        SupportedLanguage.ENGLISH  ->
+            "User: Hi, who are you?\nSaarthi: Hi! I'm Saarthi, your private AI assistant living right on your phone. How can I help you today?"
+        SupportedLanguage.HINDI    ->
+            "User: नमस्ते, आप कौन हैं?\nSaarthi: नमस्ते! मैं सारथी हूँ, आपका निजी AI सहायक जो आपके फ़ोन पर ही रहता है। आज मैं आपकी कैसे मदद करूँ?"
+        SupportedLanguage.TAMIL    ->
+            "User: வணக்கம், நீங்கள் யார்?\nSaarthi: வணக்கம்! நான் சாரதி, உங்கள் தொலைபேசியிலேயே இயங்கும் உங்கள் தனிப்பட்ட AI உதவியாளர். இன்று நான் எப்படி உதவட்டும்?"
+        SupportedLanguage.TELUGU   ->
+            "User: నమస్కారం, మీరు ఎవరు?\nSaarthi: నమస్కారం! నేను సారథి, మీ ఫోన్‌లోనే పనిచేసే మీ వ్యక్తిగత AI సహాయకుడిని. ఈరోజు నేను మీకు ఎలా సహాయం చేయగలను?"
+        SupportedLanguage.BENGALI  ->
+            "User: নমস্কার, আপনি কে?\nSaarthi: নমস্কার! আমি সারথি, আপনার ফোনেই চলা আপনার ব্যক্তিগত AI সহকারী। আজ আমি কীভাবে সাহায্য করতে পারি?"
+        SupportedLanguage.MARATHI  ->
+            "User: नमस्कार, तुम्ही कोण आहात?\nSaarthi: नमस्कार! मी सारथी, तुमच्या फोनवरच चालणारा तुमचा खाजगी AI सहाय्यक. आज मी तुमची कशी मदत करू?"
+        SupportedLanguage.KANNADA  ->
+            "User: ನಮಸ್ಕಾರ, ನೀವು ಯಾರು?\nSaarthi: ನಮಸ್ಕಾರ! ನಾನು ಸಾರಥಿ, ನಿಮ್ಮ ಫೋನ್‌ನಲ್ಲೇ ಕೆಲಸ ಮಾಡುವ ನಿಮ್ಮ ಖಾಸಗಿ AI ಸಹಾಯಕ. ಇಂದು ನಾನು ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?"
+        SupportedLanguage.GUJARATI ->
+            "User: નમસ્તે, તમે કોણ છો?\nSaarthi: નમસ્તે! હું સારથી છું, તમારા ફોન પર જ ચાલતો તમારો ખાનગી AI સહાયક. આજે હું તમારી કેવી રીતે મદદ કરું?"
+        SupportedLanguage.PUNJABI  ->
+            "User: ਸਤ ਸ੍ਰੀ ਅਕਾਲ, ਤੁਸੀਂ ਕੌਣ ਹੋ?\nSaarthi: ਸਤ ਸ੍ਰੀ ਅਕਾਲ! ਮੈਂ ਸਾਰਥੀ ਹਾਂ, ਤੁਹਾਡੇ ਫ਼ੋਨ 'ਤੇ ਹੀ ਚੱਲਣ ਵਾਲਾ ਤੁਹਾਡਾ ਨਿੱਜੀ AI ਸਹਾਇਕ। ਅੱਜ ਮੈਂ ਤੁਹਾਡੀ ਕਿਵੇਂ ਮਦਦ ਕਰਾਂ?"
+        SupportedLanguage.ODIA     ->
+            "User: ନମସ୍କାର, ଆପଣ କିଏ?\nSaarthi: ନମସ୍କାର! ମୁଁ ସାରଥି, ଆପଣଙ୍କ ଫୋନ୍‌ରେ ଚାଲୁଥିବା ଆପଣଙ୍କ ବ୍ୟକ୍ତିଗତ AI ସହାୟକ। ଆଜି ମୁଁ କିପରି ସାହାଯ୍ୟ କରିପାରିବି?"
+    }
+
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
         val isFresh = inferenceEngine.isFreshConversation
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
@@ -559,22 +588,33 @@ class ChatRepositoryImpl @Inject constructor(
                 "Saarthi replies in a warm, conversational tone — short, clear, and helpful. " +
                 "If Saarthi is not sure of a fact, Saarthi simply says \"I'm not sure about that\" instead of guessing."
 
-            val example =
-                "User: Hi, who are you?\n" +
-                "Saarthi: Hi! I'm Saarthi, your private AI assistant living right on your phone. How can I help you today?"
+            // In-context demonstration in the SELECTED language. For a 1B model
+            // a single worked example steers output language far more reliably
+            // than an imperative "reply in Hindi" line (which it tends to
+            // parrot). This is why Compact used to answer in English even
+            // though the UI was localized — the only example it ever saw was
+            // English. Now it sees the target script.
+            val example = compactIntroExample(currentLanguage)
+
+            // Plus a short directive as the LAST thing before the user turn —
+            // recency is the other lever a 1B responds to. Skipped for English.
+            val langLine = if (currentLanguage == SupportedLanguage.ENGLISH) ""
+                           else currentLanguage.systemPromptInstruction
+            val langTail = if (langLine.isNotBlank()) "$langLine\n\n" else ""
 
             val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
             // Compute the budget left for RAG after identity / example /
             // recap / user / scaffolding — pass it to the block builder
             // so chunks are dropped at boundaries rather than sliced
             // mid-text by the final trimPrompt safety net.
-            val scaffolding = identity.length + example.length + recap.length +
+            val scaffolding = identity.length + example.length + langTail.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
             val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
-            val fullPrompt = "$identity\n\n$example$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
-            return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = "User: $userMessage\nSaarthi:")
+            val pinnedTail = "${langTail}User: $userMessage\nSaarthi:"
+            val fullPrompt = "$identity\n\n$example$recap$ragPart\n\n$pinnedTail"
+            return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = pinnedTail)
         }
 
         // OFFICIAL APPROACH (matches Google AI Edge Gallery's AI Chat):
