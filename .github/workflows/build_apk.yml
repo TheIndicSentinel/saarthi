@@ -54,15 +54,22 @@ jobs:
           fi
           exit $EXIT_CODE
 
-      - name: Upload build log (always)
-        if: always()
+      # Build log only when something fails — keeps artifact storage small.
+      - name: Upload build log (on failure)
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: /tmp/build.log
+          retention-days: 7
 
+      # Short retention so APKs don't pile up and exhaust the account's
+      # Actions storage quota (which silently blocks NEW runs from being
+      # created on push — the symptom that prompted this change). Download
+      # the APK soon after the build; older ones auto-expire.
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: saarthi-release-apk
           path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
