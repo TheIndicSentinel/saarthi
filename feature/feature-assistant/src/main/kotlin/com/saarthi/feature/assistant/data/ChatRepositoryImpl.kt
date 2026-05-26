@@ -588,32 +588,35 @@ class ChatRepositoryImpl @Inject constructor(
                 "Saarthi replies in a warm, conversational tone — short, clear, and helpful. " +
                 "If Saarthi is not sure of a fact, Saarthi simply says \"I'm not sure about that\" instead of guessing."
 
+            val english = currentLanguage == SupportedLanguage.ENGLISH
+
             // In-context demonstration in the SELECTED language. For a 1B model
-            // a single worked example steers output language far more reliably
-            // than an imperative "reply in Hindi" line (which it tends to
-            // parrot). This is why Compact used to answer in English even
-            // though the UI was localized — the only example it ever saw was
-            // English. Now it sees the target script.
+            // a worked example steers output language far more reliably than an
+            // imperative "reply in Hindi" line (which it tends to parrot).
             val example = compactIntroExample(currentLanguage)
 
-            // Plus a short directive as the LAST thing before the user turn —
-            // recency is the other lever a 1B responds to. Skipped for English.
-            val langLine = if (currentLanguage == SupportedLanguage.ENGLISH) ""
-                           else currentLanguage.systemPromptInstruction
-            val langTail = if (langLine.isNotBlank()) "$langLine\n\n" else ""
+            // CRITICAL for non-English: OMIT the English identity. On a 1B,
+            // ~250 chars of English at the very top of the prompt primes
+            // English output no matter what follows — which is why Compact kept
+            // replying in English even after we localized the example. For
+            // non-English we keep the entire context in-language: the localized
+            // example, then a short NATIVE directive immediately before the
+            // user turn (strongest recency signal a 1B has).
+            val head = if (english) "$identity\n\n" else ""
+            val nativeDirective = if (english) "" else currentLanguage.nativeReplyDirective
+            val directiveTail = if (nativeDirective.isNotBlank()) "$nativeDirective\n" else ""
 
             val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
-            // Compute the budget left for RAG after identity / example /
-            // recap / user / scaffolding — pass it to the block builder
-            // so chunks are dropped at boundaries rather than sliced
-            // mid-text by the final trimPrompt safety net.
-            val scaffolding = identity.length + example.length + langTail.length + recap.length +
-                userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
+            // Compute the budget left for RAG after head / example / recap /
+            // tail / scaffolding — pass it to the block builder so chunks are
+            // dropped at boundaries rather than sliced mid-text by the final
+            // trimPrompt safety net.
+            val pinnedTail = "${directiveTail}User: $userMessage\nSaarthi:"
+            val scaffolding = head.length + example.length + recap.length + pinnedTail.length + 8
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
             val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
-            val pinnedTail = "${langTail}User: $userMessage\nSaarthi:"
-            val fullPrompt = "$identity\n\n$example$recap$ragPart\n\n$pinnedTail"
+            val fullPrompt = "$head$example$recap$ragPart\n\n$pinnedTail"
             return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = pinnedTail)
         }
 
@@ -845,6 +848,12 @@ class ChatRepositoryImpl @Inject constructor(
         if (complete.isEmpty()) return ""
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
         if (tier == SystemPromptProvider.ModelTier.COMPACT) {
+            // English framing here would nudge the 1B back to English output
+            // on a non-English chat — and language fidelity matters more than
+            // a thin recap on a model that barely sustains context anyway. So
+            // only add the recap in English; other languages skip it to keep
+            // the whole Compact prompt in-language.
+            if (currentLanguage != SupportedLanguage.ENGLISH) return ""
             val lastUser = complete.lastOrNull { it.role == MessageRole.USER } ?: return ""
             return "(Earlier in this chat, the user asked: \"${lastUser.content.take(120)}\")"
         }

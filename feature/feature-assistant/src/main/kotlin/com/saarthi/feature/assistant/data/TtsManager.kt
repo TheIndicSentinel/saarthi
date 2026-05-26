@@ -140,6 +140,15 @@ class TtsManager @Inject constructor(
         var t = raw
         t = t.replace(Regex("```[\\s\\S]*?```"), " ")            // drop code blocks
         t = t.replace(Regex("`+"), "")                             // inline code ticks
+        // LaTeX / math markup the models emit (e.g. $\text{O}_2$, \frac{a}{b}).
+        // Convert to readable plain text BEFORE the emphasis strip below
+        // (which would otherwise eat the _ / ^ we rely on here).
+        t = t.replace(Regex("\\\\(?:text|mathrm|mathbf|mathit|operatorname)\\s*\\{([^{}]*)\\}"), "$1")
+        t = t.replace(Regex("\\\\frac\\s*\\{([^{}]*)\\}\\s*\\{([^{}]*)\\}"), "$1 over $2")
+        t = t.replace(Regex("[_^]\\{([^{}]*)\\}"), "$1")
+        t = t.replace(Regex("[_^]([0-9A-Za-z])"), "$1")          // O_2 → O2
+        t = t.replace(Regex("\\\\[A-Za-z]+"), " ")                // stray \commands
+        t = t.replace("$", " ").replace("{", " ").replace("}", " ").replace("^", " ")
         t = t.replace(Regex("\\[([^\\]]+)\\]\\([^)]*\\)"), "$1")  // [label](url) → label
         t = t.replace(Regex("\\[\\s*\\d+(?:\\s*,\\s*\\d+)*\\s*\\]"), "") // [1] / [1, 2] citations
         t = t.replace(Regex("(?m)^\\s*[-*•]\\s+"), "")            // list bullets

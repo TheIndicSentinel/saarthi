@@ -47,8 +47,43 @@ fun MarkdownText(
     )
 }
 
+/**
+ * Convert LaTeX/math fragments the models sometimes emit (e.g. `$\text{O}_2$`,
+ * `\frac{a}{b}`) into plain text so chemical formulas and equations read
+ * cleanly. Scoped to `$…$` / `\(…\)` / `\[…\]` spans (plus a bare `\text{}`
+ * sweep) so ordinary prose and snake_case in code are left untouched.
+ */
+fun stripLatexForDisplay(input: String): String {
+    if (!input.contains('$') && !input.contains("\\(") &&
+        !input.contains("\\[") && !input.contains("\\text")
+    ) return input
+    fun cleanMath(m: String): String {
+        var t = m
+        t = t.replace(Regex("\\\\(?:text|mathrm|mathbf|mathit|operatorname)\\s*\\{([^{}]*)\\}"), "$1")
+        t = t.replace(Regex("\\\\frac\\s*\\{([^{}]*)\\}\\s*\\{([^{}]*)\\}"), "$1/$2")
+        t = t.replace(Regex("[_^]\\{([^{}]*)\\}"), "$1")
+        t = t.replace(Regex("[_^]([0-9A-Za-z])"), "$1")           // O_2 → O2
+        t = t.replace(Regex("\\\\(?:times|cdot)"), "×")
+        t = t.replace(Regex("\\\\(?:rightarrow|to)\\b"), "→")
+        t = t.replace(Regex("\\\\[A-Za-z]+"), "")                 // drop other commands
+        t = t.replace(Regex("[{}]"), "")
+        return t.trim()
+    }
+    var s = input
+    s = Regex("\\$\\$(.+?)\\$\\$", RegexOption.DOT_MATCHES_ALL).replace(s) { cleanMath(it.groupValues[1]) }
+    s = Regex("\\$([^$\\n]+?)\\$").replace(s) { cleanMath(it.groupValues[1]) }
+    s = Regex("\\\\\\((.+?)\\\\\\)").replace(s) { cleanMath(it.groupValues[1]) }
+    s = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MATCHES_ALL).replace(s) { cleanMath(it.groupValues[1]) }
+    // Bare \text{…} some models emit without delimiters, plus stray braces left
+    // by malformed snippets like "$\text{C}}6".
+    s = s.replace(Regex("\\\\text\\s*\\{([^{}]*)\\}"), "$1")
+    s = s.replace(Regex("(?<=[A-Za-z0-9])\\}+(?=[0-9A-Za-z) ]|$)"), "")
+    return s
+}
+
 /** Public for unit-testing the parser without spinning up Compose. */
-fun renderMarkdown(input: String): AnnotatedString = buildAnnotatedString {
+fun renderMarkdown(rawInput: String): AnnotatedString = buildAnnotatedString {
+    val input = stripLatexForDisplay(rawInput)
     // First strip fenced code blocks: render their content as monospace, drop the fences.
     val noFences = stripFences(input) { codeBody ->
         withStyle(

@@ -93,6 +93,108 @@ enum class SupportedLanguage(
         }[slot]
     }
 
+    /**
+     * Short, NATIVE-ONLY "reply in this language" directive (no English).
+     * Used by the COMPACT (1B) prompt where mixing English instruction text
+     * tends to flip the tiny model back to English output.
+     */
+    val nativeReplyDirective: String get() = when (this) {
+        ENGLISH  -> ""
+        HINDI    -> "हमेशा हिन्दी में ही जवाब दें।"
+        TAMIL    -> "எப்போதும் தமிழில் மட்டுமே பதிலளிக்கவும்."
+        TELUGU   -> "ఎల్లప్పుడూ తెలుగులో మాత్రమే సమాధానం ఇవ్వండి."
+        BENGALI  -> "সবসময় শুধু বাংলায় উত্তর দিন।"
+        MARATHI  -> "नेहमी फक्त मराठीतच उत्तर द्या."
+        KANNADA  -> "ಯಾವಾಗಲೂ ಕನ್ನಡದಲ್ಲೇ ಉತ್ತರಿಸಿ."
+        GUJARATI -> "હંમેશા ફક્ત ગુજરાતીમાં જ જવાબ આપો."
+        PUNJABI  -> "ਹਮੇਸ਼ਾ ਸਿਰਫ਼ ਪੰਜਾਬੀ ਵਿੱਚ ਹੀ ਜਵਾਬ ਦਿਓ।"
+        ODIA     -> "ସବୁବେଳେ କେବଳ ଓଡ଼ିଆରେ ଉତ୍ତର ଦିଅନ୍ତୁ।"
+    }
+
+    /** Kisan pack chat top-bar subtitle. */
+    val kisanChatSubtitle: String get() = when (this) {
+        ENGLISH  -> "Answers from the offline farming pack"
+        HINDI    -> "ऑफ़लाइन खेती पैक से जवाब"
+        TAMIL    -> "ஆஃப்லைன் விவசாயத் தொகுப்பிலிருந்து பதில்கள்"
+        TELUGU   -> "ఆఫ్‌లైన్ వ్యవసాయ ప్యాక్ నుండి సమాధానాలు"
+        BENGALI  -> "অফলাইন কৃষি প্যাক থেকে উত্তর"
+        MARATHI  -> "ऑफलाइन शेती पॅकमधून उत्तरे"
+        KANNADA  -> "ಆಫ್‌ಲೈನ್ ಕೃಷಿ ಪ್ಯಾಕ್‌ನಿಂದ ಉತ್ತರಗಳು"
+        GUJARATI -> "ઑફલાઇન ખેતી પૅકમાંથી જવાબો"
+        PUNJABI  -> "ਆਫ਼ਲਾਈਨ ਖੇਤੀ ਪੈਕ ਤੋਂ ਜਵਾਬ"
+        ODIA     -> "ଅଫଲାଇନ କୃଷି ପ୍ୟାକରୁ ଉତ୍ତର"
+    }
+
+    /** Kisan pack empty-state subtitle. */
+    val kisanEmptySubtitle: String get() = when (this) {
+        ENGLISH  -> "Answers come only from the offline farming pack — schemes, MSP, crop calendars, pest control."
+        HINDI    -> "जवाब सिर्फ़ ऑफ़लाइन खेती पैक से आते हैं — योजनाएँ, MSP, फसल कैलेंडर, कीट नियंत्रण।"
+        TAMIL    -> "பதில்கள் ஆஃப்லைன் விவசாயத் தொகுப்பிலிருந்து மட்டுமே — திட்டங்கள், MSP, பயிர் காலண்டர், பூச்சி கட்டுப்பாடு."
+        TELUGU   -> "సమాధానాలు ఆఫ్‌లైన్ వ్యవసాయ ప్యాక్ నుండి మాత్రమే — పథకాలు, MSP, పంట క్యాలెండర్లు, పురుగు నియంత్రణ."
+        BENGALI  -> "উত্তর শুধু অফলাইন কৃষি প্যাক থেকে — প্রকল্প, MSP, ফসল ক্যালেন্ডার, কীটপতঙ্গ নিয়ন্ত্রণ।"
+        MARATHI  -> "उत्तरे फक्त ऑफलाइन शेती पॅकमधून — योजना, MSP, पीक दिनदर्शिका, कीड नियंत्रण."
+        KANNADA  -> "ಉತ್ತರಗಳು ಆಫ್‌ಲೈನ್ ಕೃಷಿ ಪ್ಯಾಕ್‌ನಿಂದ ಮಾತ್ರ — ಯೋಜನೆಗಳು, MSP, ಬೆಳೆ ಕ್ಯಾಲೆಂಡರ್, ಕೀಟ ನಿಯಂತ್ರಣ."
+        GUJARATI -> "જવાબો ફક્ત ઑફલાઇન ખેતી પૅકમાંથી — યોજનાઓ, MSP, પાક કૅલેન્ડર, જીવાત નિયંત્રણ."
+        PUNJABI  -> "ਜਵਾਬ ਸਿਰਫ਼ ਆਫ਼ਲਾਈਨ ਖੇਤੀ ਪੈਕ ਤੋਂ — ਸਕੀਮਾਂ, MSP, ਫ਼ਸਲ ਕੈਲੰਡਰ, ਕੀਟ ਕੰਟਰੋਲ।"
+        ODIA     -> "ଉତ୍ତର କେବଳ ଅଫଲାଇନ କୃଷି ପ୍ୟାକରୁ — ଯୋଜନା, MSP, ଫସଲ କ୍ୟାଲେଣ୍ଡର, କୀଟ ନିୟନ୍ତ୍ରଣ।"
+    }
+
+    /** Kisan landing "Open chat" call-to-action. */
+    val kisanOpenChat: String get() = when (this) {
+        ENGLISH  -> "Open Kisan chat →"
+        HINDI    -> "किसान चैट खोलें →"
+        TAMIL    -> "கிசான் அரட்டையைத் திற →"
+        TELUGU   -> "కిసాన్ చాట్ తెరవండి →"
+        BENGALI  -> "কিষাণ চ্যাট খুলুন →"
+        MARATHI  -> "किसान चॅट उघडा →"
+        KANNADA  -> "ಕಿಸಾನ್ ಚಾಟ್ ತೆರೆಯಿರಿ →"
+        GUJARATI -> "કિસાન ચેટ ખોલો →"
+        PUNJABI  -> "ਕਿਸਾਨ ਚੈਟ ਖੋਲ੍ਹੋ →"
+        ODIA     -> "କିସାନ ଚାଟ ଖୋଲନ୍ତୁ →"
+    }
+
+    /** Kisan landing "QUICK ASK" section label. */
+    val kisanQuickAsk: String get() = when (this) {
+        ENGLISH  -> "QUICK ASK"
+        HINDI    -> "तुरंत पूछें"
+        TAMIL    -> "விரைவில் கேள்"
+        TELUGU   -> "త్వరగా అడగండి"
+        BENGALI  -> "দ্রুত জিজ্ঞাসা"
+        MARATHI  -> "पटकन विचारा"
+        KANNADA  -> "ತಕ್ಷಣ ಕೇಳಿ"
+        GUJARATI -> "ઝડપથી પૂછો"
+        PUNJABI  -> "ਤੁਰੰਤ ਪੁੱਛੋ"
+        ODIA     -> "ଶୀଘ୍ର ପଚାରନ୍ତୁ"
+    }
+
+    /** Kisan landing "TOPICS IN THIS PACK" section label. */
+    val kisanTopicsHeader: String get() = when (this) {
+        ENGLISH  -> "TOPICS IN THIS PACK"
+        HINDI    -> "इस पैक के विषय"
+        TAMIL    -> "இந்தத் தொகுப்பின் தலைப்புகள்"
+        TELUGU   -> "ఈ ప్యాక్‌లోని అంశాలు"
+        BENGALI  -> "এই প্যাকের বিষয়"
+        MARATHI  -> "या पॅकमधील विषय"
+        KANNADA  -> "ಈ ಪ್ಯಾಕ್‌ನ ವಿಷಯಗಳು"
+        GUJARATI -> "આ પૅકના વિષયો"
+        PUNJABI  -> "ਇਸ ਪੈਕ ਦੇ ਵਿਸ਼ੇ"
+        ODIA     -> "ଏହି ପ୍ୟାକର ବିଷୟ"
+    }
+
+    /** Kisan "100% offline" badge. */
+    val kisanOfflineBadge: String get() = when (this) {
+        ENGLISH  -> "100% offline"
+        HINDI    -> "100% ऑफ़लाइन"
+        TAMIL    -> "100% ஆஃப்லைன்"
+        TELUGU   -> "100% ఆఫ్‌లైన్"
+        BENGALI  -> "100% অফলাইন"
+        MARATHI  -> "100% ऑफलाइन"
+        KANNADA  -> "100% ಆಫ್‌ಲೈನ್"
+        GUJARATI -> "100% ઑફલાઇન"
+        PUNJABI  -> "100% ਆਫ਼ਲਾਈਨ"
+        ODIA     -> "100% ଅଫଲାଇନ"
+    }
+
     /** Kisan pack empty-state heading. */
     val kisanAskTitle: String get() = when (this) {
         ENGLISH  -> "Ask Kisan Saathi"

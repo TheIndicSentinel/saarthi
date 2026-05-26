@@ -79,6 +79,7 @@ fun KisanPackScreen(
     viewModel: KisanPackViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
+    val language by viewModel.language.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -135,6 +136,7 @@ fun KisanPackScreen(
                     pack = ui.pack!!,
                     packSupportedOnCurrentModel = ui.packSupportedOnCurrentModel,
                     activeModelName = ui.activeModelName,
+                    language = language,
                     onOpenChat = onOpenKisanChat,
                 )
             }
@@ -149,6 +151,7 @@ private fun LoadedPackContent(
     pack: KisanPackInstaller.InstalledPack,
     packSupportedOnCurrentModel: Boolean,
     activeModelName: String?,
+    language: com.saarthi.core.i18n.SupportedLanguage,
     onOpenChat: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
@@ -169,6 +172,7 @@ private fun LoadedPackContent(
                 pack = pack,
                 packSupportedOnCurrentModel = packSupportedOnCurrentModel,
                 activeModelName = activeModelName,
+                offlineBadge = language.kisanOfflineBadge,
             )
         }
 
@@ -181,7 +185,7 @@ private fun LoadedPackContent(
 
         // ── Quick-ask section header ──
         item {
-            SectionHeader(text = "QUICK ASK", subtitle = "tap any topic to start a chat")
+            SectionHeader(text = language.kisanQuickAsk, subtitle = "")
         }
 
         // ── Suggested questions (chips) ──
@@ -194,14 +198,14 @@ private fun LoadedPackContent(
 
         // ── Open-chat CTA ──
         item {
-            OpenChatCta(onClick = onOpenChat)
+            OpenChatCta(label = language.kisanOpenChat, onClick = onOpenChat)
         }
 
         // ── Topic list section header ──
         item {
             SectionHeader(
-                text = "TOPICS IN THIS PACK",
-                subtitle = "${pack.entries.size} curated entries · all offline",
+                text = language.kisanTopicsHeader,
+                subtitle = "${pack.entries.size} · ${language.kisanOfflineBadge}",
             )
         }
 
@@ -221,6 +225,7 @@ private fun StatusCard(
     pack: KisanPackInstaller.InstalledPack,
     packSupportedOnCurrentModel: Boolean,
     activeModelName: String?,
+    offlineBadge: String,
 ) {
     Box(
         modifier = Modifier
@@ -266,7 +271,7 @@ private fun StatusCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                BadgeChip(icon = Icons.Outlined.WifiOff, label = "100% offline")
+                BadgeChip(icon = Icons.Outlined.WifiOff, label = offlineBadge)
                 BadgeChip(icon = Icons.Outlined.AutoAwesome, label = "${pack.entries.size} topics")
                 if (pack.language.isNotBlank()) BadgeChip(label = pack.language.uppercase())
             }
@@ -366,7 +371,7 @@ private fun QuickAskChip(text: String, onClick: () -> Unit, modifier: Modifier =
 }
 
 @Composable
-private fun OpenChatCta(onClick: () -> Unit) {
+private fun OpenChatCta(label: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -381,7 +386,7 @@ private fun OpenChatCta(onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "Open Kisan chat →",
+            text = label,
             style = MaterialTheme.typography.titleMedium.copy(
                 color = SaarthiColors.Bg,
                 fontWeight = FontWeight.Bold,

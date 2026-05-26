@@ -3,6 +3,8 @@ package com.saarthi.feature.assistant.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.KisanPackPreference
+import com.saarthi.core.i18n.LanguageManager
+import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.feature.assistant.data.KisanPackInstaller
@@ -39,7 +41,11 @@ class KisanPackViewModel @Inject constructor(
     private val preference: KisanPackPreference,
     private val inferenceEngine: InferenceEngine,
     private val systemPromptProvider: SystemPromptProvider,
+    languageManager: LanguageManager,
 ) : ViewModel() {
+
+    /** Selected language — the screen localizes its labels off this. */
+    val language: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
 
     data class UiState(
         val loading: Boolean = true,

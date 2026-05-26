@@ -104,7 +104,7 @@ fun PackChatScreen(
                     ),
                 )
                 Text(
-                    "Answers from the offline farming pack",
+                    language.kisanChatSubtitle,
                     style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                 )
             }
@@ -127,6 +127,7 @@ fun PackChatScreen(
             if (messages.isEmpty()) {
                 EmptyState(
                     title = language.kisanAskTitle,
+                    subtitle = language.kisanEmptySubtitle,
                     starters = language.kisanStarters,
                     onPick = { q -> if (!isGenerating) viewModel.ask(q) },
                     modifier = Modifier.fillMaxSize().padding(20.dp),
@@ -214,6 +215,7 @@ fun PackChatScreen(
 @Composable
 private fun EmptyState(
     title: String,
+    subtitle: String,
     starters: List<String>,
     onPick: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -232,7 +234,7 @@ private fun EmptyState(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "Answers come only from the offline farming pack — schemes, MSP, crop calendars, pest control — with sources cited.",
+            subtitle,
             style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2, lineHeight = 19.sp),
         )
         Spacer(Modifier.height(18.dp))
