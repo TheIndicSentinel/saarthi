@@ -838,6 +838,7 @@ private fun SegmentedCard(
  * the model's recommended value (shown as "Auto") so it reflects what's in
  * effect before any override.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun CreativityCard(
     temperature: Float,
@@ -946,6 +947,16 @@ private fun CreativityCard(
                 activeTrackColor = SaarthiColors.Marigold,
                 inactiveTrackColor = SaarthiColors.Border,
             ),
+            // Round knob instead of Material 3's default vertical-bar thumb.
+            thumb = {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(SaarthiColors.Marigold)
+                        .border(2.dp, SaarthiColors.Surface, CircleShape),
+                )
+            },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
         )
         Text(

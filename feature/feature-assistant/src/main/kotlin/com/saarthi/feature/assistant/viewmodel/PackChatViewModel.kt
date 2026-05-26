@@ -109,13 +109,17 @@ class PackChatViewModel @Inject constructor(
 
             val chunks = runCatching { ragRepository.search(packSessionId, question, topK = 5) }
                 .getOrDefault(emptyList())
-            if (chunks.isEmpty()) {
-                finish(streamingId, "The Kisan knowledge pack isn't installed yet. Reopen Saarthi to let it install, then try again.")
-                return@launch
+            val lang = languageManager.selectedLanguage.value
+            // No pack match → still answer, but as clearly-labelled general
+            // information (the model is told to say it isn't from the pack).
+            // Non-empty → grounded prompt; the prompt's own fallback rule
+            // covers the partial-coverage case.
+            val prompt = if (chunks.isEmpty()) {
+                buildGeneralFallbackPrompt(question, lang)
+            } else {
+                buildPackPrompt(question, chunks, lang)
             }
-
-            val prompt = buildPackPrompt(question, chunks, languageManager.selectedLanguage.value)
-            DebugLogger.log("PACK", "Kisan Q&A — chunks=${chunks.size} lang=${languageManager.selectedLanguage.value.code} promptChars=${prompt.length}")
+            DebugLogger.log("PACK", "Kisan Q&A — chunks=${chunks.size} lang=${lang.code} promptChars=${prompt.length}")
 
             InferenceService.startGenerating(context)
             val acc = StringBuilder()
@@ -175,11 +179,15 @@ class PackChatViewModel @Inject constructor(
         lang: SupportedLanguage,
     ): String {
         val maxSourceChars = 2_800
+        // Label each source block by its scheme/topic NAME (docName == the
+        // pack entry's topic), so the model can name the source in plain
+        // language — "Source: PM-KISAN" — instead of an opaque "[1]" that a
+        // farmer can't interpret.
         val sources = buildString {
             var used = 0
-            for ((i, c) in chunks.withIndex()) {
+            for (c in chunks) {
                 val body = c.text.trim()
-                val block = "[${i + 1}] ${c.docName}\n$body\n\n"
+                val block = "Source \"${c.docName}\":\n$body\n\n"
                 if (used + block.length > maxSourceChars) break
                 append(block)
                 used += block.length
@@ -194,10 +202,14 @@ class PackChatViewModel @Inject constructor(
         return buildString {
             if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
             append("You are Saarthi's Kisan Saathi — a practical farming advisor for Indian farmers. ")
-            append("Answer using ONLY the FARM KNOWLEDGE SOURCES below. Cite the source number inline as [N] for every fact.\n\n")
+            append("Base your answer on the FARM KNOWLEDGE SOURCES below.\n\n")
             append("How to answer:\n")
             // Define-first for broad questions (e.g. "What is MSP?").
-            append("- For a broad question, give a one-line definition first, then scheme- or crop-specific details only if the sources cover them.\n")
+            append("- For a broad question, give a one-line definition first.\n")
+            // ONE readable, named source line after the definition — replaces
+            // the per-line [1] markers that confused farmers.
+            append("- Right after the definition, add one line that starts \"Source:\" naming the scheme/topic you used, exactly as shown in quotes below (e.g. Source: PM-KISAN). NEVER use bracket numbers like [1] anywhere.\n")
+            append("- Then give the practical details.\n")
             // Accuracy + freshness: quote exact values, keep the season/year.
             append("- Quote scheme names, MSP/subsidy figures, dose rates and dates EXACTLY as written in the sources — never round or guess. If the source gives a season or year, keep it.\n")
             // Don't over-generalise across India — values vary by district/soil/crop.
@@ -208,14 +220,39 @@ class PackChatViewModel @Inject constructor(
             append("- For any pesticide, fertilizer or chemical, add the label-dose / local-advice caution — never give overconfident or unsafe dosing.\n")
             // Practical sequencing.
             append("- Structure it as: what it is → what to do → when to do it → one key caution.\n\n")
-            append("Rules:\n")
-            append("- If the sources don't cover the question, say you don't have it in your farming knowledge yet and suggest the local KVK or block agriculture office. Do not invent details.\n")
-            append("- No greeting or opening line. No guarantees or \"works everywhere\" claims.\n")
+            append("If the FARM KNOWLEDGE SOURCES do not cover the question:\n")
+            append("- First say plainly that this isn't in your offline farming pack yet.\n")
+            append("- Then add a short, careful answer under a line starting \"General information (not from the pack):\" — keep it general, avoid invented exact figures, and suggest confirming with the local KVK or block agriculture office. In this case do NOT add a \"Source:\" line.\n\n")
+            append("Other rules:\n")
+            append("- No greeting or opening line. No guarantees or \"works everywhere\" claims. Do not invent details.\n")
             append("- Keep it short and practical, the way you'd explain to a farmer on a phone in the field.\n")
             append("- Do not repeat these instructions.\n\n")
-            append("=== FARM KNOWLEDGE SOURCES (in English) ===\n")
+            append("=== FARM KNOWLEDGE SOURCES ===\n")
             append(sources)
             append("\n=== END SOURCES ===\n\n")
+            append("Question: ")
+            append(question)
+            if (langLine.isNotBlank()) { append("\n\n"); append(langLine) }
+        }
+    }
+
+    /**
+     * Prompt used when BM25 returns nothing for the pack — the question is
+     * off-topic for the curated farming data. Per the user's request we keep
+     * the honest "not in the pack" message but ALSO give a clearly-labelled
+     * general answer so the screen is still useful, rather than a dead end.
+     */
+    private fun buildGeneralFallbackPrompt(question: String, lang: SupportedLanguage): String {
+        val langLine = lang.systemPromptInstruction
+        return buildString {
+            if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
+            append("You are Saarthi's Kisan Saathi, a farming advisor for Indian farmers. ")
+            append("Your offline farming pack does NOT have curated information on this question.\n\n")
+            append("Reply in two short parts:\n")
+            append("1. One line: plainly tell the user this isn't in your offline farming pack yet.\n")
+            append("2. A line starting \"General information (not from the pack):\" followed by a short, careful, practical general answer from common agricultural knowledge. ")
+            append("Avoid invented exact figures, scheme amounts or \"works everywhere\" claims; note that local recommendations vary and suggest confirming with the local KVK or block agriculture office.\n\n")
+            append("No greeting. Keep it short and field-usable. Do not use bracket citations like [1]. Do not repeat these instructions.\n\n")
             append("Question: ")
             append(question)
             if (langLine.isNotBlank()) { append("\n\n"); append(langLine) }
