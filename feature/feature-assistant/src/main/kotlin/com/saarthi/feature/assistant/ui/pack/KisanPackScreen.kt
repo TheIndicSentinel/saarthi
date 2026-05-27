@@ -407,6 +407,7 @@ private fun OpenChatCta(label: String, onClick: () -> Unit) {
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun TopicCard(
     entry: KisanPackInstaller.InstalledEntry,
@@ -443,7 +444,14 @@ private fun TopicCard(
             }
             if (entry.tags.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // FlowRow so long multi-word tags wrap onto the next line
+                // instead of squeezing into one Row (which made pills clip and
+                // their text wrap, leaving tall, uneven cards).
+                androidx.compose.foundation.layout.FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     entry.tags.take(4).forEach { tag ->
                         BadgeChip(label = "#$tag")
                     }
@@ -527,6 +535,8 @@ private fun BadgeChip(
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text2),
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
     }
 }
