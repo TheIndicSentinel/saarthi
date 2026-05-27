@@ -57,6 +57,16 @@ object IndianStates {
     /** All canonical state/UT display names, alphabetical — for the picker UI. */
     val all: List<String> = aliases.keys.sorted()
 
+    /** Sentinel returned by [statePrefixOf] for the combined NE-states overlay. */
+    const val NORTH_EAST = "North East"
+
+    private val northEastStates = setOf(
+        "Arunachal Pradesh", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Tripura", "Sikkim",
+    )
+
+    /** True if [state] is one of the north-eastern states covered by the combined overlay. */
+    fun isNorthEast(state: String): Boolean = northEastStates.any { it.equals(state, ignoreCase = true) }
+
     /** Detect a state mentioned anywhere in [text]; null if none. */
     fun detect(text: String): String? {
         if (text.isBlank()) return null
@@ -81,6 +91,9 @@ object IndianStates {
             .substringBefore(":")
             .trim()
             .lowercase()
+        if (prefix in setOf("north east states", "north-east states", "northeast states", "north east")) {
+            return NORTH_EAST
+        }
         return canonLower[prefix]
     }
 }

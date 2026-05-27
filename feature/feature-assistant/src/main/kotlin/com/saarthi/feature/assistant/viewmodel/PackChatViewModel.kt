@@ -184,7 +184,10 @@ class PackChatViewModel @Inject constructor(
             // dropped → no-state answers are exactly as before this feature.
             val chunks = rawChunks.filter { c ->
                 val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
-                cs == null || cs.equals(userState, ignoreCase = true)
+                cs == null ||
+                    cs.equals(userState, ignoreCase = true) ||
+                    (cs == com.saarthi.core.i18n.IndianStates.NORTH_EAST &&
+                        com.saarthi.core.i18n.IndianStates.isNorthEast(userState))
             }
 
             // No pack match → still answer, but as clearly-labelled general

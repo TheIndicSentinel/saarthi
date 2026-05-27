@@ -1,6 +1,6 @@
 {
   "packId": "kisan",
-  "version": 5,
+  "version": 6,
   "language": "en",
   "title": "Kisan Knowledge — starter pack",
   "source": "Government of India open data (data.gov.in, Agmarknet) + Ministry of Agriculture publications. Snapshot bundled with Saarthi v1.0.24.",
@@ -295,7 +295,7 @@
     },
     {
       "topic": "Uttar Pradesh — state top-up on PM-KISAN (Kisan Kalyan Mission)",
-      "content": "STATE OVERLAY for Uttar Pradesh. Alongside the central PM-KISAN (₹6,000/year), Uttar Pradesh adds a state top-up of ₹6,000/year, taking an eligible farmer's total to about ₹12,000/year; the state's Kisan Kalyan Mission also runs input, training and market-linkage support. Confirm the current state top-up status with the UP Agriculture Department.",
+      "content": "STATE OVERLAY for Uttar Pradesh. Alongside the central PM-KISAN (₹6,000/year), Uttar Pradesh adds a state top-up of ₹6,000/year, taking an eligible farmer's total to about ₹12,000/year; the state's Kisan Kalyan Mission also runs input, training and market-linkage support. Confirm the current state top-up status with the UP Agriculture Department. These figures are as of 2025-26 and are revised at budget time each year — confirm the current amount with the state agriculture department before the season.",
       "sourceUrl": "https://upagriculture.com/",
       "tags": [
         "uttar pradesh",
@@ -307,7 +307,7 @@
     },
     {
       "topic": "Rajasthan — Mukhyamantri Kisan Samman Nidhi (PM-KISAN top-up)",
-      "content": "STATE OVERLAY for Rajasthan. Rajasthan tops up the central PM-KISAN to a total of about ₹9,000/year (the state adds roughly ₹3,000). Farmers also get a wheat MSP bonus of ₹150/quintal, interest-free short-term crop loans (from a large state cooperative loan pool), and micro-irrigation (drip/sprinkler) subsidy up to about 75%. Confirm current rates with the Rajasthan Agriculture Department.",
+      "content": "STATE OVERLAY for Rajasthan. Rajasthan tops up the central PM-KISAN to a total of about ₹9,000/year (the state adds roughly ₹3,000). Farmers also get a wheat MSP bonus of ₹150/quintal, interest-free short-term crop loans (from a large state cooperative loan pool), and micro-irrigation (drip/sprinkler) subsidy up to about 75%. Confirm current rates with the Rajasthan Agriculture Department. These figures are as of 2025-26 and are revised at budget time each year — confirm the current amount with the state agriculture department before the season.",
       "sourceUrl": "https://rajkisan.rajasthan.gov.in/",
       "tags": [
         "rajasthan",
@@ -384,6 +384,99 @@
         "msp bonus",
         "crop insurance",
         "micro irrigation",
+        "state scheme"
+      ]
+    },
+    {
+      "topic": "Assam — Krishi Sa Sajuli Yojana & farm support",
+      "content": "STATE OVERLAY for Assam. Mukhya Mantri Krishi Sa Sajuli Yojana gives a ₹5,000 one-time grant for farm tools and implements to small and marginal farmers who own at least 1 acre and have farmed for 3 years. Tractor subsidy up to 70% (maximum ₹5.5 lakh) is available under CMSGUY. Canal irrigation is free of cost. There is no state top-up on PM-KISAN. Confirm current amounts and eligibility with the Assam Agriculture Department.",
+      "sourceUrl": "https://diragri.assam.gov.in/",
+      "tags": [
+        "assam",
+        "krishi sa sajuli",
+        "sa sajuli",
+        "cmsguy",
+        "tractor subsidy",
+        "farm tools",
+        "state scheme"
+      ]
+    },
+    {
+      "topic": "Kerala — paddy royalty, farmer pension & state crop insurance",
+      "content": "STATE OVERLAY for Kerala. Rice cultivation royalty: ₹5,500/hectare for sustainable paddy cultivation; paddy-land conservation support ₹3,000/hectare. Welfare Pension for Agriculturists (age 60+, holding below 2 ha): ₹1,600/month. Kerala Karshaka Kshemanidhi pension: ₹1,000/month at 60+, with ₹1 lakh accidental-death benefit and ₹50,000 permanent-disability benefit from the fund. The State Crop Insurance scheme is state-funded and covers 27 crops (paddy, coconut, rubber, pepper, cardamom, vegetables and more) including wild-animal attacks and hailstorm — which central PMFBY does not. Karuthal group insurance premium is ₹650 total (state pays ₹500, farmer ₹150). No state top-up on PM-KISAN. Apply through the AIMS portal and local Krishi Bhavans. Confirm current rates before relying on them.",
+      "sourceUrl": "https://www.keralaagriculture.gov.in/",
+      "tags": [
+        "kerala",
+        "paddy royalty",
+        "farmer pension",
+        "karshaka kshemanidhi",
+        "state crop insurance",
+        "karuthal",
+        "krishi bhavan",
+        "state scheme"
+      ]
+    },
+    {
+      "topic": "Uttarakhand — interest-free loans, irrigation & horticulture support",
+      "content": "STATE OVERLAY for Uttarakhand. Interest-free crop loans up to ₹3 lakh. Canal irrigation is free of cost across the state. Farm-machinery subsidy up to 80%. Kiwi orchard support (launched April 2025) at 70% state subsidy; dragon-fruit cultivation supported at 80%. Farmer pension of ₹1,000–₹1,200/month for age 60+ holding up to 2 hectares. No state top-up on PM-KISAN. Confirm current schemes and rates with the Uttarakhand Agriculture / Horticulture Department.",
+      "sourceUrl": "https://agriculture.uk.gov.in/",
+      "tags": [
+        "uttarakhand",
+        "interest-free loan",
+        "canal irrigation",
+        "farm machinery",
+        "kiwi",
+        "dragon fruit",
+        "farmer pension",
+        "state scheme"
+      ]
+    },
+    {
+      "topic": "Himachal Pradesh — hail nets, solar fencing, polyhouse & natural farming",
+      "content": "STATE OVERLAY for Himachal Pradesh. Anti-hail net subsidy 80% (individual) / 85% (group) for up to 5,000 sqm — protects apple and stone fruit. Solar fencing 80% (individual) / 85% (group) to keep monkeys and wild animals out (unique to hill states). Polyhouse subsidy up to 85% under the Mukhya Mantri Nutan Polyhouse project for high-value off-season vegetables. Natural farming under Prakritik Kheti Khushhal Kisan Yojana: ₹25,000 for an indigenous cow, ₹8,000 for cowshed improvement, ₹750 per drum for on-farm inputs. Apple rejuvenation: a ₹500 crore five-year high-density plantation project. A Market Intervention Scheme gives price protection by DBT during bumper harvests. No state top-up on PM-KISAN. Confirm current rates before relying on them.",
+      "sourceUrl": "https://hpagrisnet.gov.in/",
+      "tags": [
+        "himachal pradesh",
+        "anti-hail net",
+        "solar fencing",
+        "polyhouse",
+        "natural farming",
+        "prakritik kheti",
+        "apple",
+        "state scheme"
+      ]
+    },
+    {
+      "topic": "Jammu and Kashmir — Holistic Agriculture Development Programme (HADP)",
+      "content": "STATE OVERLAY for Jammu and Kashmir. The Holistic Agriculture Development Programme (HADP) covers 29 projects — seed quality, mechanisation, high-density plantation, dairy, sheep, poultry and market linkages — with subsidies from 20% to 95% depending on the activity. As a Himalayan classified state, micro-irrigation gets 25% extra unit-cost assistance on top of central PMKSY rates. HADP loans offer up to 90% financing with a back-ended government subsidy. Service delivery is through the hadp.jk.gov.in portal and Kisan Khidmat Ghars. Confirm the current project list and subsidy share before relying on them.",
+      "sourceUrl": "https://hadp.jk.gov.in/",
+      "tags": [
+        "jammu and kashmir",
+        "hadp",
+        "holistic agriculture",
+        "high-density plantation",
+        "micro irrigation",
+        "kisan khidmat ghar",
+        "state scheme"
+      ]
+    },
+    {
+      "topic": "North East States — crop insurance & enhanced central support",
+      "content": "STATE OVERLAY for the North-Eastern states (Arunachal Pradesh, Manipur, Meghalaya, Mizoram, Nagaland, Tripura, Sikkim). Under PMFBY crop insurance the central government bears 100% of the premium for these states — the farmer pays ZERO premium, unlike the rest of India where farmers pay about 2% for Kharif crops. PM-KISAN operates normally at ₹6,000/year. Most central scheme subsidies are enhanced for NE states. For state-specific schemes, contact the local agriculture department as they vary by state.",
+      "sourceUrl": "https://pmfby.gov.in/",
+      "tags": [
+        "arunachal pradesh",
+        "manipur",
+        "meghalaya",
+        "mizoram",
+        "nagaland",
+        "tripura",
+        "sikkim",
+        "north east",
+        "ne states",
+        "crop insurance",
+        "pmfby",
+        "zero premium",
         "state scheme"
       ]
     }
