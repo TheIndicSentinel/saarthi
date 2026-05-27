@@ -6,9 +6,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -353,30 +355,39 @@ private fun SpecialistsGrid(
     onKarigarClick: () -> Unit,
     onSwasthClick: () -> Unit,
 ) {
+    // height(IntrinsicSize.Min) + fillMaxHeight() makes both tiles in a row
+    // match the taller one's height, so tiles never stretch unevenly when one
+    // label/subtitle wraps to two lines — consistent across screen sizes.
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             SpecialistTile(
                 Icons.Outlined.Spa, "Kisan", "Farming · Mandi · Schemes",
                 tone = ChipTone.Jade, onClick = onKisanClick,
                 comingSoon = false,   // Kisan is LIVE
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             SpecialistTile(
                 Icons.AutoMirrored.Outlined.MenuBook, "Vidya", "NCERT · Science · GK",
                 tone = ChipTone.Indigo, onClick = onVidyaClick,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             SpecialistTile(
                 Icons.Outlined.Build, "Karigar", "Manuals · Error codes",
                 tone = ChipTone.Terracotta, onClick = onKarigarClick,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             SpecialistTile(
                 Icons.Outlined.Favorite, "Swasth", "Wellness · First-aid",
                 tone = ChipTone.Marigold, onClick = onSwasthClick,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
     }
@@ -434,9 +445,17 @@ private fun SpecialistTile(
                 Icon(icon, null, tint = toneColor, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Text(
                     name,
+                    // weight(fill=false) lets the name take the space left by
+                    // the pill and WRAP to a second line on narrow tiles /
+                    // large fonts, instead of being squeezed or clipped.
+                    modifier = Modifier.weight(1f, fill = false),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
