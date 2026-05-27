@@ -277,12 +277,32 @@ class PackChatViewModel @Inject constructor(
     private fun sourceLabelFor(chunks: List<RetrievedChunk>): String {
         if (chunks.isEmpty()) return "General"
         return chunks
-            .map { it.docName.substringBefore(" —").substringBefore(" -").trim() }
+            .map { schemeLabelOf(it.docName) }
             .filter { it.isNotBlank() }
             .distinct()
             .take(2)
             .joinToString(", ")
             .ifBlank { "Kisan pack" }
+    }
+
+    /**
+     * Turn a pack docName into a SPECIFIC source label — the official scheme /
+     * programme name, never the bare state. Central topics read
+     * "Scheme (ABBR) — description" (scheme before the dash); state overlays
+     * read "State — Scheme (qualifier)" (scheme after the dash), so a
+     * Maharashtra add-on cites "Namo Shetkari Maha Samman Nidhi", not
+     * "Maharashtra".
+     */
+    private fun schemeLabelOf(docName: String): String {
+        val isStateOverlay = com.saarthi.core.i18n.IndianStates.statePrefixOf(docName) != null
+        val raw = if (isStateOverlay) {
+            val after = docName.substringAfter(" —").trim()
+            // Drop a trailing "(state add-on)" / "(qualifier)" so the scheme name stays.
+            (if (after.endsWith(")")) after.substringBeforeLast(" (").trim() else after)
+        } else {
+            docName.substringBefore(" —").trim()  // keep any "(ABBR)" — it IS the short name
+        }
+        return raw.take(48)
     }
 
     private fun buildPackPrompt(
@@ -316,23 +336,23 @@ class PackChatViewModel @Inject constructor(
         return buildString {
             if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
             append("You are Saarthi's Kisan Saathi — a warm, practical farming advisor for Indian farmers. ")
-            append("Use the reference notes when they cover the question; when they don't, still help using your own general farming knowledge, clearly marked. Keep the conversation flowing.\n\n")
-            append("How to answer:\n")
-            // Define-first for broad questions (e.g. "What is MSP?").
-            append("- For a broad question, give a one-line definition first, then the practical details.\n")
-            // Accuracy + freshness: quote exact values, keep the season/year.
-            append("- Quote scheme names, MSP/subsidy figures, dose rates and dates EXACTLY as written in the notes — never round or guess. If a note gives a season or year, keep it.\n")
-            // Don't over-generalise across India — values vary by district/soil/crop.
-            append("- Many figures vary by year, season, district, soil or crop. When a value can vary, say it is \"as per the latest notification / local agriculture department / soil test\" instead of stating it as fixed everywhere.\n")
-            // Farmer-friendly clarity.
-            append("- Use simple, field-usable words; briefly explain any technical term.\n")
+            append("Answer ONLY from the reference notes below — they are official government sources and your only source of facts. When they don't cover the question, use the fallback rule.\n\n")
+            append("How to answer (short, direct, farmer-friendly):\n")
+            append("- Lead with a one-line answer or definition, then the key practical steps. Briefly explain any technical term.\n")
+            // Relevance — answer the topic that was asked, never an unrelated scheme.
+            append("- Use ONLY notes that actually match the question's topic (dairy → dairy, irrigation → irrigation, crop loss → insurance/relief, machinery → equipment subsidy). If the notes are about a different topic, treat the question as NOT covered — never answer with an unrelated scheme.\n")
+            // Official names + scheme level.
+            append("- Use the EXACT official scheme/programme name from the notes (e.g. PM-KISAN, PMFBY, PMKSY, Namo Shetkari Maha Samman Nidhi) — never a generic label like \"the state scheme\".\n")
+            append("- Say clearly whether a scheme is CENTRAL (national), a STATE scheme, or district-level.\n")
+            // Amounts — never guess.
+            append("- AMOUNTS: quote a benefit / instalment / subsidy figure ONLY if it is in the notes, exactly as written. If it is not in the notes or may be dated, say \"Please verify the current amount on the official government portal\" — never guess or round.\n")
+            // Eligibility — never guess.
+            append("- ELIGIBILITY: state who can apply ONLY if the notes say so. If it isn't confirmed, say \"eligibility isn't confirmed in the offline pack — please check the official portal.\" Never guess (for example, do not claim tenant farmers can apply unless the notes say so).\n")
+            // Explicit uncertainty language.
+            append("- When a fact is grounded in the notes you may open with \"Based on the available government source…\". When you cannot confirm something, say \"I could not confirm this in the current offline pack — please verify with your KVK or the official portal.\"\n")
             // Safe chemical/dose wording.
             append("- For any pesticide, fertilizer or chemical, add the label-dose / local-advice caution — never give overconfident or unsafe dosing.\n")
-            // Natural tone — the what/what-to-do/when/caution flow is a GUIDE
-            // for procedural questions, not a template to stamp on every reply.
-            append("- Answer naturally and conversationally. For a how-to or scheme question it often helps to cover what it is, what to do, when, and one key caution — but only when it fits; do not force that structure on simple or general questions.\n")
-            // The app prints the source — the model must not, and must never
-            // echo the bracketed note names or use [1]-style citations.
+            // The app prints the source — the model must not.
             append("- Do NOT write a \"Source:\" line, do NOT use bracket citations like [1], and do NOT mention the reference notes or their headings — just answer.\n")
             // Center → State hierarchy (industry standard for Indian agri advisory).
             if (state.isNotBlank()) {
@@ -343,7 +363,7 @@ class PackChatViewModel @Inject constructor(
             // Conversational fallback: when the pack doesn't cover it, still
             // help with general knowledge — never a bare refusal. The [GENERAL]
             // tag lets the app label the source "General" (not a pack scheme).
-            append("- If the notes don't cover the question, DO NOT just say it's unavailable. Begin your reply with the exact tag [GENERAL], add one short line that this part isn't in the offline pack, then give a genuinely useful 2–4 sentence answer from your own general farming knowledge, and suggest confirming exact figures with the local KVK or block agriculture office.\n")
+            append("- If the notes don't cover the question (or only contain unrelated schemes), begin your reply with the exact tag [GENERAL], add one short line that this isn't in the offline pack, then give brief general guidance relevant to what was asked — but do NOT name specific government schemes or quote rupee amounts you cannot confirm. Suggest the local KVK or the official portal.\n")
             if (packPublishedAt.isNotBlank()) {
                 append("- This offline farming data was last updated on $packPublishedAt. For figures that change over time (MSP, scheme amounts, dates), add \"as of $packPublishedAt\" so the user knows it may have changed since — never present it as today's live value.\n")
             }
@@ -371,8 +391,8 @@ class PackChatViewModel @Inject constructor(
             append("Your offline farming pack does NOT have curated information on this question.\n\n")
             append("Reply in two short parts:\n")
             append("1. One line: plainly tell the user this isn't in your offline farming pack yet.\n")
-            append("2. A line starting \"General information (not from the pack):\" followed by a short, careful, practical general answer from common agricultural knowledge. ")
-            append("Avoid invented exact figures, scheme amounts or \"works everywhere\" claims; note that local recommendations vary and suggest confirming with the local KVK or block agriculture office.\n\n")
+            append("2. A line starting \"General information (not from the pack):\" followed by a short, practical general answer relevant to what was asked, from common agricultural knowledge. ")
+            append("Do NOT name specific government schemes or quote rupee amounts / eligibility you cannot confirm — keep it general. Note that local recommendations vary and suggest verifying with the local KVK or the official portal.\n\n")
             append("No greeting. Keep it short and field-usable. Do not use bracket citations like [1]. Do not repeat these instructions.\n\n")
             append("Question: ")
             append(question)
