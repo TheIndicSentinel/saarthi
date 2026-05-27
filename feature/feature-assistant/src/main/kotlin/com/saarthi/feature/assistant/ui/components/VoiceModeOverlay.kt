@@ -80,7 +80,10 @@ fun VoiceModeOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0805))
+            // Theme background, not a hardcoded near-black — otherwise in light
+            // mode the dark overlay clashed with the theme-coloured (dark) text,
+            // making the voice screen unreadable.
+            .background(SaarthiColors.Bg)
             .clickable(enabled = false) {} // swallow taps to background
     ) {
         // ambient marigold glow
@@ -108,7 +111,8 @@ fun VoiceModeOverlay(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(Color(0x10F5EEE3))
+                        .background(SaarthiColors.Surface)
+                        .border(1.dp, SaarthiColors.Border, CircleShape)
                         .clickable(onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {

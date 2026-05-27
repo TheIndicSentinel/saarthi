@@ -317,8 +317,29 @@ class AssistantViewModel @Inject constructor(
                         sendMessage()
                     }
                 }
-                override fun onError(error: Int) =
-                    _uiState.update { it.copy(isListening = false, error = "Voice error: $error") }
+                override fun onError(error: Int) {
+                    // Code 5 (ERROR_CLIENT) fires when we cancel()/destroy() the
+                    // recognizer — that's the user closing voice mode, not a
+                    // failure, so stay silent. Others map to plain language; raw
+                    // "Voice error: 5" must never reach the user.
+                    val msg = when (error) {
+                        SpeechRecognizer.ERROR_CLIENT -> null
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                            "Didn't catch that — tap the mic and try again."
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                            "Microphone permission is needed for voice input."
+                        SpeechRecognizer.ERROR_NETWORK,
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
+                        SpeechRecognizer.ERROR_SERVER ->
+                            "The device speech service isn't responding right now. Please type instead."
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+                            "Voice input is busy — try again in a moment."
+                        else ->
+                            "Couldn't process voice input. Please try again or type instead."
+                    }
+                    _uiState.update { it.copy(isListening = false, error = msg) }
+                }
                 override fun onEndOfSpeech() = _uiState.update { it.copy(isListening = false) }
                 override fun onReadyForSpeech(p: Bundle?) = Unit
                 override fun onBeginningOfSpeech() = Unit

@@ -261,17 +261,16 @@ fun AssistantScreen(
                 // a white-on-white invisible toast. Passing the colors
                 // directly bypasses every theme path.
                 SnackbarHost(snackbarHost) { data ->
-                    // Use Material's INVERSE pair (dark surface + light text in
-                    // light theme, and vice-versa). The earlier Surface/Text
-                    // pairing was white-on-cream in light mode — almost no
-                    // contrast, so the toast looked blank. Inverse guarantees a
-                    // high-contrast, readable snackbar in both themes.
+                    // Fixed dark "toast" colours in BOTH themes — consistent and
+                    // always high-contrast. (Inverse colours flipped between
+                    // themes, which looked inconsistent; Surface/Text was
+                    // white-on-cream and nearly invisible in light mode.)
                     androidx.compose.material3.Snackbar(
                         snackbarData = data,
-                        containerColor = MaterialTheme.colorScheme.inverseSurface,
-                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-                        actionColor = SaarthiColors.Marigold,
-                        dismissActionContentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                        containerColor = Color(0xFF2B2317),
+                        contentColor = Color(0xFFF5EEE0),
+                        actionColor = Color(0xFFF4A52E),
+                        dismissActionContentColor = Color(0xFFBFB6A6),
                     )
                 }
             },
