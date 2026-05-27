@@ -41,7 +41,22 @@ class KisanPackPreference @Inject constructor(
     private val versionKey  = intPreferencesKey("kisan_pack_version")
     private val langKey     = stringPreferencesKey("kisan_pack_language")
     private val checkedKey  = longPreferencesKey("kisan_pack_last_check_ms")
+    private val userStateKey = stringPreferencesKey("kisan_user_state")
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /**
+     * The user's Indian state, captured conversationally in the Kisan chat
+     * (e.g. "Madhya Pradesh"). Empty = unknown → answers use the central
+     * baseline only. Pack-scoped on purpose: keeps the Kisan pack modular and
+     * NOT linked to the main chat's [SAARTHI_MEMORY].
+     */
+    val userState: StateFlow<String> = context.dataStore.data
+        .map { it[userStateKey] ?: "" }
+        .stateIn(scope, SharingStarted.Eagerly, "")
+
+    suspend fun setUserState(state: String) {
+        context.dataStore.edit { it[userStateKey] = state.trim() }
+    }
 
     val installedVersion: StateFlow<Int> = context.dataStore.data
         .map { it[versionKey] ?: 0 }

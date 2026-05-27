@@ -60,6 +60,7 @@ class PackChatViewModel @Inject constructor(
     private val conversationDao: ConversationDao,
     private val languageManager: LanguageManager,
     private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
+    private val kisanPackPreference: com.saarthi.core.i18n.KisanPackPreference,
 ) : ViewModel() {
 
     private val packSessionId = PackId.KISAN.sessionId            // RAG chunks
@@ -147,9 +148,30 @@ class PackChatViewModel @Inject constructor(
                 return@launch
             }
 
-            val chunks = runCatching { ragRepository.search(packSessionId, question, topK = 5) }
-                .getOrDefault(emptyList())
             val lang = languageManager.selectedLanguage.value
+
+            // Center → State hierarchy. Capture the user's state if they
+            // mention it (conversational), persist it pack-scoped, and use it
+            // this turn. Empty state ⇒ identical behaviour to before.
+            val detectedState = com.saarthi.core.i18n.IndianStates.detect(question)
+            if (detectedState != null && !detectedState.equals(kisanPackPreference.userState.value, ignoreCase = true)) {
+                withContext(NonCancellable) { runCatching { kisanPackPreference.setUserState(detectedState) } }
+            }
+            val userState = detectedState ?: kisanPackPreference.userState.value
+
+            // Inject the state into the retrieval query so a matching state
+            // overlay surfaces alongside the central baseline.
+            val searchQuery = if (userState.isNotBlank()) "$question $userState" else question
+            val rawChunks = runCatching { ragRepository.search(packSessionId, searchQuery, topK = 5) }
+                .getOrDefault(emptyList())
+            // Keep every central chunk; keep a STATE-OVERLAY chunk only when it
+            // matches the user's state. With no state set, all overlays are
+            // dropped → no-state answers are exactly as before this feature.
+            val chunks = rawChunks.filter { c ->
+                val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
+                cs == null || cs.equals(userState, ignoreCase = true)
+            }
+
             // No pack match → still answer, but as clearly-labelled general
             // information (the model is told to say it isn't from the pack).
             // Non-empty → grounded prompt; the prompt's own fallback rule
@@ -157,13 +179,13 @@ class PackChatViewModel @Inject constructor(
             val prompt = if (chunks.isEmpty()) {
                 buildGeneralFallbackPrompt(question, lang)
             } else {
-                buildPackPrompt(question, chunks, lang)
+                buildPackPrompt(question, chunks, lang, userState)
             }
             // The source line is built HERE from the actual retrieved pack
             // topics (or "General" on no match) — never authored by the model,
             // so it's always a real pack scheme name, not the prompt header.
             val sourceLabel = sourceLabelFor(chunks)
-            DebugLogger.log("PACK", "Kisan Q&A — chunks=${chunks.size} lang=${lang.code} source=$sourceLabel promptChars=${prompt.length}")
+            DebugLogger.log("PACK", "Kisan Q&A — chunks=${chunks.size} lang=${lang.code} state=${userState.ifBlank { "-" }} source=$sourceLabel promptChars=${prompt.length}")
 
             InferenceService.startGenerating(context)
             val acc = StringBuilder()
@@ -249,6 +271,7 @@ class PackChatViewModel @Inject constructor(
         question: String,
         chunks: List<RetrievedChunk>,
         lang: SupportedLanguage,
+        state: String,
     ): String {
         val maxSourceChars = 2_800
         // Each reference note is headed by its scheme/topic name so the model
@@ -293,6 +316,12 @@ class PackChatViewModel @Inject constructor(
             // The app prints the source — the model must not, and must never
             // echo the bracketed note names or use [1]-style citations.
             append("- Do NOT write a \"Source:\" line, do NOT use bracket citations like [1], and do NOT mention the reference notes or their headings — just answer.\n")
+            // Center → State hierarchy (industry standard for Indian agri advisory).
+            if (state.isNotBlank()) {
+                append("- The user farms in $state. Give the central/national rule FIRST, then add any $state-specific detail present in the notes (state scheme top-ups, bonuses, local sowing windows) and combine them in one answer. If the notes carry no $state add-on, give the central rule and add one line that local benefits may exist — suggest the $state agriculture department or local KVK. Never invent state figures.\n")
+            } else {
+                append("- If the question is about a scheme, MSP/price, subsidy or sowing dates, give the central/national rule, then end with ONE short line inviting the user to share their state for local specifics (for example: \"Tell me your state and I can check for local benefits too.\").\n")
+            }
             // Conversational fallback: when the pack doesn't cover it, still
             // help with general knowledge — never a bare refusal. The [GENERAL]
             // tag lets the app label the source "General" (not a pack scheme).
