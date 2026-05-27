@@ -54,6 +54,9 @@ object IndianStates {
 
     private val canonLower: Map<String, String> = aliases.keys.associateBy { it.lowercase() }
 
+    /** All canonical state/UT display names, alphabetical — for the picker UI. */
+    val all: List<String> = aliases.keys.sorted()
+
     /** Detect a state mentioned anywhere in [text]; null if none. */
     fun detect(text: String): String? {
         if (text.isBlank()) return null

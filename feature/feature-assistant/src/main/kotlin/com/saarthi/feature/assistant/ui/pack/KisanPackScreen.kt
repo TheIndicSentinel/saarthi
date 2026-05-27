@@ -80,6 +80,16 @@ fun KisanPackScreen(
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val language by viewModel.language.collectAsStateWithLifecycle()
+    val userState by viewModel.userState.collectAsStateWithLifecycle()
+    var showStatePicker by remember { mutableStateOf(false) }
+
+    if (showStatePicker) {
+        StatePickerSheet(
+            current = userState,
+            onSelect = viewModel::setUserState,
+            onDismiss = { showStatePicker = false },
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -110,6 +120,8 @@ fun KisanPackScreen(
                 ),
                 modifier = Modifier.weight(1f),
             )
+            StateChip(state = userState, onClick = { showStatePicker = true })
+            Spacer(Modifier.width(4.dp))
             IconButton(onClick = { viewModel.refresh() }) {
                 Icon(
                     Icons.Outlined.Refresh,

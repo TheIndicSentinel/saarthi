@@ -61,6 +61,12 @@ class KisanPackViewModel @Inject constructor(
     /** Convenience shortcut for the screen to show "Pack v1" header. */
     val installedVersion: StateFlow<Int> = preference.installedVersion
 
+    /** The user's selected state (empty = unset) — for the landing-page picker. */
+    val userState: StateFlow<String> = preference.userState
+    fun setUserState(state: String) {
+        viewModelScope.launch { runCatching { preference.setUserState(state) } }
+    }
+
     init {
         // Push the live model tier into the UI state so the "model
         // capable?" hint reflects the current selection in realtime.

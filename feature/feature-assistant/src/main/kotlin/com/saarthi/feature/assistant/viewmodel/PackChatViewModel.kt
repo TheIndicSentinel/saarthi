@@ -61,10 +61,15 @@ class PackChatViewModel @Inject constructor(
     private val languageManager: LanguageManager,
     private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
     private val kisanPackPreference: com.saarthi.core.i18n.KisanPackPreference,
+    private val packInstaller: com.saarthi.feature.assistant.data.KisanPackInstaller,
 ) : ViewModel() {
 
     private val packSessionId = PackId.KISAN.sessionId            // RAG chunks
     private val chatSessionId = PACK_CHAT_SESSION                 // persisted messages
+
+    /** When the installed pack data was published — surfaced so the model can
+     *  flag figures as "as of <date>" rather than presenting stale data as live. */
+    @Volatile private var packPublishedAt: String = ""
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -79,6 +84,12 @@ class PackChatViewModel @Inject constructor(
     /** Selected language — the screen uses it for the localized input hint. */
     val language: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
 
+    /** The user's selected state (empty = unset) — shown as a chip, switchable. */
+    val userState: StateFlow<String> = kisanPackPreference.userState
+    fun setUserState(state: String) {
+        viewModelScope.launch { runCatching { kisanPackPreference.setUserState(state) } }
+    }
+
     init {
         // Restore the persisted pack conversation so "go back and return"
         // shows the prior chat (the gap the user reported).
@@ -92,6 +103,10 @@ class PackChatViewModel @Inject constructor(
         ttsManager.isSpeaking
             .onEach { speaking -> if (!speaking) _speakingMessageId.value = null }
             .launchIn(viewModelScope)
+        // Load the pack's publish date once so answers can flag data freshness.
+        viewModelScope.launch {
+            packPublishedAt = runCatching { packInstaller.loadInstalledPack()?.publishedAt }.getOrNull().orEmpty()
+        }
     }
 
     /** Listen / stop on a Kisan answer bubble. */
@@ -326,6 +341,9 @@ class PackChatViewModel @Inject constructor(
             // help with general knowledge — never a bare refusal. The [GENERAL]
             // tag lets the app label the source "General" (not a pack scheme).
             append("- If the notes don't cover the question, DO NOT just say it's unavailable. Begin your reply with the exact tag [GENERAL], add one short line that this part isn't in the offline pack, then give a genuinely useful 2–4 sentence answer from your own general farming knowledge, and suggest confirming exact figures with the local KVK or block agriculture office.\n")
+            if (packPublishedAt.isNotBlank()) {
+                append("- This offline farming data was last updated on $packPublishedAt. For figures that change over time (MSP, scheme amounts, dates), add \"as of $packPublishedAt\" so the user knows it may have changed since — never present it as today's live value.\n")
+            }
             append("- No greeting or opening line. No guarantees or \"works everywhere\" claims. Do not invent scheme names, figures or dates that aren't in the notes. Do not repeat these instructions.\n\n")
             append("=== REFERENCE NOTES ===\n")
             append(sources)

@@ -1,6 +1,6 @@
 {
   "packId": "kisan",
-  "version": 3,
+  "version": 4,
   "language": "en",
   "title": "Kisan Knowledge — starter pack",
   "source": "Government of India open data (data.gov.in, Agmarknet) + Ministry of Agriculture publications. Snapshot bundled with Saarthi v1.0.24.",
@@ -89,6 +89,42 @@
       "content": "STATE OVERLAY for Telangana (EXAMPLE entry — verify the current per-acre amount, season coverage and eligibility with the Telangana Agriculture Department before relying on it). Rythu Bandhu (now Rythu Bharosa) is a Telangana state investment-support scheme that pays land-owning farmers a per-acre amount each season to help with input costs, separate from central schemes. Check enrolment and the current per-acre rate through the state Rythu Bharosa portal or the local agriculture / revenue office. NOTE: the per-acre amount, season coverage and eligibility change by state notification — always confirm the latest figure before advising.",
       "sourceUrl": "https://rythubandhu.telangana.gov.in/",
       "tags": ["telangana", "rythu bandhu", "rythu bharosa", "state scheme", "investment support", "per acre"]
+    },
+    {
+      "topic": "Madhya Pradesh — Bhavantar Bhugtan Yojana (price-deficiency payment)",
+      "content": "STATE OVERLAY for Madhya Pradesh (EXAMPLE entry — verify current crops, rates and registration dates with the MP Agriculture / Mandi Board before relying on it). Bhavantar Bhugtan Yojana is a Madhya Pradesh price-deficiency scheme: for notified crops, if the market (modal) sale price falls below the declared model price during the notified period, the state pays the registered farmer the difference directly, instead of physically procuring the crop. Farmers must register in advance and sell in a notified mandi within the window. NOTE: covered crops, the model price and the registration window change each season by state notification — confirm the latest before advising.",
+      "sourceUrl": "https://mpeuparjan.nic.in/",
+      "tags": ["madhya pradesh", "bhavantar", "bhavantar bhugtan", "price deficiency", "price support", "state scheme"]
+    },
+    {
+      "topic": "Karnataka — Krishi Bhagya (farm pond + micro-irrigation)",
+      "content": "STATE OVERLAY for Karnataka (EXAMPLE entry — verify current subsidy share and eligibility with the Karnataka Agriculture Department). Krishi Bhagya is a Karnataka rain-fed-farming scheme that helps farmers harvest and reuse rainwater: subsidised farm ponds (krishi honda) with polythene lining, lifting devices (diesel/solar pump) and micro-irrigation as a bundle, so a single rain event can be stored for protective irrigation. Apply through the local Raitha Samparka Kendra. NOTE: subsidy percentage and component list change by notification — confirm the latest before advising.",
+      "sourceUrl": "https://raitamitra.karnataka.gov.in/",
+      "tags": ["karnataka", "krishi bhagya", "farm pond", "krishi honda", "irrigation subsidy", "state scheme"]
+    },
+    {
+      "topic": "Bihar — Rajya Fasal Sahayata Yojana (state crop assistance)",
+      "content": "STATE OVERLAY for Bihar (EXAMPLE entry — verify current per-hectare assistance and enrolment dates with the Bihar Cooperative / Agriculture Department). Bihar Rajya Fasal Sahayata Yojana is the state's crop-loss assistance scheme (Bihar runs this in place of PMFBY): registered farmers who suffer a notified yield loss in a season receive a per-hectare assistance amount, with a higher rate for larger losses, and no premium is charged to the farmer. Enrol online each season before the cut-off. NOTE: rates, loss thresholds and the enrolment window change each season — confirm the latest before advising.",
+      "sourceUrl": "https://pacsonline.bih.nic.in/fsy/",
+      "tags": ["bihar", "rajya fasal sahayata", "crop assistance", "crop loss", "state crop insurance", "state scheme"]
+    },
+    {
+      "topic": "Odisha — KALIA (livelihood & income support)",
+      "content": "STATE OVERLAY for Odisha (EXAMPLE entry — verify current benefit amounts and eligibility with the Odisha Agriculture Department). KALIA (Krushak Assistance for Livelihood and Income Augmentation) is an Odisha scheme that gives cultivators and landless agricultural labourers seasonal financial assistance for cultivation, plus livelihood support and life/accident insurance cover for vulnerable households. Check enrolment / status on the state KALIA portal. NOTE: assistance amounts, instalments and eligibility change by notification — confirm the latest before advising.",
+      "sourceUrl": "https://kalia.odisha.gov.in/",
+      "tags": ["odisha", "kalia", "livelihood support", "income support", "landless labourer", "state scheme"]
+    },
+    {
+      "topic": "West Bengal — Krishak Bandhu (assured income & death benefit)",
+      "content": "STATE OVERLAY for West Bengal (EXAMPLE entry — verify current per-acre amount and eligibility with the West Bengal Agriculture Department). Krishak Bandhu has two parts: an assured per-acre financial assistance paid each year (split across Kharif and Rabi) to recorded cultivators, and a one-time death-benefit grant to the family if a registered farmer aged 18–60 dies. Apply through the duare sarkar camps or the state Krishak Bandhu portal. NOTE: the per-acre rate, minimum amount and eligibility change by notification — confirm the latest before advising.",
+      "sourceUrl": "https://krishakbandhu.net/",
+      "tags": ["west bengal", "krishak bandhu", "assured income", "death benefit", "income support", "state scheme"]
+    },
+    {
+      "topic": "Punjab — Wheat sowing window (PAU Ludhiana guidance)",
+      "content": "STATE OVERLAY for Punjab (EXAMPLE entry — verify with Punjab Agricultural University, Ludhiana, or your local KVK for the current season). For Punjab, PAU generally advises sowing timely wheat varieties from about the last week of October to the third week of November; very late sowing into December lowers yield, so short-duration varieties are recommended if delayed. Use the recommended seed rate and treat seed before sowing. NOTE: exact dates and recommended varieties are revised each season by PAU and the State Agriculture Department — confirm the latest before advising.",
+      "sourceUrl": "https://www.pau.edu/",
+      "tags": ["punjab", "wheat", "sowing calendar", "sowing window", "pau", "rabi", "state scheme"]
     }
   ]
 }

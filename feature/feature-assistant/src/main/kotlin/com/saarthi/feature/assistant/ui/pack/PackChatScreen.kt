@@ -72,8 +72,18 @@ fun PackChatScreen(
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val language by viewModel.language.collectAsStateWithLifecycle()
     val speakingId by viewModel.speakingMessageId.collectAsStateWithLifecycle()
+    val userState by viewModel.userState.collectAsStateWithLifecycle()
+    var showStatePicker by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
+
+    if (showStatePicker) {
+        StatePickerSheet(
+            current = userState,
+            onSelect = viewModel::setUserState,
+            onDismiss = { showStatePicker = false },
+        )
+    }
 
     // Keep the latest message in view as tokens stream in.
     LaunchedEffect(messages.size, messages.lastOrNull()?.content) {
@@ -108,6 +118,7 @@ fun PackChatScreen(
                     style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                 )
             }
+            StateChip(state = userState, onClick = { showStatePicker = true })
             // Clear / start-fresh — the "manage conversation" action. The
             // chat is otherwise persisted across navigation, so this is the
             // only way to wipe it.
