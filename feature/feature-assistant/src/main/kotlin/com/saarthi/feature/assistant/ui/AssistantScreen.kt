@@ -165,7 +165,12 @@ fun AssistantScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
+    // Follow the conversation: on a new message AND as the streaming reply
+    // grows, keep the latest text in view so the user watches it generate.
+    // streamingContent is non-null only while the last bubble is streaming, so
+    // after it finishes only the message count drives the scroll.
+    val streamingContent = messages.lastOrNull()?.takeIf { it.isStreaming }?.content
+    LaunchedEffect(messages.size, streamingContent) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 

@@ -297,68 +297,82 @@ class AssistantViewModel @Inject constructor(
         }
     }
 
+    // One shared listener — the recognizer is created ONCE and reused (see
+    // startListening). Recreating it every turn raced Android's async service
+    // teardown, which is why voice worked the first time then silently failed
+    // on the next turn until a cancel() (the user's close + reopen).
+    private val recognitionListener = object : RecognitionListener {
+        override fun onResults(results: Bundle?) {
+            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            val spoken = matches?.firstOrNull() ?: return
+            _uiState.update { it.copy(inputText = spoken, isListening = false) }
+            // Auto-send + close the voice overlay if it was the trigger.
+            if (_uiState.value.showVoiceMode && spoken.isNotBlank()) {
+                _uiState.update { it.copy(showVoiceMode = false) }
+                sendMessage()
+            }
+        }
+        override fun onError(error: Int) {
+            // Code 5 (ERROR_CLIENT) fires when we cancel() the recognizer —
+            // that's the user closing voice mode or us restarting it, not a
+            // failure, so stay silent. Others map to plain language; raw
+            // "Voice error: 5" must never reach the user.
+            val msg = when (error) {
+                SpeechRecognizer.ERROR_CLIENT -> null
+                SpeechRecognizer.ERROR_NO_MATCH,
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                    "Didn't catch that — tap the mic and try again."
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                    "Microphone permission is needed for voice input."
+                SpeechRecognizer.ERROR_NETWORK,
+                SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
+                SpeechRecognizer.ERROR_SERVER ->
+                    "The device speech service isn't responding right now. Please type instead."
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+                    "Voice input is busy — try again in a moment."
+                else ->
+                    "Couldn't process voice input. Please try again or type instead."
+            }
+            _uiState.update { it.copy(isListening = false, error = msg) }
+        }
+        override fun onEndOfSpeech() = _uiState.update { it.copy(isListening = false) }
+        override fun onReadyForSpeech(p: Bundle?) = Unit
+        override fun onBeginningOfSpeech() = Unit
+        override fun onRmsChanged(v: Float) = Unit
+        override fun onBufferReceived(b: ByteArray?) = Unit
+        override fun onPartialResults(p: Bundle?) {
+            val matches = p?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            val partial = matches?.firstOrNull().orEmpty()
+            if (partial.isNotBlank()) {
+                _uiState.update { it.copy(inputText = partial) }
+            }
+        }
+        override fun onEvent(e: Int, b: Bundle?) = Unit
+    }
+
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(getApplication())) {
             _uiState.update { it.copy(error = "Voice recognition not available on this device") }
             return
         }
-        // Destroy any existing recognizer before creating a new one to prevent leaking
-        // the old instance if startListening() is called while already listening.
-        speechRecognizer?.destroy()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(getApplication()).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle?) {
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val spoken = matches?.firstOrNull() ?: return
-                    _uiState.update { it.copy(inputText = spoken, isListening = false) }
-                    // Auto-send + close the voice overlay if it was the trigger.
-                    if (_uiState.value.showVoiceMode && spoken.isNotBlank()) {
-                        _uiState.update { it.copy(showVoiceMode = false) }
-                        sendMessage()
-                    }
-                }
-                override fun onError(error: Int) {
-                    // Code 5 (ERROR_CLIENT) fires when we cancel()/destroy() the
-                    // recognizer — that's the user closing voice mode, not a
-                    // failure, so stay silent. Others map to plain language; raw
-                    // "Voice error: 5" must never reach the user.
-                    val msg = when (error) {
-                        SpeechRecognizer.ERROR_CLIENT -> null
-                        SpeechRecognizer.ERROR_NO_MATCH,
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                            "Didn't catch that — tap the mic and try again."
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-                            "Microphone permission is needed for voice input."
-                        SpeechRecognizer.ERROR_NETWORK,
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
-                        SpeechRecognizer.ERROR_SERVER ->
-                            "The device speech service isn't responding right now. Please type instead."
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
-                            "Voice input is busy — try again in a moment."
-                        else ->
-                            "Couldn't process voice input. Please try again or type instead."
-                    }
-                    _uiState.update { it.copy(isListening = false, error = msg) }
-                }
-                override fun onEndOfSpeech() = _uiState.update { it.copy(isListening = false) }
-                override fun onReadyForSpeech(p: Bundle?) = Unit
-                override fun onBeginningOfSpeech() = Unit
-                override fun onRmsChanged(v: Float) = Unit
-                override fun onBufferReceived(b: ByteArray?) = Unit
-                override fun onPartialResults(p: Bundle?) {
-                    val matches = p?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val partial = matches?.firstOrNull().orEmpty()
-                    if (partial.isNotBlank()) {
-                        _uiState.update { it.copy(inputText = partial) }
-                    }
-                }
-                override fun onEvent(e: Int, b: Bundle?) = Unit
-            })
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        // Reuse a SINGLE recognizer instance across turns. cancel() clears any
+        // prior (finished) session, then we start fresh — this is the reliable
+        // pattern. The old destroy()+recreate raced the async teardown so the
+        // 2nd voice turn silently did nothing until the user cancelled.
+        val recognizer = speechRecognizer
+            ?: SpeechRecognizer.createSpeechRecognizer(getApplication()).also {
+                it.setRecognitionListener(recognitionListener)
+                speechRecognizer = it
             }
-            startListening(intent)
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+        runCatching {
+            recognizer.cancel()
+            recognizer.startListening(intent)
+        }.onFailure {
+            _uiState.update { it.copy(isListening = false, error = "Couldn't start voice input. Please try again.") }
         }
         _uiState.update { it.copy(isListening = true) }
     }
