@@ -210,7 +210,10 @@ class PackChatViewModel @Inject constructor(
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
                     if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
-                    finish(streamingId, e.message?.takeIf { it.isNotBlank() } ?: "Something went wrong. Please try again.")
+                    // Never surface raw native errors (e.g. token-overflow) to the
+                    // farmer — show a clean, actionable message instead.
+                    DebugLogger.log("PACK", "Kisan generation error: ${e.message}")
+                    finish(streamingId, "Sorry, I couldn't generate an answer just now. Please try again, or ask a shorter question.")
                 }
                 .onEach { token ->
                     acc.append(token)

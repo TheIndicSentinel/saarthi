@@ -710,6 +710,17 @@ class LiteRTInferenceEngine @Inject constructor(
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (LARGE tier — Gemma 4 needs room for system+recap+reply)  headroom=${headroomMb}MB  model=${sizeMb}MB")
                             2048
                         }
+                        isLargeTier -> {
+                            // CRITICAL: a Gemma 4 prompt (system + RAG + recap) is
+                            // ~1,100–1,450 tokens. The old low-RAM fallback of 512
+                            // tokens made EVERY generation fail with "Input token ids
+                            // are too long: 1092 >= 512" — no response until the user
+                            // restarted (see crash logs). 1536 holds the prompt while
+                            // keeping the KV-cache ~25% smaller than 2048 for the
+                            // tight-RAM load. Never drop a LARGE model below this.
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1536 (LARGE tier, low RAM headroom=${headroomMb}MB — must fit its own prompt)")
+                            1536
+                        }
                         isCompactTier -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 (COMPACT tier — tested stable on SM8550)")
                             512
