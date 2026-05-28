@@ -699,10 +699,17 @@ private fun ModelOption(
                 ) {
                     Text(
                         model.displayName,
+                        // weight(fill=false) lets the name take the space left by
+                        // the chip and wrap on narrow screens, instead of starving
+                        // the chip into a squeezed vertical sliver (which also blew
+                        // up the row height on small devices).
+                        modifier = Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = SaarthiColors.Text,
                         ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     SaarthiChip(text = tag, tone = tone, small = true)
                 }
