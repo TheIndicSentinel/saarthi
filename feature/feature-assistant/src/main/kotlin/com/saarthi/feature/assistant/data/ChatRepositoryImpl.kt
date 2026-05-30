@@ -808,8 +808,12 @@ class ChatRepositoryImpl @Inject constructor(
         if (complete.isEmpty()) return ""
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
         if (tier == SystemPromptProvider.ModelTier.COMPACT) {
-            val lastUser = complete.lastOrNull { it.role == MessageRole.USER } ?: return ""
-            return "(Earlier in this chat, the user asked: \"${lastUser.content.take(120)}\")"
+            // No recap for the 1B. Quoting the prior user message verbatim made
+            // it parrot the user back ("You're doing good!" after "I am doing
+            // good") — see user-reported transcript. The 1B's multi-turn
+            // coherence is weak with or without this hint; without it each turn
+            // is independent and clean. STANDARD/LARGE recap is untouched.
+            return ""
         }
         // STANDARD / LARGE — user questions only, three most recent.
         val questionsToKeep = 3

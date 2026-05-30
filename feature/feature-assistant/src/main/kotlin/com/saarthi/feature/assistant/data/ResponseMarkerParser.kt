@@ -285,6 +285,10 @@ object ResponseMarkerParser {
 
     private fun stripAll(text: String): String {
         var out = text
+            // Compact (Gemma 1B) sometimes echoes the "Saarthi:" transcript
+            // anchor as the first token of its reply. STANDARD/LARGE never see
+            // that anchor in their prompts, so this regex is a no-op for them.
+            .replace(Regex("^\\s*\\**\\s*[Ss]aarthi\\**\\s*:\\s*"), "")
             .replace(MEMORY_REGEX, "")
             .replace(REMINDER_ABS_REGEX, "")
             .replace(REMINDER_REL_REGEX, "")
