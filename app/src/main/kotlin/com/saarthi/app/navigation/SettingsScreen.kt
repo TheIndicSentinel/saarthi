@@ -40,7 +40,6 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -81,7 +80,6 @@ fun SettingsScreen(
 ) {
     var showLangPicker by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
-    val context = androidx.compose.ui.platform.LocalContext.current
     val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
     val darkOn = themeMode == com.saarthi.core.ui.theme.ThemeMode.DARK
     // Daily wisdom notification — preference-backed (DataStore) and tied
@@ -203,53 +201,6 @@ fun SettingsScreen(
                 danger = true,
                 trailing = { ChevronRight() },
                 onClick = { showClearDialog = true },
-            )
-            // Diagnostic log share — opens the Android share sheet with the
-            // saarthi_debug.log file attached. Used to send onboarding/download
-            // logs from a friend's device when something goes wrong (e.g. model
-            // download stuck on OEM background-restricted phones).
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.BugReport, null) },
-                title = "Share debug log",
-                subtitle = "Send saarthi_debug.log to help troubleshoot",
-                tone = ChipTone.Marigold,
-                trailing = { ChevronRight() },
-                onClick = {
-                    runCatching {
-                        val logPath = com.saarthi.core.inference.DebugLogger.path()
-                        val file = java.io.File(logPath)
-                        if (!file.exists() || file.length() == 0L) {
-                            android.widget.Toast.makeText(
-                                context,
-                                "Log file is empty — open the app once and retry the failing step first.",
-                                android.widget.Toast.LENGTH_LONG,
-                            ).show()
-                            return@runCatching
-                        }
-                        val uri = androidx.core.content.FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.fileprovider",
-                            file,
-                        )
-                        val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                            putExtra(android.content.Intent.EXTRA_SUBJECT, "Saarthi debug log")
-                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(
-                            android.content.Intent.createChooser(share, "Share debug log").apply {
-                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                        )
-                    }.onFailure {
-                        android.widget.Toast.makeText(
-                            context,
-                            "Couldn't share log: ${it.message}",
-                            android.widget.Toast.LENGTH_LONG,
-                        ).show()
-                    }
-                },
             )
 
             SectionLabel("About")
