@@ -1,6 +1,8 @@
 package com.saarthi.core.inference
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
@@ -18,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -304,6 +307,52 @@ class ModelDownloadManager @Inject constructor(
         workManager.enqueueUniqueWork(model.id, policy, request)
         observeWork(model)
         DebugLogger.log("DOWNLOAD", "WorkManager job enqueued  model=${model.id}  policy=$policy  tmp=${tmpFile.name}")
+        // Network + storage snapshot at enqueue time — explains "stuck"
+        // downloads. The worker's constraints are NetworkType.CONNECTED +
+        // RequiresStorageNotLow; if either fails the worker silently stays
+        // ENQUEUED with no further logs from the worker itself.
+        DebugLogger.log("DOWNLOAD-DIAG", "enqueue snapshot — ${networkAndStorageSnapshot()}")
+        // Stuck-check: if the worker is still ENQUEUED after 8s, neither
+        // constraint flipped to satisfied — log a clear diagnostic so the
+        // log shows WHY no progress, instead of going silent.
+        scope.launch {
+            delay(8_000)
+            val infos = runCatching { workManager.getWorkInfosForUniqueWork(model.id).get() }.getOrNull()
+            val info = infos?.firstOrNull() ?: return@launch
+            if (info.state == WorkInfo.State.ENQUEUED) {
+                DebugLogger.log("DOWNLOAD-DIAG",
+                    "STILL ENQUEUED after 8s — worker hasn't run. " +
+                    "Constraints required: NetworkType.CONNECTED + RequiresStorageNotLow. " +
+                    "Now: ${networkAndStorageSnapshot()}. " +
+                    "If both look OK on this device, the OEM (Realme/OPPO/Vivo/Xiaomi) " +
+                    "is likely blocking background work — check App auto-launch / " +
+                    "Background activity permission for Saarthi.")
+            }
+        }
+    }
+
+    /**
+     * Diagnostic snapshot used to explain why a queued download isn't running.
+     * Reports active network type, whether it's validated for internet, whether
+     * it's metered, and free internal storage.
+     */
+    private fun networkAndStorageSnapshot(): String {
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        val net = cm?.activeNetwork
+        val caps = net?.let { cm.getNetworkCapabilities(it) }
+        val transport = when {
+            caps == null -> "none"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
+            else -> "other"
+        }
+        val hasInternet = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        val notMetered = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+        val freeMb = runCatching { context.filesDir.freeSpace / 1_048_576L }.getOrDefault(-1L)
+        return "net=$transport internet=$hasInternet validated=$validated notMetered=$notMetered freeStorage=${freeMb}MB"
     }
 
     /**
@@ -314,9 +363,17 @@ class ModelDownloadManager @Inject constructor(
     private fun observeWork(model: ModelEntry) {
         activeObservers[model.id]?.cancel()
         activeObservers[model.id] = scope.launch {
+            var lastState: WorkInfo.State? = null
             workManager.getWorkInfosForUniqueWorkFlow(model.id)
                 .collect { infos ->
                     val info = infos.firstOrNull() ?: return@collect
+                    // Log every state transition — ENQUEUED → RUNNING is the
+                    // signal that the worker actually started. If it goes from
+                    // ENQUEUED → (nothing) the worker is held by constraints.
+                    if (info.state != lastState) {
+                        DebugLogger.log("WORK-STATE", "${model.id}  ${lastState ?: "-"} -> ${info.state}")
+                        lastState = info.state
+                    }
                     val progress = mapToProgress(info, model)
                     if (progress != null) {
                         _allProgress.update { it + (model.id to progress) }

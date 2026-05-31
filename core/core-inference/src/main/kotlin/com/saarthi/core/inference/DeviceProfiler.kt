@@ -157,7 +157,7 @@ class DeviceProfiler @Inject constructor(
             "GPU policy: gpuSafe=$gpuSafe  reason=$gpuSafeReason  " +
             "npuSafe=$npuSafe  soc=$socModel  api=$apiLevel  manufacturer=$manufacturer")
 
-        return DeviceProfile(
+        val profile = DeviceProfile(
             totalRamMb        = totalRamMb,
             availableRamMb    = availRamMb,
             safeModelBudgetMb = safeModelBudgetMb,
@@ -174,6 +174,13 @@ class DeviceProfiler @Inject constructor(
             socModel          = socModel,
             socFamily         = socFamily,
         )
+        // Full snapshot — explains why some models are filtered out of the
+        // picker (the catalog uses safeModelBudgetMb, derived from availRam).
+        DebugLogger.log("PROFILE",
+            "tier=${profile.tier}  totalRam=${totalRamMb}MB  avail=${availRamMb}MB  " +
+            "budget=${safeModelBudgetMb}MB  storage=${availStorageMb}MB  " +
+            "gpu=$gpuSafe  npu=$npuSafe  cores=$cpuCores  abi=$abi")
+        return profile
     }
 
     /**

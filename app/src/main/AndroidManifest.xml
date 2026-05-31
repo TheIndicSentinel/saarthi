@@ -160,5 +160,21 @@
                 android:value="AI model file download (background, resumable via OkHttp)" />
         </service>
 
+        <!--
+            FileProvider exposes the saarthi_debug.log file to other apps via a
+            content:// URI so users can share it through ACTION_SEND (Gmail,
+            WhatsApp, Drive, etc.) for troubleshooting. Authority is namespaced
+            with applicationId so debug + release builds don't collide.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 </manifest>

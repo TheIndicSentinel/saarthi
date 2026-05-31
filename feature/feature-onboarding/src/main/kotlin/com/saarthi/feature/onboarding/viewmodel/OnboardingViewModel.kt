@@ -118,6 +118,17 @@ class OnboardingViewModel @Inject constructor(
     init {
         val profile = deviceProfiler.profile()
         val catalog = modelCatalog.recommendedFor(profile)
+        // Log what the picker offered vs filtered out — answers "why does this
+        // device only see the Compact model?" without guessing.
+        com.saarthi.core.inference.DebugLogger.log("CATALOG",
+            "tier=${profile.tier}  budget=${profile.safeModelBudgetMb}MB  " +
+            "offered=${catalog.size} [${catalog.joinToString { it.id }}]")
+        val filtered = modelCatalog.allModels - catalog.toSet()
+        if (filtered.isNotEmpty()) {
+            com.saarthi.core.inference.DebugLogger.log("CATALOG",
+                "filtered_out=${filtered.size} " +
+                filtered.joinToString { "${it.id}(needs~${(it.fileSizeBytes / 1_048_576) + 300}MB)" })
+        }
         _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
 
         // PRE-POPULATE handledCompletions with all already-downloaded models BEFORE

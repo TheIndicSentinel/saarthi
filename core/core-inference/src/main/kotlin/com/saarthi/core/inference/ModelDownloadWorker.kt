@@ -83,6 +83,11 @@ class ModelDownloadWorker(
         val title    = inputData.getString(KEY_TITLE)     ?: "Downloading model…"
         val token    = inputData.getString(KEY_HF_TOKEN)  ?: ""
 
+        // First line of evidence: if this appears, WorkManager actually
+        // dispatched the worker. If not, constraints / OEM background limits
+        // are blocking it — see DOWNLOAD-DIAG stuck-check in ModelDownloadManager.
+        DebugLogger.log("DOWNLOAD_WORKER", "STARTED dest=${destPath.substringAfterLast('/')} attempt=$runAttemptCount")
+
         val tmpFile  = File(tmpPath).also { it.parentFile?.mkdirs() }
         val destFile = File(destPath).also { it.parentFile?.mkdirs() }
 

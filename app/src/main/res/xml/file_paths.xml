@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Paths exposed by FileProvider for sharing the debug log via ACTION_SEND.
+    Must cover all three fallback locations DebugLogger may pick:
+      1. public Downloads (Environment.DIRECTORY_DOWNLOADS)
+      2. app-external files (context.getExternalFilesDir)
+      3. app-internal files (context.filesDir)
+-->
+<paths>
+    <external-path  name="downloads"           path="Download/" />
+    <external-files-path name="external_files" path="."         />
+    <files-path     name="internal_files"      path="."         />
+</paths>
