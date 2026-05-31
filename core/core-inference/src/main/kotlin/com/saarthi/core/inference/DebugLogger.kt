@@ -119,15 +119,33 @@ object DebugLogger {
             val resolver = context.contentResolver
             val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
-            // Re-use an entry from a previous session so we keep appending to
-            // the same file instead of creating saarthi_debug (1).log,
-            // saarthi_debug (2).log, … on every launch.
-            val proj = arrayOf(MediaStore.Downloads._ID)
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME}=?"
-            val existing: Uri? = resolver.query(collection, proj, selection, arrayOf(FILE_NAME), null)?.use { c ->
-                if (c.moveToFirst()) ContentUris.withAppendedId(collection, c.getLong(0)) else null
+            // Collapse to a SINGLE log file. MediaStore auto-renames to
+            // "saarthi_debug (1).log", "(2).log", … when a same-named file
+            // already exists (e.g. across reinstalls during testing), so over
+            // time the Downloads folder accumulates many partial logs. Here we
+            // find every "saarthi_debug*.log" variant, keep ONE (preferring the
+            // canonical name) and delete the rest, then append to the survivor.
+            val proj = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME)
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?"
+            val rows = mutableListOf<Pair<Long, String>>()
+            resolver.query(
+                collection, proj, selection, arrayOf("saarthi_debug%.log"),
+                "${MediaStore.Downloads._ID} ASC",
+            )?.use { c ->
+                val idCol = c.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                val nameCol = c.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                while (c.moveToNext()) rows.add(c.getLong(idCol) to c.getString(nameCol))
             }
-            if (existing != null) return@runCatching existing
+            if (rows.isNotEmpty()) {
+                // Prefer the canonical "saarthi_debug.log"; else the oldest variant.
+                val keepId = rows.firstOrNull { it.second == FILE_NAME }?.first ?: rows.first().first
+                rows.filter { it.first != keepId }.forEach { (dupId, _) ->
+                    // Best-effort — entries owned by a prior install without
+                    // MANAGE_EXTERNAL_STORAGE may resist deletion; harmless if so.
+                    runCatching { resolver.delete(ContentUris.withAppendedId(collection, dupId), null, null) }
+                }
+                return@runCatching ContentUris.withAppendedId(collection, keepId)
+            }
 
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, FILE_NAME)

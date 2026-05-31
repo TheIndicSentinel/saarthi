@@ -613,7 +613,17 @@ class LiteRTInferenceEngine @Inject constructor(
                             }
                         }
                     }
-                    if (crashedDuringInit && !crashWasThisModel) incrementCrashCount(config.modelPath, false)
+                    // A DIFFERENT model crashed during init (typically a large
+                    // model was OOM-killed and we are now loading a smaller
+                    // fallback). Attribute the crash to the model that ACTUALLY
+                    // crashed — NEVER to the model we are now loading. Previously
+                    // this incremented config.modelPath, which let a heavy model's
+                    // repeated OOM (e.g. Gemma 4 E4B) push the lightweight fallback
+                    // (Compact 1B) to the UNSTABLE threshold and brick it — exactly
+                    // backwards, since Compact is the safe model we fall back TO.
+                    if (crashedDuringInit && !crashWasThisModel && crashedModelPath.isNotEmpty()) {
+                        incrementCrashCount(crashedModelPath, false)
+                    }
                     markGenerationEnded()
                     markInitEnded()
                     closeInternal()
@@ -722,8 +732,16 @@ class LiteRTInferenceEngine @Inject constructor(
                             1536
                         }
                         isCompactTier -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 (COMPACT tier — tested stable on SM8550)")
-                            512
+                            // 2048 (was 512): the 512 cap made the Kisan pack fail
+                            // on Compact with "Input token ids are too long:
+                            // 1484 >= 512" — a Kisan RAG prompt runs ~1500 tokens.
+                            // The 1B model's KV-cache at 2048 is only ~55 MB, safe
+                            // even on low-RAM devices, and the same SM8550 runs
+                            // Gemma 4 E2B at 2048 on GPU without issue. The
+                            // crash-recovery ladder above still drops to 256/64 if
+                            // any device proves unstable at this size.
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (COMPACT tier — fits Kisan RAG prompt)")
+                            2048
                         }
                         headroomMb < 2048 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB")
