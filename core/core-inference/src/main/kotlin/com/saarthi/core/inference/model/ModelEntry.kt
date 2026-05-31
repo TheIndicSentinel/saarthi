@@ -40,11 +40,31 @@ data class ModelEntry(
     val fileName: String get() = downloadUrl.substringAfterLast('/')
 
     /**
-     * Checks if this model is safe to load based on the current [DeviceProfile].
-     * Account for the model size plus a fixed 300MB overhead for the KV-cache and UI.
+     * Returns true when this model is safe to offer to a device.
+     *
+     * Two gates must both pass:
+     *
+     * 1. **Tier gate (total-RAM based, stable):**
+     *    [DeviceProfile.tier] is derived from total RAM — a fixed hardware spec
+     *    that never changes. It is the correct signal for deciding which models
+     *    a device class can handle. The previous gate used [DeviceProfile.safeModelBudgetMb]
+     *    which is 75% of *available* RAM — a number that swings by ±1 GB in a
+     *    single session (from 1459 MB to 3044 MB on the same OnePlus CPH2487 in
+     *    one test run), causing models to silently appear/disappear between launches.
+     *    LiteRT already memory-maps weights from flash storage; the whole file
+     *    does not need to be RAM-resident. The tier gate correctly captures
+     *    whether the device *class* can handle this model, not whether it
+     *    happens to have enough free RAM at this millisecond.
+     *
+     * 2. **Storage gate:**
+     *    The model must physically fit on the device's storage (with 500 MB
+     *    buffer for the tmp file during download + OS write margin).
      */
     fun isSafeFor(profile: DeviceProfile): Boolean {
-        val requiredMb = fileSizeMb + 300
-        return requiredMb <= profile.safeModelBudgetMb
+        // Gate 1: device tier (total-RAM based — stable)
+        if (profile.tier.ordinal < requiredTier.ordinal) return false
+        // Gate 2: enough storage to download
+        if (profile.availableStorageMb < fileSizeMb + 500) return false
+        return true
     }
 }
