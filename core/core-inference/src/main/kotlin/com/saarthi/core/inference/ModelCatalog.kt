@@ -67,8 +67,8 @@ class ModelCatalog @Inject constructor() {
     //
     // Tier → models offered (isSafeFor gates on total-RAM tier, not availableRam):
     //   MINIMAL  : < 3.5 GB total RAM  → no model (insufficient for any LLM)
-    //   LOW      : 3.5–6 GB total RAM  → Compact 1B + Gemma 3 4B (when live)
-    //   MID      : 6–10 GB total RAM   → Compact 1B + Gemma 3 4B + Gemma 4 E2B + Gemma 3n E2B
+    //   LOW      : 3.5–6 GB total RAM  → Compact 1B only
+    //   MID      : 6–10 GB total RAM   → Compact 1B + Gemma 4 E2B + Gemma 3n E2B
     //   FLAGSHIP : ≥ 10 GB total RAM   → all models
     //
     // Target audience for India mid-range: MID tier covers the bulk of 6–8 GB
@@ -175,32 +175,6 @@ class ModelCatalog @Inject constructor() {
         // ══════════════════════════════════════════════════════════════════════
         //  GEMMA 3 — LITERT-LM
         // ══════════════════════════════════════════════════════════════════════
-
-        // ── Gemma 3 4B · Generic (budget mid-range and above, 4 GB+ total RAM) ─
-        //
-        // Fills the gap between the 1B Compact (557 MB, basic chat only) and
-        // Gemma 4 E2B (2.5 GB, MID-tier minimum). At ~2.3 GB int4, the 4B model
-        // runs on devices from 4 GB upward via mmap (hot pages + KV-cache ~700 MB
-        // resident), giving LOW-tier phones real conversational and Kisan quality
-        // without the MID-tier RAM requirement.
-        //
-        // ⚠️  URL NOT YET LIVE: Google has not published a Gemma 3 4B LiteRT-LM
-        // bundle at the time of writing. The URL below follows the established
-        // litert-community naming pattern (matches Gemma3-1B-IT exactly).
-        // Verify at https://huggingface.co/litert-community/Gemma3-4B-IT before
-        // shipping. Also confirm the exact filename and fileSizeBytes from the
-        // HuggingFace file listing — update both fields when the model is released.
-        ModelEntry(
-            id            = "gemma3-4b-it-litert-int4",
-            displayName   = "Gemma 3 4B · Balanced  🌟",
-            description   = "Good everyday AI — handles farming questions, government schemes, and everyday advice. ~2.3 GB download. Works on phones with 4 GB+ RAM.",
-            downloadUrl   = "https://huggingface.co/litert-community/Gemma3-4B-IT/resolve/main/gemma3-4b-it-int4.litertlm",
-            fileSizeBytes = 2_415_919_104L,   // ⚠️ estimate — verify exact bytes on HuggingFace
-            engineType    = EngineType.LITERT,
-            requiredTier  = DeviceTier.LOW,   // available from 3.5 GB+ devices (mmap)
-            contextLength = 8192,
-            tags          = listOf("Balanced", "Good for Most"),
-        ),
 
         // ── Gemma 3 1B · Generic (any phone) ─────────────────────────────────
         ModelEntry(
