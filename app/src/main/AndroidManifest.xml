@@ -160,5 +160,28 @@
                 android:value="AI model file download (background, resumable via OkHttp)" />
         </service>
 
+        <!--
+            User-initiated model download foreground service.
+
+            Replaces the WorkManager/JobScheduler download path, which OEM
+            Android skins (OxygenOS/ColorOS/RealmeUI, MIUI, FuntouchOS, One UI
+            deep-sleep) refuse to dispatch for non-whitelisted apps — the job
+            sits in ENQUEUED forever even with all constraints satisfied
+            (reproduced on OnePlus CPH2487, Android 14).
+
+            Started directly from the user's "Download" tap, so the Android 12+
+            foreground-service start is permitted; the ongoing notification then
+            keeps it alive across every OEM ROM. specialUse type matches
+            InferenceService (dataSync was removed in Android 16 / API 36).
+        -->
+        <service
+            android:name="com.saarthi.core.inference.ModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="AI model file download (user-initiated, resumable via OkHttp)" />
+        </service>
+
     </application>
 </manifest>

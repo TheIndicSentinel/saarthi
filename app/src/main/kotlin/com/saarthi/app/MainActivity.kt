@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
      * Android 13+ (API 33+) requires runtime grant of POST_NOTIFICATIONS
      * before any `NotificationManagerCompat.notify(...)` will actually
      * surface a notification. Without this:
-     *  • Download progress notifications never appear (ModelDownloadWorker
+     *  • Download progress notifications never appear (ModelDownloadService
      *    sets a Foreground notification but the system silently suppresses it).
      *  • Daily wisdom alarms fire on schedule but the post call is a no-op.
      *  • Reminders fire but the user sees nothing.
