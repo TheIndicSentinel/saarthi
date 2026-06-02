@@ -40,10 +40,11 @@ class RagDocumentRepository @Inject constructor(
         // boundary. Cheap insurance — costs ~13% extra storage, fixes
         // ~5% of edge-case retrieval misses.
         private const val CHUNK_OVERLAP = 80
-        // Top-K returned to the prompt builder. 5 keeps the prompt
-        // bounded (~3000 chars of context) while giving the LLM enough
-        // surface area to triangulate facts across multiple chunks.
-        private const val DEFAULT_TOP_K = 5
+        // Top-K returned to the prompt builder. Raised from 5 to 8 now
+        // that the LARGE-tier ragBudget is ~2650c (was ~1050c) — the
+        // larger chunk space can hold 4-5 full chunks, so retrieving 8
+        // gives BM25 more candidates and structural sampling a wider net.
+        private const val DEFAULT_TOP_K = 8
 
         // Sentinel chunkIndex for an auto-extracted document outline —
         // headings scraped during indexing and stored as a single virtual
@@ -59,11 +60,14 @@ class RagDocumentRepository @Inject constructor(
         // — which has no "summarise this"-style anchor — still hits the
         // meta path. The phrase list below catches multi-word forms.
         private val META_TOKEN_TRIGGERS = setOf(
-            // Whole-doc summary
+            // Whole-doc summary / analysis
             "summarise", "summarize", "summary", "synopsis",
             "tldr", "tl;dr", "overview", "outline", "toc",
-            // Structure
+            "analyse", "analyze", "analysis",   // "Analyse attached document"
+            // Structure / listing
             "sections", "chapters", "headings",
+            "list", "lists", "listed",           // "list all sections / topics"
+            "topics", "topic",
             // Positional — bottom of the doc. "What is the conclusion?"
             // at 12:25:34 went through BM25 and got a refusal; structural
             // sampling always includes the last chunks so positional
@@ -87,11 +91,15 @@ class RagDocumentRepository @Inject constructor(
         private val META_QUERY_PHRASES = listOf(
             "what's this", "what is this",
             "what are the sections", "what are the chapters", "what are the headings",
+            "what are the topics", "what are the subjects",
             "table of contents",
             "tell me about this document", "tell me what this",
             "what does this cover", "what does it cover",
             "describe this document", "describe the document",
             "give me an overview", "give an overview",
+            "give overview", "give a summary",
+            "analyse the", "analyze the",
+            "analyse attached", "analyze attached",
         )
     }
 

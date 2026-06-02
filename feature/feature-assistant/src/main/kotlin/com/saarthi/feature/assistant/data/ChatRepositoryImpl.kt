@@ -438,7 +438,15 @@ class ChatRepositoryImpl @Inject constructor(
                 // RAG ratio of 2.7 c/tok the engine actually sees).
                 MAX_PROMPT_CHARS_STANDARD -> 0.98    // 5000 → 4900
                 MAX_PROMPT_CHARS_2048     -> 0.92    // 5500 → 5060 — Gemma 2, bumped for the same reason
-                else                       -> 0.70    // 8000 → 5600 — LARGE (Gemma 4), unchanged
+                // Raised from 0.70 (5600c) to 0.90 (7200c): the 5600c
+                // budget left only ~1050c for RAG after the 4423c system
+                // prompt, and after the rulesHeader (~243c) only ~807c
+                // for actual chunk content — barely 1-2 chunks of 500c.
+                // At 0.90: ragBudget ≈ 2650c, chunk space ≈ 2400c →
+                // 4-5 chunks fit. 7200c ÷ 3 c/tok ≈ 2400 input tokens;
+                // with maxTokens=2048 output the total is ~4448 tokens,
+                // well within Gemma 4's 8192-token context window.
+                else                       -> 0.90    // 8000 → 7200 — LARGE (Gemma 4)
             }
             return (baseBudget * docsMultiplier).toInt()
         }
