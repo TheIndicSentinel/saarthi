@@ -710,13 +710,27 @@ class LiteRTInferenceEngine @Inject constructor(
                         // since they react to ACTUAL inference instability, not
                         // battery state. Crash counters are cleared on every new
                         // APK install (see version-reset block).
+                        // Recovery ladder — but NEVER below a tier's usable
+                        // minimum. A Gemma 4 prompt is ~1,100+ tokens; dropping
+                        // a LARGE model to 256/64 doesn't "recover" it, it just
+                        // swaps the crash for a guaranteed "Input token ids are
+                        // too long" on EVERY turn — even a one-word "Hi". This
+                        // bricked E4B after a single transient init crash:
+                        // maxTokens=256 made normal chat (1051 tok), RAG, and
+                        // every attachment fail with 0 tokens generated. For
+                        // LARGE the recovery floor is 1536 (KV-cache already 25%
+                        // smaller than 2048, and its own prompt still fits); if
+                        // even that won't init, the model is marked UNSTABLE
+                        // above at cpuCrashCount>=3 with a user-facing message.
                         cpuCrashCount >= 2 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=64 (ULTRA-SAFE: CPU crash count $cpuCrashCount)")
-                            64
+                            val t = if (isLargeTier) 1536 else 64
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=$t (ULTRA-SAFE: CPU crash count $cpuCrashCount, largeTier=$isLargeTier)")
+                            t
                         }
                         cpuCrashCount >= 1 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=256 (AUTO-RECOVERY: CPU crash count $cpuCrashCount)")
-                            256
+                            val t = if (isLargeTier) 1536 else 256
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=$t (AUTO-RECOVERY: CPU crash count $cpuCrashCount, largeTier=$isLargeTier)")
+                            t
                         }
                         config.maxTokens > 0 && config.maxTokens <= 4096 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=${config.maxTokens} (caller override)")

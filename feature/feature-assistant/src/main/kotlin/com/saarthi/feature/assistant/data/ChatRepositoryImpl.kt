@@ -630,16 +630,19 @@ class ChatRepositoryImpl @Inject constructor(
             // Memory is scoped to THIS chat — never read another chat's memories.
             val currentSession = _currentSessionId.value
             val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
-            // When docs are pinned, the RAG chunks ARE the topic context —
-            // recap becomes redundant and was eating ~150–250 c that the
-            // chunks need. Production log 03:47:37–03:52:25 showed
-            // systemChars≈3700 vs ragBudget≈1700: system prompt was 2×
-            // larger than the actual evidence the model is supposed to use.
-            // Dropping the recap on doc-pinned turns lets one more chunk
-            // fit and gives the model a clearer "your only source is the
-            // excerpts" signal.
+            // Recap is now kept on doc-pinned turns too. The Conversation's
+            // KV cache is recycled after every reply, so EVERY turn is FRESH —
+            // the recap is the ONLY thing that carries conversation continuity.
+            // It used to be dropped here to save ~150–250c for chunks, back
+            // when the full ~4423c BASE prompt left almost no room. But that
+            // made document chat non-conversational: with no memory of the
+            // prior turn, a follow-up like "explain more" or "now the second
+            // one" just re-summarised the whole document every time. Now that
+            // the compact grounded prompt (~962c) frees ~3400c, there is ample
+            // room for the recent-questions recap, which lets the model treat
+            // follow-ups as a continuing conversation instead of restarting.
             val docsPinned = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty()
-            val priorTurns = if (docsPinned) "" else buildPriorTurnsRecap()
+            val priorTurns = buildPriorTurnsRecap()
             // On doc-grounded turns swap the full ~4423c persona/tools/reminders
             // prompt for a compact instruction set. The verbose prompt alone is
             // ~1370 tokens — larger than E4B's entire 1536-token window once RAM

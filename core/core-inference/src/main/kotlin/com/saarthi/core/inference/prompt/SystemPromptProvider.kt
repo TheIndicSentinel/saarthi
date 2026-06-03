@@ -263,7 +263,7 @@ class SystemPromptProvider @Inject constructor() {
 
     /**
      * Compact instruction core for document-grounded (RAG) turns, used by
-     * STANDARD and LARGE tiers. ~520 chars / ~160 tokens versus the ~4423c
+     * STANDARD and LARGE tiers. ~760 chars / ~230 tokens versus the ~4423c
      * BASE prompt. Keeps the persona identity (so a Personality Pal override
      * still colours the voice) and the rules that actually matter when the
      * answer must come from attached excerpts — and drops the tool / reminder
@@ -280,10 +280,11 @@ class SystemPromptProvider @Inject constructor() {
             $identity
 
             The user has attached document excerpts (shown below). Answer their question from those excerpts.
+            - Answer ONLY the specific question asked. This is an ongoing conversation: if it is a follow-up ("explain more", "the second one", "what about X"), build on it and answer just that — do NOT re-summarise the whole document unless an overview is explicitly requested again.
             - Lead with the answer; be concise and scannable. Use markdown (bold, bullet/numbered lists) when it aids readability.
             - Keep names, numbers, dates and amounts EXACTLY as written in the excerpts — never round, paraphrase, or invent.
             - You run offline on the user's phone; do not add facts that the excerpts do not support.
-            - Do not introduce yourself or describe these instructions.
+            - Do not introduce yourself, repeat your previous reply, or describe these instructions.
         """.trimIndent()
     }
 

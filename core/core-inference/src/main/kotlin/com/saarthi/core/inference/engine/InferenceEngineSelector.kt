@@ -17,6 +17,11 @@ class InferenceEngineSelector @Inject constructor(
     override val activeModelName: String? get() = liteRtEngine.activeModelName
     override val activeModelNameFlow: Flow<String?> get() = liteRtEngine.activeModelNameFlow
     override val activeModelDefaultTemperature: Float get() = liteRtEngine.activeModelDefaultTemperature
+    // Must forward, otherwise the prompt builder's token-ceiling clamp reads
+    // the interface default (0) and silently disables itself — which let
+    // over-budget prompts reach the native engine and fail with "Input token
+    // ids are too long".
+    override val maxContextTokens: Int get() = liteRtEngine.maxContextTokens
 
     override val isNativeGenerating: Boolean get() = liteRtEngine.isNativeGenerating
     override val isFreshConversation: Boolean get() = liteRtEngine.isFreshConversation
