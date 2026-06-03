@@ -102,6 +102,12 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile override var activeModelName: String? = null
         private set
 
+    // Surfaces the effective context-window the model was actually loaded
+    // with (set alongside loadedEffectiveMaxTokens at the end of a successful
+    // load, cleared to 0 on release). The prompt builder reads this to size
+    // its char budget so it never overruns the input-token ceiling.
+    override val maxContextTokens: Int get() = loadedEffectiveMaxTokens
+
     @Volatile private var usingNpu: Boolean = false
     @Volatile private var usingGpu: Boolean = false
 

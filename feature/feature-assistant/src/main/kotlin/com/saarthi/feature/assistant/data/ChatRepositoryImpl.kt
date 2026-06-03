@@ -442,13 +442,39 @@ class ChatRepositoryImpl @Inject constructor(
                 // budget left only ~1050c for RAG after the 4423c system
                 // prompt, and after the rulesHeader (~243c) only ~807c
                 // for actual chunk content — barely 1-2 chunks of 500c.
-                // At 0.90: ragBudget ≈ 2650c, chunk space ≈ 2400c →
-                // 4-5 chunks fit. 7200c ÷ 3 c/tok ≈ 2400 input tokens;
-                // with maxTokens=2048 output the total is ~4448 tokens,
-                // well within Gemma 4's 8192-token context window.
+                // At 0.90 the char budget is 7200c; the token clamp below
+                // then caps it to whatever actually fits the model's
+                // context window (the real binding constraint).
                 else                       -> 0.90    // 8000 → 7200 — LARGE (Gemma 4)
             }
-            return (baseBudget * docsMultiplier).toInt()
+            val charBudget = (baseBudget * docsMultiplier).toInt()
+            // ── Token-ceiling clamp (the real safety net) ──────────────
+            // The char budgets above are heuristics; the HARD limit is the
+            // model's context window (maxNumTokens), which the native engine
+            // checks against the INPUT prompt. maxTokens is NOT fixed — it
+            // drops with RAM headroom (Gemma 4: 2048 → 1536; Gemma 3n: 1024
+            // → 512). When the char budget translated to more tokens than
+            // that ceiling, generation failed instantly with "Input token
+            // ids are too long: 2051 >= 2048" (E2B) and "1609 >= 1536"
+            // (E4B) — every doc turn produced an empty reply. Derive a
+            // char budget from the live token ceiling so the assembled
+            // prompt can never overrun it, regardless of tier or RAM.
+            val ctxTokens = inferenceEngine.maxContextTokens
+            if (ctxTokens <= 0) return charBudget   // model not loaded → trust char heuristic
+            // Reserve room so the reply has space to generate (a prompt that
+            // fills the whole window leaves nothing to decode into and the
+            // engine evicts context mid-reply → the repetition loops seen in
+            // the log). 256 tokens ≈ a solid phone-sized answer; 16 covers
+            // the turn-structure tokens (<start_of_turn> etc.) the engine
+            // adds around our text.
+            val inputTokenBudget = (ctxTokens - 256 - 16).coerceAtLeast(256)
+            // Conservative chars/token: dense content (logs, hex IDs, code)
+            // tokenises at ~3.0 c/tok — the densest observed in the field was
+            // 3.09. Using 3.0 guarantees inputTokenBudget chars never exceed
+            // the token budget even for the worst-case content; ordinary
+            // prose (~4 c/tok) simply leaves extra headroom.
+            val tokenDerivedCharBudget = (inputTokenBudget * 3.0).toInt()
+            return minOf(charBudget, tokenDerivedCharBudget)
         }
 
     // DeviceProfiler.profile() makes several system calls (MemoryInfo, thermal,
@@ -614,7 +640,14 @@ class ChatRepositoryImpl @Inject constructor(
             // excerpts" signal.
             val docsPinned = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty()
             val priorTurns = if (docsPinned) "" else buildPriorTurnsRecap()
-            val systemInstructions = buildSystemPrompt(memoryContext, priorTurns)
+            // On doc-grounded turns swap the full ~4423c persona/tools/reminders
+            // prompt for a compact instruction set. The verbose prompt alone is
+            // ~1370 tokens — larger than E4B's entire 1536-token window once RAM
+            // is tight — so trimPrompt was butchering it and E4B produced no
+            // reply at all. The compact version (~160 tokens) both fits the
+            // small window AND frees ~1000 tokens for actual document chunks,
+            // which is the real lever for answer quality on E2B/3n.
+            val systemInstructions = buildSystemPrompt(memoryContext, priorTurns, grounded = docsPinned)
             val budget = maxPromptChars
             // Size the RAG block to fit the remaining budget AFTER the
             // system prompt and the user message have claimed their space.
@@ -888,7 +921,7 @@ class ChatRepositoryImpl @Inject constructor(
         return result
     }
 
-    private fun buildSystemPrompt(memoryContext: String, priorTurnsContext: String = ""): String {
+    private fun buildSystemPrompt(memoryContext: String, priorTurnsContext: String = "", grounded: Boolean = false): String {
         val modelName = inferenceEngine.activeModelName
         val tier = systemPromptProvider.tierFor(modelName)
         if (memoryContext.isNotEmpty()) {
@@ -926,6 +959,7 @@ class ChatRepositoryImpl @Inject constructor(
             responseStyleSuffix = styleSuffix,
             personalityOverride = personalityOverride,
             personalityBehaviorRules = personalityRules,
+            grounded = grounded,
         )
     }
 

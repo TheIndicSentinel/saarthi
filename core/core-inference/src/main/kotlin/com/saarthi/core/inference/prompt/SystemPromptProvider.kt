@@ -105,6 +105,20 @@ class SystemPromptProvider @Inject constructor() {
          * on a turn-by-turn basis, not the identity paragraph alone.
          */
         personalityBehaviorRules: List<String> = emptyList(),
+        /**
+         * True when this turn has document excerpts (RAG) pinned. The full
+         * BASE prompt (~4423c / ~1370 tokens of persona + tool/reminder/memory
+         * rules) is both irrelevant to answering from a document AND too large
+         * for the small context windows the on-device models get under RAM
+         * pressure (Gemma 4 E4B drops to 1536 tokens — the full prompt alone
+         * overflowed it, so the engine rejected every doc turn). When grounded,
+         * STANDARD/LARGE use a compact instruction core (~160 tokens) that
+         * keeps the persona identity and the essential "answer from the
+         * excerpts, quote verbatim, don't invent" rules while dropping the
+         * tool/reminder/memory machinery — freeing the bulk of the window for
+         * the actual document chunks.
+         */
+        grounded: Boolean = false,
     ): String {
         val tier = tierFor(modelName)
 
@@ -123,10 +137,13 @@ class SystemPromptProvider @Inject constructor() {
             return ""
         }
 
-        val core = when (tier) {
-            ModelTier.COMPACT  -> compactPrompt(pack)  // unreachable; handled above
-            ModelTier.STANDARD -> standardPrompt(pack, personalityOverride)
-            ModelTier.LARGE    -> largePrompt(pack, personalityOverride)
+        val core = when {
+            // Document-grounded turns use the lean core for ALL non-compact
+            // tiers — the BASE persona/tool block is dead weight here and its
+            // size is what broke E4B and starved RAG on E2B/3n.
+            grounded           -> groundedPrompt(personalityOverride)
+            tier == ModelTier.STANDARD -> standardPrompt(pack, personalityOverride)
+            else               -> largePrompt(pack, personalityOverride)
         }
 
         // Render the persona behaviour rules + response-style suffix as a
@@ -243,6 +260,32 @@ class SystemPromptProvider @Inject constructor() {
         "You are Saarthi, a friendly offline AI assistant for users in India. " +
         "You run entirely on the user's device, which means their conversations stay private."
     )
+
+    /**
+     * Compact instruction core for document-grounded (RAG) turns, used by
+     * STANDARD and LARGE tiers. ~520 chars / ~160 tokens versus the ~4423c
+     * BASE prompt. Keeps the persona identity (so a Personality Pal override
+     * still colours the voice) and the rules that actually matter when the
+     * answer must come from attached excerpts — and drops the tool / reminder
+     * / memory-marker machinery, which is irrelevant to answering from a
+     * document and was eating the context window the chunks need.
+     *
+     * The detailed citation / "answer ONLY from these" rules live in the RAG
+     * block's own header (see ChatRepositoryImpl.buildRagPromptBlock), so they
+     * are deliberately NOT duplicated here.
+     */
+    private fun groundedPrompt(personalityOverride: String = ""): String {
+        val identity = personalityOverride.ifBlank { DEFAULT_SAARTHI_IDENTITY }
+        return """
+            $identity
+
+            The user has attached document excerpts (shown below). Answer their question from those excerpts.
+            - Lead with the answer; be concise and scannable. Use markdown (bold, bullet/numbered lists) when it aids readability.
+            - Keep names, numbers, dates and amounts EXACTLY as written in the excerpts — never round, paraphrase, or invent.
+            - You run offline on the user's phone; do not add facts that the excerpts do not support.
+            - Do not introduce yourself or describe these instructions.
+        """.trimIndent()
+    }
 
     private fun standardPrompt(pack: PackType, personalityOverride: String = ""): String = when (pack) {
         PackType.BASE -> {

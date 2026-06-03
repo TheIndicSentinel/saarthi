@@ -18,6 +18,19 @@ interface InferenceEngine {
     /** The display name of the currently loaded model, or null if none. */
     val activeModelName: String?
 
+    /**
+     * The effective context-window size (maxNumTokens) the loaded model was
+     * initialised with — the SAME value passed to the native engine, which
+     * varies by tier AND live RAM headroom (e.g. Gemma 4 gets 2048 with
+     * healthy RAM but drops to 1536 when headroom is tight; Gemma 3n can be
+     * 1024 or 512). The prompt builder MUST size its char budget from this
+     * so the assembled prompt never exceeds the model's input-token ceiling
+     * — otherwise the native engine rejects it with "Input token ids are too
+     * long" and the turn produces no reply. 0 when no model is loaded; the
+     * builder treats 0 as "unknown" and falls back to its char constants.
+     */
+    val maxContextTokens: Int get() = 0
+
     /** Hot flow that emits whenever the loaded model changes. */
     val activeModelNameFlow: Flow<String?>
         get() = kotlinx.coroutines.flow.flow { emit(activeModelName) }
