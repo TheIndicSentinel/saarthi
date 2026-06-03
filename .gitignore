@@ -20,3 +20,10 @@ keystore/*.keystore
 
 # Kotlin compiler transient session files
 .kotlin/
+
+# Local dev scratch — one-off regex-edit scripts and captured crash/debug logs
+fix_*.py
+scratchpad_*.py
+debug_*.py
+*_crash_log.txt
+*_human_log.txt
