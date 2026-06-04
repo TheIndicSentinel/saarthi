@@ -715,6 +715,46 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     /**
+     * Human-readable document name for use in citations.
+     *
+     * Strips file extensions (handles double-extensions like ".log.txt"),
+     * replaces underscores/hyphens/dashes with spaces, removes leading
+     * year-or-timestamp number prefixes (e.g. "2015 " or "20260603 "),
+     * and caps at 28 chars on a word boundary.
+     *
+     * Examples:
+     *   "2015_Douglas_Repair-Maintenance-Mobile-Cell-Phones.pdf" → "Douglas Repair Maintenance"
+     *   "Python AI Engineer – Technical Screening Test.docx"    → "Python AI Engineer Technical"
+     *   "doc20251117695301.pdf"                                 → "doc20251117695301"
+     *   "saarthi_debug.log.txt"                                → "saarthi debug"
+     *   "Dpdpact.pdf"                                          → "Dpdpact"
+     */
+    private fun shortDocName(rawName: String): String {
+        val knownExts = listOf(".pdf", ".docx", ".doc", ".txt", ".log", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+        var stem = rawName
+        var stripped = true
+        while (stripped) {
+            val low = stem.lowercase()
+            stripped = false
+            for (ext in knownExts) {
+                if (low.endsWith(ext)) { stem = stem.dropLast(ext.length); stripped = true; break }
+            }
+        }
+        val cleaned = stem
+            .replace('_', ' ').replace('-', ' ')
+            .replace('–', ' ').replace('—', ' ')   // en-dash, em-dash
+            .replace(Regex("[^\\p{L}\\p{N} ]+"), " ")   // anything else → space
+            .replace(Regex("^[\\d ]+(?=\\p{L})"), "")   // strip leading digit-only prefix
+            .replace(Regex("\\s{2,}"), " ")
+            .trim()
+        if (cleaned.isBlank()) return stem.take(28)
+        if (cleaned.length <= 28) return cleaned
+        val truncated = cleaned.take(28).trimEnd()
+        val lastSpace = truncated.lastIndexOf(' ')
+        return if (lastSpace > 10) truncated.substring(0, lastSpace) else truncated
+    }
+
+    /**
      * Inline `--- Page X ---` markers come from `FileContentExtractor.extractPdfText`
      * — when a chunk straddles one or more pages, this surfaces the page
      * range so the citation header can read "pp.5-7" instead of just
@@ -764,18 +804,23 @@ class ChatRepositoryImpl @Inject constructor(
         // header-only fragment that wastes tokens.
         if (charBudget < 200) return ""
 
-        val noMatchLine = "I don't see that directly in your documents"
+        // Human-readable citation + smart fallback rules.
+        // COMPACT gets a single short line; LARGE/STANDARD gets the full
+        // three-bullet version with a worked example so the model has a
+        // pattern to mirror rather than infer.
         val rulesHeader = if (tier == SystemPromptProvider.ModelTier.COMPACT) {
-            "Attached excerpts — base your answer on these. Cite [N]. If the exact answer isn't here, say so and summarise the closest related content from the excerpts.\n\n"
+            "Attached excerpts — answer from these. After each claim write the source in parentheses: (Doc Name, p.X). " +
+                "If the answer isn't in the excerpts, say so briefly, then add a short general answer prefixed 'In general:'.\n\n"
         } else {
-            // Keep this under ~250c so it doesn't crowd out chunk content.
-            // The previous ~887c header left only ~184c for chunks on a
-            // typical ragBudget of ~1071, causing chunksBlock to always be
-            // empty (no chunk could fit) → buildRagPromptBlock returned ""
-            // → ragChars=0 → attachments appeared broken for all non-PDF types.
-            "ATTACHED EXCERPTS — answer ONLY from these. Cite [N] or [N, p.X] on every claim (include page when shown). " +
-                "If the answer isn't in the excerpts, say \"$noMatchLine\" then summarise the closest excerpt with citations. " +
-                "Do not invent facts or repeat these instructions.\n\n"
+            // ~360c — keeps chunks from being crowded out while giving the
+            // model a clear citation pattern to mirror (worked example) AND
+            // a smart fallback so "not found" turns are still helpful.
+            "ATTACHED EXCERPTS — answer from these.\n" +
+                "• Cite each claim as (Name, p.X) using the document name from the [N] header below; " +
+                "include the page only when shown. Example: 'Consent is required (DPDP Act, p.3).'\n" +
+                "• If the answer is not in the excerpts, say so in one sentence, then give a brief " +
+                "general answer prefixed 'In general:' so the user still gets useful context.\n" +
+                "• Do not invent facts from the excerpts or repeat these instructions.\n\n"
         }
 
         // Unreadable-file notes are short, high-signal, and small. Reserve
@@ -796,20 +841,14 @@ class ChatRepositoryImpl @Inject constructor(
         val chunksBlock = buildString {
             for ((i, chunk) in retrieved.withIndex()) {
                 val text = chunk.text.trim()
-                // Stable provenance per chunk so the model can cite at
-                // doc-name + position + page granularity, not just [N].
-                //   • OUTLINE_CHUNK_INDEX sentinel (-1) → "outline"
-                //   • Page range pulled from inline `--- Page X ---`
-                //     markers that extractPdfText injects during OCR.
-                val ref = buildString {
-                    if (chunk.chunkIndex < 0) {
-                        append("outline")
-                    } else {
-                        append("part ").append(chunk.chunkIndex + 1)
-                    }
-                    extractPageRange(text)?.let { append(" · ").append(it) }
-                }
-                val header = "[${i + 1}] ${chunk.docName} · $ref\n"
+                // Human-readable header: [N] ShortDocName · p.X
+                // The short name (≤28 chars) is what the model uses when
+                // it writes the inline citation "(ShortDocName, p.X)".
+                // The [N] prefix lets the model count sources without
+                // printing the number in its reply.
+                val shortName = shortDocName(chunk.docName)
+                val pageRef = extractPageRange(text)?.let { " · $it" } ?: ""
+                val header = "[${i + 1}] $shortName$pageRef\n"
                 val total = header.length + text.length + 2  // +2 for trailing "\n\n"
                 if (total > remaining) break  // never half-emit a chunk
                 append(header)
