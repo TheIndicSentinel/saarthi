@@ -69,6 +69,11 @@ private const val MAX_PROMPT_CHARS_STANDARD = 5_000   // Gemma 3n E2B/E4B
 private const val MAX_PROMPT_CHARS_2048     = 5_500   // Gemma 2
 private const val MAX_PROMPT_CHARS_LARGE    = 8_000   // Gemma 4
 
+// Hard ceiling on the prior-turns recap block. Keeps total prompt fill well
+// under the tier budget so a long chat can't push Gemma 3n into the
+// high-fill repetition loops observed in production (19:37:30 / 19:42:01).
+private const val RECAP_MAX_CHARS = 280
+
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -89,6 +94,13 @@ class ChatRepositoryImpl @Inject constructor(
     private val _history = MutableStateFlow<List<ChatMessage>>(emptyList())
     private val _tokensPerSecond = MutableStateFlow(0f)
     private val _currentSessionId = MutableStateFlow("default")
+
+    // ── Reminder confirmation ────────────────────────────────────────────────
+    // Exposed to the UI so a confirmation chip can appear immediately after
+    // the model schedules a reminder — currently the scheduling is silent and
+    // the user has no in-app feedback that a notification was set.
+    private val _lastReminder = kotlinx.coroutines.flow.MutableStateFlow<com.saarthi.feature.assistant.domain.ScheduledReminderInfo?>(null)
+    override fun getLastReminder(): kotlinx.coroutines.flow.Flow<com.saarthi.feature.assistant.domain.ScheduledReminderInfo?> = _lastReminder
 
     // ── RAG persistence ──────────────────────────────────────────────────────
     // Document chunks now live in Room (`rag_chunks`) via [RagDocumentRepository].
@@ -323,18 +335,28 @@ class ChatRepositoryImpl @Inject constructor(
                     }
                     scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
 
-                    // Save extracted memories — scoped to THIS chat session so the
-                    // facts can't bleed into another chat's prompt. Industry-standard
-                    // per-chat isolation (matches ChatGPT / Claude / Gemini default).
+                    // Save extracted memories. Two tiers (industry-standard):
+                    //  • Durable identity facts (name, city, profession, …) →
+                    //    USER_SCOPE so they follow the user into every chat.
+                    //  • Everything else → THIS session, so conversational
+                    //    context can't bleed into another chat's prompt.
                     parsed.memories.forEach { marker ->
                         scope.launch {
-                            memoryRepository.set(
+                            persistMemoryFact(
                                 sessionId = sessionId,
-                                key = marker.key.trim().lowercase().replace(" ", "_"),
-                                value = marker.value.trim(),
-                                packSource = "USER",
+                                rawKey = marker.key,
+                                value = marker.value,
                             )
                         }
+                    }
+                    // Implicit extraction: the model often answers a personal
+                    // statement ("my name is Arjun", "I'm a teacher") WITHOUT
+                    // emitting a [SAARTHI_MEMORY] marker. Mirror what ChatGPT /
+                    // Gemini do — scan the user's own message for high-confidence
+                    // identity facts and persist them too. Conservative patterns
+                    // only (see extractImplicitFacts) to avoid false positives.
+                    extractImplicitFacts(userMessage).forEach { (k, v) ->
+                        scope.launch { persistMemoryFact(sessionId, k, v) }
                     }
 
                     // Defensive reminder gate. The system prompt tells the model to
@@ -348,10 +370,28 @@ class ChatRepositoryImpl @Inject constructor(
                             parsed.reminders.forEach { marker ->
                                 val text = marker.text.trim()
                                 when {
-                                    marker.delayMinutes != null ->
+                                    marker.delayMinutes != null -> {
                                         reminderManager.scheduleByDelay(text, marker.delayMinutes)
-                                    marker.time != null ->
-                                        reminderManager.scheduleReminder(text, marker.time.trim())
+                                        val label = when {
+                                            marker.delayMinutes < 60 -> "in ${marker.delayMinutes} min"
+                                            marker.delayMinutes % 60 == 0 -> "in ${marker.delayMinutes / 60}h"
+                                            else -> "in ${marker.delayMinutes / 60}h ${marker.delayMinutes % 60}min"
+                                        }
+                                        _lastReminder.value = com.saarthi.feature.assistant.domain.ScheduledReminderInfo(text, label)
+                                    }
+                                    marker.time != null -> {
+                                        val t = marker.time.trim()
+                                        reminderManager.scheduleReminder(text, t)
+                                        // Convert "HH:MM" → "at H:MM AM/PM" for display
+                                        val label = runCatching {
+                                            val parts = t.split(":")
+                                            val h = parts[0].toInt(); val m = parts[1].toInt()
+                                            val amPm = if (h < 12) "AM" else "PM"
+                                            val h12 = when { h == 0 -> 12; h > 12 -> h - 12; else -> h }
+                                            "at $h12:${m.toString().padStart(2,'0')} $amPm"
+                                        }.getOrDefault("at $t")
+                                        _lastReminder.value = com.saarthi.feature.assistant.domain.ScheduledReminderInfo(text, label)
+                                    }
                                 }
                             }
                         } else {
@@ -898,27 +938,112 @@ class ChatRepositoryImpl @Inject constructor(
             // is independent and clean. STANDARD/LARGE recap is untouched.
             return ""
         }
-        // STANDARD / LARGE — user questions only, three most recent.
-        val questionsToKeep = 3
-        val perMsgChars = 300
-        // Defensive: pass each message through stripForDisplay. Normally clean
-        // text is stored (parse().cleanText is called on completion), but
-        // crash / truncated-stream paths can leave a half-formed
-        // `[SAARTHI_MEMORY key="…"` fragment in history. Without this, that
-        // fragment goes back into the next FRESH system prompt and the model
-        // may treat it as a fresh marker instruction.
-        val recentUserMessages = complete
-            .filter { it.role == MessageRole.USER }
-            .takeLast(questionsToKeep)
-        if (recentUserMessages.isEmpty()) return ""
-        return buildString {
-            append("Recent questions the user asked earlier in this chat (topic context only — answer the NEW question below in a fresh way, do not restate or quote your previous replies):\n")
-            recentUserMessages.forEach { msg ->
-                val sanitized = ResponseMarkerParser.stripForDisplay(msg.content, streaming = false)
-                val body = sanitized.take(perMsgChars)
-                append("- \"$body\"\n")
+        // STANDARD / LARGE — give the model continuity in a BOUNDED size.
+        //
+        // Two competing needs, resolved together:
+        //   • Continuity (so resuming a long chat isn't cold): include the
+        //     FIRST question (where the conversation started) + the most
+        //     recent ones (where it is now).
+        //   • Bounded prompt fill: the old "last 3 × 300c" recap could reach
+        //     ~960c, which on Gemma 3n's tight 4900c with-docs budget pushed
+        //     total fill past ~95% and triggered the repetition loops seen in
+        //     the log (19:37:30, 19:42:01). Hard-cap the whole block instead.
+        //
+        // Per-question cap is short (~85c) and the whole block is capped at
+        // RECAP_MAX_CHARS so it never crowds out RAG chunks or the reply.
+        val perMsgChars = 85
+        val allUserMessages = complete.filter { it.role == MessageRole.USER }
+        if (allUserMessages.isEmpty()) return ""
+
+        // Origin question + the last two — deduped, in chronological order.
+        val picked = LinkedHashSet<String>()
+        allUserMessages.firstOrNull()?.let { picked.add(it.content) }
+        allUserMessages.takeLast(2).forEach { picked.add(it.content) }
+
+        val lines = picked.mapNotNull { raw ->
+            val sanitized = ResponseMarkerParser.stripForDisplay(raw, streaming = false).trim()
+            if (sanitized.isEmpty()) null
+            else {
+                val body = sanitized.take(perMsgChars).let { if (sanitized.length > perMsgChars) "$it…" else it }
+                "- \"$body\""
             }
-        }.trimEnd()
+        }
+        if (lines.isEmpty()) return ""
+
+        val header = "Earlier in this chat the user asked (topic context only — answer the NEW question below freshly, don't restate your previous replies):\n"
+        // Hard cap: drop oldest lines until under budget.
+        val mutableLines = lines.toMutableList()
+        while (mutableLines.size > 1 && (header.length + mutableLines.sumOf { it.length + 1 }) > RECAP_MAX_CHARS) {
+            mutableLines.removeAt(0)
+        }
+        return (header + mutableLines.joinToString("\n")).trimEnd()
+    }
+
+    /**
+     * Persist one memory fact, routing it to the correct tier:
+     *  • durable identity facts (name, city, profession, …) → USER_SCOPE so
+     *    they follow the user into every future chat (cross-session profile);
+     *  • everything else → the supplied [sessionId] (per-chat context).
+     * Centralised so marker-based and implicit extraction share one policy.
+     */
+    private suspend fun persistMemoryFact(sessionId: String, rawKey: String, value: String) {
+        val key = rawKey.trim().lowercase().replace(" ", "_")
+        val v = value.trim()
+        if (key.isBlank() || v.isBlank()) return
+        val target =
+            if (MemoryRepository.isUserScopedKey(key)) MemoryRepository.USER_SCOPE else sessionId
+        memoryRepository.set(sessionId = target, key = key, value = v, packSource = "USER")
+    }
+
+    /**
+     * Conservative implicit fact extraction from the USER's own message.
+     *
+     * Small on-device models frequently fail to emit the [SAARTHI_MEMORY]
+     * marker even when the user clearly states a stable fact, so memory never
+     * fills. ChatGPT / Gemini extract these heuristically; we mirror that with
+     * a SMALL set of high-precision patterns. Precision over recall: a missed
+     * fact is harmless (the user can restate), a wrong one is annoying, so the
+     * patterns are deliberately strict (anchored, single capture, length-capped).
+     *
+     * Returns (key, value) pairs; persistence + USER_SCOPE routing is handled
+     * by [persistMemoryFact].
+     */
+    private fun extractImplicitFacts(message: String): List<Pair<String, String>> {
+        val msg = message.trim()
+        if (msg.isEmpty() || msg.length > 300) return emptyList()  // long msgs are rarely a single fact
+        val out = mutableListOf<Pair<String, String>>()
+        fun clean(s: String) = s.trim().trim('.', ',', '!', '"', '\'').trim()
+        // Reject captures whose first word is a stopword — "from the office",
+        // "called the doctor", "is a bit busy" are not names/places.
+        val stopStarts = setOf("the", "a", "an", "my", "this", "that", "here", "there", "not", "just", "so", "very", "really")
+        fun firstWordOk(s: String) = s.split(Regex("\\s+")).firstOrNull()?.lowercase() !in stopStarts
+
+        // name: "my name is X", "I am called X", "call me X"
+        Regex("(?i)\\b(?:my name is|i am called|call me|i'm called)\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})")
+            .find(msg)?.groupValues?.get(1)?.let { n ->
+                val name = clean(n).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
+            }
+        // profession: "I am a teacher", "I work as an electrician", "I'm an engineer"
+        Regex("(?i)\\b(?:i am|i'm|i work as)\\s+(?:a|an)\\s+([\\p{L}][\\p{L}\\s-]{2,30})")
+            .find(msg)?.groupValues?.get(1)?.let { p ->
+                val prof = clean(p)
+                // Guard against "I am a bit tired" style false positives.
+                if (prof.length in 3..30 && prof.lowercase() !in NON_PROFESSION_WORDS) out += "profession" to prof
+            }
+        // location: "I live in X", "I am from X", "I'm based in X"
+        Regex("(?i)\\b(?:i live in|i am from|i'm from|i am based in|i'm based in)\\s+([\\p{L}][\\p{L}\\s,'-]{1,40})")
+            .find(msg)?.groupValues?.get(1)?.let { c ->
+                val city = clean(c).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (city.length in 2..40 && firstWordOk(city)) out += "city" to city
+            }
+        // age: "I am 28 years old", "I'm 28"
+        Regex("(?i)\\b(?:i am|i'm)\\s+(\\d{1,3})\\s*(?:years old|yrs old|years|yo)\\b")
+            .find(msg)?.groupValues?.get(1)?.let { a ->
+                val age = a.toIntOrNull()
+                if (age != null && age in 1..120) out += "age" to age.toString()
+            }
+        return out
     }
 
     /**
@@ -935,18 +1060,37 @@ class ChatRepositoryImpl @Inject constructor(
         return REMINDER_TRIGGER_PHRASES.any { msg.contains(it) }
     }
 
+    // Words that follow "I am a/an …" but are NOT a profession — guards the
+    // implicit profession extractor against "I am a bit tired" style matches.
+    private val NON_PROFESSION_WORDS = setOf(
+        "bit", "little", "lot", "fan", "big", "huge", "small", "good", "bad",
+        "great", "happy", "sad", "tired", "fine", "beginner", "expert", "newbie",
+        "student",  // handled as education, not profession
+    )
+
     private val REMINDER_TRIGGER_PHRASES = listOf(
-        // English — direct request verbs.
+        // English — direct explicit request verbs.
         "remind me", "remind us", "reminder for", "reminder to", "reminder at",
-        "set a reminder", "set reminder", "schedule a reminder", "schedule reminder",
+        "set a reminder", "set me a reminder", "set reminder",
+        "schedule a reminder", "schedule reminder",
         "alert me", "notify me", "ping me",
         "wake me", "wake me up",
         "set an alarm", "set alarm", "alarm at", "alarm for",
+        // Natural-language / implicit — unambiguously requesting a reminder.
+        "don't let me forget",  "don't let me miss",
+        "make sure i remember", "help me remember",
+        "need a reminder",  "want a reminder",
+        "can you remind",   "could you remind",
+        "please remind",    "kindly remind",
+        // Contextual — user mentions a scheduled event + time (implicit ask).
+        "i have a meeting at", "my meeting is at",
+        "my appointment is at", "my appointment at",
+        "my class is at", "my class starts at",
         // Hindi (Latin + Devanagari)
         "yaad dila", "yaad rakh", "yaad dilana", "yaad dilao", "yaad karwa",
+        "mujhe yaad kara", "mujhe remind kar",
         "याद दिला", "याद रख", "रिमाइंडर", "अलार्म",
         // Tamil / Telugu / Bengali / Marathi / Kannada / Gujarati / Punjabi / Odia
-        // — common transliterated forms users actually type
         "ninaivu padut", "gnabakam unchu", "mone koriye dao",
         "athavan karun", "nenapu ittuko", "yaad rakhjo",
     )

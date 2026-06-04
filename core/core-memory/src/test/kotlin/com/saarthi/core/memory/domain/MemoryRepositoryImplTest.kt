@@ -143,15 +143,65 @@ class MemoryRepositoryImplTest {
     }
 
     @Test
-    fun `buildContextSummary never reads outside the supplied session`() = runTest {
+    fun `buildContextSummary reads ONLY this session and the global user profile`() = runTest {
         coEvery { dao.getBySession(SESSION) } returns emptyList()
+        coEvery { dao.getBySession(MemoryRepository.USER_SCOPE) } returns emptyList()
 
         repository.buildContextSummary(SESSION)
 
-        // The DAO call MUST be scoped to SESSION. Calling getBySession with
-        // any other id, or any cross-session reader, would be a leak.
+        // Two intentional tiers: the calling chat + the global identity
+        // profile. It must NEVER read another CHAT's memories (no observeAll,
+        // no other concrete session id) — that's the cross-chat-bleed contract.
         coVerify(exactly = 1) { dao.getBySession(SESSION) }
+        coVerify(exactly = 1) { dao.getBySession(MemoryRepository.USER_SCOPE) }
         coVerify(exactly = 0) { dao.observeAll() }
+    }
+
+    @Test
+    fun `buildContextSummary merges global user profile with session facts`() = runTest {
+        // Durable identity lives in USER_SCOPE; chat-specific notes in SESSION.
+        coEvery { dao.getBySession(MemoryRepository.USER_SCOPE) } returns listOf(
+            MemoryEntity(sessionId = MemoryRepository.USER_SCOPE, key = "name", value = "Arjun", packSource = "USER"),
+        )
+        coEvery { dao.getBySession(SESSION) } returns listOf(
+            MemoryEntity(sessionId = SESSION, key = "topic", value = "DPDP Act", packSource = "USER"),
+        )
+
+        val summary = repository.buildContextSummary(SESSION)
+
+        // Global profile fact appears in every chat …
+        assertTrue("Global identity must surface. Got:\n$summary", summary.contains("- Name: Arjun"))
+        // … alongside this chat's own context.
+        assertTrue("Session fact must surface. Got:\n$summary", summary.contains("- Topic: DPDP Act"))
+    }
+
+    @Test
+    fun `session fact overrides global profile for the same key`() = runTest {
+        coEvery { dao.getBySession(MemoryRepository.USER_SCOPE) } returns listOf(
+            MemoryEntity(sessionId = MemoryRepository.USER_SCOPE, key = "city", value = "Delhi", packSource = "USER"),
+        )
+        coEvery { dao.getBySession(SESSION) } returns listOf(
+            MemoryEntity(sessionId = SESSION, key = "city", value = "Mumbai", packSource = "USER"),
+        )
+
+        val summary = repository.buildContextSummary(SESSION)
+
+        assertTrue("Session value must win. Got:\n$summary", summary.contains("- City / Location: Mumbai"))
+        assertFalse("Global value must be overridden. Got:\n$summary", summary.contains("Delhi"))
+    }
+
+    @Test
+    fun `isUserScopedKey classifies identity facts as global and context as session`() {
+        // Identity → global profile
+        assertTrue(MemoryRepository.isUserScopedKey("name"))
+        assertTrue(MemoryRepository.isUserScopedKey("user_name"))
+        assertTrue(MemoryRepository.isUserScopedKey("profession"))
+        assertTrue(MemoryRepository.isUserScopedKey("city"))
+        assertTrue(MemoryRepository.isUserScopedKey("age"))
+        // Conversational context → stays in the chat
+        assertFalse(MemoryRepository.isUserScopedKey("topic"))
+        assertFalse(MemoryRepository.isUserScopedKey("grocery_list"))
+        assertFalse(MemoryRepository.isUserScopedKey("current_task"))
     }
 
     // ── CRUD pass-through ──────────────────────────────────────────────

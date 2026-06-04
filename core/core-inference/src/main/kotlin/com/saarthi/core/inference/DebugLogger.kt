@@ -109,54 +109,75 @@ object DebugLogger {
         runCatching { f.appendText(line) }
     }
 
+    // ── single-file guarantee ────────────────────────────────────────────────
+    // The old approach queried MediaStore by LIKE pattern and kept the first
+    // match, but entries from a previous install (different UID on Samsung /
+    // Samsung One UI) resist deletion and cannot be written to. Every fresh
+    // install then called resolver.insert() and created another file
+    // ("saarthi_debug (1).log", "(2).log", …). The fix: persist the working
+    // URI in private SharedPreferences and probe writability before trusting
+    // any cached or found entry. If write fails, clean up best-effort and
+    // insert a fresh entry that IS owned by the current install.
+    private const val PREFS_NAME = "debug_logger_prefs"
+    private const val PREF_LOG_URI = "log_uri_v2"
+
     /**
-     * Look up an existing /Download/saarthi_debug.log entry, else create one.
-     * Returns null if the volume isn't writable (extremely rare — only happens
-     * on emulators without external storage mounted).
+     * Returns a writable MediaStore URI for the log file, guaranteed to be
+     * owned by (and writable by) the current install. Persists the URI in
+     * private SharedPreferences so the file is reused across process restarts
+     * without re-querying MediaStore every time.
+     *
+     * On first run (or after data-clear / reinstall), any stale floating
+     * "saarthi_debug*.log" entries are deleted best-effort and a fresh
+     * canonical file is created.
      */
     private fun findOrCreateMediaStoreEntry(context: Context): Uri? {
         return runCatching {
+            val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
             val resolver = context.contentResolver
             val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
-            // Collapse to a SINGLE log file. MediaStore auto-renames to
-            // "saarthi_debug (1).log", "(2).log", … when a same-named file
-            // already exists (e.g. across reinstalls during testing), so over
-            // time the Downloads folder accumulates many partial logs. Here we
-            // find every "saarthi_debug*.log" variant, keep ONE (preferring the
-            // canonical name) and delete the rest, then append to the survivor.
-            val proj = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME)
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?"
-            val rows = mutableListOf<Pair<Long, String>>()
+            // Fast path: reuse the URI from the last successful init.
+            val savedStr = prefs.getString(PREF_LOG_URI, null)
+            if (savedStr != null) {
+                val savedUri = Uri.parse(savedStr)
+                val writable = runCatching {
+                    resolver.openOutputStream(savedUri, "wa")?.use { /* probe */ }
+                    true
+                }.getOrDefault(false)
+                if (writable) return@runCatching savedUri
+                // Stale (prior install or deleted by user) — fall through.
+                prefs.edit().remove(PREF_LOG_URI).apply()
+            }
+
+            // Slow path: delete every floating saarthi_debug*.log variant
+            // (best-effort; entries owned by a different UID will silently
+            // resist deletion, which is fine — we just create a fresh one).
+            val proj = arrayOf(MediaStore.Downloads._ID)
             resolver.query(
-                collection, proj, selection, arrayOf("saarthi_debug%.log"),
+                collection, proj,
+                "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
+                arrayOf("saarthi_debug%.log"),
                 "${MediaStore.Downloads._ID} ASC",
             )?.use { c ->
                 val idCol = c.getColumnIndexOrThrow(MediaStore.Downloads._ID)
-                val nameCol = c.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
-                while (c.moveToNext()) rows.add(c.getLong(idCol) to c.getString(nameCol))
-            }
-            if (rows.isNotEmpty()) {
-                // Prefer the canonical "saarthi_debug.log"; else the oldest variant.
-                val keepId = rows.firstOrNull { it.second == FILE_NAME }?.first ?: rows.first().first
-                rows.filter { it.first != keepId }.forEach { (dupId, _) ->
-                    // Best-effort — entries owned by a prior install without
-                    // MANAGE_EXTERNAL_STORAGE may resist deletion; harmless if so.
-                    runCatching { resolver.delete(ContentUris.withAppendedId(collection, dupId), null, null) }
+                while (c.moveToNext()) {
+                    runCatching {
+                        resolver.delete(ContentUris.withAppendedId(collection, c.getLong(idCol)), null, null)
+                    }
                 }
-                return@runCatching ContentUris.withAppendedId(collection, keepId)
             }
 
+            // Insert a fresh file owned by the current install.
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, FILE_NAME)
                 put(MediaStore.Downloads.MIME_TYPE, "text/plain")
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                // IS_PENDING=0 so the file is immediately visible to file
-                // managers; the user shouldn't have to wait for an app
-                // "finalize" step to see the log.
                 put(MediaStore.Downloads.IS_PENDING, 0)
             }
-            resolver.insert(collection, values)
+            val newUri = resolver.insert(collection, values) ?: return@runCatching null
+            prefs.edit().putString(PREF_LOG_URI, newUri.toString()).apply()
+            newUri
         }.getOrNull()
     }
 }

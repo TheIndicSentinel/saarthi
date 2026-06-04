@@ -34,7 +34,28 @@ class MemoryRepositoryImpl @Inject constructor(
         dao.deleteAllInSession(sessionId)
 
     override suspend fun buildContextSummary(sessionId: String): String {
-        val entries = dao.getBySession(sessionId)
+        // Two tiers, industry-standard:
+        //   1. USER_SCOPE — durable identity facts that follow the user across
+        //      every chat (name, profession, city, …). Rendered first so the
+        //      model sees stable profile context before chat-specific notes.
+        //   2. this session — conversational facts scoped to THIS chat only.
+        // A session-scoped fact with the same key OVERRIDES the global one
+        // (the user may have corrected it inside this chat). USER_SCOPE itself
+        // never reads a second tier.
+        val userEntries = dao.getBySession(MemoryRepository.USER_SCOPE)
+        val sessionEntries =
+            if (sessionId == MemoryRepository.USER_SCOPE) emptyList()
+            else dao.getBySession(sessionId)
+
+        // Merge preserving insertion order: global identity first, then
+        // session facts; same-key session fact replaces the global one in place.
+        val merged = LinkedHashMap<String, MemoryEntity>()
+        userEntries.forEach { merged[it.key] = it }
+        sessionEntries.forEach { e ->
+            if (merged.containsKey(e.key)) merged[e.key] = e   // override, keep position
+            else merged[e.key] = e
+        }
+        val entries = merged.values.toList()
         if (entries.isEmpty()) return ""
 
         // Friendly labels for keys the model commonly emits. Any unmapped key

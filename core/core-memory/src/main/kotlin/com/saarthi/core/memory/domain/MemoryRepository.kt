@@ -40,4 +40,48 @@ interface MemoryRepository {
 
     fun observeAll(): Flow<List<MemoryEntry>>
     suspend fun deleteEverything()
+
+    companion object {
+        /**
+         * Reserved sessionId for STABLE personal facts that should follow the
+         * user across every chat — name, age, city, profession, family, etc.
+         * This is the industry-standard "user profile" memory tier (ChatGPT /
+         * Gemini / Claude): durable identity persists globally, while
+         * conversational context stays per-chat.
+         *
+         * It is NOT a real chat session: it never appears in the session list,
+         * is never created by [createSession], and is never cascade-deleted by
+         * [deleteForSession] (which only targets a concrete chat id). Only a
+         * full settings wipe ([deleteEverything]) clears it.
+         *
+         * The leading "__" cannot collide with the UUIDs / "default" that real
+         * sessions use.
+         */
+        const val USER_SCOPE = "__user_profile__"
+
+        /**
+         * Keys that represent durable identity/profile facts and therefore
+         * belong in [USER_SCOPE] (global), not in a single chat. Everything
+         * else stays session-scoped — that's what still prevents the
+         * "groceries from another chat" bleed for conversational content.
+         *
+         * Matching is prefix-tolerant: "user_name", "name", "preferred_name"
+         * all classify as the "name" identity fact.
+         */
+        private val IDENTITY_KEY_STEMS = setOf(
+            "name", "age", "city", "location", "address",
+            "profession", "occupation", "job", "work", "company", "employer",
+            "family", "spouse", "children", "kids",
+            "language", "goal", "goals", "health", "allergy", "allergies",
+            "birthday", "dob", "pet", "hobby", "hobbies",
+            "favourite", "favorite", "likes", "dislikes",
+            "education", "degree", "student", "school", "college",
+        )
+
+        /** True when [key] is a durable identity fact that belongs in [USER_SCOPE]. */
+        fun isUserScopedKey(key: String): Boolean {
+            val k = key.trim().lowercase().removePrefix("user_").removePrefix("my_")
+            return IDENTITY_KEY_STEMS.any { stem -> k == stem || k.startsWith("${stem}_") || k.contains(stem) }
+        }
+    }
 }
