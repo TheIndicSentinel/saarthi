@@ -73,3 +73,22 @@ jobs:
           name: saarthi-release-apk
           path: app/build/outputs/apk/release/app-release.apk
           retention-days: 7
+
+      # ── Firebase Test Lab APKs ──────────────────────────────────────────
+      # Instrumentation testing needs TWO APKs signed with the same key:
+      #   • the app APK            (app-debug.apk)
+      #   • the instrumentation    (app-debug-androidTest.apk) — contains
+      #     AndroidJUnitRunner + the instrumented tests.
+      # Both are debug-signed in the same run, so they pair correctly. Robo
+      # tests only need the first; instrumentation tests need both.
+      - name: Build Firebase Test Lab APKs (debug app + instrumentation)
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+
+      - name: Upload Firebase Test Lab APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: saarthi-firebase-test-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          retention-days: 7

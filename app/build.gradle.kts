@@ -26,6 +26,11 @@ android {
         applicationId = "com.saarthi.app"
         versionCode = 25
         versionName = "1.0.24"
+        // Instrumentation runner for the androidTest APK (Firebase Test Lab /
+        // `connectedAndroidTest`). The app convention plugin doesn't set this
+        // — only the library one did — so the generated test APK referenced a
+        // runner it didn't package, which is the upload error Firebase showed.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Kisan knowledge-pack manifest URL. Empty by default (in which
         // case PackUpdateWorker is a no-op and users only ever see the
         // bundled seed pack). When the server is live, set this via:
@@ -143,4 +148,13 @@ dependencies {
         implementation(libs.firebase.crashlytics)
         implementation(libs.firebase.analytics)
     }
+
+    // Instrumentation tests — packaged into app-debug-androidTest.apk, the
+    // "test APK" uploaded to Firebase Test Lab. runner provides
+    // AndroidJUnitRunner (the class the manifest references); ext-junit adds
+    // AndroidJUnit4 + ActivityScenario; espresso-core is the standard UI-test
+    // toolkit for any future on-device tests.
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.espresso.core)
 }

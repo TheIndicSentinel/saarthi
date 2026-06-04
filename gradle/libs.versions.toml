@@ -27,6 +27,9 @@ firebase-crashlytics-plugin = "3.0.2"
 junit = "4.13.2"
 mockk = "1.13.13"
 turbine = "1.1.0"
+androidx-test-runner = "1.6.2"
+androidx-test-ext-junit = "1.2.1"
+androidx-test-espresso = "3.6.1"
 
 [libraries]
 # AndroidX Core
@@ -81,6 +84,14 @@ coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
+
+# Instrumentation tests (androidTest) — the test APK Firebase Test Lab runs.
+# androidx.test:runner carries AndroidJUnitRunner, the class the test APK's
+# manifest references; without it the runner isn't packaged and Firebase
+# rejects the upload with "test APK does not contain the test runner class".
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidx-test-runner" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidx-test-ext-junit" }
+androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "androidx-test-espresso" }
 
 # Accompanist
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanist" }
