@@ -13,6 +13,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Needed so the build can publish APKs as Release assets (raw, directly
+    # installable downloads — no artifact .zip wrapper to unpack on a phone).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -92,3 +96,31 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           retention-days: 7
+
+      # ── Direct-download release (no unzip needed) ───────────────────────
+      # GitHub *artifacts* are always wrapped in a .zip, which is awkward to
+      # unpack on a phone. Release *assets* download as raw files. We attach:
+      #   • Saarthi.apk                 → install on your phone / share with
+      #                                    others / use as a Firebase Robo test
+      #   • app-debug.apk + app-debug-androidTest.apk
+      #                                 → the pair for a Firebase Instrumentation
+      #                                    test (same debug signing key)
+      # Published to a single rolling "latest" pre-release so the newest build
+      # is always at <repo>/releases/latest — old assets are replaced, not piled up.
+      - name: Publish APKs to rolling "latest" release (raw downloads)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk Saarthi.apk
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest \
+            --title "Latest Saarthi build" \
+            --notes "Auto-built from ${{ github.sha }}.
+
+          • **Saarthi.apk** — install on your phone / share / Firebase Robo test
+          • **app-debug.apk** + **app-debug-androidTest.apk** — Firebase Instrumentation test pair" \
+            --prerelease \
+            Saarthi.apk \
+            app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
