@@ -68,17 +68,41 @@ class RagDocumentRepository @Inject constructor(
             "sections", "chapters", "headings",
             "list", "lists", "listed",           // "list all sections / topics"
             "topics", "topic",
-            // Positional — bottom of the doc. "What is the conclusion?"
-            // at 12:25:34 went through BM25 and got a refusal; structural
-            // sampling always includes the last chunks so positional
-            // queries land on the actual ending material.
+            // Positional — bottom of the doc.
             "conclusion", "concluding", "conclude", "conclusions",
             "ending", "endings", "final", "wrap-up", "wrapup",
+            // End-of-document reference sections — structural tail sampling
+            // handles these better than BM25 because the headings often
+            // appear only once (or not at all in the text layer for PDFs
+            // where the heading was an image).
+            "glossary", "glossaries",
+            "appendix", "appendices", "annexure", "annexures",
             // Positional — top of the doc.
             "introduction", "intro", "preface", "foreword", "beginning",
             "preamble", "opening",
             // Hindi (Latin transliteration)
             "saaransh", "vishaysuchi", "anukramani",
+        )
+
+        // Structural terms whose content sits near the END of most documents.
+        // When these appear in a meta-query, pickTailSamples() is used instead
+        // of the default evenly-spaced sampling — the glossary of a phone-repair
+        // manual is in the last 5 % of the doc, not the middle.
+        private val TAIL_STRUCTURE_TOKENS = setOf(
+            "glossary", "glossaries",
+            "appendix", "appendices", "annexure", "annexures",
+            "bibliography", "references",
+            "answers", "solutions",   // workbook / activity answer keys
+        )
+
+        // Query words that signal continuation of the previous turn.
+        // When any of these lead the query AND a prior question is available,
+        // the search bypasses meta-routing and runs BM25 with the combined
+        // prior+current query — so "also list meaning of each" retrieves the
+        // same evidence as the prior "meaning of terms associated with hazards".
+        private val FOLLOW_UP_TOKENS = setOf(
+            "also", "additionally", "furthermore", "moreover",
+            "elaborate", "expand",
         )
 
         // Devanagari triggers — match as substring because Devanagari
@@ -168,16 +192,21 @@ class RagDocumentRepository @Inject constructor(
 
     /**
      * Search top chunks for [query] across every document indexed under
-     * [sessionId]. Three retrieval routes:
+     * [sessionId]. Four retrieval routes:
      *
-     *  • META queries ("what sections", "summarise", "overview"): structural
-     *    sample — outline chunk first, then first/middle/last content
-     *    chunks per doc. BM25 is bypassed because the query terms almost
-     *    never appear in the doc body for these question shapes.
-     *  • Normal queries: BM25 ranks content chunks. The outline chunk is
-     *    excluded from BM25 so it doesn't compete with real evidence.
-     *  • Zero BM25 hits: fall back to first chunk per doc so the model
-     *    has something concrete to ground on (better than refusing).
+     *  • FOLLOW-UP queries (starts with "also", "additionally", etc. AND
+     *    [priorQuery] is available): bypass meta-routing, run BM25 with
+     *    the combined prior+current query. "Also list meaning of each"
+     *    paired with prior "meaning of terms associated with hazards"
+     *    retrieves the correct hazards chunks instead of a generic sample.
+     *  • META queries ("summarise", "glossary", "overview", etc.):
+     *    structural sample — outline first, then evenly-spaced content
+     *    (or tail-biased for glossary/appendix). BM25 is bypassed because
+     *    the query terms rarely appear verbatim in the doc body.
+     *  • Normal queries: BM25 ranks content chunks. Top hits get neighbor
+     *    expansion; structural padding fills any remaining topK slots.
+     *  • Zero BM25 hits: full structural fallback gives the model
+     *    representative content to answer from (better than refusing).
      */
     suspend fun search(
         sessionId: String,
@@ -185,16 +214,20 @@ class RagDocumentRepository @Inject constructor(
         topK: Int = DEFAULT_TOP_K,
         /**
          * Restricts retrieval to chunks belonging to these document URIs.
-         * Used so that when the user attaches a new PDF, follow-up turns
-         * focus on that PDF instead of dredging up earlier-attached docs
-         * from the same session — without this, attaching `JobDesc.pdf`
-         * and asking "Give overview" returned DPDP chunks first because
-         * the older DPDP outline outranked everything else.
-         *
-         * Pass `null` (or an empty set) for the legacy behaviour: search
-         * across every chunk in the session.
          */
         restrictToDocUris: Set<String>? = null,
+        /**
+         * The last completed user question from the conversation history.
+         * Used for two purposes:
+         *  1. Follow-up expansion: when [query] starts with a continuation
+         *     token ("also", "additionally", …), BM25 runs on
+         *     `"$priorQuery $query"` so the follow-up retrieves the same
+         *     evidence region as the prior turn.
+         *  2. Zero-hit fallback: if BM25 finds nothing for [query] alone,
+         *     retry with [priorQuery] to surface the relevant context.
+         * Pass null (or blank) to disable both behaviours.
+         */
+        priorQuery: String? = null,
     ): List<RetrievedChunk> {
         val raw = ragChunkDao.getBySession(sessionId)
         // Defensive: if the URI restriction produces an empty set (e.g.
@@ -205,19 +238,33 @@ class RagDocumentRepository @Inject constructor(
         } else raw
         if (all.isEmpty()) return emptyList()
 
-        if (isMetaQuery(query)) {
-            return structuralSample(all, topK)
+        // Follow-up detection: if the query STARTS with a continuation
+        // token AND we have context from the prior turn, bypass meta-routing
+        // and use BM25 on the combined query. This handles "also list meaning
+        // of each mentioned" continuing "meaning of terms associated with
+        // hazards" — the combined BM25 query surfaces the same hazard chunks
+        // rather than a generic structural sample.
+        val queryTokens = query.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
+        val isFollowUp = !priorQuery.isNullOrBlank() && queryTokens.take(4).any { it in FOLLOW_UP_TOKENS }
+
+        if (isMetaQuery(query) && !isFollowUp) {
+            return structuralSample(all, topK, query)
         }
 
         // BM25 sees only content chunks. The outline chunk is curated
         // meta, not evidence, so it should not be ranked against the
-        // user's actual question — otherwise a query like "tell me about
-        // the methodology" could surface the heading list instead of the
-        // paragraph that explains the methodology.
+        // user's actual question.
         val contentChunks = all.filter { it.chunkIndex >= 0 }
         if (contentChunks.isEmpty()) return emptyList()
 
-        val ranked = Bm25Retriever.rank(contentChunks.map { it.text }, query, topK)
+        // Expand the query when following up on the prior turn.
+        val effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
+            "${priorQuery.take(150)} $query"
+        } else {
+            query
+        }
+
+        val ranked = Bm25Retriever.rank(contentChunks.map { it.text }, effectiveQuery, topK)
 
         // Neighbor expansion: for the top BM25 hits, also include the
         // *next* chunk in the same document. Answers often straddle a
@@ -259,6 +306,26 @@ class RagDocumentRepository @Inject constructor(
         // adding structural padding here would dilute strong signal.
         if (bm25Hits.size >= topK) return bm25Hits.take(topK)
 
+        // Zero-hit retry with prior query: if the current query alone had no
+        // BM25 vocabulary match (e.g. "Also list meaning of each" without
+        // prior-query expansion) but the prior question does have matches,
+        // run a second BM25 pass on the prior query to surface the same
+        // evidence region. Half-score marks these as context rather than
+        // exact matches. Skipped when we already expanded above (isFollowUp).
+        if (bm25Hits.isEmpty() && !priorQuery.isNullOrBlank() && !isFollowUp) {
+            val retryRanked = Bm25Retriever.rank(contentChunks.map { it.text }, priorQuery.take(150), topK)
+            for (scored in retryRanked) {
+                val entity = contentChunks[scored.index]
+                if (usedIds.add(entity.id)) {
+                    bm25Hits.add(
+                        RetrievedChunk(entity.text, entity.docName, scored.score * 0.5, entity.chunkIndex)
+                    )
+                }
+                if (bm25Hits.size >= topK) break
+            }
+            if (bm25Hits.size >= topK) return bm25Hits.take(topK)
+        }
+
         // BM25 (+ neighbors) under-covered the query. Pad with
         // structural context — outline first, then first/middle/last
         // per doc — so the model has surrounding evidence to reason
@@ -291,9 +358,8 @@ class RagDocumentRepository @Inject constructor(
     }
 
     /**
-     * Evenly-spaced sample including first and last from a list of chunks
-     * already sorted by chunkIndex. Used by both meta-query structural
-     * sampling and BM25 padding.
+     * Evenly-spaced sample including first and last. Used for general
+     * meta-query structural sampling and BM25 padding.
      */
     private fun pickStructuralSamples(sorted: List<RagChunkEntity>, count: Int): List<RagChunkEntity> {
         if (sorted.size <= count) return sorted
@@ -304,29 +370,39 @@ class RagDocumentRepository @Inject constructor(
     }
 
     /**
-     * Outline + evenly-spaced content samples per document. Used for
-     * meta queries where the user is asking ABOUT the document's shape,
-     * not its content.
-     *
-     * Per-doc budget: roughly `topK / docCount` content chunks, minimum 2
-     * (first + last). The outline chunk is added on top — so a single-doc
-     * meta query returns 1 outline + ≥2 content samples (typically 4-5
-     * items total within topK).
+     * Last [count] chunks, in document order. Used for tail-structure
+     * meta-queries (glossary, appendix, bibliography, answer keys) whose
+     * content sits near the END of most documents — evenly-spaced sampling
+     * misses these sections because they represent only ~5–10 % of the doc.
      */
-    private fun structuralSample(all: List<RagChunkEntity>, topK: Int): List<RetrievedChunk> {
+    private fun pickTailSamples(sorted: List<RagChunkEntity>, count: Int): List<RagChunkEntity> {
+        return if (sorted.size <= count) sorted else sorted.takeLast(count)
+    }
+
+    /**
+     * Outline + content samples per document. Used for meta queries
+     * (structural overview, glossary, appendix, etc.).
+     *
+     * When [query] contains a tail-structure term (glossary, appendix,
+     * answers, bibliography), content samples are taken from the END of the
+     * document rather than evenly-spaced — these sections are always near
+     * the end and evenly-spaced sampling reliably misses them.
+     */
+    private fun structuralSample(all: List<RagChunkEntity>, topK: Int, query: String = ""): List<RetrievedChunk> {
+        val queryLower = query.lowercase()
+        val isTailQuery = TAIL_STRUCTURE_TOKENS.any { queryLower.contains(it) }
         val byDoc = all.groupBy { it.docUri }
         val perDoc = (topK / byDoc.size).coerceAtLeast(2)
         val result = mutableListOf<RetrievedChunk>()
         for ((_, docChunks) in byDoc) {
-            // Outline first if we extracted one at index time.
             docChunks.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX }?.let { o ->
                 result.add(RetrievedChunk(o.text, o.docName, 1.0, OUTLINE_CHUNK_INDEX))
             }
             val content = docChunks.filter { it.chunkIndex >= 0 }.sortedBy { it.chunkIndex }
             if (content.isEmpty()) continue
-            pickStructuralSamples(content, perDoc).forEach {
-                result.add(RetrievedChunk(it.text, it.docName, 0.0, it.chunkIndex))
-            }
+            val samples = if (isTailQuery) pickTailSamples(content, perDoc)
+                          else pickStructuralSamples(content, perDoc)
+            samples.forEach { result.add(RetrievedChunk(it.text, it.docName, 0.0, it.chunkIndex)) }
         }
         return result
     }

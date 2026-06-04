@@ -539,11 +539,23 @@ class ChatRepositoryImpl @Inject constructor(
         // them into the persona-driven main chat caused pack context to
         // bleed into normal conversations. The main chat only ever
         // retrieves the user's OWN attached documents for this session.
+        // Last completed user turn — passed to the retriever for two uses:
+        // (a) follow-up expansion: "also list X" → BM25("prior X also list X")
+        // (b) zero-hit retry: if BM25 finds nothing for the current query,
+        //     retry with prior query to surface the same evidence region.
+        val priorUserQuery = _history.value
+            .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
+            .dropLast(1)  // exclude the current turn being built
+            .lastOrNull()
+            ?.content
+            ?.take(200)
+
         val retrieved = runCatching {
             ragRepository.search(
                 sessionId = sessionId,
                 query = userMessage,
                 restrictToDocUris = focusUris,
+                priorQuery = priorUserQuery?.takeIf { it != userMessage && it.length > 8 },
             )
         }.getOrDefault(emptyList())
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }

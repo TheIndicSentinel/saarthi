@@ -192,7 +192,7 @@ class FileContentExtractor @Inject constructor(
                                 if (result.text.isNotBlank()) {
                                     if (extracted.isNotEmpty()) extracted.appendLine()
                                     extracted.appendLine("--- Page ${pageIndex + 1} ---")
-                                    extracted.append(result.text)
+                                    extracted.append(cleanOcrPageText(result.text))
                                 }
                             } finally {
                                 // Free native bitmap memory immediately — at
@@ -214,6 +214,53 @@ class FileContentExtractor @Inject constructor(
             Timber.e(e, "PDF OCR failed")
             "[PDF: Could not read file contents]"
         }
+    }
+
+    /**
+     * Post-process raw ML Kit OCR output from a single PDF page to reduce
+     * noise from table/column layouts.
+     *
+     * ML Kit returns text in TextBlock reading order. For tables, each cell
+     * is a separate TextBlock, so a word like "Battery" split across two
+     * cells can appear as two short lines: "Ba" and "ttery". When these are
+     * chunked without cleanup, the word fragment lands at the start of the
+     * next chunk (preview shows "ttery…"), confusing BM25 and the model.
+     *
+     * This pass joins very short alphabetic-only lines (1–4 chars) onto the
+     * next non-blank line when the next line begins with a lowercase letter —
+     * the classic signature of a broken word. It does NOT alter page markers,
+     * numbers, or capitalized words, so headings and figures stay intact.
+     */
+    private fun cleanOcrPageText(raw: String): String {
+        if (raw.length < 6) return raw
+        val lines = raw.lines()
+        val out = StringBuilder(raw.length)
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
+            val trimmed = line.trim()
+            // Keep page markers exactly as-is.
+            if (trimmed.startsWith("---") && trimmed.endsWith("---")) {
+                out.appendLine(trimmed); i++; continue
+            }
+            // Short (1-4 char) all-letter fragments: peek at the next
+            // non-blank line. If it starts with a lowercase letter this
+            // is likely a word split by a table cell — join them.
+            if (trimmed.length in 1..4 && trimmed.all { it.isLetter() }) {
+                val nextNonBlank = (i + 1 until lines.size)
+                    .map { lines[it].trim() }
+                    .firstOrNull { it.isNotEmpty() }
+                if (nextNonBlank != null && nextNonBlank[0].isLowerCase()) {
+                    // Append without newline so chunker sees one whole word.
+                    out.append(trimmed)
+                    i++
+                    continue
+                }
+            }
+            out.appendLine(line)
+            i++
+        }
+        return out.toString()
     }
 
     /**
