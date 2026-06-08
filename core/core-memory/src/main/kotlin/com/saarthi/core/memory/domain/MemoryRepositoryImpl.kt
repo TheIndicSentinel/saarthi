@@ -61,35 +61,39 @@ class MemoryRepositoryImpl @Inject constructor(
         // Friendly labels for keys the model commonly emits. Any unmapped key
         // is humanised (snake_case → Title case) so the LLM still gets a
         // readable line rather than a raw slug.
+        // All labels are prefixed "User's …" so the model never mistakes
+        // these stored facts for attributes of itself — the root cause of
+        // the pronoun-confusion bug ("my name is Arjun" → model says "I am
+        // Arjun" in subsequent turns, especially in non-English languages).
         val labelMap = mapOf(
-            "name"            to "Name",
-            "user_name"       to "Name",
-            "age"             to "Age",
-            "user_age"        to "Age",
-            "city"            to "City / Location",
-            "user_city"       to "City / Location",
-            "profession"      to "Profession / Work",
-            "user_profession" to "Profession / Work",
-            "likes"           to "Things they like",
-            "user_likes"      to "Things they like",
-            "dislikes"        to "Things they dislike",
-            "user_dislikes"   to "Things they dislike",
-            "family"          to "Family",
-            "user_family"     to "Family",
-            "goals"           to "Goals / Aspirations",
-            "user_goals"      to "Goals / Aspirations",
-            "language"        to "Preferred language",
-            "user_language"   to "Preferred language",
-            "health"          to "Health notes",
-            "user_health"     to "Health notes",
-            "budget"          to "Budget",
-            "user_budget"     to "Budget",
-            "favourite_color" to "Favourite colour",
-            "favourite_food"  to "Favourite food",
-            "favourite_music" to "Favourite music",
-            "hobbies"         to "Hobbies",
-            "pet"             to "Pet",
-            "birthday"        to "Birthday",
+            "name"            to "User's name",
+            "user_name"       to "User's name",
+            "age"             to "User's age",
+            "user_age"        to "User's age",
+            "city"            to "User's city / location",
+            "user_city"       to "User's city / location",
+            "profession"      to "User's profession / work",
+            "user_profession" to "User's profession / work",
+            "likes"           to "Things the user likes",
+            "user_likes"      to "Things the user likes",
+            "dislikes"        to "Things the user dislikes",
+            "user_dislikes"   to "Things the user dislikes",
+            "family"          to "User's family",
+            "user_family"     to "User's family",
+            "goals"           to "User's goals / aspirations",
+            "user_goals"      to "User's goals / aspirations",
+            "language"        to "User's preferred language",
+            "user_language"   to "User's preferred language",
+            "health"          to "User's health notes",
+            "user_health"     to "User's health notes",
+            "budget"          to "User's budget",
+            "user_budget"     to "User's budget",
+            "favourite_color" to "User's favourite colour",
+            "favourite_food"  to "User's favourite food",
+            "favourite_music" to "User's favourite music",
+            "hobbies"         to "User's hobbies",
+            "pet"             to "User's pet",
+            "birthday"        to "User's birthday",
         )
 
         // Returns bullets only — the chat-scope header lives in
@@ -97,7 +101,8 @@ class MemoryRepositoryImpl @Inject constructor(
         // that wording and no duplicate headers in the final prompt.
         return buildString {
             entries.forEach { e ->
-                val label = labelMap[e.key] ?: e.key.replace("_", " ").replaceFirstChar { it.uppercase() }
+                val label = labelMap[e.key]
+                    ?: "User's " + e.key.replace("_", " ").replaceFirstChar { it.uppercase() }
                 appendLine("- $label: ${e.value}")
             }
         }.trimEnd()

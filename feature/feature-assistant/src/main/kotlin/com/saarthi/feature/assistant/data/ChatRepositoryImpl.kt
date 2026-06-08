@@ -940,25 +940,28 @@ class ChatRepositoryImpl @Inject constructor(
         }
         // STANDARD / LARGE — give the model continuity in a BOUNDED size.
         //
-        // Two competing needs, resolved together:
-        //   • Continuity (so resuming a long chat isn't cold): include the
-        //     FIRST question (where the conversation started) + the most
-        //     recent ones (where it is now).
-        //   • Bounded prompt fill: the old "last 3 × 300c" recap could reach
-        //     ~960c, which on Gemma 3n's tight 4900c with-docs budget pushed
-        //     total fill past ~95% and triggered the repetition loops seen in
-        //     the log (19:37:30, 19:42:01). Hard-cap the whole block instead.
-        //
-        // Per-question cap is short (~85c) and the whole block is capped at
-        // RECAP_MAX_CHARS so it never crowds out RAG chunks or the reply.
-        val perMsgChars = 85
+        // Tier-aware budget. STANDARD (Gemma 3n) stays at RECAP_MAX_CHARS=280 —
+        // a larger window pushed fill past 95% and triggered the repetition loops
+        // observed in production (19:37:30, 19:42:01). LARGE (Gemma 4) has an
+        // 8000c prompt budget; giving it 500c here is still only 6% of that
+        // ceiling and allows 3–4 meaningful questions instead of barely 1.
+        val recapBudget = if (tier == SystemPromptProvider.ModelTier.LARGE) 500 else RECAP_MAX_CHARS
+        // 85c truncates most real questions mid-sentence. 120c preserves the
+        // full text of the vast majority of queries, including Hindi/Telugu ones
+        // where the same semantic content is expressed in fewer code units.
+        // STANDARD stays at 85c — its tight 4900c budget leaves no headroom.
+        val perMsgChars = if (tier == SystemPromptProvider.ModelTier.LARGE) 120 else 85
+        // LARGE has budget for one extra tail turn — gives deeper follow-ups
+        // ("explain point 3 from earlier") a better anchor.
+        val tailCount   = if (tier == SystemPromptProvider.ModelTier.LARGE) 3   else 2
+
         val allUserMessages = complete.filter { it.role == MessageRole.USER }
         if (allUserMessages.isEmpty()) return ""
 
-        // Origin question + the last two — deduped, in chronological order.
+        // Origin question + the most-recent tail — deduped, in chronological order.
         val picked = LinkedHashSet<String>()
         allUserMessages.firstOrNull()?.let { picked.add(it.content) }
-        allUserMessages.takeLast(2).forEach { picked.add(it.content) }
+        allUserMessages.takeLast(tailCount).forEach { picked.add(it.content) }
 
         val lines = picked.mapNotNull { raw ->
             val sanitized = ResponseMarkerParser.stripForDisplay(raw, streaming = false).trim()
@@ -970,10 +973,13 @@ class ChatRepositoryImpl @Inject constructor(
         }
         if (lines.isEmpty()) return ""
 
-        val header = "Earlier in this chat the user asked (topic context only — answer the NEW question below freshly, don't restate your previous replies):\n"
+        // Every "I"/"मैं"/"నేను"/"நான்" etc. in the quoted lines = the USER,
+        // not the model. Explicit label prevents pronoun-confusion replies
+        // ("I am also a teacher") seen across non-English sessions.
+        val header = "User's earlier words (all 'I'/'मैं'/'నేను'/'நான்'/'আমি'/'ਮੈਂ' in quotes = the USER, not you — answer the new message below, don't restate prior replies):\n"
         // Hard cap: drop oldest lines until under budget.
         val mutableLines = lines.toMutableList()
-        while (mutableLines.size > 1 && (header.length + mutableLines.sumOf { it.length + 1 }) > RECAP_MAX_CHARS) {
+        while (mutableLines.size > 1 && (header.length + mutableLines.sumOf { it.length + 1 }) > recapBudget) {
             mutableLines.removeAt(0)
         }
         return (header + mutableLines.joinToString("\n")).trimEnd()
@@ -1010,14 +1016,19 @@ class ChatRepositoryImpl @Inject constructor(
      */
     private fun extractImplicitFacts(message: String): List<Pair<String, String>> {
         val msg = message.trim()
-        if (msg.isEmpty() || msg.length > 300) return emptyList()  // long msgs are rarely a single fact
+        // Raised from 300 to 500 — introductions are commonly embedded inside
+        // longer messages ("Hi, my name is Arjun, I'm a farmer from MP, I need
+        // help with…") and were being silently skipped at the old limit.
+        if (msg.isEmpty() || msg.length > 500) return emptyList()
         val out = mutableListOf<Pair<String, String>>()
-        fun clean(s: String) = s.trim().trim('.', ',', '!', '"', '\'').trim()
+        // '।' = Devanagari danda (sentence terminator) — strip it like a period.
+        fun clean(s: String) = s.trim().trim('.', ',', '!', '"', '\'', '।').trim()
         // Reject captures whose first word is a stopword — "from the office",
         // "called the doctor", "is a bit busy" are not names/places.
         val stopStarts = setOf("the", "a", "an", "my", "this", "that", "here", "there", "not", "just", "so", "very", "really")
         fun firstWordOk(s: String) = s.split(Regex("\\s+")).firstOrNull()?.lowercase() !in stopStarts
 
+        // ── English ──────────────────────────────────────────────────────────
         // name: "my name is X", "I am called X", "call me X"
         Regex("(?i)\\b(?:my name is|i am called|call me|i'm called)\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})")
             .find(msg)?.groupValues?.get(1)?.let { n ->
@@ -1043,6 +1054,47 @@ class ChatRepositoryImpl @Inject constructor(
                 val age = a.toIntOrNull()
                 if (age != null && age in 1..120) out += "age" to age.toString()
             }
+
+        // ── Hindi / Devanagari ───────────────────────────────────────────────
+        // Only patterns with near-zero false-positive risk are included. These
+        // are the top reason "No user memories stored yet" appeared in every
+        // session log even after the user clearly stated their name or city.
+        //
+        // name: "मेरा नाम X है" / "मेरा नाम X" — highest-precision Hindi pattern.
+        // \\p{L} matches all Unicode letters including Devanagari correctly.
+        Regex("मेरा नाम\\s+([\\p{L}][\\p{L}\\s.'-]{0,38})\\s*(?:है|हैं)?")
+            .find(msg)?.groupValues?.get(1)?.let { n ->
+                val name = clean(n.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (name.length in 2..40) out += "name" to name
+            }
+        // city: "मैं X से हूँ" / "मैं X से हूं" — "I am from X"
+        Regex("मैं\\s+([\\p{L}][\\p{L}\\s,'-]{1,38})\\s+से\\s+(?:हूँ|हूं)")
+            .find(msg)?.groupValues?.get(1)?.let { c ->
+                val city = clean(c.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (city.length in 2..40) out += "city" to city
+            }
+        // city: "मैं X में रहता/रहती हूँ" — "I live in X"
+        Regex("मैं\\s+([\\p{L}][\\p{L}\\s,'-]{1,38})\\s+में\\s+(?:रहता|रहती)\\s+(?:हूँ|हूं)")
+            .find(msg)?.groupValues?.get(1)?.let { c ->
+                val city = clean(c.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (city.length in 2..40) out += "city" to city
+            }
+
+        // ── Transliterated Hindi (Latin script) ─────────────────────────────
+        // Very common on mobile — users type Hindi words in Roman script.
+        // name: "mera naam X hai" / "mera naam X"
+        Regex("(?i)\\bmera\\s+naam\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})(?:\\s+hai)?\\b")
+            .find(msg)?.groupValues?.get(1)?.let { n ->
+                val name = clean(n).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
+            }
+        // city: "main X se hun/hoon" — "I am from X"
+        Regex("(?i)\\bmain\\s+([\\p{L}][\\p{L}\\s,'-]{1,40})\\s+se\\s+(?:hun|hoon|hu)\\b")
+            .find(msg)?.groupValues?.get(1)?.let { c ->
+                val city = clean(c).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (city.length in 2..40 && firstWordOk(city)) out += "city" to city
+            }
+
         return out
     }
 
