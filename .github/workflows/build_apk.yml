@@ -34,6 +34,26 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME"                       > local.properties
           echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}"   >> local.properties
 
+      - name: Run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew test 2>&1 | tee /tmp/test.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::group::Test failure summary (last 80 lines)"
+            tail -80 /tmp/test.log
+            echo "::endgroup::"
+          fi
+          exit $EXIT_CODE
+
+      - name: Upload test report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: "**/build/reports/tests/"
+          retention-days: 7
+
       - name: Decode keystore
         run: |
           mkdir -p keystore

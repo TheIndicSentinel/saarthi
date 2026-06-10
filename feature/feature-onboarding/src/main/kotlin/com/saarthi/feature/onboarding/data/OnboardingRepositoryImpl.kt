@@ -1,7 +1,6 @@
 package com.saarthi.feature.onboarding.data
 
 import android.content.Context
-import android.os.Environment
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -75,7 +74,10 @@ class OnboardingRepositoryImpl @Inject constructor(
             File(context.getExternalFilesDir(null), "models"),
             File(context.filesDir, "models"),
             context.filesDir,
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            // Public Downloads removed: reading arbitrary files there requires
+            // MANAGE_EXTERNAL_STORAGE which is a Play Store policy violation.
+            // Models are downloaded to filesDir by the app's own download flow;
+            // users with pre-placed files can use the file-picker instead.
         )
 
         for (root in searchRoots) {
