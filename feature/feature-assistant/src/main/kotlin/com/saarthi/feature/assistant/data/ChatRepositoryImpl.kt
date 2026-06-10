@@ -158,8 +158,8 @@ class ChatRepositoryImpl @Inject constructor(
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         chatSessionDao.insert(ChatSessionEntity(id = id, title = "New Chat", createdAt = now, updatedAt = now))
-        // Reset engine session so the new chat starts with a clean KV cache
-        runCatching { inferenceEngine.resetSession() }
+        // switchSession() calls resetSession() internally — calling it here too
+        // caused the double [SESSION] reset seen in every new-session log entry.
         switchSession(id)
         return id
     }
@@ -1095,6 +1095,26 @@ class ChatRepositoryImpl @Inject constructor(
                 if (city.length in 2..40 && firstWordOk(city)) out += "city" to city
             }
 
+        // ── Diet / food preference ───────────────────────────────────────────
+        // "I'm a vegetarian" → was the exact case in the log that was never
+        // captured because the model mis-emitted SAARTHI_REMINDER instead of
+        // SAARTHI_MEMORY, and no implicit pattern existed for diet preferences.
+        // Pattern requires a first-person verb before the term to avoid catching
+        // "find me a vegetarian restaurant" type queries.
+        Regex("(?i)\\b(?:i'?m|i am|i eat|i follow|i prefer|i'm a|i am a)\\s+(?:a |an |strictly |purely )?([a-zA-Z-]{3,20})\\b")
+            .find(msg)?.groupValues?.get(1)?.let { d ->
+                if (d.lowercase() in DIET_TERMS) out += "diet" to d.lowercase()
+            }
+
+        // ── Employer ─────────────────────────────────────────────────────────
+        // "I work at Infosys", "I'm working for TCS" — distinct from profession
+        // (which captures job title; this captures company/organisation name).
+        Regex("(?i)\\b(?:i work at|i work for|i'?m working at|i'?m working for|i am working at|i am working for)\\s+([\\p{L}][\\p{L}\\s&.-]{1,30})")
+            .find(msg)?.groupValues?.get(1)?.let { e ->
+                val employer = clean(e).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (employer.length in 2..30 && firstWordOk(employer)) out += "employer" to employer
+            }
+
         return out
     }
 
@@ -1111,6 +1131,13 @@ class ChatRepositoryImpl @Inject constructor(
         val msg = userMessage.lowercase()
         return REMINDER_TRIGGER_PHRASES.any { msg.contains(it) }
     }
+
+    // Dietary preference terms matched by the diet extractor above.
+    // Kept separate so adding new terms doesn't risk widening the profession regex.
+    private val DIET_TERMS = setOf(
+        "vegetarian", "vegan", "jain", "eggetarian",
+        "non-vegetarian", "nonvegetarian",
+    )
 
     // Words that follow "I am a/an …" but are NOT a profession — guards the
     // implicit profession extractor against "I am a bit tired" style matches.

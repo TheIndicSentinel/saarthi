@@ -75,6 +75,7 @@ interface MemoryRepository {
             "language", "goal", "goals", "health", "allergy", "allergies",
             "birthday", "dob", "pet", "hobby", "hobbies",
             "favourite", "favorite", "likes", "dislikes",
+            "diet", "food",
             "education", "degree", "student", "school", "college",
         )
 

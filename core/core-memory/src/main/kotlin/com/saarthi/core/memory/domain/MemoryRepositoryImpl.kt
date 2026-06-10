@@ -92,6 +92,8 @@ class MemoryRepositoryImpl @Inject constructor(
             "favourite_food"  to "User's favourite food",
             "favourite_music" to "User's favourite music",
             "hobbies"         to "User's hobbies",
+            "diet"            to "User's dietary preference",
+            "employer"        to "User's employer / company",
             "pet"             to "User's pet",
             "birthday"        to "User's birthday",
         )
