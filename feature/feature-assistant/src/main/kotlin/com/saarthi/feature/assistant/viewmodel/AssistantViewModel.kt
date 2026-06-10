@@ -1,14 +1,15 @@
 package com.saarthi.feature.assistant.viewmodel
 
-import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.engine.InferenceEngine
@@ -68,7 +69,7 @@ data class AssistantUiState(
 
 @HiltViewModel
 class AssistantViewModel @Inject constructor(
-    application: Application,
+    @ApplicationContext private val context: Context,
     private val chatRepository: ChatRepository,
     private val inferenceEngine: InferenceEngine,
     private val fileExtractor: FileContentExtractor,
@@ -77,7 +78,7 @@ class AssistantViewModel @Inject constructor(
     private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
     private val ttsPreference: com.saarthi.core.i18n.TtsPreference,
     private val personalityPreference: com.saarthi.core.i18n.PersonalityPreference,
-) : AndroidViewModel(application) {
+) : ViewModel() {
 
     val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
 
@@ -367,7 +368,7 @@ class AssistantViewModel @Inject constructor(
     }
 
     fun startListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(getApplication())) {
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _uiState.update { it.copy(error = "Voice recognition not available on this device") }
             return
         }
@@ -376,7 +377,7 @@ class AssistantViewModel @Inject constructor(
         // pattern. The old destroy()+recreate raced the async teardown so the
         // 2nd voice turn silently did nothing until the user cancelled.
         val recognizer = speechRecognizer
-            ?: SpeechRecognizer.createSpeechRecognizer(getApplication()).also {
+            ?: SpeechRecognizer.createSpeechRecognizer(context).also {
                 it.setRecognitionListener(recognitionListener)
                 speechRecognizer = it
             }

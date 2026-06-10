@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network security policy for Saarthi.
+
+    Rules:
+    • Cleartext HTTP is blocked on every domain — the only outbound calls are
+      HTTPS model downloads from HuggingFace and the MediaStore debug-log write
+      (which is local, not a network call at all).
+    • Only system CA certificates are trusted. User-installed CAs (from proxy
+      tools like Charles / mitmproxy) are excluded, which prevents accidental
+      traffic interception on developer devices and hardens against MITM on
+      production devices.
+    • No certificate pinning: HuggingFace rotates certificates on a regular
+      cadence; pinning would break downloads silently after each rotation
+      with no user-visible error message. The system CA chain is sufficient.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- System CAs only — no user-installed CA trust -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -59,7 +59,8 @@
         android:largeHeap="true"
         android:hasFragileUserData="true"
         android:allowNativeHeapPointerTagging="false"
-        android:memtagMode="off">
+        android:memtagMode="off"
+        android:networkSecurityConfig="@xml/network_security_config">
         <!--
             Required for litertlm-android GPU (OpenCL) and NPU (QNN) backends.
             Both are optional — absent = backend falls back to CPU automatically.
