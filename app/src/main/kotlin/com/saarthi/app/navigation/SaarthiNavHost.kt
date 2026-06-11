@@ -57,6 +57,8 @@ sealed class Route(val path: String) {
     data object Pro          : Route("pro")
     data object Privacy      : Route("privacy")
     data object About        : Route("about")
+    /** Help & support — contact + problem report. */
+    data object Support      : Route("support")
     data object ResponseStyle: Route("response-style")
     data object Downloads    : Route("downloads")
     data object History      : Route("history")
@@ -191,6 +193,7 @@ fun SaarthiNavHost(
                         "pro" -> navController.navigate(Route.Pro.path)
                         "privacy" -> navController.navigate(Route.Privacy.path)
                         "about" -> navController.navigate(Route.About.path)
+                        "support" -> navController.navigate(Route.Support.path)
                         "response-style" -> navController.navigate(Route.ResponseStyle.path)
                         "downloads" -> navController.navigate(Route.Downloads.path)
                         "history" -> navController.navigate(Route.History.path)
@@ -214,6 +217,9 @@ fun SaarthiNavHost(
         }
         composable(Route.About.path) {
             AboutScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Route.Support.path) {
+            SupportScreen(onBack = { navController.popBackStack() })
         }
         composable(Route.ResponseStyle.path) {
             ResponseStyleScreen(onBack = { navController.popBackStack() })

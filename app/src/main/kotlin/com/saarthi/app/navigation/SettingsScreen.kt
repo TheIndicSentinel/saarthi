@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Notifications
@@ -222,6 +223,14 @@ fun SettingsScreen(
                 tone = ChipTone.Marigold,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("about") },
+            )
+            SaarthiListRow(
+                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.HelpOutline, null) },
+                title = "Help & support",
+                subtitle = "Contact us, report a problem, refunds",
+                tone = ChipTone.Jade,
+                trailing = { ChevronRight() },
+                onClick = { onNavigate("support") },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.FavoriteBorder, null) },
