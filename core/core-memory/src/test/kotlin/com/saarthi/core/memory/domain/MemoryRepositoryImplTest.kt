@@ -58,11 +58,13 @@ class MemoryRepositoryImplTest {
 
         val summary = repository.buildContextSummary(SESSION)
 
-        // "name" maps to the "Name" label. Regression here means the LLM
-        // sees raw key strings instead of human-readable facts.
+        // "name" maps to the "User's name" label. The "User's" prefix is
+        // deliberate — it stops the model (especially in non-English) from
+        // mistaking a stored user fact for its own identity. Regression here
+        // means the LLM sees raw key strings instead of human-readable facts.
         assertTrue(
-            "Should use 'Name' label for 'name' key. Got:\n$summary",
-            summary.contains("- Name: Rahul"),
+            "Should use \"User's name\" label for 'name' key. Got:\n$summary",
+            summary.contains("- User's name: Rahul"),
         )
     }
 
@@ -75,8 +77,8 @@ class MemoryRepositoryImplTest {
         val summary = repository.buildContextSummary(SESSION)
 
         assertTrue(
-            "Should use 'Name' label for 'user_name'. Got:\n$summary",
-            summary.contains("- Name: Priya"),
+            "Should use \"User's name\" label for 'user_name'. Got:\n$summary",
+            summary.contains("- User's name: Priya"),
         )
     }
 
@@ -94,8 +96,8 @@ class MemoryRepositoryImplTest {
         val summary = repository.buildContextSummary(SESSION)
 
         assertTrue(
-            "Unknown key should be humanised. Got:\n$summary",
-            summary.contains("- Preferred payment method: UPI"),
+            "Unknown key should be humanised with the User's prefix. Got:\n$summary",
+            summary.contains("- User's Preferred payment method: UPI"),
         )
     }
 
@@ -114,7 +116,7 @@ class MemoryRepositoryImplTest {
 
         assertTrue(
             "Bullets must be present. Got:\n$summary",
-            summary.contains("- City / Location: Pune"),
+            summary.contains("- User's city / location: Pune"),
         )
         assertFalse(
             "Repo must NOT add its own header — that's the provider's job",
@@ -132,9 +134,9 @@ class MemoryRepositoryImplTest {
 
         val summary = repository.buildContextSummary(SESSION)
 
-        val nameIdx = summary.indexOf("Name: A")
-        val cityIdx = summary.indexOf("City / Location: B")
-        val profIdx = summary.indexOf("Profession / Work: C")
+        val nameIdx = summary.indexOf("User's name: A")
+        val cityIdx = summary.indexOf("User's city / location: B")
+        val profIdx = summary.indexOf("User's profession / work: C")
         assertTrue(
             "All entries must appear:\n$summary",
             nameIdx >= 0 && cityIdx >= 0 && profIdx >= 0,
@@ -170,9 +172,9 @@ class MemoryRepositoryImplTest {
         val summary = repository.buildContextSummary(SESSION)
 
         // Global profile fact appears in every chat …
-        assertTrue("Global identity must surface. Got:\n$summary", summary.contains("- Name: Arjun"))
-        // … alongside this chat's own context.
-        assertTrue("Session fact must surface. Got:\n$summary", summary.contains("- Topic: DPDP Act"))
+        assertTrue("Global identity must surface. Got:\n$summary", summary.contains("- User's name: Arjun"))
+        // … alongside this chat's own context (unknown key → "User's " + humanised).
+        assertTrue("Session fact must surface. Got:\n$summary", summary.contains("- User's Topic: DPDP Act"))
     }
 
     @Test
@@ -186,7 +188,7 @@ class MemoryRepositoryImplTest {
 
         val summary = repository.buildContextSummary(SESSION)
 
-        assertTrue("Session value must win. Got:\n$summary", summary.contains("- City / Location: Mumbai"))
+        assertTrue("Session value must win. Got:\n$summary", summary.contains("- User's city / location: Mumbai"))
         assertFalse("Global value must be overridden. Got:\n$summary", summary.contains("Delhi"))
     }
 

@@ -40,8 +40,12 @@ class SystemPromptProviderTest {
     // ── build: invariants every prompt must satisfy ────────────────────────
 
     @Test
-    fun build_includes_Saarthi_identity_on_all_tiers() {
-        for (modelName in listOf("Gemma 3 · Compact & Fast", "Gemma 3n", "Gemma 4 · Recommended")) {
+    fun build_includes_Saarthi_identity_on_instruction_following_tiers() {
+        // STANDARD (Gemma 3n) and LARGE (Gemma 4) follow a system prompt, so the
+        // Saarthi identity must be present. COMPACT (Gemma 3 1B) is handled
+        // separately below — it intentionally gets NO system prompt because the
+        // 1B model parrots any system text back as if the user said it.
+        for (modelName in listOf("Gemma 3n", "Gemma 4 · Recommended")) {
             val prompt = provider.build(
                 modelName = modelName,
                 pack = PackType.BASE,
@@ -50,6 +54,22 @@ class SystemPromptProviderTest {
             )
             assertTrue("Tier prompt for $modelName must mention Saarthi: $prompt", prompt.contains("Saarthi"))
         }
+    }
+
+    @Test
+    fun build_returns_empty_system_prompt_for_COMPACT_tier() {
+        // Documented contract (see SystemPromptProvider.build): the COMPACT
+        // (Gemma 3 1B) tier returns an EMPTY system prompt. The tiny model
+        // cannot separate system instructions from user content — any system
+        // text ("You are Saarthi…") gets echoed back, so we send nothing
+        // system-side and let the user message stand alone.
+        val prompt = provider.build(
+            modelName = "Gemma 3 · Compact & Fast",
+            pack = PackType.BASE,
+            languageInstruction = "",
+            memoryContext = "",
+        )
+        assertTrue("COMPACT tier must return an empty system prompt, got: $prompt", prompt.isEmpty())
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.saarthi.feature.assistant.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ResponseMarkerParserTest {

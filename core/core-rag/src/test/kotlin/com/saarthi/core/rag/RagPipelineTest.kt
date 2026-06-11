@@ -186,10 +186,11 @@ class RagPipelineTest {
 
     @Test
     fun `indexDocument does not insert when text is empty`() = runTest {
-        // Whitespace-only / empty input shouldn't poison the store with
-        // a chunk of nothing — that's a quality-degrading silent bug.
-        // Current behaviour: a single empty chunk is still inserted.
-        // Locking the contract here so a future fix is intentional.
+        // Whitespace-only / empty input must NOT poison the store with a chunk
+        // of nothing. indexDocument() guards this with `if (text.isBlank()) return`,
+        // so no embedding is computed and nothing is inserted. (An earlier
+        // version of this test locked in the old buggy behaviour of inserting a
+        // single empty chunk; the guard is now in place, so we assert zero.)
         val capturedChunks = mutableListOf<String>()
         coEvery { vectorStore.insert(any(), any()) } answers {
             capturedChunks += firstArg<String>()
@@ -198,11 +199,7 @@ class RagPipelineTest {
 
         pipeline.indexDocument("")
 
-        // Document the current behaviour: single empty chunk is inserted.
-        // If/when chunkText is fixed to skip blank input this assertion
-        // will fail and force a deliberate update.
-        assertEquals(1, capturedChunks.size)
-        assertTrue("Empty/blank chunk", capturedChunks[0].isBlank())
+        assertEquals("Blank input must insert nothing", 0, capturedChunks.size)
     }
 
     @Test

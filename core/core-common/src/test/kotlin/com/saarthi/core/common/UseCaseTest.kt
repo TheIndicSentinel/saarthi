@@ -1,16 +1,17 @@
 package com.saarthi.core.common
 
 import app.cash.turbine.test
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.coroutines.CoroutineContext
 
 /**
  * UseCase / FlowUseCase / NoParamUseCase are used by every feature's domain layer.
@@ -48,25 +49,27 @@ class UseCaseTest {
     }
 
     @Test
-    fun `UseCase runs on the injected dispatcher`() = runTest {
-        val testDispatcher = StandardTestDispatcher(testScheduler)
-        var executed = false
-
-        val useCase = object : UseCase<Unit, Unit>(testDispatcher) {
-            override suspend fun execute(params: Unit) { executed = true }
+    fun `UseCase dispatches execute on the injected dispatcher`() = runTest {
+        // A dispatcher that records when withContext routes work to it.
+        // withContext(dispatcher) always calls dispatch() (isDispatchNeeded is
+        // true by default), so this deterministically proves the UseCase ran
+        // its body under the dispatcher it was constructed with — not Main or
+        // the caller's context.
+        var dispatchedOnInjected = false
+        val trackingDispatcher = object : CoroutineDispatcher() {
+            override fun dispatch(context: CoroutineContext, block: Runnable) {
+                dispatchedOnInjected = true
+                block.run()
+            }
+        }
+        val useCase = object : UseCase<Unit, Unit>(trackingDispatcher) {
+            override suspend fun execute(params: Unit) { /* no-op */ }
         }
 
-        // Enqueue the call — StandardTestDispatcher does NOT run eagerly
-        val deferred = kotlinx.coroutines.async { useCase(Unit) }
+        useCase(Unit)
 
-        // Nothing has run yet because StandardTestDispatcher is not unconfined
-        assertTrue("Should not have run before scheduler advance", !executed)
-
-        // Drain the scheduler — now the withContext(testDispatcher) block executes
-        testScheduler.advanceUntilIdle()
-        deferred.await()
-
-        assertTrue("Must have executed after scheduler advance", executed)
+        assertTrue("withContext must dispatch on the injected dispatcher",
+            dispatchedOnInjected)
     }
 
     // ── FlowUseCase ────────────────────────────────────────────────────────────
