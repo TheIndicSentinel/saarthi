@@ -323,9 +323,26 @@ class ChatRepositoryImpl @Inject constructor(
                     // Parse markers out of the raw accumulated text
                     val parsed = ResponseMarkerParser.parse(accumulated.toString())
 
+                    // Reliability guard: a small model under device memory
+                    // pressure can finish with empty / near-empty output (seen
+                    // in the logs as 2–3 tokens at <1 tok/s), which would render
+                    // as a BLANK bubble that looks broken — fatal for a paid app.
+                    // An error before the first token would ALSO blank the bubble
+                    // here, because onCompletion overwrites the message that
+                    // .catch set. Resolve a sensible, actionable reply instead of
+                    // ever showing an empty bubble.
+                    val isCancelled = throwable is kotlinx.coroutines.CancellationException
+                    val isError = throwable != null && !isCancelled
+                    val partial = _history.value.firstOrNull { it.id == streamingId }?.content.orEmpty()
+                    val finalContent = resolveAssistantReply(
+                        cleanedText = parsed.cleanText,
+                        isCancelled = isCancelled,
+                        isError = isError,
+                        partialVisible = partial,
+                    )
                     val finalMsg = ChatMessage(
                         id = streamingId,
-                        content = parsed.cleanText,
+                        content = finalContent,
                         role = MessageRole.ASSISTANT,
                         isStreaming = false,
                         tokenCount = tokenCount,
@@ -333,7 +350,15 @@ class ChatRepositoryImpl @Inject constructor(
                     _history.update { history ->
                         history.map { msg -> if (msg.id == streamingId) finalMsg else msg }
                     }
-                    scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
+                    // Persist only a REAL model reply — never the error / empty /
+                    // stopped placeholders. Persisting them would pollute chat
+                    // history AND the multi-turn transcript fed back into later
+                    // prompts ("Saarthi: I couldn't generate a reply…").
+                    val isRealReply = parsed.cleanText.isNotBlank() ||
+                        (isCancelled && partial.isNotBlank())
+                    if (isRealReply) {
+                        scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
+                    }
 
                     // Save extracted memories. Two tiers (industry-standard):
                     //  • Durable identity facts (name, city, profession, …) →
@@ -1530,4 +1555,42 @@ internal fun formatConversationContext(
         window--
     }
     return ""
+}
+
+/**
+ * Decide what the assistant bubble should show when a generation finishes,
+ * guaranteeing we NEVER render a blank "broken-looking" bubble — the single
+ * worst reliability symptom for a paid app.
+ *
+ * @param cleanedText   the model's reply with markers stripped (may be blank
+ *                      when device memory pressure starved generation, or when
+ *                      the reply was only a marker / control token).
+ * @param isCancelled   the user pressed Stop.
+ * @param isError       generation failed (a non-cancellation throwable).
+ * @param partialVisible the bubble's current content — holds either the
+ *                      streamed-so-far text or the message `.catch` already set.
+ *
+ * Pure + top-level `internal` so it is unit-testable without the repository.
+ */
+internal fun resolveAssistantReply(
+    cleanedText: String,
+    isCancelled: Boolean,
+    isError: Boolean,
+    partialVisible: String,
+): String {
+    if (cleanedText.isNotBlank()) return cleanedText
+    // No usable generated text below this point.
+    if (isError) {
+        // Keep whatever .catch surfaced; otherwise a generic, non-scary notice.
+        return partialVisible.ifBlank { "Something went wrong generating a reply. Please try again." }
+    }
+    if (isCancelled) {
+        // User stopped — keep any partial text; otherwise a brief note.
+        return partialVisible.ifBlank { "Stopped." }
+    }
+    // Normal completion but the model produced nothing — almost always device
+    // memory pressure (2–3 tokens at <1 tok/s in the logs). Give an actionable
+    // next step instead of a blank bubble.
+    return "I couldn't generate a reply just now. Please try again — if it keeps " +
+        "happening on this device, switch to a lighter model in Settings → Models."
 }
