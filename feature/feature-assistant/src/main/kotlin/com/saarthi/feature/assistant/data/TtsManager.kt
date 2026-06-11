@@ -40,6 +40,14 @@ class TtsManager @Inject constructor(
     private val _activeUtteranceId = MutableStateFlow<String?>(null)
     val activeUtteranceId: StateFlow<String?> = _activeUtteranceId.asStateFlow()
 
+    // Utterance id of the FINAL chunk of the current (possibly multi-part)
+    // reply. A long reply is split into several queued utterances; isSpeaking
+    // must stay true across all of them and only flip false when this last
+    // chunk's onDone fires. Without this, a long answer either silently failed
+    // to speak (over the engine's ~4000-char limit) or the chip reset after
+    // the first chunk.
+    @Volatile private var lastChunkId: String? = null
+
     private fun ensureInitialized(onReady: () -> Unit) {
         if (initialized) { onReady(); return }
         pendingSpeak = onReady
@@ -53,8 +61,14 @@ class TtsManager @Inject constructor(
                         _activeUtteranceId.value = utteranceId
                     }
                     override fun onDone(utteranceId: String?) {
-                        _isSpeaking.value = false
-                        if (_activeUtteranceId.value == utteranceId) _activeUtteranceId.value = null
+                        // Only the FINAL chunk of a multi-part reply ends the
+                        // speaking state — intermediate chunks keep it true so
+                        // the Listen→Stop chip stays correct across the whole
+                        // answer.
+                        if (utteranceId == lastChunkId) {
+                            _isSpeaking.value = false
+                            _activeUtteranceId.value = null
+                        }
                     }
                     @Deprecated("Old API but TTS still calls this on some OEMs")
                     override fun onError(utteranceId: String?) {
@@ -119,12 +133,25 @@ class TtsManager @Inject constructor(
                     DebugLogger.log("TTS", "Voice → ${v.name}  (${hint.gender})  pitch=${hint.pitch}  rate=${hint.rate}")
                 }
             }
-            // QUEUE_FLUSH replaces any in-progress utterance — matches "tap
-            // Listen on a different bubble while one is already playing".
-            val params = Bundle().apply {
-                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, id)
+            // Long replies exceed the engine's hard input cap
+            // (getMaxSpeechInputLength, ~4000 chars) — a single speak() call
+            // over that limit reads NOTHING. Split into sentence-bounded chunks
+            // and queue them: first FLUSH (replaces any in-progress reply),
+            // the rest ADD so they play back-to-back as one continuous answer.
+            val maxLen = runCatching { TextToSpeech.getMaxSpeechInputLength() }
+                .getOrDefault(4000)
+                .coerceIn(500, 4000) - 100   // headroom under the cap
+            val chunks = splitTextForTts(spoken, maxLen)
+            if (chunks.isEmpty()) return@ensureInitialized
+            lastChunkId = "${id}_${chunks.lastIndex}"
+            chunks.forEachIndexed { i, chunk ->
+                val mode = if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                val chunkId = "${id}_$i"
+                val params = Bundle().apply {
+                    putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, chunkId)
+                }
+                tts?.speak(chunk, mode, params, chunkId)
             }
-            tts?.speak(spoken, TextToSpeech.QUEUE_FLUSH, params, id)
         }
         return id
     }
@@ -263,4 +290,68 @@ class TtsManager @Inject constructor(
         SupportedLanguage.PUNJABI  -> Locale("pa")
         SupportedLanguage.ODIA     -> Locale("or")
     }
+}
+
+/**
+ * Split already-sanitized speech text into chunks no longer than [maxLen],
+ * preferring sentence boundaries (`. ! ? ।` and newlines) so the TTS engine
+ * never receives an over-cap utterance (which it would drop silently) and the
+ * pauses land naturally between sentences. A single sentence longer than
+ * [maxLen] is hard-split on whitespace as a last resort.
+ *
+ * Top-level `internal` so it is unit-testable without the Android TTS engine.
+ * Returns a single-element list for the common case (reply already under the
+ * cap), so typical short replies are unaffected.
+ */
+internal fun splitTextForTts(text: String, maxLen: Int): List<String> {
+    val t = text.trim()
+    if (t.isEmpty()) return emptyList()
+    if (t.length <= maxLen) return listOf(t)
+
+    val out = ArrayList<String>()
+    val sb = StringBuilder()
+    fun flush() { if (sb.isNotBlank()) out.add(sb.toString().trim()); sb.setLength(0) }
+
+    // Split on sentence terminators followed by whitespace; '।' is the
+    // Devanagari danda used across Indic scripts.
+    val sentences = t.split(Regex("(?<=[.!?।])\\s+"))
+    for (raw in sentences) {
+        val s = raw.trim()
+        if (s.isEmpty()) continue
+        when {
+            // Adding this sentence would overflow → start a new chunk first.
+            sb.isNotEmpty() && sb.length + 1 + s.length > maxLen -> {
+                flush()
+                appendSentenceOrSplit(s, maxLen, sb, out)
+            }
+            else -> appendSentenceOrSplit(s, maxLen, sb, out)
+        }
+    }
+    flush()
+    return out
+}
+
+/** Append [s] to [sb], or hard-split it on whitespace when it alone exceeds [maxLen]. */
+private fun appendSentenceOrSplit(
+    s: String,
+    maxLen: Int,
+    sb: StringBuilder,
+    out: ArrayList<String>,
+) {
+    if (s.length <= maxLen) {
+        if (sb.isNotEmpty()) sb.append(' ')
+        sb.append(s)
+        return
+    }
+    // Sentence longer than the cap — flush whatever is buffered, then split on
+    // whitespace as close to maxLen as possible.
+    if (sb.isNotBlank()) { out.add(sb.toString().trim()); sb.setLength(0) }
+    var rest = s
+    while (rest.length > maxLen) {
+        var cut = rest.lastIndexOf(' ', maxLen)
+        if (cut < maxLen / 2) cut = maxLen   // no good space — hard cut
+        out.add(rest.substring(0, cut).trim())
+        rest = rest.substring(cut).trim()
+    }
+    if (rest.isNotEmpty()) sb.append(rest)
 }
