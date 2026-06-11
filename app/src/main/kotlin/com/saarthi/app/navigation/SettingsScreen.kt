@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
@@ -102,6 +103,16 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             ProfileCard()
+
+            // Saarthi Pro upsell — prominent, top of the list.
+            SaarthiListRow(
+                leadingIcon = { Icon(Icons.Outlined.AutoAwesome, null) },
+                title = "Saarthi Pro",
+                subtitle = "Unlock documents, voice & memory · Founder ₹199",
+                tone = ChipTone.Marigold,
+                trailing = { ChevronRight() },
+                onClick = { onNavigate("pro") },
+            )
 
             SectionLabel("AI & Models")
             SaarthiListRow(

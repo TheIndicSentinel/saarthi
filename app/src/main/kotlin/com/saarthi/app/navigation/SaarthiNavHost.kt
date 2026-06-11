@@ -53,6 +53,8 @@ sealed class Route(val path: String) {
     data object Knowledge    : Route("knowledge")
     data object FieldExpert  : Route("field_expert")
     data object Settings     : Route("settings")
+    /** Saarthi Pro paywall / value screen. */
+    data object Pro          : Route("pro")
     data object Privacy      : Route("privacy")
     data object About        : Route("about")
     data object ResponseStyle: Route("response-style")
@@ -186,6 +188,7 @@ fun SaarthiNavHost(
                 onBack = { navController.popBackStack() },
                 onNavigate = { path ->
                     when (path) {
+                        "pro" -> navController.navigate(Route.Pro.path)
                         "privacy" -> navController.navigate(Route.Privacy.path)
                         "about" -> navController.navigate(Route.About.path)
                         "response-style" -> navController.navigate(Route.ResponseStyle.path)
@@ -200,6 +203,10 @@ fun SaarthiNavHost(
                 currentLanguage = currentLanguage,
                 onChangeLanguage = { lang -> mainViewModel.setLanguage(lang) },
             )
+        }
+
+        composable(Route.Pro.path) {
+            PaywallScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Route.Privacy.path) {
