@@ -26,6 +26,45 @@ abstract class SaarthiDatabase : RoomDatabase() {
 }
 
 /**
+ * v3 → v4: `shared_memory` gained a `sessionId` column and its primary key
+ * changed from `(key)` to `(sessionId, key)` — memory became per-chat instead
+ * of global. SQLite can't alter a primary key in place, so we recreate the
+ * table and copy existing rows. v3 memories were global (no session), so they
+ * are migrated into the USER_SCOPE bucket ("__user_profile__") — the durable
+ * cross-chat profile tier — which keeps them visible in every chat exactly as
+ * before. `conversation` and `chat_sessions` were unchanged in this version,
+ * so chat history and sessions are preserved untouched.
+ *
+ * Without this migration a v3 install upgrading would fall through to the
+ * destructive fallback and lose ALL chat history, sessions, and memories.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS shared_memory_new (
+                sessionId TEXT NOT NULL,
+                `key` TEXT NOT NULL,
+                value TEXT NOT NULL,
+                packSource TEXT NOT NULL,
+                updatedAt INTEGER NOT NULL,
+                PRIMARY KEY(sessionId, `key`)
+            )
+            """.trimIndent()
+        )
+        // Existing global memories → USER_SCOPE so they stay visible everywhere.
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO shared_memory_new (sessionId, `key`, value, packSource, updatedAt)
+            SELECT '__user_profile__', `key`, value, packSource, updatedAt FROM shared_memory
+            """.trimIndent()
+        )
+        db.execSQL("DROP TABLE shared_memory")
+        db.execSQL("ALTER TABLE shared_memory_new RENAME TO shared_memory")
+    }
+}
+
+/**
  * v4 → v5: add `rag_chunks` table with its two lookup indices. No data
  * migration needed (the previous in-memory implementation persisted
  * nothing) so this is purely a schema-add — existing chat history,

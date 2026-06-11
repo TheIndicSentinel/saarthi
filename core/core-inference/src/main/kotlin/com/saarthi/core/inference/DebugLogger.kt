@@ -50,7 +50,14 @@ object DebugLogger {
         val app = context.applicationContext
         resolverContext = app
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // Privacy gate: only publish the log to the world-readable public
+        // Downloads folder when PUBLIC_DEBUG_LOG is enabled (beta). A Play
+        // production build sets it false, so the log stays in app-private
+        // storage (still readable via adb / Android Studio for support) and
+        // never exposes prompts / filenames / device info to other apps.
+        val allowPublic = BuildConfig.PUBLIC_DEBUG_LOG
+
+        if (allowPublic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             mediaUri = findOrCreateMediaStoreEntry(app)
             if (mediaUri != null) {
                 pathLabel = "Downloads/$FILE_NAME (MediaStore)"
@@ -61,9 +68,11 @@ object DebugLogger {
 
         // Legacy / fallback chain. Direct File writes to public Downloads only
         // work pre-Q without MANAGE_EXTERNAL_STORAGE; after that we land in
-        // app-scoped storage, which is still accessible via adb / IDE.
-        val candidates = listOf(
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), FILE_NAME),
+        // app-scoped storage, which is still accessible via adb / IDE. When the
+        // public gate is off, the public Downloads candidate is skipped so the
+        // log can only land in app-private storage.
+        val candidates = listOfNotNull(
+            if (allowPublic) File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), FILE_NAME) else null,
             File(app.getExternalFilesDir(null), FILE_NAME),
             File(app.filesDir, FILE_NAME),
         )

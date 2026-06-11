@@ -1,7 +1,11 @@
 # Saarthi — Architecture Reference
 
 ## Overview
-Saarthi is a **100% offline** Android AI assistant powered by Gemma 2B (MediaPipe) with a **Pack-based** feature architecture. Every user interaction stays on-device.
+Saarthi is a **100% offline** Android AI assistant powered by Gemma 4 / Gemma 3n / Gemma 3 models running on **Google AI Edge LiteRT-LM** (`litertlm-android`). Every user interaction stays on-device.
+
+> Note: the native inference runtime migrated from MediaPipe → LiteRT-LM in
+> v1.0.19, and the SMS-based "Money Mentor" pack was removed. Sections below have
+> been corrected to match the shipping code; older prose may still lag.
 
 ---
 
@@ -9,20 +13,23 @@ Saarthi is a **100% offline** Android AI assistant powered by Gemma 2B (MediaPip
 
 ```
 app
-├── feature:feature-onboarding   ← Language selection + model init
-├── feature:feature-assistant    ← Base chat (streaming)
-├── feature:feature-money        ← Money Mentor (SMS → AI categorise)
-├── feature:feature-kisan        ← Kisan Saathi (agriculture RAG)
-├── feature:feature-knowledge    ← Knowledge Pack (NCERT RAG)
-├── feature:feature-fieldexpert  ← Field Expert (tech manual RAG)
+├── feature:feature-onboarding   ← Language selection + model download/init
+├── feature:feature-assistant    ← Chat (streaming), RAG attachments, packs,
+│                                   personalities, reminders, TTS
 │
 ├── core:core-ui          ← Design system, Cyber-Vedic theme, components
-├── core:core-inference   ← MediaPipe Gemma engine (interface + impl)
-├── core:core-memory      ← Shared memory layer (Room, cross-pack context)
-├── core:core-i18n        ← Language manager, SupportedLanguage enum
-├── core:core-rag         ← EmbeddingModel, VectorStore, RagPipeline
+├── core:core-inference   ← LiteRT-LM (litertlm) Gemma engine (interface + impl)
+├── core:core-memory      ← Room: memory, conversations, sessions, rag_chunks
+├── core:core-i18n        ← Language manager, SupportedLanguage, personalities
+├── core:core-rag         ← Embedding/VectorStore + BM25 retriever
 └── core:core-common      ← Result<T>, UseCase, FlowUseCase, Dispatchers
 ```
+
+> The earlier per-pack feature modules (`feature-money`, `feature-kisan`,
+> `feature-knowledge`, `feature-fieldexpert`) were never shipped as separate
+> modules. Packs are a persona/RAG overlay inside `feature-assistant`
+> (see `PackType` + the pack chat screens), not standalone modules. The
+> SMS-based Money Mentor was dropped along with the `READ_SMS` permission.
 
 **Dependency rule:** `app → feature → core`. Features never depend on other features. Core never depends on features.
 
@@ -32,9 +39,9 @@ app
 
 | Principle | Where |
 |-----------|-------|
-| **S**ingle Responsibility | `InferenceEngine` only generates text. `RagPipeline` only augments prompts. `SmsParser` only parses SMS. |
-| **O**pen/Closed | New inference backends (llama.cpp, ONNX) implement `InferenceEngine` without modifying callers. New packs add a module, not modify existing ones. |
-| **L**iskov Substitution | `MediaPipeInferenceEngine` fully substitutes `InferenceEngine`. `SqliteVectorStore` substitutes `VectorStore`. |
+| **S**ingle Responsibility | `InferenceEngine` only generates text. `RagDocumentRepository` only indexes/retrieves chunks. `ReminderManager` only schedules reminders. |
+| **O**pen/Closed | New inference backends implement `InferenceEngine` without modifying callers (`InferenceEngineSelector` routes to the active impl). New packs add a `PackType` arm, not new call sites. |
+| **L**iskov Substitution | `LiteRTInferenceEngine` fully substitutes `InferenceEngine`. `SqliteVectorStore` substitutes `VectorStore`. |
 | **I**nterface Segregation | `MemoryRepository` exposes only what callers need. `EmbeddingModel` hides model internals. |
 | **D**ependency Inversion | ViewModels depend on repository interfaces, not Room DAOs directly. Hilt DI wires implementations. |
 
@@ -47,7 +54,7 @@ Presentation (Composable + ViewModel)
     ↓ only knows domain models
 Domain (UseCases, Repository interfaces, Domain models)
     ↓ only knows domain
-Data (Repository impl, Room DAOs, MediaPipe, DataStore)
+Data (Repository impl, Room DAOs, LiteRT-LM engine, DataStore)
 ```
 
 ---
@@ -55,10 +62,13 @@ Data (Repository impl, Room DAOs, MediaPipe, DataStore)
 ## Key Architectural Decisions
 
 ### 1. On-Device Inference
-- **MediaPipe LLM Inference API** — GPU/NPU acceleration via `tasks-genai`
-- Model stored in app files dir (downloaded once at onboarding)
-- LoRA adapters loaded per Pack (`PackType.loraFileName`)
-- Streaming via `generateResponseAsync` → Kotlin `callbackFlow`
+- **Google AI Edge LiteRT-LM** (`litertlm-android`) — GPU (OpenCL/Vulkan) with
+  CPU fallback; NPU is gated off by default (see `DeviceProfiler`).
+- Model `.litertlm` stored in app files dir (downloaded at onboarding).
+- The `Conversation` is recycled per turn (a second `sendMessageAsync` on a live
+  conversation SIGKILLs the process on SM8550/Android 16); continuity comes from
+  a prompt-level multi-turn transcript (`ChatRepositoryImpl.buildConversationContext`).
+- Streaming via `Conversation.sendMessageAsync` → Kotlin `callbackFlow`.
 
 ### 2. Pack System
 Each Pack = Base Gemma model + optional LoRA adapter + dedicated RAG vector store.
@@ -66,19 +76,27 @@ Each Pack = Base Gemma model + optional LoRA adapter + dedicated RAG vector stor
 - `MemoryRepository.buildContextSummary()` prepends user profile to every prompt
 
 ### 3. Offline RAG
-- Query → `EmbeddingModel.embed()` → `VectorStore.search(topK=3)` → augmented prompt
-- Vector store: SQLite with cosine similarity (replace with SQLite-VSS `.so` for prod)
-- Documents chunked at 512 tokens / 64 overlap
+- Production path is **BM25** over Room-persisted chunks
+  (`RagDocumentRepository` + `Bm25Retriever`), with structural sampling,
+  neighbour expansion and outline extraction. The `EmbeddingModel` /
+  `SqliteVectorStore` cosine path (`RagPipeline`) is legacy/unused
+  (`@Deprecated`) and kept only for its test contract.
+- Documents chunked sentence/word-aware (~600 chars / 80 overlap).
 
 ### 4. Multi-Language
 - `SupportedLanguage` enum — 10 Indian languages + English
 - `LanguageManager.setLanguage()` applies via `AppCompatDelegate` (no restart needed)
 - `LanguageManager.buildLanguageInstruction()` appended to prompts for native responses
 
-### 5. Money Mentor Privacy
-- `READ_SMS` permission → `SmsParser` (regex + Gemma classification)
-- No cloud API, no bank SDK — fully offline
-- Transactions stored in local encrypted Room DB
+### 5. Reminders & Voice
+- User-set reminders via `ReminderManager` → `AlarmManager` exact alarms
+  (degrades to inexact when `SCHEDULE_EXACT_ALARM` is not granted).
+- Text-to-speech read-aloud via `TtsManager` — markdown-stripped, persona voice
+  hints, and sentence-aware chunking so replies over the engine's ~4000-char
+  input cap are spoken in full.
+
+> The previous SMS-based "Money Mentor" pack (`READ_SMS` + `SmsParser`) was
+> removed; the app no longer requests SMS access.
 
 ---
 

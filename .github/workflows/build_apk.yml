@@ -54,6 +54,22 @@ jobs:
           path: "**/build/reports/tests/"
           retention-days: 7
 
+      # Android Lint — informational, NON-blocking. Surfaces correctness /
+      # security / a11y / performance issues without failing the release
+      # pipeline on pre-existing findings. Review the uploaded HTML report and
+      # tighten over time; flip continue-on-error to false once it is clean.
+      - name: Run Android Lint (non-blocking)
+        continue-on-error: true
+        run: ./gradlew :app:lintRelease
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-*.html
+          retention-days: 7
+
       - name: Decode keystore
         run: |
           mkdir -p keystore

@@ -4,8 +4,6 @@
     <!-- Model downloads + any future network calls -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Money Mentor: on-device SMS analysis -->
-    <uses-permission android:name="android.permission.READ_SMS" />
     <!-- Voice input (SpeechRecognizer / Whisper.cpp) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- File attachments — media (Android 13+) -->
@@ -16,7 +14,14 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <!-- Push notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Exact alarms for reminders (Android 12+) -->
+    <!-- Exact alarms for user-set reminders (Android 12+). Justification:
+         Saarthi schedules reminders the USER explicitly asks for ("remind me at
+         6pm") and the 8 AM daily-wisdom alarm; these must fire at the exact
+         requested minute, not be batched by Doze. Required for the Play Store
+         "Alarms & reminders" policy declaration form (use-exact-alarm category:
+         scheduled user reminder). The runtime path degrades gracefully to an
+         inexact alarm when the user has not granted the permission
+         (see ReminderManager.scheduleAt → canScheduleExactAlarms). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Keep alarms alive through Doze mode -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
