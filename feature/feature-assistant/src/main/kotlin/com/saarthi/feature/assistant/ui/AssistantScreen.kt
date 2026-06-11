@@ -88,6 +88,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -147,6 +149,8 @@ fun AssistantScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
     val haptic = LocalHapticFeedback.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     // ── Personality Pal ─────────────────────────────────────────────────────
     val personalityVm: PersonalityViewModel = hiltViewModel()
@@ -165,13 +169,38 @@ fun AssistantScreen(
         }
     }
 
-    // Follow the conversation: on a new message AND as the streaming reply
-    // grows, keep the latest text in view so the user watches it generate.
-    // streamingContent is non-null only while the last bubble is streaming, so
-    // after it finishes only the message count drives the scroll.
+    // ── Stick-to-bottom auto-follow (ChatGPT / Gemini pattern) ───────────────
+    // True bottom of the list = the LAST emitted item (trailing spacer), NOT
+    // messages.lastIndex. Scrolling to messages.lastIndex stopped short of the
+    // spacer/shimmer, so the end of a long reply stayed below the fold — that's
+    // the "scroll doesn't reach the bottom of the response" report.
+    suspend fun scrollToBottom() {
+        val target = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+        listState.animateScrollToItem(target)
+    }
+    // "At bottom" = the last item is currently visible. Drives both auto-follow
+    // and the scroll-to-bottom FAB.
+    val isAtBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
+            last.index >= info.totalItemsCount - 1
+        }
+    }
+
+    // New message arrived (user sent, or the assistant bubble appeared) → always
+    // snap to the bottom so the new turn is in view.
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) scrollToBottom()
+    }
+
+    // Streamed tokens growing the last bubble → follow ONLY while the user is
+    // still parked at the bottom. The moment they scroll up to re-read, we stop
+    // pulling them back down. Re-firing animateScrollToItem on every token was
+    // the "scroll gets stuck until generation finishes" bug.
     val streamingContent = messages.lastOrNull()?.takeIf { it.isStreaming }?.content
-    LaunchedEffect(messages.size, streamingContent) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    LaunchedEffect(streamingContent) {
+        if (streamingContent != null && isAtBottom) scrollToBottom()
     }
 
     // Streaming haptic disabled — buzzing on every token was distracting.
@@ -183,7 +212,7 @@ fun AssistantScreen(
 
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
     LaunchedEffect(imeVisible) {
-        if (imeVisible && messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+        if (imeVisible && messages.isNotEmpty()) scrollToBottom()
     }
 
     LaunchedEffect(uiState.error) {
@@ -336,13 +365,11 @@ fun AssistantScreen(
                         }
 
 
-                        // Scroll-to-bottom FAB — smooth fade + slide so it
-                        // doesn't pop in/out abruptly.
-                        val showScrollFab = remember {
-                            derivedStateOf { listState.firstVisibleItemIndex > 2 }
-                        }
+                        // Scroll-to-bottom FAB — appears whenever the user has
+                        // scrolled away from the bottom (so it also signals that
+                        // auto-follow is paused), smooth fade + slide.
                         androidx.compose.animation.AnimatedVisibility(
-                            visible = showScrollFab.value,
+                            visible = !isAtBottom,
                             enter = androidx.compose.animation.fadeIn(
                                 animationSpec = androidx.compose.animation.core.tween(220),
                             ) + androidx.compose.animation.slideInVertically(
@@ -358,7 +385,7 @@ fun AssistantScreen(
                             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                         ) {
                             IconButton(
-                                onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
+                                onClick = { scope.launch { scrollToBottom() } },
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(CircleShape)
@@ -436,6 +463,11 @@ fun AssistantScreen(
                     },
                     onVoiceClick = {
                         if (micPermission.status.isGranted) {
+                            // Dismiss the soft keyboard before the voice overlay
+                            // takes over — otherwise the keypad stayed up behind
+                            // the overlay when voice was triggered from the input.
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
                             viewModel.openVoiceMode()
                         } else {
                             micPermission.launchPermissionRequest()
