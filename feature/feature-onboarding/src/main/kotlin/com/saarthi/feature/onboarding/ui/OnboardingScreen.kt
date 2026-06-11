@@ -316,18 +316,21 @@ private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
         onPrimary = onNext,
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            SaarthiLogo(size = 104.dp)
-            Spacer(Modifier.height(28.dp))
-            Text("सारथी", style = DisplayAccent.copy(fontSize = 22.sp))
-            Spacer(Modifier.height(12.dp))
+            SaarthiLogo(size = 84.dp)
+            Spacer(Modifier.height(18.dp))
+            Text("सारथी", style = DisplayAccent.copy(fontSize = 20.sp))
+            Spacer(Modifier.height(10.dp))
             Text(
-                "Your AI companion,",
+                "Your private AI,",
                 style = MaterialTheme.typography.displayLarge.copy(
-                    fontSize = 30.sp,
+                    fontSize = 27.sp,
                     fontWeight = FontWeight.Bold,
                     color = SaarthiColors.Text,
                 ),
@@ -336,22 +339,40 @@ private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
             Text(
                 "made for India.",
                 style = MaterialTheme.typography.displayLarge.copy(
-                    fontSize = 30.sp,
+                    fontSize = 27.sp,
                     fontWeight = FontWeight.Bold,
                     color = SaarthiColors.Marigold,
                 ),
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(14.dp))
-            Text(
-                "Saarthi — meaning charioteer — guides you through everyday questions in your language, fully offline.",
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    color = SaarthiColors.Text2,
-                    fontSize = 14.sp,
-                ),
-                textAlign = TextAlign.Center,
-            )
+            Spacer(Modifier.height(22.dp))
+            // Outcome-first: show what Saarthi actually DOES before the model
+            // download. Users care about results, not "an AI companion".
+            Column(modifier = Modifier.fillMaxWidth()) {
+                WelcomeOutcome("📄", "Ask questions about your PDFs & documents")
+                WelcomeOutcome("🌾", "Kisan helper — crops, schemes, mandi prices")
+                WelcomeOutcome("🎙️", "Voice — speak your question, hear the answer")
+                WelcomeOutcome("🔒", "Works offline · nothing leaves your phone")
+            }
         }
+    }
+}
+
+@Composable
+private fun WelcomeOutcome(emoji: String, text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(emoji, fontSize = 18.sp)
+        Spacer(Modifier.width(14.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                color = SaarthiColors.Text2,
+                fontSize = 14.sp,
+            ),
+        )
     }
 }
 
@@ -620,11 +641,21 @@ private fun Onb4ModelPick(
 @Composable
 private fun DeviceTierBadge(profile: DeviceProfile?) {
     if (profile == null) return
+    val ram = "${profile.totalRamMb / 1024}GB RAM"
     val label = when (profile.tier) {
-        DeviceTier.FLAGSHIP -> "Flagship · ${profile.totalRamMb / 1024}GB RAM · ${if (profile.hasVulkan) "Vulkan GPU" else "CPU"}"
-        DeviceTier.MID      -> "Mid-range · ${profile.totalRamMb / 1024}GB RAM"
-        DeviceTier.LOW      -> "Entry · ${profile.totalRamMb / 1024}GB RAM"
-        DeviceTier.MINIMAL  -> "Ultra-low · ${profile.totalRamMb / 1024}GB RAM"
+        DeviceTier.FLAGSHIP -> "Flagship · $ram · ${if (profile.hasVulkan) "Vulkan GPU" else "CPU"}"
+        DeviceTier.MID      -> "Mid-range · $ram"
+        DeviceTier.LOW      -> "Entry · $ram"
+        DeviceTier.MINIMAL  -> "Ultra-low · $ram"
+    }
+    // Honest, plain-language expectation for THIS phone. Setting it before the
+    // download decision is what keeps a mid/low-RAM user from picking the
+    // heaviest model, getting slow/blank replies, and leaving a 1-star review.
+    val expectation = when (profile.tier) {
+        DeviceTier.FLAGSHIP -> "Runs the best models smoothly."
+        DeviceTier.MID      -> "Pick the recommended model for the best balance of speed and quality."
+        DeviceTier.LOW      -> "Choose a lighter model for smooth replies — bigger ones may run slowly."
+        DeviceTier.MINIMAL  -> "Only the compact model will run well here; replies stay short and simple."
     }
     Row(
         modifier = Modifier
@@ -637,10 +668,22 @@ private fun DeviceTierBadge(profile: DeviceProfile?) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Icon(Icons.Outlined.Memory, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(16.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = SaarthiColors.Text,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            Text(
+                expectation,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = SaarthiColors.Text2,
+                    fontSize = 12.sp,
+                ),
+            )
+        }
     }
 }
 
