@@ -694,7 +694,14 @@ class ChatRepositoryImpl @Inject constructor(
             // room for the recent-questions recap, which lets the model treat
             // follow-ups as a continuing conversation instead of restarting.
             val docsPinned = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty()
-            val priorTurns = buildPriorTurnsRecap()
+            // Full multi-turn context — user questions AND Saarthi's prior
+            // answers — so follow-ups ("explain more", "the second one", "why?")
+            // resolve against what was actually said. The KV cache is recycled
+            // every turn on this hardware (a second sendMessageAsync on a live
+            // Conversation SIGKILLs the process — see LiteRTInferenceEngine), so
+            // the prompt is the ONLY carrier of continuity. STANDARD/LARGE get
+            // the real transcript; COMPACT (1B) gets nothing (it parrots).
+            val priorTurns = buildConversationContext(grounded = docsPinned)
             // On doc-grounded turns swap the full ~4423c persona/tools/reminders
             // prompt for a compact instruction set. The verbose prompt alone is
             // ~1370 tokens — larger than E4B's entire 1536-token window once RAM
@@ -983,6 +990,54 @@ class ChatRepositoryImpl @Inject constructor(
             mutableLines.removeAt(0)
         }
         return (header + mutableLines.joinToString("\n")).trimEnd()
+    }
+
+    /**
+     * Multi-turn conversation context for STANDARD / LARGE tiers.
+     *
+     * Unlike [buildPriorTurnsRecap] (user QUESTIONS only), this carries
+     * Saarthi's PRIOR ANSWERS too — bounded and clearly framed as reference
+     * context. That is what lets follow-ups resolve against what was actually
+     * said, instead of the model restarting cold every turn. Because the KV
+     * cache is recycled per turn on this hardware, the prompt is the only
+     * carrier of continuity, so the answers MUST be re-supplied here.
+     *
+     * Anti-echo design (the reason assistant turns were originally dropped):
+     *  • The current user message is appended OUTSIDE this block (last), so the
+     *    model continues from the NEW question, not a dangling assistant turn.
+     *  • Assistant turns are truncated → a partial echo is bounded and the text
+     *    reads as a compressed note, not a script to reproduce.
+     *  • Labels are unambiguous ("User:" = the human, "Saarthi:" = itself); the
+     *    earlier regression used "You:" for the assistant, which it continued.
+     *  • The header explicitly forbids repeating the block.
+     *
+     * COMPACT (1B) returns "" — it parrots any transcript regardless of framing.
+     */
+    private fun buildConversationContext(grounded: Boolean): String {
+        val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+        if (tier == SystemPromptProvider.ModelTier.COMPACT) return ""
+
+        val flat = buildCompleteHistoryPairs(
+            _history.value.filter { it.content.isNotBlank() && !it.isStreaming }.dropLast(1)
+        )
+        if (flat.size < 2) return ""
+
+        // Group the flat [U,A,U,A,…] list into (user, assistant) turns, marker
+        // tags stripped so [SAARTHI_MEMORY]/[SAARTHI_REMINDER] never leak back in.
+        val turns = ArrayList<Pair<String, String>>(flat.size / 2)
+        var i = 0
+        while (i + 1 < flat.size) {
+            val u = ResponseMarkerParser.stripForDisplay(flat[i].content, streaming = false).trim()
+            val a = ResponseMarkerParser.stripForDisplay(flat[i + 1].content, streaming = false).trim()
+            turns.add(u to a)
+            i += 2
+        }
+
+        return formatConversationContext(
+            turns = turns,
+            isLarge = tier == SystemPromptProvider.ModelTier.LARGE,
+            grounded = grounded,
+        )
     }
 
     /**
@@ -1420,4 +1475,59 @@ class ChatRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
+}
+
+/**
+ * Pure, dependency-free formatter for the multi-turn conversation context block.
+ * Extracted as a top-level `internal` function so it is unit-testable without
+ * constructing [ChatRepositoryImpl] and its 12 dependencies.
+ *
+ * @param turns   completed (userText, assistantText) pairs, oldest → newest,
+ *                already marker-stripped and trimmed by the caller.
+ * @param isLarge true for the LARGE (Gemma 4) tier; false for STANDARD (Gemma 3n).
+ *                LARGE carries more thread (8000c budget); STANDARD's tight
+ *                ~4900c with-docs budget gets a smaller window to avoid the
+ *                high-fill repetition loops.
+ * @param grounded true on document-grounded (RAG) turns, where chunks compete
+ *                 for the window, so the transcript shrinks further.
+ *
+ * Returns the formatted block (header + "User:/Saarthi:" lines), or "" when
+ * there is nothing to include. The block is sized to fit a tier/grounded budget
+ * by dropping the oldest turns; the most recent turn is always kept.
+ */
+internal fun formatConversationContext(
+    turns: List<Pair<String, String>>,
+    isLarge: Boolean,
+    grounded: Boolean,
+): String {
+    if (turns.isEmpty()) return ""
+
+    val maxTurns      = if (isLarge) 3 else 2
+    val perUserChars  = if (isLarge) 160 else 110
+    val perReplyChars = if (isLarge) { if (grounded) 220 else 320 } else { if (grounded) 150 else 200 }
+    val blockBudget   = if (isLarge) { if (grounded) 1100 else 1500 } else { if (grounded) 560 else 760 }
+
+    fun trunc(s: String, n: Int): String {
+        val c = s.trim()
+        return if (c.length > n) c.take(n).trimEnd() + "…" else c
+    }
+
+    val header = "Conversation so far (context only — answer the NEW message below and build on this; do not repeat or restate any of it):"
+
+    // Largest recent window of turns that fits the block budget. Always keep at
+    // least the most recent turn even if it slightly exceeds (perReplyChars
+    // already bounds a single turn).
+    var window = maxTurns.coerceAtMost(turns.size)
+    while (window >= 1) {
+        val lines = ArrayList<String>(window * 2)
+        for ((u, a) in turns.takeLast(window)) {
+            val uu = trunc(u, perUserChars); if (uu.isNotEmpty()) lines.add("User: $uu")
+            val aa = trunc(a, perReplyChars); if (aa.isNotEmpty()) lines.add("Saarthi: $aa")
+        }
+        if (lines.isEmpty()) return ""
+        val block = (header + "\n" + lines.joinToString("\n")).trimEnd()
+        if (block.length <= blockBudget || window == 1) return block
+        window--
+    }
+    return ""
 }
