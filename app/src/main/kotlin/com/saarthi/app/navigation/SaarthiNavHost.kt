@@ -179,6 +179,10 @@ fun SaarthiNavHost(
                 onKisanTap = {
                     navController.navigate(Route.KisanPack.path)
                 },
+                onSuggestionChip = { msg ->
+                    val encoded = java.net.URLEncoder.encode(msg, "UTF-8")
+                    navController.navigate("${Route.Assistant.path}?msg=$encoded")
+                },
                 currentLanguage = currentLanguage,
                 greeting = currentLanguage.greeting,
                 exploreSubtitle = currentLanguage.exploreSubtitle,
@@ -236,10 +240,15 @@ fun SaarthiNavHost(
             HistoryScreen(onBack = { navController.popBackStack() })
         }
 
-        composable(Route.Assistant.path) {
+        composable(
+            route = "${Route.Assistant.path}?msg={msg}",
+            arguments = listOf(navArgument("msg") { defaultValue = "" }),
+        ) { backStack ->
+            val initialMessage = backStack.arguments?.getString("msg").orEmpty()
             AssistantScreen(
                 onBack = { navController.popBackStack() },
                 initialLanguage = currentLanguage,
+                initialMessage = initialMessage,
                 onNavigateToKnowledge = { navController.navigate(Route.Knowledge.path) },
                 onChangeModel = {
                     navController.navigate("${Route.Onboarding.path}?modelChange=true")

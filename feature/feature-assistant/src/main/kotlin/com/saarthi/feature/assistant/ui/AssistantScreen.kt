@@ -132,6 +132,8 @@ fun AssistantScreen(
     // Passed from SaarthiNavHost where MainViewModel already has the stored language loaded.
     // Avoids showing HINDI for one frame while AssistantViewModel's fresh StateFlow catches up.
     initialLanguage: SupportedLanguage = SupportedLanguage.HINDI,
+    /** Pre-fills the input when navigating from a home-screen suggestion chip. */
+    initialMessage: String = "",
     onNavigateToKnowledge: () -> Unit = {},
     onChangeModel: () -> Unit = {},
     viewModel: AssistantViewModel = hiltViewModel(),
@@ -161,6 +163,11 @@ fun AssistantScreen(
     val personalitySupported by personalityVm.supportedForCurrentModel.collectAsStateWithLifecycle()
     var showPersonalitySheet by remember { mutableStateOf(false) }
     val personalitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // Pre-fill input from a home-screen suggestion chip (fires once on entry).
+    LaunchedEffect(initialMessage) {
+        if (initialMessage.isNotBlank()) viewModel.onInputChange(initialMessage)
+    }
 
     // Sync drawer open/close with VM state
     LaunchedEffect(uiState.showDrawer) {

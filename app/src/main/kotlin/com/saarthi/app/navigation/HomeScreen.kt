@@ -25,7 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -33,7 +33,6 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Spa
 import androidx.compose.material.icons.outlined.Star
@@ -81,6 +80,8 @@ fun HomeScreen(
      * persona ViewModel is in scope.
      */
     onKisanTap: () -> Unit = { onNavigate(Route.KisanSaathi) },
+    /** Called when a home-screen suggestion chip is tapped. Opens the chat with the chip text pre-filled. */
+    onSuggestionChip: (String) -> Unit = { onNavigate(Route.Assistant) },
     currentLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     greeting: String = currentLanguage.greeting,
     exploreSubtitle: String = currentLanguage.exploreSubtitle,
@@ -116,7 +117,10 @@ fun HomeScreen(
                 Spacer(Modifier.height(6.dp))
                 GreetingBlock(currentLanguage)
                 Spacer(Modifier.height(22.dp))
-                HeroComposer(onClick = { onNavigate(Route.Assistant) })
+                HeroComposer(
+                    onClick = { onNavigate(Route.Assistant) },
+                    onSuggestionChip = onSuggestionChip,
+                )
                 Spacer(Modifier.height(20.dp))
 
                 Text(
@@ -226,34 +230,14 @@ private fun HomeTopBar(
 
 @Composable
 private fun GreetingBlock(lang: SupportedLanguage) {
-    // Calendar.getInstance() was being called on *every* recomposition (the
-    // HomeScreen recomposes when language / menu / dialog state changes).
-    // The hour-of-day only matters once per screen entry, so cache the
-    // greeting tuple keyed off `lang` — Calendar work happens once.
-    val (greetEn, greetNative) = remember(lang) { resolveGreetings(lang) }
-    // For English the native time-greeting IS the English one, so a separate
-    // accent line would just repeat the headline below ("Good evening" twice).
-    // Show the bilingual accent line only when it adds a second script.
-    val showAccent = greetNative != greetEn
+    val greeting = remember(lang) {
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        lang.timeGreeting(h)
+    }
     Column {
-        if (showAccent) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                com.saarthi.core.ui.components.SaarthiLogo(size = 22.dp)
-                Text(
-                    text = greetNative,
-                    // Sized to sit level with the 22.dp logo beside it.
-                    style = DisplayAccent.copy(fontSize = 22.sp, lineHeight = 22.sp),
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-        } else {
-            // English: keep the brand mark, drop the duplicate greeting line.
-            com.saarthi.core.ui.components.SaarthiLogo(size = 26.dp)
-            Spacer(Modifier.height(10.dp))
-        }
         Text(
             buildAnnotatedString {
-                append("$greetEn, ")
+                append("$greeting, ")
                 withStyle(SpanStyle(color = SaarthiColors.Marigold)) { append("friend") }
             },
             style = MaterialTheme.typography.displayLarge.copy(
@@ -274,20 +258,8 @@ private fun GreetingBlock(lang: SupportedLanguage) {
     }
 }
 
-private fun resolveGreetings(lang: SupportedLanguage): Pair<String, String> {
-    val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    val en = when {
-        h < 12 -> "Good morning"
-        h < 17 -> "Good afternoon"
-        else -> "Good evening"
-    }
-    // Accent greeting follows the selected language (falls back to Hindi
-    // wording only for HINDI itself); the big line below stays English.
-    return en to lang.timeGreeting(h)
-}
-
 @Composable
-private fun HeroComposer(onClick: () -> Unit) {
+private fun HeroComposer(onClick: () -> Unit, onSuggestionChip: (String) -> Unit = {}) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -309,67 +281,54 @@ private fun HeroComposer(onClick: () -> Unit) {
                 ),
         )
         Column {
-            // Input row — looks like a real composer: sparkle + placeholder + actions
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    Icons.Outlined.AutoAwesome,
-                    null,
-                    tint = SaarthiColors.Marigold,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    "Ask Saarthi anything…",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        color = SaarthiColors.Text3,
-                        fontSize = 15.sp,
-                    ),
-                )
-                // Attachment icon
-                Icon(
-                    Icons.Filled.AttachFile,
-                    contentDescription = "Attach",
-                    tint = SaarthiColors.Text2,
-                    modifier = Modifier.size(20.dp),
-                )
-                // Mic button — orange circle, matching screenshot
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(SaarthiColors.Marigold),
+                        .background(SaarthiColors.MarigoldSoft)
+                        .border(1.dp, SaarthiColors.MarigoldBd, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Outlined.Mic, null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Outlined.AutoAwesome, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(20.dp))
                 }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Ask Saarthi anything",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SaarthiColors.Text,
+                        ),
+                    )
+                    Text(
+                        "Text · Voice · File · Image",
+                        style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+                    )
+                }
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = SaarthiColors.Text3, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.height(14.dp))
-            // Suggestion chips — wrap to second row naturally
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                SuggestionPill("Summarize a PDF")
-                SuggestionPill("PM Kisan eligibility")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SuggestionPill("Summarize a PDF", onClick = { onSuggestionChip("Summarize a PDF") })
+                SuggestionPill("PM Kisan eligibility", onClick = { onSuggestionChip("PM Kisan eligibility") })
             }
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SuggestionPill("Translate to हिंदी")
+                SuggestionPill("Translate to हिंदी", onClick = { onSuggestionChip("Translate to हिंदी") })
             }
         }
     }
 }
 
 @Composable
-private fun SuggestionPill(text: String) {
+private fun SuggestionPill(text: String, onClick: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(Color(0x0AF5EEE3))
             .border(1.dp, SaarthiColors.Border, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
             .padding(horizontal = 11.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -499,7 +458,7 @@ private fun SpecialistTile(
                 )
                 if (comingSoon) {
                     Text(
-                        "Soon",
+                        "SOON",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = SaarthiColors.Text3,
                             fontSize = 9.5.sp,
@@ -514,7 +473,7 @@ private fun SpecialistTile(
                 } else {
                     // LIVE pill — toned to the tile's accent (jade for Kisan).
                     Text(
-                        "Live",
+                        "LIVE",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = toneColor,
                             fontSize = 9.5.sp,
