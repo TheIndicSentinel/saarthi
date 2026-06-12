@@ -25,7 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Spa
 import androidx.compose.material.icons.outlined.Star
@@ -53,7 +54,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saarthi.core.i18n.SupportedLanguage
@@ -248,7 +252,10 @@ private fun GreetingBlock(lang: SupportedLanguage) {
             Spacer(Modifier.height(10.dp))
         }
         Text(
-            "$greetEn, friend",
+            buildAnnotatedString {
+                append("$greetEn, ")
+                withStyle(SpanStyle(color = SaarthiColors.Marigold)) { append("friend") }
+            },
             style = MaterialTheme.typography.displayLarge.copy(
                 fontSize = 30.sp,
                 fontWeight = FontWeight.Bold,
@@ -258,7 +265,7 @@ private fun GreetingBlock(lang: SupportedLanguage) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "What can I help you with today?",
+            "What can I help you with?",
             style = MaterialTheme.typography.bodyLarge.copy(
                 color = SaarthiColors.Text3,
                 fontSize = 14.sp,
@@ -302,37 +309,55 @@ private fun HeroComposer(onClick: () -> Unit) {
                 ),
         )
         Column {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Input row — looks like a real composer: sparkle + placeholder + actions
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.AutoAwesome,
+                    null,
+                    tint = SaarthiColors.Marigold,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    "Ask Saarthi anything…",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        color = SaarthiColors.Text3,
+                        fontSize = 15.sp,
+                    ),
+                )
+                // Attachment icon
+                Icon(
+                    Icons.Filled.AttachFile,
+                    contentDescription = "Attach",
+                    tint = SaarthiColors.Text2,
+                    modifier = Modifier.size(20.dp),
+                )
+                // Mic button — orange circle, matching screenshot
                 Box(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(SaarthiColors.MarigoldSoft)
-                        .border(1.dp, SaarthiColors.MarigoldBd, CircleShape),
+                        .background(SaarthiColors.Marigold),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Outlined.AutoAwesome, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Outlined.Mic, null, tint = Color.Black, modifier = Modifier.size(20.dp))
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Ask Saarthi anything",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SaarthiColors.Text,
-                        ),
-                    )
-                    Text(
-                        "Text · Voice · File · Image",
-                        style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
-                    )
-                }
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = SaarthiColors.Text3, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Suggestion chips — wrap to second row naturally
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 SuggestionPill("Summarize a PDF")
                 SuggestionPill("PM Kisan eligibility")
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SuggestionPill("Translate to हिंदी")
             }
         }
     }
