@@ -46,6 +46,20 @@ class RagDocumentRepository @Inject constructor(
         // gives BM25 more candidates and structural sampling a wider net.
         private const val DEFAULT_TOP_K = 8
 
+        // Heading-anchored retrieval. When a query strongly matches a
+        // detected outline heading (e.g. "what are special provisions"
+        // → the "SPECIAL PROVISIONS" chapter), the section's own chunks
+        // are pulled to the top BEFORE BM25 — fixing the production miss
+        // where "What are special provisions" retrieved scattered chunks
+        // (top score 5.86, none being the actual section) and produced a
+        // thin 45-token answer. Capped so anchoring never crowds out the
+        // BM25 evidence that fills the remaining slots.
+        private const val HEADING_ANCHOR_MAX = 3
+        // Synthetic score for anchored chunks — above any realistic BM25
+        // score so they sort first and survive topK truncation, and clearly
+        // distinguishable in the debug log.
+        private const val HEADING_ANCHOR_SCORE = 50.0
+
         // Sentinel chunkIndex for an auto-extracted document outline —
         // headings scraped during indexing and stored as a single virtual
         // chunk that meta-queries ("what sections are there?", "summarise
@@ -257,6 +271,12 @@ class RagDocumentRepository @Inject constructor(
         val contentChunks = all.filter { it.chunkIndex >= 0 }
         if (contentChunks.isEmpty()) return emptyList()
 
+        // Heading-anchored retrieval: if the query closely matches a
+        // detected outline heading, surface that section's chunks first.
+        // Additive — BM25 still ranks below; this only guarantees the
+        // section the user named is present and leading.
+        val anchoredEntities = anchoredHeadingChunks(all, contentChunks, query)
+
         // Expand the query when following up on the prior turn.
         val effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
             "${priorQuery.take(150)} $query"
@@ -278,6 +298,13 @@ class RagDocumentRepository @Inject constructor(
 
         val usedIds = LinkedHashSet<Long>()
         val bm25Hits = mutableListOf<RetrievedChunk>()
+        // Seed with the anchored section chunks so BM25 dedupes against them
+        // and they lead the final result.
+        for (e in anchoredEntities) {
+            if (usedIds.add(e.id)) {
+                bm25Hits.add(RetrievedChunk(e.text, e.docName, HEADING_ANCHOR_SCORE, e.chunkIndex))
+            }
+        }
         for ((rank, scored) in ranked.withIndex()) {
             val entity = contentChunks[scored.index]
             if (usedIds.add(entity.id)) {
@@ -407,6 +434,39 @@ class RagDocumentRepository @Inject constructor(
         return result
     }
 
+    /**
+     * If [query] strongly matches a heading in the auto-extracted outline,
+     * return that section's leading chunks (the chunk containing the heading
+     * plus the next few in document order) so they lead the result. Returns
+     * empty when there's no outline, no heading match, or the heading text
+     * couldn't be located in any chunk (e.g. it straddled a chunk boundary) —
+     * in every such case retrieval falls back cleanly to BM25.
+     */
+    private fun anchoredHeadingChunks(
+        all: List<RagChunkEntity>,
+        contentChunks: List<RagChunkEntity>,
+        query: String,
+    ): List<RagChunkEntity> {
+        val outline = all.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX } ?: return emptyList()
+        val heading = matchHeading(query, parseOutlineHeadings(outline.text)) ?: return emptyList()
+
+        // Locate the section in document order, then take it + the following
+        // chunks (the section body). Search per-doc so the index sequence is
+        // contiguous within one document.
+        for ((_, docChunks) in contentChunks.groupBy { it.docUri }) {
+            val sorted = docChunks.sortedBy { it.chunkIndex }
+            val pos = sorted.indexOfFirst { it.text.contains(heading, ignoreCase = true) }
+            if (pos >= 0) {
+                val section = sorted.subList(pos, minOf(pos + HEADING_ANCHOR_MAX, sorted.size)).toList()
+                com.saarthi.core.inference.DebugLogger.log(
+                    "RAG", "heading-anchored on \"$heading\" → ${section.size} chunk(s)"
+                )
+                return section
+            }
+        }
+        return emptyList()
+    }
+
     private fun isMetaQuery(query: String): Boolean {
         val lower = query.lowercase().trim()
         if (lower.isEmpty()) return false
@@ -528,6 +588,74 @@ data class RetrievedChunk(
      */
     val chunkIndex: Int = 0,
 )
+
+// ── Heading-anchored retrieval (pure, testable) ─────────────────────────────────
+
+/**
+ * Words to drop before matching a query against a heading: interrogatives,
+ * articles, and document-reference filler ("tell me about the … section").
+ * What survives is the content the user actually named.
+ */
+private val HEADING_STOPWORDS = setOf(
+    "what", "whats", "which", "are", "is", "the", "of", "and", "a", "an", "to",
+    "for", "in", "on", "this", "that", "these", "those", "tell", "me", "about",
+    "explain", "describe", "give", "please", "document", "doc", "section",
+    "sections", "chapter", "chapters", "part", "parts", "all", "any", "my",
+    "your", "under", "as", "per", "does", "do", "says", "say", "content",
+    "contents", "provide", "show", "list",
+)
+
+/**
+ * Normalise a heading or query to its significant content tokens: lowercase,
+ * split on non-alphanumerics, drop stopwords and tokens shorter than 3 chars
+ * (articles, roman numerals like "iv"), and strip a trailing plural "s" so
+ * "provisions" and "provision" match. Symmetric — the same transform runs on
+ * both sides, so plural mangling cancels out.
+ */
+internal fun headingTokens(s: String): Set<String> =
+    s.lowercase()
+        .split(Regex("[^\\p{L}\\p{N}]+"))
+        .asSequence()
+        .filter { it.length >= 3 }
+        .filter { it !in HEADING_STOPWORDS }
+        .map { if (it.length > 3 && it.endsWith("s")) it.dropLast(1) else it }
+        .toSet()
+
+/** Heading lines ("- …") parsed out of the auto-extracted outline chunk. */
+internal fun parseOutlineHeadings(outlineText: String): List<String> =
+    outlineText.lines()
+        .map { it.trim() }
+        .filter { it.startsWith("- ") }
+        .map { it.removePrefix("- ").trim() }
+        .filter { it.isNotEmpty() }
+
+/**
+ * Best heading from [headings] that the [query] names, or null. Conservative:
+ * every *significant* heading token (length ≥ 4, so roman numerals and short
+ * connectives don't gate the match) must be present in the query, and the
+ * heading must carry at least ~6 chars of significant tokens so a single short
+ * word can't anchor. Ties break toward the more specific (more-token) heading.
+ *
+ * Requiring all significant tokens present is the safe direction: it fires only
+ * on a clear section reference ("special provisions" → "SPECIAL PROVISIONS")
+ * and stays silent on partial overlaps ("rights" alone won't match "RIGHTS AND
+ * DUTIES OF DATA PRINCIPAL"), so anchoring never hijacks an ordinary query.
+ */
+internal fun matchHeading(query: String, headings: List<String>): String? {
+    val qTokens = headingTokens(query)
+    if (qTokens.isEmpty()) return null
+    var best: String? = null
+    var bestScore = 0
+    for (h in headings) {
+        val significant = headingTokens(h).filter { it.length >= 4 }
+        if (significant.isEmpty() || significant.sumOf { it.length } < 6) continue
+        if (significant.all { it in qTokens } && significant.size > bestScore) {
+            bestScore = significant.size
+            best = h
+        }
+    }
+    return best
+}
 
 // ── Document chunker (pure, testable) ──────────────────────────────────────────
 
