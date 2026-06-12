@@ -84,6 +84,7 @@ class OnboardingViewModel @Inject constructor(
     private val modelCatalog: ModelCatalog,
     private val downloadManager: ModelDownloadManager,
     private val hfTokenManager: HuggingFaceTokenManager,
+    private val funnel: com.saarthi.core.inference.FunnelTracker,
 ) : ViewModel() {
 
     private val isModelChangeMode: Boolean =
@@ -131,6 +132,9 @@ class OnboardingViewModel @Inject constructor(
         }
         _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
 
+        // Funnel: a genuine first-run onboarding started (not a model-change re-entry).
+        if (!isModelChangeMode) funnel.track(com.saarthi.core.inference.FunnelEvent.ONBOARDING_STARTED)
+
         // PRE-POPULATE handledCompletions with all already-downloaded models BEFORE
         // the allProgress collector starts.  restoreCompletedStates() will emit
         // Completed for every file on disk — without this guard those events would
@@ -154,6 +158,7 @@ class OnboardingViewModel @Inject constructor(
                 }
                 newlyCompleted.forEach { (modelId, progress) ->
                     handledCompletions += modelId
+                    funnel.track(com.saarthi.core.inference.FunnelEvent.MODEL_DOWNLOAD_COMPLETED)
                     val path = (progress as DownloadProgress.Completed).filePath
                     DebugLogger.log("DOWNLOAD", "Success: $path")
                     _uiState.update {
@@ -358,6 +363,7 @@ class OnboardingViewModel @Inject constructor(
     // ── Catalog download ──────────────────────────────────────────────────────
 
     fun downloadModel(model: ModelEntry) {
+        funnel.track(com.saarthi.core.inference.FunnelEvent.MODEL_DOWNLOAD_STARTED)
         downloadManager.startDownload(model)
     }
 
@@ -549,6 +555,7 @@ class OnboardingViewModel @Inject constructor(
             val resolved = if (isModelChangeMode) languageManager.selectedLanguage.value
                            else _uiState.value.selectedLanguage
             repository.completeOnboarding(resolved)
+            if (!isModelChangeMode) funnel.track(com.saarthi.core.inference.FunnelEvent.ONBOARDING_COMPLETED)
             _uiState.update { it.copy(step = OnboardingStep.DONE) }
         }
     }

@@ -12,6 +12,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.FunnelEvent
+import com.saarthi.core.inference.FunnelTracker
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.feature.assistant.data.FileContentExtractor
 import com.saarthi.feature.assistant.domain.AttachedFile
@@ -78,6 +80,7 @@ class AssistantViewModel @Inject constructor(
     private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
     private val ttsPreference: com.saarthi.core.i18n.TtsPreference,
     private val personalityPreference: com.saarthi.core.i18n.PersonalityPreference,
+    private val funnel: FunnelTracker,
 ) : ViewModel() {
 
     val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
@@ -208,6 +211,7 @@ class AssistantViewModel @Inject constructor(
         val text = _uiState.value.inputText.trim()
         val attachments = _uiState.value.pendingAttachments
         if ((text.isBlank() && attachments.isEmpty()) || _uiState.value.isStreaming) return
+        funnel.trackOnce(FunnelEvent.FIRST_CHAT_SENT)
 
         _uiState.update { it.copy(inputText = "", pendingAttachments = emptyList(), isStreaming = true, error = null) }
 
@@ -284,6 +288,7 @@ class AssistantViewModel @Inject constructor(
             val files = uris.mapNotNull { uri ->
                 runCatching { fileExtractor.extract(uri) }.getOrNull()
             }
+            if (files.isNotEmpty()) funnel.trackOnce(FunnelEvent.FIRST_DOC_ATTACHED)
             _uiState.update { it.copy(pendingAttachments = it.pendingAttachments + files) }
         }
     }

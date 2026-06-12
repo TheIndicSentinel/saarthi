@@ -63,6 +63,7 @@ class AssistantViewModelTest {
     private val mockTtsManager: TtsManager = mockk(relaxed = true)
     private val mockTtsPreference: TtsPreference = mockk(relaxed = true)
     private val mockPersonalityPreference: PersonalityPreference = mockk(relaxed = true)
+    private val mockFunnel: com.saarthi.core.inference.FunnelTracker = mockk(relaxed = true)
 
     // Mutable flows controlled by individual tests
     private val isReadyFlow = MutableStateFlow(false)
@@ -97,6 +98,7 @@ class AssistantViewModelTest {
         ttsManager = mockTtsManager,
         ttsPreference = mockTtsPreference,
         personalityPreference = mockPersonalityPreference,
+        funnel = mockFunnel,
     )
 
     // ── sendMessage ────────────────────────────────────────────────────────────
