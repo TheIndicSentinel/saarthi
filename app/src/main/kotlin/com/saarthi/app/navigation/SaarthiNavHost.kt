@@ -180,7 +180,10 @@ fun SaarthiNavHost(
                     navController.navigate(Route.KisanPack.path)
                 },
                 onSuggestionChip = { msg ->
-                    val encoded = java.net.URLEncoder.encode(msg, "UTF-8")
+                    // Uri.encode uses %20 for spaces; URLEncoder uses + which
+                    // NavComponent does NOT decode back to a space, giving
+                    // "Translate+to+हिंदी" in the input field.
+                    val encoded = android.net.Uri.encode(msg)
                     navController.navigate("${Route.Assistant.path}?msg=$encoded")
                 },
                 currentLanguage = currentLanguage,

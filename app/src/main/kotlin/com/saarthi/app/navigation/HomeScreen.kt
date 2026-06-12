@@ -230,10 +230,11 @@ private fun HomeTopBar(
 
 @Composable
 private fun GreetingBlock(lang: SupportedLanguage) {
-    val greeting = remember(lang) {
-        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        lang.timeGreeting(h)
-    }
+    // Compute hour on every recomposition so the greeting updates correctly when
+    // the user returns to this screen later in the day (remember(lang) would have
+    // cached "Good morning" from the morning and never refreshed it).
+    val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    val greeting = lang.timeGreeting(h)
     Column {
         Text(
             buildAnnotatedString {
@@ -428,34 +429,22 @@ private fun SpecialistTile(
                 ),
         )
         Column(modifier = Modifier.padding(16.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(toneBg)
-                    .border(1.dp, toneColor.copy(alpha = 0.22f), RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, null, tint = toneColor, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.height(10.dp))
+            // Top row: icon on the left, status badge on the right (matching design).
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    name,
-                    // weight(fill=false) lets the name take the space left by
-                    // the pill and WRAP to a second line on narrow tiles /
-                    // large fonts, instead of being squeezed or clipped.
-                    modifier = Modifier.weight(1f, fill = false),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SaarthiColors.Text,
-                    ),
-                )
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(toneBg)
+                        .border(1.dp, toneColor.copy(alpha = 0.22f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, null, tint = toneColor, modifier = Modifier.size(20.dp))
+                }
+                Spacer(Modifier.weight(1f))
                 if (comingSoon) {
                     Text(
                         "SOON",
@@ -471,7 +460,6 @@ private fun SpecialistTile(
                             .padding(horizontal = 7.dp, vertical = 3.dp),
                     )
                 } else {
-                    // LIVE pill — toned to the tile's accent (jade for Kisan).
                     Text(
                         "LIVE",
                         style = MaterialTheme.typography.labelSmall.copy(
@@ -488,6 +476,15 @@ private fun SpecialistTile(
                     )
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                name,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+            )
             Text(
                 sub,
                 style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
