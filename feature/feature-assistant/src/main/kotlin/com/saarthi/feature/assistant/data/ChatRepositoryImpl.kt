@@ -1287,7 +1287,7 @@ class ChatRepositoryImpl @Inject constructor(
         } else {
             DebugLogger.log("MEMORY", "No user memories stored yet")
         }
-        val timeContext = buildTimeContext()
+        val timeContext = buildTimeContext(currentLanguage)
         DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}  recap=${priorTurnsContext.isNotEmpty()}  lang=${currentLanguage.code}  time=$timeContext")
         // Always pass the language instruction, including for English. Without it
         // the model defaults to whatever it picks up from the user's input or its
@@ -1360,7 +1360,7 @@ class ChatRepositoryImpl @Inject constructor(
      * Example output: "Current local time is 21:14 on Mon, 20 May 2026 — it
      * is evening (use a time-appropriate greeting if you greet the user)."
      */
-    private fun buildTimeContext(): String {
+    private fun buildTimeContext(language: SupportedLanguage): String {
         val now = java.util.Calendar.getInstance()
         val hour = now.get(java.util.Calendar.HOUR_OF_DAY)
         val band = when (hour) {
@@ -1371,7 +1371,13 @@ class ChatRepositoryImpl @Inject constructor(
         }
         val timeStr = java.text.SimpleDateFormat("HH:mm 'on' EEE, d MMM yyyy", java.util.Locale.US)
             .format(now.time)
-        return "Current local time is $timeStr — it is $band (use a time-appropriate greeting if you greet the user)."
+        // Hand the model the EXACT greeting for the band, in the user's language
+        // (same source of truth as the home screen — SupportedLanguage.timeGreeting),
+        // so even weaker models greet correctly instead of defaulting to "good
+        // morning". The "only if you greet" guard keeps it from forcing a greeting.
+        val greeting = language.timeGreeting(hour)
+        return "Current local time is $timeStr — it is $band. Only if you greet the user, " +
+            "use a $band-appropriate greeting such as \"$greeting\" — never a morning greeting at night or vice versa."
     }
 
     /**

@@ -73,23 +73,33 @@ enum class SupportedLanguage(
     }
 
     /**
-     * Time-of-day greeting in this language (morning / afternoon / evening),
-     * chosen by [hour] (0..23). Used on the home header so the accent line
-     * beside the logo tracks the selected language.
+     * Time-of-day greeting in this language (morning / afternoon / evening /
+     * night), chosen by [hour] (0..23). Used on the home header and fed into
+     * the chat prompt's time context so both stay in sync.
+     *
+     * Bands match [buildTimeContext] in ChatRepositoryImpl exactly — morning
+     * 5–11, afternoon 12–16, evening 17–20, night otherwise. The previous
+     * 3-band version had no night slot, so any hour before noon (incl. 2 AM)
+     * resolved to "Good morning" — the bug the user hit at 01:59.
      */
     fun timeGreeting(hour: Int): String {
-        val slot = when { hour < 12 -> 0; hour < 17 -> 1; else -> 2 }
+        val slot = when (hour) {
+            in 5..11  -> 0
+            in 12..16 -> 1
+            in 17..20 -> 2
+            else      -> 3
+        }
         return when (this) {
-            ENGLISH  -> listOf("Good morning", "Good afternoon", "Good evening")
-            HINDI    -> listOf("सुप्रभात", "नमस्ते", "शुभ संध्या")
-            TAMIL    -> listOf("காலை வணக்கம்", "மதிய வணக்கம்", "மாலை வணக்கம்")
-            TELUGU   -> listOf("శుభోదయం", "శుభ మధ్యాహ్నం", "శుభ సాయంత్రం")
-            BENGALI  -> listOf("সুপ্রভাত", "শুভ অপরাহ্ন", "শুভ সন্ধ্যা")
-            MARATHI  -> listOf("सुप्रभात", "शुभ दुपार", "शुभ संध्याकाळ")
-            KANNADA  -> listOf("ಶುಭೋದಯ", "ಶುಭ ಮಧ್ಯಾಹ್ನ", "ಶುಭ ಸಂಜೆ")
-            GUJARATI -> listOf("સુપ્રભાત", "શુભ બપોર", "શુભ સાંજ")
-            PUNJABI  -> listOf("ਸ਼ੁਭ ਸਵੇਰ", "ਸ਼ੁਭ ਦੁਪਹਿਰ", "ਸ਼ੁਭ ਸ਼ਾਮ")
-            ODIA     -> listOf("ଶୁଭ ସକାଳ", "ଶୁଭ ଅପରାହ୍ନ", "ଶୁଭ ସନ୍ଧ୍ୟା")
+            ENGLISH  -> listOf("Good morning", "Good afternoon", "Good evening", "Good night")
+            HINDI    -> listOf("सुप्रभात", "नमस्ते", "शुभ संध्या", "शुभ रात्रि")
+            TAMIL    -> listOf("காலை வணக்கம்", "மதிய வணக்கம்", "மாலை வணக்கம்", "இனிய இரவு")
+            TELUGU   -> listOf("శుభోదయం", "శుభ మధ్యాహ్నం", "శుభ సాయంత్రం", "శుభ రాత్రి")
+            BENGALI  -> listOf("সুপ্রভাত", "শুভ অপরাহ্ন", "শুভ সন্ধ্যা", "শুভ রাত্রি")
+            MARATHI  -> listOf("सुप्रभात", "शुभ दुपार", "शुभ संध्याकाळ", "शुभ रात्री")
+            KANNADA  -> listOf("ಶುಭೋದಯ", "ಶುಭ ಮಧ್ಯಾಹ್ನ", "ಶುಭ ಸಂಜೆ", "ಶುಭ ರಾತ್ರಿ")
+            GUJARATI -> listOf("સુપ્રભાત", "શુભ બપોર", "શુભ સાંજ", "શુભ રાત્રિ")
+            PUNJABI  -> listOf("ਸ਼ੁਭ ਸਵੇਰ", "ਸ਼ੁਭ ਦੁਪਹਿਰ", "ਸ਼ੁਭ ਸ਼ਾਮ", "ਸ਼ੁਭ ਰਾਤ")
+            ODIA     -> listOf("ଶୁଭ ସକାଳ", "ଶୁଭ ଅପରାହ୍ନ", "ଶୁଭ ସନ୍ଧ୍ୟା", "ଶୁଭ ରାତ୍ରି")
         }[slot]
     }
 
