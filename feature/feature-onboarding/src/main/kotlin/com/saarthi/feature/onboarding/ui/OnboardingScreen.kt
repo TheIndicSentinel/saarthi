@@ -32,9 +32,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Spa
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -46,7 +49,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -345,35 +352,120 @@ private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
                 ),
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(26.dp))
             // Outcome-first: show what Saarthi actually DOES before the model
-            // download. Users care about results, not "an AI companion".
-            // The block wraps its content and is centred by the parent (rows
-            // left-aligned within), so it sits centred under the heading on
-            // every screen size instead of flush-left.
-            Column(horizontalAlignment = Alignment.Start) {
-                WelcomeOutcome("📄", "Ask questions about your PDFs & documents")
-                WelcomeOutcome("🌾", "Kisan helper — crops, schemes, mandi prices")
-                WelcomeOutcome("🎙️", "Voice — speak your question, hear the answer")
-                WelcomeOutcome("🔒", "Works offline · nothing leaves your phone")
+            // download. Users care about results, not "an AI companion". Each
+            // outcome is a full-width card (tinted icon + title + subtitle) so
+            // the section reads as a polished feature list, consistent with the
+            // home-screen card idiom, rather than a flat emoji list.
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                WelcomeOutcome(
+                    icon = Icons.Outlined.Description,
+                    title = "Documents",
+                    subtitle = "Ask questions about any PDF or photo",
+                    tint = SaarthiColors.Marigold,
+                    tintSoft = SaarthiColors.MarigoldSoft,
+                    tintBd = SaarthiColors.MarigoldBd,
+                )
+                WelcomeOutcome(
+                    icon = Icons.Outlined.Spa,
+                    title = "Kisan helper",
+                    subtitle = "Crops, schemes & live mandi prices",
+                    tint = SaarthiColors.Jade,
+                    tintSoft = SaarthiColors.JadeSoft,
+                    tintBd = SaarthiColors.JadeBd,
+                )
+                WelcomeOutcome(
+                    icon = Icons.Outlined.Mic,
+                    title = "Voice",
+                    subtitle = "Speak your question, hear the answer",
+                    tint = SaarthiColors.Indigo,
+                    tintSoft = SaarthiColors.IndigoSoft,
+                    tintBd = SaarthiColors.IndigoBd,
+                )
+                Spacer(Modifier.height(2.dp))
+                WelcomeOfflineNote()
             }
         }
     }
 }
 
 @Composable
-private fun WelcomeOutcome(emoji: String, text: String) {
+private fun WelcomeOutcome(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    tint: Color,
+    tintSoft: Color,
+    tintBd: Color,
+) {
     Row(
-        modifier = Modifier.padding(vertical = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(SaarthiColors.Surface)
+            .border(1.dp, SaarthiColors.Border, RoundedCornerShape(18.dp))
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(emoji, fontSize = 18.sp)
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(tintSoft)
+                .border(1.dp, tintBd, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+        }
         Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SaarthiColors.Text,
+                ),
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+            )
+        }
+    }
+}
+
+/** Privacy reassurance — a dashed pill so it reads as a guarantee, not a feature. */
+@Composable
+private fun WelcomeOfflineNote() {
+    val borderColor = SaarthiColors.JadeBd
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                drawRoundRect(
+                    color = borderColor,
+                    cornerRadius = CornerRadius(size.height / 2f, size.height / 2f),
+                    style = Stroke(
+                        width = 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f)),
+                    ),
+                )
+            }
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Lock, null, tint = SaarthiColors.Jade, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(10.dp))
         Text(
-            text,
-            style = MaterialTheme.typography.bodyLarge.copy(
+            "Works offline — nothing ever leaves your phone",
+            style = MaterialTheme.typography.bodySmall.copy(
                 color = SaarthiColors.Text2,
-                fontSize = 14.sp,
+                fontSize = 12.5.sp,
             ),
         )
     }
