@@ -19,6 +19,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -73,6 +75,20 @@ class ModelDownloadService : Service() {
 
     /** One coroutine per in-flight model download, keyed by model id. */
     private val jobs = ConcurrentHashMap<String, Job>()
+
+    /**
+     * Serializes the actual byte transfer to ONE model at a time. Multiple
+     * jobs may be launched (the user can queue several models), but each waits
+     * here before transferring so two multi-GB downloads never run together.
+     *
+     * Why: concurrent transfers split the connection AND thrash the OS page
+     * cache — gigabytes of file-backed write pages count against "available"
+     * RAM, which on a flagship dragged avail from 3.1 GB → 2.3 GB mid-session
+     * and tripped the GPU-unsafe fallback (avail < 3 GB) during inference.
+     * One-at-a-time keeps each transfer faster and avail RAM steadier while a
+     * model is loaded. A cancelled queued job simply never acquires the lock.
+     */
+    private val transferGate = Mutex()
 
     /** Latest (downloaded, total) per model — drives the foreground notification. */
     private val latest = ConcurrentHashMap<String, Pair<Long, Long>>()
@@ -141,11 +157,20 @@ class ModelDownloadService : Service() {
 
                 val job = serviceScope.launch {
                     toCancel?.join()
-                    // For a replace, wipe the tmp only AFTER the old job has fully
-                    // stopped — otherwise its final in-flight chunk could recreate
-                    // the file and the new run would resume instead of starting over.
-                    if (replace) File(tmp).delete()
-                    runDownload(modelId, url, File(tmp), File(dest), token, title)
+                    // Queue behind any active transfer (see [transferGate]). Only
+                    // log "QUEUED" when something else actually holds the gate, so
+                    // the common single-download case stays quiet.
+                    if (transferGate.isLocked) {
+                        DebugLogger.log("DOWNLOAD_SVC", "QUEUED $modelId — waiting for active download")
+                    }
+                    transferGate.withLock {
+                        // For a replace, wipe the tmp only AFTER the old job has fully
+                        // stopped (toCancel.join above) AND it's this model's turn —
+                        // otherwise its final in-flight chunk could recreate the file
+                        // and the new run would resume instead of starting over.
+                        if (replace) File(tmp).delete()
+                        runDownload(modelId, url, File(tmp), File(dest), token, title)
+                    }
                 }
                 jobs[modelId] = job
                 job.invokeOnCompletion {
