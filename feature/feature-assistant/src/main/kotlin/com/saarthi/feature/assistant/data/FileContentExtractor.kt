@@ -237,27 +237,28 @@ class FileContentExtractor @Inject constructor(
         val out = StringBuilder(raw.length)
         var i = 0
         while (i < lines.size) {
-            val line = lines[i]
-            val trimmed = line.trim()
-            // Keep page markers exactly as-is.
+            val trimmed = lines[i].trim()
+            // Preserve blank lines (paragraph gaps) and page markers as-is.
+            if (trimmed.isEmpty()) { out.appendLine(); i++; continue }
             if (trimmed.startsWith("---") && trimmed.endsWith("---")) {
                 out.appendLine(trimmed); i++; continue
             }
-            // Short (1-4 char) all-letter fragments: peek at the next
-            // non-blank line. If it starts with a lowercase letter this
-            // is likely a word split by a table cell — join them.
-            if (trimmed.length in 1..4 && trimmed.all { it.isLetter() }) {
-                val nextNonBlank = (i + 1 until lines.size)
-                    .map { lines[it].trim() }
-                    .firstOrNull { it.isNotEmpty() }
-                if (nextNonBlank != null && nextNonBlank[0].isLowerCase()) {
-                    // Append without newline so chunker sees one whole word.
-                    out.append(trimmed)
-                    i++
-                    continue
-                }
-            }
-            out.appendLine(line)
+
+            out.append(trimmed)
+
+            // Line-unwrap: OCR breaks a flowing paragraph into visual lines, which
+            // leaves chunks full of mid-sentence fragments ("…can attract\na
+            // penalty…"). When this line is a wrapped continuation, join it to the
+            // next with a SPACE so the chunker sees whole sentences — better BM25
+            // matching and far more readable context for the model. Otherwise keep
+            // the newline (real paragraph / list / heading boundary).
+            val next = (i + 1 until lines.size)
+                .map { lines[it].trim() }
+                .firstOrNull { it.isNotEmpty() }
+            val joins = next != null &&
+                !(next.startsWith("---") && next.endsWith("---")) &&
+                isOcrLineWrap(trimmed, next)
+            out.append(if (joins) " " else "\n")
             i++
         }
         return out.toString()
@@ -347,4 +348,27 @@ class FileContentExtractor @Inject constructor(
 
     private fun String.endsWithAny(vararg suffixes: String) =
         suffixes.any { this.lowercase().endsWith(it) }
+}
+
+private val OCR_LIST_ITEM = Regex("^([-*•]\\s+|\\d+[.)]\\s+).*")
+
+/**
+ * True when an OCR'd line [current] is a WRAPPED continuation that should be
+ * joined to [next] with a space (reconstructing a paragraph), rather than left
+ * as a separate line. Conservative — only joins when [current] clearly does not
+ * end a sentence/clause and [next] clearly continues it — so real paragraph,
+ * list and heading boundaries are preserved.
+ *
+ * Top-level `internal` so the line-unwrap decision is unit-testable.
+ */
+internal fun isOcrLineWrap(current: String, next: String): Boolean {
+    if (current.isEmpty() || next.isEmpty()) return false
+    // Sentence/clause end, or a hyphen we won't space-join → keep the break.
+    if (current.last() in ".!?:;-»\")]") return false
+    val first = next.first()
+    // Next must look like a continuation: a lowercase word or a bare number.
+    if (!(first.isLowerCase() || first.isDigit())) return false
+    // A bulleted / numbered list item on the next line is an intentional break.
+    if (next.matches(OCR_LIST_ITEM)) return false
+    return true
 }

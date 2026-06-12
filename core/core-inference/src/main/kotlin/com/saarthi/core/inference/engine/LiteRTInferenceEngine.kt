@@ -481,41 +481,21 @@ class LiteRTInferenceEngine @Inject constructor(
 
     // ── Streaming repetition guard ────────────────────────────────────────────
     //
-    // Two cheap O(n) checks over the most recent ~400 chars of streamed output:
+    // Detects a DEGENERATE generation loop in the most recent streamed output and
+    // returns true → caller calls conversation.cancelProcess() to stop the native
+    // thread (litertlm's SamplerConfig has no repetition_penalty, so this is the
+    // only lever). Whatever streamed up to that point stays visible.
     //
-    //  1. Word-frequency: any word ≥8 chars appearing 4+ times in the window.
-    //     Catches list-loops like "Maharashtra … Maharashtra … Maharashtra" where
-    //     the model gets stuck on the same long token, classic on Gemma 1B.
-    //
-    //  2. Phrase-mirror: the most recent 40 characters appearing earlier in the
-    //     prior 200 chars. Catches whole-phrase echo loops that aren't dominated
-    //     by a single word.
-    //
-    // Returns true → caller should call conversation.cancelProcess() to stop the
-    // native thread. Whatever was streamed up to that point stays visible.
-    private val repetitionWordRegex = Regex("[\\s\\p{Punct}]+")
-
+    // CRITICAL: tuned to fire ONLY on consecutive (back-to-back) repetition — the
+    // true signature of a stuck model. The previous guard killed scattered
+    // recurrence (any ≥8-char word 4× in 400 chars, or a 40-char phrase echoed
+    // in the prior 200 chars), which false-positived on EVERY document answer,
+    // because legal/grounded text legitimately repeats domain terms ("Data
+    // Fiduciary", "personal data", "Data Principal") and list structure. That
+    // truncated grounded replies at ~80–190 tokens. See [isRepetitionLoop].
     private fun detectRepetitionLoop(buf: StringBuilder): Boolean {
-        if (buf.length < 200) return false
-        val from = maxOf(0, buf.length - 400)
-        val tail = buf.substring(from)
-
-        val maxWordCount = tail
-            .split(repetitionWordRegex)
-            .asSequence()
-            .filter { it.length >= 8 }
-            .groupingBy { it }
-            .eachCount()
-            .maxOfOrNull { it.value }
-            ?: 0
-        if (maxWordCount >= 4) return true
-
-        if (buf.length >= 240) {
-            val recent = buf.substring(buf.length - 40)
-            val before = buf.substring(buf.length - 240, buf.length - 40)
-            if (before.contains(recent)) return true
-        }
-        return false
+        if (buf.length < 60) return false
+        return isRepetitionLoop(buf.substring(maxOf(0, buf.length - 240)))
     }
 
     // ── Initialize ────────────────────────────────────────────────────────────
@@ -1478,4 +1458,47 @@ class LiteRTInferenceEngine @Inject constructor(
         .replace("<end_of_turn>", "")
         .replace("<eos>", "")
         .replace("<bos>", "")
+}
+
+private val REPETITION_WORD_SPLIT = Regex("[\\s\\p{Punct}]+")
+
+/**
+ * True when [tail] (the most recent ~240 streamed chars) shows a DEGENERATE,
+ * back-to-back repetition loop — the signature of a stuck small model.
+ *
+ * Deliberately conservative: only CONSECUTIVE repetition triggers, so a coherent
+ * answer that legitimately reuses a domain term ("Data Fiduciary", "personal
+ * data") or list structure is NOT killed. The previous scattered-frequency guard
+ * truncated nearly every document-grounded reply because legal/RAG text recurs
+ * such terms naturally.
+ *
+ * Top-level `internal` so the detection is unit-testable without the engine.
+ */
+internal fun isRepetitionLoop(tail: String): Boolean {
+    if (tail.length < 40) return false
+
+    // 1. A phrase of length L that repeats 3× immediately back-to-back at the
+    //    very end ("X. X. X." / "abcabcabc"). Prose never does this; a stuck
+    //    model does. Per-token streaming means we hit a period boundary within a
+    //    few tokens of a real loop starting.
+    val maxL = minOf(40, tail.length / 3)
+    for (l in maxL downTo 8) {
+        val a = tail.substring(tail.length - l)
+        val b = tail.substring(tail.length - 2 * l, tail.length - l)
+        val c = tail.substring(tail.length - 3 * l, tail.length - 2 * l)
+        if (a == b && b == c) return true
+    }
+
+    // 2. The same token repeated 5+ times back-to-back ("data data data data data").
+    val words = tail.split(REPETITION_WORD_SPLIT).filter { it.isNotEmpty() }
+    var run = 1
+    for (i in 1 until words.size) {
+        if (words[i].length >= 2 && words[i].equals(words[i - 1], ignoreCase = true)) {
+            run++
+            if (run >= 5) return true
+        } else {
+            run = 1
+        }
+    }
+    return false
 }
