@@ -348,7 +348,10 @@ private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
             Spacer(Modifier.height(22.dp))
             // Outcome-first: show what Saarthi actually DOES before the model
             // download. Users care about results, not "an AI companion".
-            Column(modifier = Modifier.fillMaxWidth()) {
+            // The block wraps its content and is centred by the parent (rows
+            // left-aligned within), so it sits centred under the heading on
+            // every screen size instead of flush-left.
+            Column(horizontalAlignment = Alignment.Start) {
                 WelcomeOutcome("📄", "Ask questions about your PDFs & documents")
                 WelcomeOutcome("🌾", "Kisan helper — crops, schemes, mandi prices")
                 WelcomeOutcome("🎙️", "Voice — speak your question, hear the answer")
@@ -361,7 +364,7 @@ private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
 @Composable
 private fun WelcomeOutcome(emoji: String, text: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        modifier = Modifier.padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(emoji, fontSize = 18.sp)

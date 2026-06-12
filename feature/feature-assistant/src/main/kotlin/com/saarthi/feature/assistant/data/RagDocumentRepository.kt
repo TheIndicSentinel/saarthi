@@ -511,66 +511,8 @@ class RagDocumentRepository @Inject constructor(
      * found — at a word boundary. The next chunk also starts at a word
      * boundary so the overlap window doesn't reintroduce the fragment.
      */
-    private fun chunkText(text: String): List<String> {
-        val cleaned = text.trim()
-        if (cleaned.length <= CHUNK_SIZE) return listOf(cleaned)
-
-        val chunks = ArrayList<String>(cleaned.length / CHUNK_SIZE + 1)
-        var start = 0
-        while (start < cleaned.length) {
-            // Skip leading whitespace so a chunk never starts with a blank.
-            while (start < cleaned.length && cleaned[start].isWhitespace()) start++
-            if (start >= cleaned.length) break
-
-            val hardEnd = (start + CHUNK_SIZE).coerceAtMost(cleaned.length)
-            val end = when {
-                hardEnd >= cleaned.length -> hardEnd
-                else -> {
-                    // Prefer sentence end inside [start + half, hardEnd].
-                    val sentenceEnd = findSentenceBoundary(cleaned, start + CHUNK_SIZE / 2, hardEnd)
-                    if (sentenceEnd > 0) sentenceEnd
-                    // Fall back to next whitespace after hardEnd — never cut a word.
-                    else findWordBoundary(cleaned, hardEnd)
-                }
-            }
-
-            val piece = cleaned.substring(start, end).trim()
-            if (piece.isNotBlank()) chunks += piece
-            if (end >= cleaned.length) break
-
-            // Overlap window also starts at a word boundary.
-            val overlapAnchor = (end - CHUNK_OVERLAP).coerceAtLeast(start + 1)
-            start = skipToWordStart(cleaned, overlapAnchor)
-        }
-        return chunks
-    }
-
-    /** Latest position in `[lo, hi)` that ends a sentence (returns char AFTER the terminator), or 0 if none. */
-    private fun findSentenceBoundary(text: String, lo: Int, hi: Int): Int {
-        if (lo >= hi) return 0
-        for (i in (hi - 1) downTo lo.coerceAtLeast(0)) {
-            val c = text[i]
-            if (c == '.' || c == '!' || c == '?' || c == '\n') {
-                val next = i + 1
-                if (next >= text.length || text[next].isWhitespace()) return next
-            }
-        }
-        return 0
-    }
-
-    /** Walk RIGHT from `idx` until the first whitespace — returns that position so chunks end on whole words. */
-    private fun findWordBoundary(text: String, idx: Int): Int {
-        var i = idx.coerceAtMost(text.length)
-        while (i < text.length && !text[i].isWhitespace()) i++
-        return i
-    }
-
-    /** Walk RIGHT from `idx` past any whitespace — returns the first non-space position so chunks start on a word. */
-    private fun skipToWordStart(text: String, idx: Int): Int {
-        var i = idx.coerceAtLeast(0)
-        while (i < text.length && text[i].isWhitespace()) i++
-        return i
-    }
+    private fun chunkText(text: String): List<String> =
+        chunkDocumentText(text, CHUNK_SIZE, CHUNK_OVERLAP)
 }
 
 /** Result of a [RagDocumentRepository.search] call. */
@@ -586,3 +528,87 @@ data class RetrievedChunk(
      */
     val chunkIndex: Int = 0,
 )
+
+// ── Document chunker (pure, testable) ──────────────────────────────────────────
+
+/**
+ * Sentence/word-aware overlapping chunker — the quality floor for RAG retrieval.
+ * A bad chunker (mid-word slicing) produces fragments that can't match BM25 query
+ * tokens, so the right chunk scores 0 and the model answers from the wrong text.
+ *
+ * Each chunk ends at a sentence boundary (`.`, `!`, `?`, `\n`) found in the
+ * latter half of the window, or — failing that — at the next word boundary so a
+ * word is never split. The next chunk starts at a word boundary too, so the
+ * overlap window never reintroduces a fragment.
+ *
+ * Top-level `internal` so it is unit-testable without constructing the
+ * repository + its Room DAO.
+ */
+internal fun chunkDocumentText(text: String, chunkSize: Int, overlap: Int): List<String> {
+    val cleaned = text.trim()
+    if (cleaned.isEmpty()) return emptyList()
+    if (cleaned.length <= chunkSize) return listOf(cleaned)
+
+    val chunks = ArrayList<String>(cleaned.length / chunkSize + 1)
+    var start = 0
+    while (start < cleaned.length) {
+        // Skip leading whitespace so a chunk never starts with a blank.
+        while (start < cleaned.length && cleaned[start].isWhitespace()) start++
+        if (start >= cleaned.length) break
+
+        val hardEnd = (start + chunkSize).coerceAtMost(cleaned.length)
+        val end = when {
+            hardEnd >= cleaned.length -> hardEnd
+            else -> {
+                val sentenceEnd = findSentenceBoundary(cleaned, start + chunkSize / 2, hardEnd)
+                if (sentenceEnd > 0) sentenceEnd
+                else findWordBoundary(cleaned, hardEnd)
+            }
+        }
+
+        val piece = cleaned.substring(start, end).trim()
+        if (piece.isNotBlank()) chunks += piece
+        if (end >= cleaned.length) break
+
+        val overlapAnchor = (end - overlap).coerceAtLeast(start + 1)
+        start = skipToWordStart(cleaned, overlapAnchor)
+    }
+    return chunks
+}
+
+/** Latest position in `[lo, hi)` that ends a sentence (returns char AFTER the terminator), or 0 if none. */
+private fun findSentenceBoundary(text: String, lo: Int, hi: Int): Int {
+    if (lo >= hi) return 0
+    for (i in (hi - 1) downTo lo.coerceAtLeast(0)) {
+        val c = text[i]
+        if (c == '.' || c == '!' || c == '?' || c == '\n') {
+            val next = i + 1
+            if (next >= text.length || text[next].isWhitespace()) return next
+        }
+    }
+    return 0
+}
+
+/** Walk RIGHT from `idx` until the first whitespace — returns that position so chunks end on whole words. */
+private fun findWordBoundary(text: String, idx: Int): Int {
+    var i = idx.coerceAtMost(text.length)
+    while (i < text.length && !text[i].isWhitespace()) i++
+    return i
+}
+
+/**
+ * Return a clean word-start position at or after [idx] so the next chunk never
+ * begins on a word fragment. If [idx] lands in the MIDDLE of a word, advance to
+ * the end of that word first (otherwise the overlap window would reintroduce a
+ * leading fragment like "rd57" that can't match the BM25 token "word57"), then
+ * skip any whitespace to land on the next word's first character.
+ */
+private fun skipToWordStart(text: String, idx: Int): Int {
+    var i = idx.coerceAtLeast(0)
+    // Mid-word? (previous and current chars are both non-whitespace) → finish the word.
+    if (i in 1 until text.length && !text[i - 1].isWhitespace() && !text[i].isWhitespace()) {
+        while (i < text.length && !text[i].isWhitespace()) i++
+    }
+    while (i < text.length && text[i].isWhitespace()) i++
+    return i
+}
