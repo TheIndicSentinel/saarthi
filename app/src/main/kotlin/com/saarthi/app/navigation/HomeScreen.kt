@@ -226,17 +226,27 @@ private fun GreetingBlock(lang: SupportedLanguage) {
     // HomeScreen recomposes when language / menu / dialog state changes).
     // The hour-of-day only matters once per screen entry, so cache the
     // greeting tuple keyed off `lang` — Calendar work happens once.
-    val (greetEn, greetHi) = remember(lang) { resolveGreetings(lang) }
+    val (greetEn, greetNative) = remember(lang) { resolveGreetings(lang) }
+    // For English the native time-greeting IS the English one, so a separate
+    // accent line would just repeat the headline below ("Good evening" twice).
+    // Show the bilingual accent line only when it adds a second script.
+    val showAccent = greetNative != greetEn
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            com.saarthi.core.ui.components.SaarthiLogo(size = 22.dp)
-            Text(
-                text = greetHi,
-                // Sized to sit level with the 22.dp logo beside it.
-                style = DisplayAccent.copy(fontSize = 22.sp, lineHeight = 22.sp),
-            )
+        if (showAccent) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                com.saarthi.core.ui.components.SaarthiLogo(size = 22.dp)
+                Text(
+                    text = greetNative,
+                    // Sized to sit level with the 22.dp logo beside it.
+                    style = DisplayAccent.copy(fontSize = 22.sp, lineHeight = 22.sp),
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+        } else {
+            // English: keep the brand mark, drop the duplicate greeting line.
+            com.saarthi.core.ui.components.SaarthiLogo(size = 26.dp)
+            Spacer(Modifier.height(10.dp))
         }
-        Spacer(Modifier.height(6.dp))
         Text(
             "$greetEn, friend",
             style = MaterialTheme.typography.displayLarge.copy(
