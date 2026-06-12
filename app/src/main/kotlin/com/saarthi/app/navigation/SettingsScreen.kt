@@ -183,18 +183,33 @@ fun SettingsScreen(
                            else "Off — daylight-friendly light",
                 trailing = { SaarthiToggle(on = darkOn, onToggle = { themeViewModel.toggle() }) },
             )
-            // Read replies aloud (TTS)
+            // Read replies aloud (TTS) — hands-free auto-read is a Pro feature;
+            // manual "Listen" on a reply stays free for everyone.
             val ttsVm: com.saarthi.app.TtsSettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
             val ttsOn by ttsVm.autoSpeak.collectAsStateWithLifecycle()
-            SaarthiListRow(
-                leadingIcon = {
-                    Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
-                },
-                title = "Read replies aloud",
-                subtitle = if (ttsOn) "Saarthi speaks each reply when it's ready"
-                           else "Tap Listen on a reply to hear it",
-                trailing = { SaarthiToggle(on = ttsOn, onToggle = { ttsVm.toggle() }) },
-            )
+            val ttsIsPro by ttsVm.isPro.collectAsStateWithLifecycle()
+            if (ttsIsPro) {
+                SaarthiListRow(
+                    leadingIcon = {
+                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
+                    },
+                    title = "Read replies aloud",
+                    subtitle = if (ttsOn) "Saarthi speaks each reply when it's ready"
+                               else "Tap Listen on a reply to hear it",
+                    trailing = { SaarthiToggle(on = ttsOn, onToggle = { ttsVm.toggle() }) },
+                )
+            } else {
+                SaarthiListRow(
+                    leadingIcon = {
+                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
+                    },
+                    title = "Read replies aloud",
+                    subtitle = "Saarthi Pro — auto-read every reply, hands-free",
+                    tone = ChipTone.Marigold,
+                    trailing = { ProChip() },
+                    onClick = { onNavigate("pro") },
+                )
+            }
 
             SectionLabel("Privacy")
             SaarthiListRow(
@@ -410,6 +425,23 @@ private fun ChevronRight() {
         contentDescription = null,
         tint = SaarthiColors.Text4,
         modifier = Modifier.size(14.dp),
+    )
+}
+
+/** Small "PRO" badge shown on rows for Pro-only features. */
+@Composable
+private fun ProChip() {
+    Text(
+        "PRO",
+        style = MaterialTheme.typography.labelSmall.copy(
+            color = SaarthiColors.OnMarigold,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp,
+        ),
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(SaarthiColors.Marigold)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
     )
 }
 

@@ -5,23 +5,26 @@ package com.saarthi.core.i18n
  * the free-tier limits, so gate decisions are unit-testable and consistent
  * across every call site.
  *
- * **Gating is DORMANT during the beta.** [ENFORCED] is `false`, so every gate
- * returns "allowed" / unlimited for everyone regardless of Pro status — current
- * beta testers are never degraded by this code landing. Flip [ENFORCED] to
- * `true` on the day real Play Billing ships and the free-tier limits below begin
- * to apply to non-Pro users.
+ * **Gating is ENFORCED.** [ENFORCED] is `true`, so the free-tier limits below
+ * apply to non-Pro users while a Pro unlock removes them — testers experience
+ * the real free → Pro flow that production users will get. During the beta the
+ * unlock is the local "Unlock (beta)" button; on the Play Store the exact same
+ * gates read the exact same [EntitlementManager.isPro], the only difference
+ * being a verified Play purchase (not the local button) flips it. Nothing in the
+ * gate logic changes when billing is wired — only the unlock SOURCE.
  *
  * The per-call `enforced` parameter defaults to [ENFORCED] so production callers
- * just pass `isPro`, while tests can exercise both the enforced and dormant
+ * just pass `isPro`, while tests can exercise both the enforced and unenforced
  * branches explicitly (independent of the current flag value).
  */
 object Entitlements {
 
     /**
-     * Master switch. While `false` (beta) all gates are dormant. Set `true` when
-     * Play Billing is live so the free-tier limits start applying to free users.
+     * Master switch. `true` = free-tier limits apply to non-Pro users (a Pro
+     * unlock lifts them). Set `false` only to disable all gating (e.g. an
+     * unrestricted internal build).
      */
-    const val ENFORCED = false
+    const val ENFORCED = true
 
     // ── Free-tier limits (apply only when ENFORCED and the user is NOT Pro) ──
     /** Free users may keep the PDF/doc "wow" — one document, generous page cap. */

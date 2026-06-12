@@ -26,9 +26,11 @@ class EntitlementsTest {
     }
 
     @Test
-    fun `the shipped default flag is dormant during beta`() {
-        // Guards against accidentally shipping enforcement before billing exists.
-        assertFalse("ENFORCED must stay false until Play Billing is live", Entitlements.ENFORCED)
+    fun `gating is enforced so testers and users see the free vs Pro flow`() {
+        // Enforcement is ON: free-tier limits apply, a Pro unlock lifts them.
+        // The unlock source (local button now, Play purchase later) is what
+        // changes for production — not this flag.
+        assertTrue("ENFORCED must be true so the gates actually apply", Entitlements.ENFORCED)
     }
 
     // ── Enforced — free users hit limits, Pro users do not ─────────────────────

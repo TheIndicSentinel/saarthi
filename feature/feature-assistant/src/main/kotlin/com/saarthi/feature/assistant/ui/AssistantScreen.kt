@@ -462,6 +462,14 @@ fun AssistantScreen(
                                     "Attachments need a larger model — switch to Gemma 4 from Settings → Models.",
                                 )
                             }
+                        } else if (!viewModel.canAttachDocument()) {
+                            // Free tier: the per-chat document allowance is used.
+                            // Show the Pro upsell instead of the picker.
+                            scope.launch {
+                                snackbarHost.showSnackbar(
+                                    "Free includes 1 document per chat. Unlock Saarthi Pro in Settings for unlimited documents.",
+                                )
+                            }
                         } else {
                             scope.launch { attachmentSheetState.show() }
                         }

@@ -64,6 +64,7 @@ class AssistantViewModelTest {
     private val mockTtsPreference: TtsPreference = mockk(relaxed = true)
     private val mockPersonalityPreference: PersonalityPreference = mockk(relaxed = true)
     private val mockFunnel: com.saarthi.core.inference.FunnelTracker = mockk(relaxed = true)
+    private val mockEntitlements: com.saarthi.core.i18n.EntitlementManager = mockk(relaxed = true)
 
     // Mutable flows controlled by individual tests
     private val isReadyFlow = MutableStateFlow(false)
@@ -86,6 +87,7 @@ class AssistantViewModelTest {
         every { mockTtsManager.isSpeaking } returns MutableStateFlow(false)
         every { mockTtsPreference.autoSpeakReplies } returns MutableStateFlow(false)
         every { mockPersonalityPreference.selected } returns MutableStateFlow(PersonalityCatalog.SAARTHI)
+        every { mockEntitlements.isPro } returns MutableStateFlow(false)
     }
 
     private fun createViewModel() = AssistantViewModel(
@@ -99,6 +101,7 @@ class AssistantViewModelTest {
         ttsPreference = mockTtsPreference,
         personalityPreference = mockPersonalityPreference,
         funnel = mockFunnel,
+        entitlements = mockEntitlements,
     )
 
     // ── sendMessage ────────────────────────────────────────────────────────────

@@ -81,7 +81,24 @@ class AssistantViewModel @Inject constructor(
     private val ttsPreference: com.saarthi.core.i18n.TtsPreference,
     private val personalityPreference: com.saarthi.core.i18n.PersonalityPreference,
     private val funnel: FunnelTracker,
+    private val entitlements: com.saarthi.core.i18n.EntitlementManager,
 ) : ViewModel() {
+
+    // Documents the (free) user has attached in the current chat. Free tier is
+    // capped (see Entitlements.maxDocuments); Pro is unlimited. Reset whenever
+    // the chat changes. The bundled demo document does NOT count — it's the free
+    // trial showcase.
+    private var docsThisSession = 0
+
+    /**
+     * Whether the user may attach another document right now. Pro → always.
+     * Free → until the per-chat allowance is used. Drives the attach button's
+     * upsell so a tester sees the real free → Pro difference.
+     */
+    fun canAttachDocument(): Boolean {
+        if (entitlements.isPro.value) return true
+        return docsThisSession < com.saarthi.core.i18n.Entitlements.maxDocuments(isPro = false)
+    }
 
     val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
 
@@ -179,7 +196,8 @@ class AssistantViewModel @Inject constructor(
         val autoSpoken = mutableSetOf<String>()
         allMessages
             .onEach { msgs ->
-                if (!ttsPreference.autoSpeakReplies.value) return@onEach
+                // Hands-free auto-read is a Pro feature (manual Listen stays free).
+                if (!ttsPreference.autoSpeakReplies.value || !entitlements.isPro.value) return@onEach
                 msgs.forEach { m ->
                     if (m.role == com.saarthi.feature.assistant.domain.MessageRole.ASSISTANT && m.isStreaming) {
                         streamedLive.add(m.id)
@@ -288,8 +306,33 @@ class AssistantViewModel @Inject constructor(
             val files = uris.mapNotNull { uri ->
                 runCatching { fileExtractor.extract(uri) }.getOrNull()
             }
-            if (files.isNotEmpty()) funnel.trackOnce(FunnelEvent.FIRST_DOC_ATTACHED)
-            _uiState.update { it.copy(pendingAttachments = it.pendingAttachments + files) }
+            if (files.isEmpty()) return@launch
+            funnel.trackOnce(FunnelEvent.FIRST_DOC_ATTACHED)
+
+            // Pro gate: cap how many documents a free user can attach per chat.
+            // Images are not the paid RAG feature, so they're never gated.
+            val isPro = entitlements.isPro.value
+            val docFiles = files.filter { !it.isImage }
+            val accepted: List<AttachedFile>
+            if (isPro || docFiles.isEmpty()) {
+                accepted = files
+            } else {
+                val remaining =
+                    (com.saarthi.core.i18n.Entitlements.maxDocuments(isPro = false) - docsThisSession)
+                        .coerceAtLeast(0)
+                val acceptedDocs = docFiles.take(remaining)
+                if (acceptedDocs.size < docFiles.size) {
+                    _uiState.update {
+                        it.copy(error = "Free includes ${com.saarthi.core.i18n.Entitlements.FREE_MAX_DOCUMENTS} document per chat. " +
+                            "Unlock Saarthi Pro (Settings → Saarthi Pro) for unlimited documents.")
+                    }
+                }
+                accepted = files.filter { it.isImage } + acceptedDocs
+            }
+            docsThisSession += accepted.count { !it.isImage }
+            if (accepted.isNotEmpty()) {
+                _uiState.update { it.copy(pendingAttachments = it.pendingAttachments + accepted) }
+            }
         }
     }
 
@@ -438,6 +481,7 @@ class AssistantViewModel @Inject constructor(
     fun dismissClearDialog() = _uiState.update { it.copy(showClearDialog = false) }
     fun clearChat() = viewModelScope.launch {
         chatRepository.clearHistory()
+        docsThisSession = 0
         _uiState.update { it.copy(showClearDialog = false) }
     }
 
@@ -449,11 +493,13 @@ class AssistantViewModel @Inject constructor(
 
     fun newChat() = viewModelScope.launch {
         chatRepository.createSession()
+        docsThisSession = 0
         _uiState.update { it.copy(showDrawer = false) }
     }
 
     fun switchSession(sessionId: String) = viewModelScope.launch {
         chatRepository.switchSession(sessionId)
+        docsThisSession = 0
         _uiState.update { it.copy(showDrawer = false) }
     }
 
