@@ -10,6 +10,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -329,7 +332,9 @@ fun AssistantScreen(
                     EmptyState(
                         language = currentLanguage,
                         modifier = Modifier.weight(1f),
-                        onSuggestionTap = { viewModel.onInputChange(it) }
+                        onSuggestionTap = { viewModel.onInputChange(it) },
+                        showDemo = uiState.attachmentsEnabled,
+                        onTryDemo = { viewModel.tryDemoDocument() },
                     )
                 } else {
                     Box(modifier = Modifier.weight(1f)) {
@@ -928,10 +933,13 @@ private fun EmptyState(
     language: SupportedLanguage,
     modifier: Modifier = Modifier,
     onSuggestionTap: (String) -> Unit = {},
+    showDemo: Boolean = false,
+    onTryDemo: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -958,6 +966,49 @@ private fun EmptyState(
             style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text3),
             textAlign = TextAlign.Center,
         )
+
+        // Killer-demo entry: attach a bundled sample document + a ready question
+        // in one tap, so a brand-new user sees the document-Q&A wow immediately.
+        // Shown only when the active model can use attachments (LARGE tier).
+        if (showDemo) {
+            Spacer(Modifier.height(20.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(SaarthiColors.Marigold.copy(alpha = 0.14f), Color.Transparent),
+                        ),
+                    )
+                    .border(1.dp, SaarthiColors.MarigoldBd, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onTryDemo)
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("📄", fontSize = 22.sp)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Try the document assistant",
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.SemiBold, color = SaarthiColors.Text, fontSize = 14.sp,
+                        ),
+                    )
+                    Text(
+                        "Open a sample PDF and ask a question — one tap",
+                        style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3, fontSize = 12.sp),
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    tint = SaarthiColors.Marigold,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+
         Spacer(Modifier.height(22.dp))
         com.saarthi.core.ui.components.RangoliDivider(width = 100.dp, color = SaarthiColors.Text3)
         Spacer(Modifier.height(18.dp))

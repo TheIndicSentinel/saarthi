@@ -296,6 +296,29 @@ class AssistantViewModel @Inject constructor(
     fun removeAttachment(file: AttachedFile) =
         _uiState.update { it.copy(pendingAttachments = it.pendingAttachments - file) }
 
+    /**
+     * One-tap "Try the document assistant" demo: attaches a bundled sample
+     * document (no file picking needed) and pre-fills a question, so a new user
+     * instantly sees the attach → ask → grounded-answer flow. The user just
+     * taps Send. This is the killer-demo entry point on the empty chat screen.
+     */
+    fun tryDemoDocument() {
+        val demo = AttachedFile(
+            uri = Uri.parse(com.saarthi.feature.assistant.data.DemoDocument.URI),
+            name = com.saarthi.feature.assistant.data.DemoDocument.NAME,
+            mimeType = com.saarthi.feature.assistant.data.DemoDocument.MIME,
+            sizeBytes = com.saarthi.feature.assistant.data.DemoDocument.TEXT.length.toLong(),
+            extractedText = com.saarthi.feature.assistant.data.DemoDocument.TEXT,
+        )
+        funnel.trackOnce(FunnelEvent.FIRST_DOC_ATTACHED)
+        _uiState.update {
+            it.copy(
+                pendingAttachments = listOf(demo),
+                inputText = com.saarthi.feature.assistant.data.DemoDocument.SUGGESTED_QUESTIONS.first(),
+            )
+        }
+    }
+
     fun toggleAttachmentSheet() =
         _uiState.update { it.copy(showAttachmentSheet = !it.showAttachmentSheet) }
 
