@@ -3,7 +3,7 @@ package com.saarthi.app
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.feature.assistant.data.VoicePackManager
-import com.saarthi.feature.assistant.data.VoicePackPreference
+import com.saarthi.core.i18n.VoicePackPreference
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
