@@ -52,6 +52,12 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.accompanist.permissions)
     implementation(libs.mlkit.text.recognition)
-    implementation(files("libs/sherpa-onnx-$sherpaVersion.aar"))
+    // compileOnly (NOT implementation): a library module cannot bundle a local
+    // .aar — AGP fails bundleReleaseLocalLintAar with "Direct local .aar file
+    // dependencies are not supported when building an AAR". We only need the
+    // sherpa-onnx CLASSES at compile time here; the actual runtime classes and
+    // native .so libs are packaged by the :app module (see app/build.gradle.kts),
+    // which is an application module and CAN package a local .aar.
+    compileOnly(files("libs/sherpa-onnx-$sherpaVersion.aar"))
     implementation(libs.commons.compress)
 }
