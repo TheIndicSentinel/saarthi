@@ -1,0 +1,30 @@
+package com.saarthi.app
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.saarthi.feature.assistant.data.VoiceCatalog
+import com.saarthi.feature.assistant.data.VoicePackManager
+import com.saarthi.feature.assistant.data.VoicePackPreference
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
+import javax.inject.Inject
+
+@HiltViewModel
+class VoiceSettingsViewModel @Inject constructor(
+    private val manager: VoicePackManager,
+    private val pref: VoicePackPreference,
+) : ViewModel() {
+
+    val isNeuralSupported: Boolean = manager.isNeuralSupported
+
+    val installedPackIds: StateFlow<Set<String>> = pref.installedPackIds
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    fun stateFor(packId: String) = manager.stateFor(packId)
+
+    fun download(packId: String) = manager.download(packId)
+
+    fun remove(packId: String) = manager.remove(packId)
+}

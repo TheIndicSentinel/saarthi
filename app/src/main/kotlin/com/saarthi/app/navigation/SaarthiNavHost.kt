@@ -62,6 +62,7 @@ sealed class Route(val path: String) {
     data object ResponseStyle: Route("response-style")
     data object Downloads    : Route("downloads")
     data object History      : Route("history")
+    data object Voice        : Route("voice")
     // Model change is onboarding re-entry — same composable, modelChange flag
     data object ModelChange  : Route("onboarding?modelChange=true")
 }
@@ -204,6 +205,7 @@ fun SaarthiNavHost(
                         "response-style" -> navController.navigate(Route.ResponseStyle.path)
                         "downloads" -> navController.navigate(Route.Downloads.path)
                         "history" -> navController.navigate(Route.History.path)
+                        "voice" -> navController.navigate(Route.Voice.path)
                         "assistant" -> navController.navigate(Route.Assistant.path)
                     }
                 },
@@ -241,6 +243,9 @@ fun SaarthiNavHost(
         }
         composable(Route.History.path) {
             HistoryScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Route.Voice.path) {
+            VoiceSettingsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(

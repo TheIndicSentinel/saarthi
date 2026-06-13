@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CloudDownload
@@ -210,6 +211,17 @@ fun SettingsScreen(
                     onClick = { onNavigate("pro") },
                 )
             }
+
+            // Indian Voice — download Piper neural voices for Hindi (MID+ devices only).
+            // Shows on every device; the destination screen explains the capability gate.
+            SaarthiListRow(
+                leadingIcon = {
+                    Icon(Icons.Outlined.RecordVoiceOver, contentDescription = null)
+                },
+                title = "Indian Voice",
+                subtitle = "Download a Hindi voice for more natural speech",
+                onClick = { onNavigate("voice") },
+            )
 
             SectionLabel("Privacy")
             SaarthiListRow(

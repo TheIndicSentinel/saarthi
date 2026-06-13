@@ -8,6 +8,7 @@ import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.InferenceConfig
+import com.saarthi.feature.assistant.data.VoicePackManager
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +34,7 @@ class MainViewModel @Inject constructor(
     private val modelCatalog: ModelCatalog,
     private val languageManager: LanguageManager,
     private val deviceProfiler: DeviceProfiler,
+    private val voicePackManager: VoicePackManager,
 ) : ViewModel() {
 
     private val _startState = MutableStateFlow<AppStartState>(AppStartState.Loading)
@@ -46,6 +48,8 @@ class MainViewModel @Inject constructor(
     }
 
     init {
+        // Reload any previously installed voice pack into TtsManager on startup.
+        voicePackManager.restoreOnStartup()
         viewModelScope.launch {
             val isComplete = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 onboardingRepository.isOnboardingComplete().first()

@@ -10,4 +10,6 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.accompanist.permissions)
     implementation(libs.mlkit.text.recognition)
+    implementation(files("libs/sherpa-onnx-1.13.2.aar"))
+    implementation(libs.commons.compress)
 }
