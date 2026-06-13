@@ -100,3 +100,21 @@
 -keepattributes *Annotation*
 -keep class com.google.firebase.** { *; }
 -dontwarn com.google.firebase.**
+
+# ── Apache Commons Compress (voice-pack .tar.bz2 extraction) ────────────────
+# commons-compress declares OPTIONAL backends for compression formats we never
+# use (XZ, LZMA, Zstd, Brotli, Pack200). Their classes aren't on the classpath,
+# so R8 fails the release build with "Missing class org.tukaani.xz.* /
+# com.github.luben.zstd.* …". We only use bzip2 + tar, which are built into
+# commons-compress with no external deps — so it is safe to tell R8 to ignore
+# the missing optional backends rather than add unused ~1 MB libraries.
+-dontwarn org.tukaani.xz.**
+-dontwarn com.github.luben.zstd.**
+-dontwarn org.brotli.dec.**
+-dontwarn org.apache.commons.compress.compressors.**
+-dontwarn org.apache.commons.compress.archivers.sevenz.**
+# Pack200 backend (commons-compress.harmony.pack200) references ASM, which we
+# don't ship; AnnotatedType is a desugar-absent reflection API. Both come from
+# AGP's auto-generated missing_rules.txt for this exact build.
+-dontwarn org.objectweb.asm.**
+-dontwarn java.lang.reflect.AnnotatedType
