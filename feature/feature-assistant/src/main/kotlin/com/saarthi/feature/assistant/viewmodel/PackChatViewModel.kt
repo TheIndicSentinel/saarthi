@@ -159,7 +159,18 @@ class PackChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             if (!inferenceEngine.isReady) {
-                finish(streamingId, "Please download and load a model first from Settings → Models, then come back to ask about farming.")
+                // The model is downloaded during onboarding, so reaching here
+                // almost always means the engine was evicted under memory
+                // pressure (common on low-RAM devices — the budget SM-E625F log
+                // showed repeated "CRITICAL system pressure → engine closed"),
+                // NOT that no model exists. Telling such a user to "download a
+                // model" they already have is wrong and confusing. Give an
+                // accurate, actionable message instead.
+                finish(
+                    streamingId,
+                    "Saarthi's model isn't loaded right now — your phone may be low on memory. " +
+                        "Close a few background apps and try again in a moment. Everything still works offline.",
+                )
                 return@launch
             }
 

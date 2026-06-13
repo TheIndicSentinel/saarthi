@@ -218,12 +218,25 @@ class TtsManager @Inject constructor(
         val engine = tts ?: return null
         val wantMale = gender == com.saarthi.core.i18n.VoiceGender.MALE
 
-        // Filter to local voices for this language; sort by quality DESC.
+        // Filter to local voices for this language; then sort REGION-first,
+        // quality-second. The region sort is the fix for the production bug
+        // where, with locale=en-IN, the picker returned `en-us-x-iom-local`
+        // (a US voice) simply because it scored highest quality among all
+        // "en" voices — overriding the en-IN locale we'd just set and making
+        // English sound American. Now an en-IN voice, when installed, wins
+        // over en-US regardless of quality, so the assistant sounds Indian.
+        val wantCountry = locale.country.uppercase()   // "IN" for en-IN; "" for hi/ta/…
         val candidates = runCatching { engine.voices }.getOrNull().orEmpty()
             .filter {
                 it.locale.language == locale.language && !it.isNetworkConnectionRequired
             }
-            .sortedByDescending { runCatching { it.quality }.getOrDefault(0) }
+            .sortedWith(
+                compareByDescending<android.speech.tts.Voice> {
+                    // India-region voices first (no-op when wantCountry is blank,
+                    // e.g. Indic scripts that have no country variants).
+                    wantCountry.isNotEmpty() && it.locale.country.equals(wantCountry, ignoreCase = true)
+                }.thenByDescending { runCatching { it.quality }.getOrDefault(0) }
+            )
         if (candidates.isEmpty()) return null
 
         // Indic-aware Google TTS voice-ID hints. en-in / en-us / hi-in

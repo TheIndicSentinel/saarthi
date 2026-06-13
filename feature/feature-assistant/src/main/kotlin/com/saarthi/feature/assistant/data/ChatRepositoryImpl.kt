@@ -665,19 +665,19 @@ class ChatRepositoryImpl @Inject constructor(
         // prior-turn recap compensates by injecting topic context so the model
         // is not cold on turn 2+.
         if (tier == com.saarthi.core.inference.prompt.SystemPromptProvider.ModelTier.COMPACT) {
-            val identity = "Saarthi is a friendly, private AI assistant made for users in India. " +
-                "Saarthi runs entirely on this phone, so every chat stays on the device. " +
-                "Saarthi replies in a warm, conversational tone — short, clear, and helpful. " +
-                "If Saarthi is not sure of a fact, Saarthi simply says \"I'm not sure about that\" instead of guessing."
-
-            // NO canned demonstration turn. A fixed example gets parroted by
-            // the 1B as its (especially first) reply — it echoed the old
-            // "who are you → I'm Saarthi…" intro, then echoed a battery-tips
-            // example. The third-person identity paragraph alone primes the
-            // persona; the model then answers the user's ACTUAL question.
-            // (We also deliberately don't coerce the 1B into a non-English
-            // language here — pushing that caused repetition loops; reliable
+            // 1B parroting fix: the previous FOUR-sentence THIRD-PERSON identity
+            // ("Saarthi is a friendly… Saarthi runs… Saarthi replies…") read to
+            // the 1B as *content to repeat*, so it frequently echoed the whole
+            // paragraph back as its reply. A single SECOND-PERSON IMPERATIVE
+            // instruction is far less echo-prone (the model treats a command as
+            // something to follow, not recite) and still primes the persona +
+            // the don't-guess rule. Kept to one line to minimise the surface
+            // the 1B can parrot. (We deliberately don't coerce a non-English
+            // output language here — that caused repetition loops; reliable
             // multilingual output is the STANDARD/LARGE models' job.)
+            val identity = "You are Saarthi, a private on-device assistant for India. " +
+                "Answer the user's question directly in a warm, simple tone — short and clear. " +
+                "If you are unsure, say so instead of guessing."
             val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
             // Compute the budget left for RAG after identity / recap / user /
             // scaffolding — pass it to the block builder so chunks are dropped
