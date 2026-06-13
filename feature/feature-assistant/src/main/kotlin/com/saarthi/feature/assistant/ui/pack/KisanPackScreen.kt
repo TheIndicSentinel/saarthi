@@ -147,6 +147,7 @@ fun KisanPackScreen(
                 LoadedPackContent(
                     pack = ui.pack!!,
                     packSupportedOnCurrentModel = ui.packSupportedOnCurrentModel,
+                    canRunBetterModel = ui.canRunBetterModel,
                     activeModelName = ui.activeModelName,
                     language = language,
                     onOpenChat = onOpenKisanChat,
@@ -162,6 +163,7 @@ fun KisanPackScreen(
 private fun LoadedPackContent(
     pack: KisanPackInstaller.InstalledPack,
     packSupportedOnCurrentModel: Boolean,
+    canRunBetterModel: Boolean,
     activeModelName: String?,
     language: com.saarthi.core.i18n.SupportedLanguage,
     onOpenChat: () -> Unit,
@@ -191,7 +193,7 @@ private fun LoadedPackContent(
         // ── Capability warning ──
         if (!packSupportedOnCurrentModel) {
             item {
-                CapabilityHint(activeModelName)
+                CapabilityHint(activeModelName, canRunBetterModel)
             }
         }
 
@@ -292,7 +294,7 @@ private fun StatusCard(
 }
 
 @Composable
-private fun CapabilityHint(activeModelName: String?) {
+private fun CapabilityHint(activeModelName: String?, canRunBetterModel: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -303,7 +305,8 @@ private fun CapabilityHint(activeModelName: String?) {
     ) {
         Column {
             Text(
-                text = "Best with Gemma 4 or 3n",
+                // On a device that can't run a bigger model, don't dangle one.
+                text = if (canRunBetterModel) "Best with Gemma 4 or 3n" else "Running the compact model",
                 style = MaterialTheme.typography.titleSmall.copy(
                     color = SaarthiColors.Marigold,
                     fontWeight = FontWeight.SemiBold,
@@ -311,7 +314,14 @@ private fun CapabilityHint(activeModelName: String?) {
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "You're on ${activeModelName?.substringAfter('/')?.substringBefore('.') ?: "the small model"}. The Kisan pack is browseable on every model, but chat answers stay sharper on the larger ones — switch from Settings → Models.",
+                // canRunBetterModel == false → this phone can only run the 1B
+                // model, so a "switch model" nudge would be a dead-end. Set
+                // honest expectations instead of pointing at an unavailable upgrade.
+                text = if (canRunBetterModel) {
+                    "You're on ${activeModelName?.substringAfter('/')?.substringBefore('.') ?: "the small model"}. The Kisan pack is browseable on every model, but chat answers stay sharper on the larger ones — switch from Settings → Models."
+                } else {
+                    "This phone runs Saarthi's compact model, so Kisan answers will be short and simple — that's expected on this device. Everything still works fully offline."
+                },
                 style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text2, lineHeight = 17.sp),
             )
         }

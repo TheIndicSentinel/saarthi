@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.KisanPackPreference
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.engine.InferenceEngine
+import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.feature.assistant.data.KisanPackInstaller
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -41,8 +43,20 @@ class KisanPackViewModel @Inject constructor(
     private val preference: KisanPackPreference,
     private val inferenceEngine: InferenceEngine,
     private val systemPromptProvider: SystemPromptProvider,
+    deviceProfiler: DeviceProfiler,
     languageManager: LanguageManager,
 ) : ViewModel() {
+
+    /**
+     * Whether THIS device can run a non-compact model at all. On LOW / MINIMAL
+     * tier the catalog only ever offers the Compact 1B (the budget SM-E625F log
+     * showed `offered=1, filtered_out=5`). Telling such a user to "switch to
+     * Gemma 4 / 3n" is a dead-end — those models physically cannot load here.
+     * Derived from total RAM (a fixed hardware spec), so it's computed once.
+     */
+    private val canRunBetterModel: Boolean =
+        runCatching { deviceProfiler.profile().tier.ordinal >= DeviceTier.MID.ordinal }
+            .getOrDefault(true)
 
     /** Selected language — the screen localizes its labels off this. */
     val language: StateFlow<SupportedLanguage> = languageManager.selectedLanguage
@@ -52,6 +66,8 @@ class KisanPackViewModel @Inject constructor(
         val pack: KisanPackInstaller.InstalledPack? = null,
         /** False on Gemma 1B (COMPACT) — pack chunks won't merge into RAG. */
         val packSupportedOnCurrentModel: Boolean = true,
+        /** False on LOW/MINIMAL devices that can never run a bigger model. */
+        val canRunBetterModel: Boolean = true,
         val activeModelName: String? = null,
     )
 
@@ -76,7 +92,13 @@ class KisanPackViewModel @Inject constructor(
                 Pair(name, tier != SystemPromptProvider.ModelTier.COMPACT)
             }
             .onEach { (name, capable) ->
-                _ui.update { it.copy(activeModelName = name, packSupportedOnCurrentModel = capable) }
+                _ui.update {
+                    it.copy(
+                        activeModelName = name,
+                        packSupportedOnCurrentModel = capable,
+                        canRunBetterModel = canRunBetterModel,
+                    )
+                }
             }
             .launchIn(viewModelScope)
 

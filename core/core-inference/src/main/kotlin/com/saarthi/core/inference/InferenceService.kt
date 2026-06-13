@@ -66,28 +66,19 @@ class InferenceService : Service() {
             ?: NotificationState.GENERATING
 
         val notification = buildNotification(state)
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is the correct and only type for
-                // on-device AI inference. DATA_SYNC was removed in Android 16 (API 36) —
-                // passing it here causes SecurityException on API 36+ devices (e.g. Samsung
-                // SM-S918B), which was silently caught below, leaving us with NO foreground
-                // service protection and the LMK killing the process in ~10 seconds.
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } catch (e: Exception) {
-            // Android 14+ is extremely strict about when an FGS can start.
-            // If it fails, log the reason prominently — silent failure here is the #1
-            // crash source (process gets killed mid-inference with no stack trace).
-            DebugLogger.log("SERVICE", "WARN: startForeground failed (${e.javaClass.simpleName}): ${e.message}")
-            // Attempt graceful fallback: try without an explicit type (API < Q behaviour)
-            runCatching { startForeground(NOTIFICATION_ID, notification) }
+        if (!enterForeground(notification)) {
+            // We could NOT legally become a foreground service right now — e.g. on
+            // a low-RAM budget device the app was pushed to the background during a
+            // memory-pressure storm (the Android 13 SM-E625F log showed exactly
+            // this). If we leave the startForegroundService() promise unfulfilled,
+            // the platform fires ForegroundServiceDidNotStartInTimeException and
+            // HARD-CRASHES the process. Stopping now turns that crash into a clean
+            // no-op: inference still runs on its own thread, it just loses FGS
+            // protection for this one turn — far better than crashing on low-end
+            // devices.
+            DebugLogger.log("SERVICE", "FGS could not enter foreground — stopping to avoid crash")
+            stopSelf()
+            return START_NOT_STICKY
         }
 
         // Acquire a partial wake lock to keep the CPU running during decode
@@ -103,6 +94,43 @@ class InferenceService : Service() {
 
         DebugLogger.log("SERVICE", "FGS onStartCommand  state=$state")
         return START_NOT_STICKY
+    }
+
+    /**
+     * Enter the foreground, returning true only if [startForeground] actually
+     * succeeded. Returns false (instead of swallowing) so the caller can stop
+     * the service rather than leave the start-promise dangling → crash.
+     *
+     * FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API-34 type; on API 29–33 the
+     * manifest's `specialUse` value is unknown, so passing the typed flag there
+     * throws. Use the untyped overload (valid on every API) below 34 — that's
+     * the path the budget-device API-33 log needs.
+     */
+    private fun enterForeground(notification: Notification): Boolean {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            return true
+        } catch (e: Exception) {
+            // #1 crash source if swallowed: process killed mid-inference with no
+            // stack trace. Log loudly, then make one untyped attempt (covers an
+            // API-34 type/manifest mismatch) before giving up.
+            DebugLogger.log("SERVICE", "WARN: startForeground failed (${e.javaClass.simpleName}): ${e.message}")
+            return runCatching {
+                startForeground(NOTIFICATION_ID, notification)
+                true
+            }.getOrElse {
+                DebugLogger.log("SERVICE", "WARN: untyped startForeground also failed: ${it.message}")
+                false
+            }
+        }
     }
 
     override fun onDestroy() {

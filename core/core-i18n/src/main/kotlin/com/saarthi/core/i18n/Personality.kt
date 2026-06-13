@@ -78,9 +78,11 @@ object PersonalityCatalog {
             "Mirror the user's tone and length — short casual messages get short casual replies.",
             "Use everyday Indian context (UPI, gram panchayat, Aadhaar, NCERT) when it helps clarity.",
         ),
-        // Saarthi: warm, friendly female voice — slightly lifted pitch so it
-        // feels younger and lighter than Dadi Maa (who sits at 0.92).
-        voiceHint = VoiceHint(gender = VoiceGender.FEMALE, pitch = 1.05f, rate = 1.00f),
+        // Saarthi is the GENERAL voice of the app (default persona + plain
+        // read-aloud). A soothing male voice: pitch just under neutral for
+        // warmth, an unhurried rate. Distinct from Pandit ji's deeper, slower
+        // delivery (0.85/0.92) so the two don't sound identical.
+        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 0.96f, rate = 0.96f),
     )
 
     val PANDIT = Personality(
@@ -118,7 +120,10 @@ object PersonalityCatalog {
             "For any medical or financial topic, close by gently suggesting they also consult a doctor or qualified professional.",
             "Use short, calming sentences. Avoid bullet lists — speak in prose.",
         ),
-        voiceHint = VoiceHint(gender = VoiceGender.FEMALE, pitch = 0.92f, rate = 0.95f),
+        // Dadi Maa is the ONLY female voice — an elderly grandmother. Pitch
+        // pulled well down (0.80) and rate slowed (0.88) so she audibly reads
+        // as an older woman rather than a young default-female voice.
+        voiceHint = VoiceHint(gender = VoiceGender.FEMALE, pitch = 0.80f, rate = 0.88f),
     )
 
     val COACH = Personality(
