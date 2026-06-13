@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -40,6 +41,18 @@ class VoicePackPreference @Inject constructor(
         context.voiceDataStore.edit { prefs ->
             prefs[KEY] = (prefs[KEY] ?: emptySet()) - packId
         }
+    }
+
+    // ── Voice gender preference ───────────────────────────────────────────────
+
+    private val GENDER_KEY = stringPreferencesKey("voice_gender")
+
+    /** "male" or "female". Defaults to "male" (soothing Pratham voice). */
+    val voiceGender: Flow<String> =
+        context.voiceDataStore.data.map { prefs -> prefs[GENDER_KEY] ?: "male" }
+
+    suspend fun setVoiceGender(gender: String) {
+        context.voiceDataStore.edit { prefs -> prefs[GENDER_KEY] = gender }
     }
 }
 

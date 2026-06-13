@@ -29,6 +29,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Download sherpa-onnx AAR
+        run: |
+          mkdir -p feature/feature-assistant/libs
+          curl -L \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.2/sherpa-onnx-1.13.2.aar" \
+            -o feature/feature-assistant/libs/sherpa-onnx-1.13.2.aar
+
       - name: Write local.properties
         run: |
           echo "sdk.dir=$ANDROID_HOME"                       > local.properties

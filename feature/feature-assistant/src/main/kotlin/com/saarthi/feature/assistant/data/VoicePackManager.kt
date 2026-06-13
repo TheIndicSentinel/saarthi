@@ -187,7 +187,10 @@ class VoicePackManager @Inject constructor(
 
     private suspend fun reloadActiveEngine() = withContext(Dispatchers.IO) {
         val installed = pref.installedPackIds.first()
-        val pack = VoiceCatalog.entries.firstOrNull { it.id in installed }
+        val gender = pref.voiceGender.first()
+        // Prefer the pack matching the user's gender preference; fall back to any installed.
+        val pack = VoiceCatalog.entries.firstOrNull { it.id in installed && it.gender == gender }
+            ?: VoiceCatalog.entries.firstOrNull { it.id in installed }
         if (pack == null) {
             ttsManager.setNeuralEngine(null, emptySet())
             return@withContext
@@ -199,9 +202,17 @@ class VoicePackManager @Inject constructor(
                 .map { it.language }
                 .toSet()
             ttsManager.setNeuralEngine(engine, languages)
-            DebugLogger.log("TTS", "VoicePackManager: neural engine active for ${languages.map { it.code }}")
+            DebugLogger.log("TTS", "VoicePackManager: neural engine active  pack=${pack.id}  gender=$gender  langs=${languages.map { it.code }}")
         } else {
             ttsManager.setNeuralEngine(null, emptySet())
+        }
+    }
+
+    /** Switch to the pack matching the new gender preference, reloading if needed. */
+    fun setGender(gender: String) {
+        scope.launch {
+            pref.setVoiceGender(gender)
+            reloadActiveEngine()
         }
     }
 

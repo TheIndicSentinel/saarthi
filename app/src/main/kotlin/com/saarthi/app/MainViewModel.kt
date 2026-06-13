@@ -47,6 +47,26 @@ class MainViewModel @Inject constructor(
         languageManager.setLanguage(language)
     }
 
+    /**
+     * Called by SaarthiNavHost when onboarding completes (DONE step). Triggers
+     * automatic background voice download for the user's selected language when
+     * the device is MID+ and a Piper voice is available — no user action needed.
+     * The onboarding UI shows a non-blocking "downloading Indian voice" banner and
+     * a Skip option while this runs.
+     */
+    fun onOnboardingCompleted() {
+        viewModelScope.launch {
+            val lang = languageManager.selectedLanguage.value
+            val hasPack = com.saarthi.feature.assistant.data.VoiceCatalog.entries
+                .any { it.language == lang }
+            if (voicePackManager.isNeuralSupported && hasPack) {
+                val defaultPack = com.saarthi.feature.assistant.data.VoiceCatalog.entries
+                    .first { it.language == lang }
+                voicePackManager.download(defaultPack.id)
+            }
+        }
+    }
+
     init {
         // Reload any previously installed voice pack into TtsManager on startup.
         voicePackManager.restoreOnStartup()
@@ -54,7 +74,7 @@ class MainViewModel @Inject constructor(
             val isComplete = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 onboardingRepository.isOnboardingComplete().first()
             }
-            
+
             if (!isComplete) {
                 _startState.value = AppStartState.GoToOnboarding
                 return@launch

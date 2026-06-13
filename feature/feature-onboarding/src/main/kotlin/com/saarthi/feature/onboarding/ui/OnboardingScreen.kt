@@ -127,6 +127,8 @@ fun OnboardingScreen(
                 )
                 OnboardingStep.MODEL_PICK -> Onb4ModelPick(
                     state = state,
+                    voiceAutoDownload = state.voiceAutoDownload,
+                    onSkipVoice = viewModel::skipVoiceDownload,
                     onDownload = viewModel::downloadModel,
                     onCancel = viewModel::cancelDownload,
                     onSelect = viewModel::selectDownloadedModel,
@@ -663,6 +665,8 @@ private fun PrivacyRow(icon: ImageVector, title: String, subtitle: String) {
 @Composable
 private fun Onb4ModelPick(
     state: com.saarthi.feature.onboarding.viewmodel.OnboardingUiState,
+    voiceAutoDownload: Boolean?,
+    onSkipVoice: () -> Unit,
     onDownload: (ModelEntry) -> Unit,
     onCancel: (ModelEntry) -> Unit,
     onSelect: (ModelEntry) -> Unit,
@@ -702,6 +706,47 @@ private fun Onb4ModelPick(
             Spacer(Modifier.height(14.dp))
             DeviceTierBadge(profile = state.deviceProfile)
             Spacer(Modifier.height(14.dp))
+            // Voice auto-download banner — only shown when device supports neural TTS
+            // and the selected language has a Piper voice. Non-blocking: the download
+            // runs in the background while the user picks their AI model.
+            if (voiceAutoDownload == true) {
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                        .background(SaarthiColors.JadeSoft)
+                        .border(1.dp, SaarthiColors.JadeBd, androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        color = SaarthiColors.Jade,
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "Also downloading an Indian voice (~64 MB) for more natural speech",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = SaarthiColors.Jade,
+                            fontSize = 12.sp,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Skip",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = SaarthiColors.Text3,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        ),
+                        modifier = Modifier
+                            .clickable(onClick = onSkipVoice)
+                            .padding(4.dp),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+            }
             state.catalogModels.forEachIndexed { i, model ->
                 val progress = state.downloadProgress[model.id]
                 val isDownloaded = model.id in state.downloadedModelIds

@@ -212,14 +212,15 @@ fun SettingsScreen(
                 )
             }
 
-            // Indian Voice — download Piper neural voices for Hindi (MID+ devices only).
-            // Shows on every device; the destination screen explains the capability gate.
+            // Voice style — Male / Female toggle (only meaningful if a neural voice
+            // was downloaded during onboarding or is being downloaded in background).
+            // Routes to voice screen for the toggle and any re-download option.
             SaarthiListRow(
                 leadingIcon = {
                     Icon(Icons.Outlined.RecordVoiceOver, contentDescription = null)
                 },
-                title = "Indian Voice",
-                subtitle = "Download a Hindi voice for more natural speech",
+                title = "Voice style",
+                subtitle = "Choose male or female voice for speech",
                 onClick = { onNavigate("voice") },
             )
 

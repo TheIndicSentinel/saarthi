@@ -135,6 +135,7 @@ fun SaarthiNavHost(
         composable(Route.Onboarding.path) {
             OnboardingScreen(
                 onOnboardingComplete = {
+                    mainViewModel.onOnboardingCompleted()
                     navController.navigate(Route.Home.path) {
                         popUpTo(0) { inclusive = true }
                     }

@@ -45,6 +45,13 @@ import javax.inject.Inject
 data class OnboardingUiState(
     val step: OnboardingStep = OnboardingStep.WELCOME,
     val selectedLanguage: SupportedLanguage = SupportedLanguage.HINDI,
+    /**
+     * Offered when device is MID+ and the selected language has a Piper voice.
+     * null = not applicable / already decided.
+     * true = downloading in background.
+     * false = user skipped.
+     */
+    val voiceAutoDownload: Boolean? = null,
     // Device & catalog
     val deviceProfile: DeviceProfile? = null,
     val catalogModels: List<ModelEntry> = emptyList(),
@@ -229,7 +236,24 @@ class OnboardingViewModel @Inject constructor(
     fun goBackTo(step: OnboardingStep) =
         _uiState.update { it.copy(step = step) }
 
+    fun skipVoiceDownload() {
+        _uiState.update { it.copy(voiceAutoDownload = false) }
+    }
+
     fun proceedToModelPick() {
+        // Check if device has a voice available for the chosen language.
+        // If so, show the auto-download banner; the actual download is triggered
+        // from the app-level MainViewModel when onboarding completes, so we can't
+        // depend on feature-assistant here. We just show the informational banner.
+        val lang = _uiState.value.selectedLanguage
+        val deviceTierOrdinal = _uiState.value.deviceProfile?.tier?.ordinal ?: 0
+        val midOrdinal = com.saarthi.core.inference.model.DeviceTier.MID.ordinal
+        // Simple check: MID+ (≥ 6 GB) and the language string "HINDI" has Piper voices
+        val canShowBanner = deviceTierOrdinal >= midOrdinal &&
+            lang == com.saarthi.core.i18n.SupportedLanguage.HINDI
+        if (canShowBanner) {
+            _uiState.update { it.copy(voiceAutoDownload = true) }
+        }
         _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isScanning = true) }
         viewModelScope.launch {
             languageManager.setLanguage(_uiState.value.selectedLanguage)
