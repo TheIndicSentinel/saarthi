@@ -145,6 +145,16 @@ class LiteRTInferenceEngine @Inject constructor(
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
 
+    // Serializes EVERY Conversation create/close so two native sessions can never
+    // coexist. litertlm allows exactly one Conversation per Engine; creating a
+    // second one throws "FAILED_PRECONDITION: A session already exists". That race
+    // happened because the per-turn recycle ran in a DETACHED coroutine (onDone/
+    // onError) while the next turn's timeout-path force-recycle ALSO created one.
+    // [recycleConversation] holds this lock and always CLOSES the current
+    // conversation before creating the next, so the invariant "≤1 live
+    // Conversation" is guaranteed regardless of how the paths interleave.
+    private val conversationLock = Mutex()
+
     // Single-threaded dispatcher for all Engine calls. Ensures native objects are
     // never accessed concurrently and callbacks return to a stable thread context.
     private val engineDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
@@ -988,6 +998,31 @@ class LiteRTInferenceEngine @Inject constructor(
         return e
     }
 
+    /**
+     * Atomically replace [activeConversation]: close the current one (if any)
+     * THEN create a fresh one — all under [conversationLock] so two native
+     * sessions can never coexist (the "A session already exists" race).
+     *
+     * The current conversation reference is nulled BEFORE close so that even if
+     * a concurrent recycle interleaves, neither path ever sees a live session
+     * when it calls createConversation. Returns the new conversation, or null if
+     * the engine is gone or creation failed (callers fall back to system state).
+     */
+    private suspend fun recycleConversation(sampler: SamplerConfig?): Conversation? =
+        conversationLock.withLock {
+            val eng = engine ?: run { activeConversation = null; return@withLock null }
+            activeConversation?.let { old ->
+                activeConversation = null
+                runCatching { old.close() }
+            }
+            val fresh = runCatching {
+                eng.createConversation(ConversationConfig(samplerConfig = sampler))
+            }.getOrNull()
+            activeConversation = fresh
+            _isFreshConversation = true
+            fresh
+        }
+
     // ── generateStream ────────────────────────────────────────────────────────
 
     /**
@@ -1051,14 +1086,12 @@ class LiteRTInferenceEngine @Inject constructor(
                         DebugLogger.log("LITERT", "[GEN] Called cancelProcess() — waiting for onError to fire...")
                         kotlinx.coroutines.withTimeoutOrNull(10_000L) { prev.await() }
                             ?: run {
-                                // cancelProcess didn't work — force cleanup as last resort
+                                // cancelProcess didn't work — force cleanup as last resort.
+                                // Serialized close-before-create so it can't collide with the
+                                // detached recycle the stalled turn may still run.
                                 DebugLogger.log("LITERT", "[GEN] TIMEOUT after cancelProcess — force recycling conversation")
                                 isNativeGenerating = false
-                                runCatching<Unit?> { activeConversation?.close() }
-                                val sc = samplerForActiveModel()
-                                activeConversation = runCatching {
-                                    eng.createConversation(ConversationConfig(samplerConfig = sc))
-                                }.getOrNull()
+                                recycleConversation(samplerForActiveModel())
                                 prev.complete(Unit)
                                 DebugLogger.log("LITERT", "[GEN] Force-recycled conversation")
                             }
@@ -1091,20 +1124,18 @@ class LiteRTInferenceEngine @Inject constructor(
                                      else samplerForActiveModel()
                 if (activeConversation != null && conversationIsGrounded != groundedNow) {
                     DebugLogger.log("LITERT", "[SAMPLER] mode flipped (grounded=$groundedNow) — recycling conversation")
-                    runCatching { activeConversation?.close() }
-                    activeConversation = runCatching {
-                        eng.createConversation(ConversationConfig(samplerConfig = desiredSampler))
-                    }.getOrNull()
+                    recycleConversation(desiredSampler)
                     conversationIsGrounded = groundedNow
                 }
                 // Safety fallback when there's no conversation yet (very
                 // first send after init, or after a recycle failure).
                 if (activeConversation == null) {
-                    activeConversation = eng.createConversation(ConversationConfig(samplerConfig = desiredSampler))
+                    recycleConversation(desiredSampler)   // close-before-create handles a null active
                     conversationIsGrounded = groundedNow
                     DebugLogger.log("LITERT", "[GEN] Safety fallback: created new conversation  grounded=$groundedNow")
                 }
-                val conversation = activeConversation!!
+                val conversation = activeConversation
+                    ?: throw IllegalStateException("Could not create a conversation (engine released or out of memory).")
 
                 watchdog = launch {
                     delay(timeoutMs)
@@ -1167,18 +1198,12 @@ class LiteRTInferenceEngine @Inject constructor(
                         // Async to avoid native deadlock — onDone runs on the native
                         // C++ inference thread, and createConversation() needs the same
                         // mutex that LiteRT holds until this callback returns.
+                        // Preserve the sampler mode the just-completed turn used (a
+                        // doc-Q&A follow-up is very likely also grounded).
                         CoroutineScope(Dispatchers.IO).launch {
-                            runCatching { conversation.close() }
-                            // Preserve the sampler mode the just-completed turn
-                            // used — if the user is in a doc-Q&A session their
-                            // next turn is very likely also grounded, and we
-                            // avoid an extra recycle at the top of generateStream.
                             val sc = if (conversationIsGrounded) groundedSamplerFor(loadedModelPath ?: "")
                                      else samplerForActiveModel()
-                            activeConversation = runCatching {
-                                eng.createConversation(ConversationConfig(samplerConfig = sc))
-                            }.getOrNull()
-                            _isFreshConversation = true
+                            recycleConversation(sc)
                             thisDone.complete(Unit)
                         }
 
@@ -1187,6 +1212,14 @@ class LiteRTInferenceEngine @Inject constructor(
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                         val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
                         DebugLogger.log("LITERT", "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}  conv=recycled")
+                        // Drain BOTH deferred-close handles. Previously only
+                        // closingEngine was closed here, so a closingConversation
+                        // saved during a memory-pressure deferred close leaked until
+                        // the next full close.
+                        closingConversation?.let { old ->
+                            runCatching { old.close() }
+                            closingConversation = null
+                        }
                         closingEngine?.let { old ->
                             runCatching { old.close() }
                             closingEngine = null
@@ -1208,17 +1241,9 @@ class LiteRTInferenceEngine @Inject constructor(
                         // Async to avoid native-thread deadlock (LiteRT holds an internal mutex
                         // until this callback returns; createConversation() needs that mutex).
                         CoroutineScope(Dispatchers.IO).launch {
-                            runCatching { conversation.close() }
-                            // Preserve the sampler mode the just-completed turn
-                            // used — if the user is in a doc-Q&A session their
-                            // next turn is very likely also grounded, and we
-                            // avoid an extra recycle at the top of generateStream.
                             val sc = if (conversationIsGrounded) groundedSamplerFor(loadedModelPath ?: "")
                                      else samplerForActiveModel()
-                            activeConversation = runCatching {
-                                eng.createConversation(ConversationConfig(samplerConfig = sc))
-                            }.getOrNull()
-                            _isFreshConversation = true
+                            recycleConversation(sc)
                             thisDone.complete(Unit)
                         }
 
@@ -1326,12 +1351,10 @@ class LiteRTInferenceEngine @Inject constructor(
      */
     override suspend fun resetSession() = withContext(engineDispatcher) {
         generateMutex.withLock {
-            val eng = engine ?: return@withLock
-            runCatching { activeConversation?.close() }
-            val sc = samplerForActiveModel()
-            activeConversation = runCatching {
-                eng.createConversation(ConversationConfig(samplerConfig = sc))
-            }.getOrNull()
+            if (engine == null) return@withLock
+            // Serialized close-before-create (same invariant as the per-turn
+            // recycle) so a reset can't collide with an in-flight recycle.
+            recycleConversation(samplerForActiveModel())
             nativeDoneSignal = null
             _isFreshConversation = true   // next turn must re-send system prompt
             DebugLogger.log("LITERT", "[SESSION] Session reset — conversation recycled, KV cache cleared")
