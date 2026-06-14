@@ -24,8 +24,8 @@ android {
     }
     defaultConfig {
         applicationId = "com.saarthi.app"
-        versionCode = 27
-        versionName = "1.0.26"
+        versionCode = 28
+        versionName = "1.0.27"
         // Instrumentation runner for the androidTest APK (Firebase Test Lab /
         // `connectedAndroidTest`). The app convention plugin doesn't set this
         // — only the library one did — so the generated test APK referenced a
@@ -140,13 +140,6 @@ dependencies {
     implementation(project(":feature:feature-onboarding"))
     implementation(project(":feature:feature-assistant"))
 
-    // sherpa-onnx neural TTS runtime. Declared here (the application module) —
-    // NOT in feature-assistant — because only an app module can package a local
-    // .aar (classes + jni/*.so) into the final APK. feature-assistant compiles
-    // against it via compileOnly. The file is fetched by feature-assistant's
-    // downloadSherpaOnnx task (and by the CI workflow before the build).
-    implementation(files(rootProject.file("feature/feature-assistant/libs/sherpa-onnx-1.13.2.aar")))
-
     // Firebase Crashlytics — only declared when google-services.json is present.
     // Listing them outside this guard would force every contributor to provide
     // a Firebase config or the build would fail at the AAR resolution step.
@@ -164,11 +157,4 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
-}
-
-// Ensure the sherpa-onnx AAR is downloaded before app packaging consumes it as
-// a local file dependency (the file lives in feature-assistant/libs). On CI the
-// workflow curls it first; this guarantees correct ordering for local builds too.
-tasks.matching { it.name == "preBuild" }.configureEach {
-    dependsOn(":feature:feature-assistant:downloadSherpaOnnx")
 }

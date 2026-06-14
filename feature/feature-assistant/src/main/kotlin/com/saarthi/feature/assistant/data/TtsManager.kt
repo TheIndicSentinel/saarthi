@@ -1,124 +1,92 @@
 package com.saarthi.feature.assistant.data
 
 import android.content.Context
+import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.VoiceGender
 import com.saarthi.core.i18n.VoiceHint
+import com.saarthi.core.inference.DebugLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Public TTS router — the ONLY TTS call site for the rest of the app.
+ * Thin wrapper around Android's built-in [TextToSpeech]. Lazily initialises on
+ * first speak so we don't pay engine startup cost until the user presses Listen.
+ * Exposes [isSpeaking] for the UI to flip the bubble action chip.
  *
- * Manages two engine slots:
- *
- *  • [systemEngine] ([SystemTtsEngine]) — Android TextToSpeech.
- *    Always present after app start. Used as the default and fallback.
- *
- *  • [neuralEngine] — Piper/sherpa-onnx (Phase 2). Null until a voice pack
- *    is installed and the device is MID+ tier. When non-null and available
- *    for the active language, it takes priority over the system engine.
- *
- * Routing logic:
- *   1. If [neuralEngine] is non-null, available, and supports [language] →
- *      use neural.
- *   2. Otherwise → use [systemEngine].
- *
- * StateFlow management lives here (not in the engines) so the rest of the
- * app has a single observable surface, regardless of which engine fired.
+ * Offline-by-default: the Google TTS engine ships with most language packs
+ * on-device. For English we request the en-IN locale and prefer India-region
+ * voices, so the assistant sounds Indian where those voices are installed
+ * (e.g. hi-in / en-in voices on Samsung/Pixel). Per-persona pitch/rate/gender
+ * come from [VoiceHint].
  */
 @Singleton
 class TtsManager @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    private var tts: TextToSpeech? = null
+    private var initialized: Boolean = false
+    private var pendingSpeak: (() -> Unit)? = null
+
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
     private val _activeUtteranceId = MutableStateFlow<String?>(null)
     val activeUtteranceId: StateFlow<String?> = _activeUtteranceId.asStateFlow()
 
-    // Id of the FINAL chunk of the current multi-part reply. isSpeaking must
-    // stay true across all chunks; only the last onDone flips it false.
+    // Utterance id of the FINAL chunk of the current (possibly multi-part) reply.
     @Volatile private var lastChunkId: String? = null
 
-    private val callbacks = TtsCallbacks(
-        onStart = { id ->
-            _isSpeaking.value = true
-            _activeUtteranceId.value = id
-        },
-        onDone = { id ->
-            if (id == lastChunkId) {
-                _isSpeaking.value = false
-                _activeUtteranceId.value = null
+    private fun ensureInitialized(onReady: () -> Unit) {
+        if (initialized) { onReady(); return }
+        pendingSpeak = onReady
+        if (tts != null) return  // init already in flight
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                initialized = true
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {
+                        _isSpeaking.value = true
+                        _activeUtteranceId.value = utteranceId
+                    }
+                    override fun onDone(utteranceId: String?) {
+                        if (utteranceId == lastChunkId) {
+                            _isSpeaking.value = false
+                            _activeUtteranceId.value = null
+                        }
+                    }
+                    @Deprecated("Old API but TTS still calls this on some OEMs")
+                    override fun onError(utteranceId: String?) {
+                        _isSpeaking.value = false
+                        if (_activeUtteranceId.value == utteranceId) _activeUtteranceId.value = null
+                    }
+                    override fun onError(utteranceId: String?, errorCode: Int) {
+                        DebugLogger.log("TTS", "Utterance error code=$errorCode  id=$utteranceId")
+                        _isSpeaking.value = false
+                        if (_activeUtteranceId.value == utteranceId) _activeUtteranceId.value = null
+                    }
+                })
+                pendingSpeak?.invoke()
+                pendingSpeak = null
+            } else {
+                DebugLogger.log("TTS", "TTS init FAILED status=$status — speak ignored")
+                pendingSpeak = null
             }
-        },
-        onError = { id, _ ->
-            _isSpeaking.value = false
-            if (_activeUtteranceId.value == id) _activeUtteranceId.value = null
-        },
-    )
-
-    // ── Engine slots ──────────────────────────────────────────────────────────
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    private val systemEngine: SystemTtsEngine = SystemTtsEngine(context)
-
-    /**
-     * LAZY neural engine. CRITICAL: the neural engine's native init (sherpa-onnx
-     * + onnxruntime) must NOT run eagerly at startup or right after download —
-     * doing so collides with litertlm's GPU model load and SIGKILLs the process
-     * (observed crash-loop: "killed during MODEL_LOAD"). Instead, the voice-pack
-     * subsystem registers a [neuralLoader] factory; the engine is constructed +
-     * init'd on a background thread the FIRST TIME we actually speak in a
-     * supported language — by which point the LLM is already loaded and idle.
-     */
-    @Volatile private var neuralLoader: (suspend () -> TtsEngine?)? = null
-    @Volatile private var neuralSupportedLanguages: Set<SupportedLanguage> = emptySet()
-    @Volatile private var neuralEngine: TtsEngine? = null
-    @Volatile private var neuralLoading: Boolean = false
-
-    /**
-     * Register a neural voice pack as AVAILABLE. [loader] constructs AND
-     * initialises the engine (the heavy native load) and returns it, or null on
-     * failure. It is invoked lazily off the main thread on first use — never
-     * here. Re-registering (e.g. after a gender switch) drops the cached engine
-     * so the next speak reloads the new voice.
-     */
-    fun registerNeuralPack(loader: suspend () -> TtsEngine?, supportedLanguages: Set<SupportedLanguage>) {
-        neuralLoader = loader
-        neuralSupportedLanguages = supportedLanguages
-        neuralEngine?.let { old -> scope.launch { runCatching { old.release() } } }
-        neuralEngine = null
+        }
     }
-
-    /** Drop the neural pack entirely — all synthesis returns to the system engine. */
-    fun clearNeuralPack() {
-        neuralLoader = null
-        neuralSupportedLanguages = emptySet()
-        neuralEngine?.let { old -> scope.launch { runCatching { old.release() } } }
-        neuralEngine = null
-    }
-
-    // ── Public API (unchanged surface — no callers need updating) ─────────────
 
     /**
      * Speak [text] in [language]'s locale if available; falls back to device
      * default otherwise. [voiceHint] controls pitch / speech-rate / gender so
      * spoken replies match the active persona.
-     *
-     * Routes to [neuralEngine] when available for [language]; falls back to
-     * [systemEngine] otherwise.
      */
     fun speak(
         text: String,
@@ -128,69 +96,60 @@ class TtsManager @Inject constructor(
         val spoken = sanitizeForSpeech(text)
         if (spoken.isBlank()) return ""
         val id = UUID.randomUUID().toString()
-
-        val hint = voiceHint ?: VoiceHint(VoiceGender.NEUTRAL, 1.0f, 1.0f)
-        val locale = ttsLocaleFor(language)
-
-        val maxLen = runCatching { android.speech.tts.TextToSpeech.getMaxSpeechInputLength() }
-            .getOrDefault(4000)
-            .coerceIn(500, 4000) - 100
-        val chunks = splitTextForTts(spoken, maxLen)
-        if (chunks.isEmpty()) return ""
-
-        lastChunkId = "${id}_${chunks.lastIndex}"
-
-        val engine = pickEngine(language)
-        // SystemTtsEngine needs the dispatcher wired before each speak
-        // (lazily, since the TTS object is created asynchronously).
-        if (engine is SystemTtsEngine) engine.setCallbackDispatcher(callbacks)
-        engine.speakChunks(chunks, locale, hint, id, callbacks)
-
+        ensureInitialized {
+            val locale = ttsLocaleFor(language)
+            val supported = tts?.isLanguageAvailable(locale) ?: TextToSpeech.LANG_NOT_SUPPORTED
+            if (supported >= TextToSpeech.LANG_AVAILABLE) {
+                tts?.language = locale
+            } else {
+                DebugLogger.log("TTS", "Language ${locale.language} unavailable — using device default")
+            }
+            val hint = voiceHint ?: VoiceHint(VoiceGender.NEUTRAL, 1.0f, 1.0f)
+            tts?.setPitch(hint.pitch)
+            tts?.setSpeechRate(hint.rate)
+            if (hint.gender != VoiceGender.NEUTRAL) {
+                pickVoiceByGender(locale, hint.gender)?.let { v ->
+                    tts?.voice = v
+                    DebugLogger.log("TTS", "Voice → ${v.name}  (${hint.gender})  pitch=${hint.pitch}  rate=${hint.rate}")
+                }
+            }
+            val maxLen = runCatching { TextToSpeech.getMaxSpeechInputLength() }
+                .getOrDefault(4000)
+                .coerceIn(500, 4000) - 100
+            val chunks = splitTextForTts(spoken, maxLen)
+            if (chunks.isEmpty()) return@ensureInitialized
+            lastChunkId = "${id}_${chunks.lastIndex}"
+            chunks.forEachIndexed { i, chunk ->
+                val mode = if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                val chunkId = "${id}_$i"
+                val params = Bundle().apply {
+                    putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, chunkId)
+                }
+                tts?.speak(chunk, mode, params, chunkId)
+            }
+        }
         return id
     }
 
-    /**
-     * Pick the engine for [language]. If a neural pack is registered for it but
-     * not yet loaded, kick off the background load (so the NEXT reply uses the
-     * neural voice) and use the system engine for THIS utterance. This is what
-     * keeps the heavy native load off the startup / model-load path.
-     */
-    private fun pickEngine(language: SupportedLanguage): TtsEngine {
-        val wantsNeural = neuralLoader != null && language in neuralSupportedLanguages
-        if (!wantsNeural) return systemEngine
-
-        val loaded = neuralEngine
-        if (loaded != null && loaded.isAvailable) return loaded
-
-        // Not loaded yet → start the one-time background load, speak via system now.
-        if (!neuralLoading) {
-            neuralLoading = true
-            val loader = neuralLoader
-            scope.launch {
-                val e = runCatching { loader?.invoke() }.getOrNull()
-                neuralEngine = e?.takeIf { it.isAvailable }
-                neuralLoading = false
-            }
-        }
-        return systemEngine
-    }
-
     fun stop() {
-        systemEngine.stop()
-        neuralEngine?.stop()
+        tts?.stop()
         _isSpeaking.value = false
         _activeUtteranceId.value = null
     }
 
     fun release() {
-        systemEngine.release()
-        neuralEngine?.release()
+        runCatching { tts?.shutdown() }
+        tts = null
+        initialized = false
         _isSpeaking.value = false
         _activeUtteranceId.value = null
     }
 
-    // ── Private ───────────────────────────────────────────────────────────────
-
+    /**
+     * Map the Saarthi language to a Locale the TTS engine understands. English
+     * uses en-IN so an Indian-accented voice is preferred; Indic scripts use the
+     * script-only locale, which falls back to the device default if missing.
+     */
     private fun ttsLocaleFor(language: SupportedLanguage): Locale = when (language) {
         SupportedLanguage.ENGLISH  -> Locale("en", "IN")
         SupportedLanguage.HINDI    -> Locale("hi")
@@ -205,7 +164,47 @@ class TtsManager @Inject constructor(
     }
 
     /**
-     * Turn a markdown/rich reply into plain prose the TTS engine reads
+     * Pick the best on-device voice for [locale] matching [gender] — region-first,
+     * quality-second. The region sort is what makes en-IN win over en-US: without
+     * it the highest-quality "en" voice (often en-us) was chosen, overriding the
+     * en-IN locale and making English sound American.
+     */
+    private fun pickVoiceByGender(locale: Locale, gender: VoiceGender): android.speech.tts.Voice? {
+        val engine = tts ?: return null
+        val wantMale = gender == VoiceGender.MALE
+        val wantCountry = locale.country.uppercase()
+
+        val candidates = runCatching { engine.voices }.getOrNull().orEmpty()
+            .filter { it.locale.language == locale.language && !it.isNetworkConnectionRequired }
+            .sortedWith(
+                compareByDescending<android.speech.tts.Voice> {
+                    wantCountry.isNotEmpty() && it.locale.country.equals(wantCountry, ignoreCase = true)
+                }.thenByDescending { runCatching { it.quality }.getOrDefault(0) }
+            )
+        if (candidates.isEmpty()) return null
+
+        val malePattern   = Regex("(?:^|[-_#])(male|iol|iom|tpd|and|ene|mlc|mlh)(?:[-_#]|$)", RegexOption.IGNORE_CASE)
+        val femalePattern = Regex("(?:^|[-_#])(female|tpf|tpc|iog|cxx|flc|flh)(?:[-_#]|$)", RegexOption.IGNORE_CASE)
+        val wantPattern = if (wantMale) malePattern else femalePattern
+        val antiPattern = if (wantMale) femalePattern else malePattern
+
+        fun matches(v: android.speech.tts.Voice, pattern: Regex, label: String): Boolean {
+            val features = runCatching { v.features }.getOrNull().orEmpty()
+            return features.any { it.equals(label, ignoreCase = true) } || pattern.containsMatchIn(v.name)
+        }
+
+        val wantedLabel = if (wantMale) "male" else "female"
+        val antiLabel   = if (wantMale) "female" else "male"
+
+        candidates.firstOrNull { matches(it, wantPattern, wantedLabel) }?.let { return it }
+        candidates.firstOrNull { !matches(it, antiPattern, antiLabel) }?.let { return it }
+
+        DebugLogger.log("TTS", "No $wantedLabel voice found; keeping system default")
+        return null
+    }
+
+    /**
+     * Turn a markdown/rich chat reply into plain prose the TTS engine reads
      * naturally. Removes code fences, emphasis, citations, bullets, emoji.
      */
     private fun sanitizeForSpeech(raw: String): String {

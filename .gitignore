@@ -17,8 +17,6 @@
 local.properties
 keystore/*.jks
 keystore/*.keystore
-# Large binary runtime dependencies — downloaded during CI and local builds
-feature/feature-assistant/libs/*.aar
 
 # Kotlin compiler transient session files
 .kotlin/

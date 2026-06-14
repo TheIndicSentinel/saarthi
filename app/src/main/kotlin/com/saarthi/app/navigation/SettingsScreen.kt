@@ -27,7 +27,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CloudDownload
@@ -211,18 +210,6 @@ fun SettingsScreen(
                     onClick = { onNavigate("pro") },
                 )
             }
-
-            // Voice style — Male / Female toggle (only meaningful if a neural voice
-            // was downloaded during onboarding or is being downloaded in background).
-            // Routes to voice screen for the toggle and any re-download option.
-            SaarthiListRow(
-                leadingIcon = {
-                    Icon(Icons.Outlined.RecordVoiceOver, contentDescription = null)
-                },
-                title = "Voice style",
-                subtitle = "Choose male or female voice for speech",
-                onClick = { onNavigate("voice") },
-            )
 
             SectionLabel("Privacy")
             SaarthiListRow(
