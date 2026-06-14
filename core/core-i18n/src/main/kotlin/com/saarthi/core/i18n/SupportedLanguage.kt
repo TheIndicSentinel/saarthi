@@ -91,7 +91,7 @@ enum class SupportedLanguage(
         }
         return when (this) {
             ENGLISH  -> listOf("Good morning", "Good afternoon", "Good evening", "Good night")
-            HINDI    -> listOf("सुप्रभात", "नमस्ते", "शुभ संध्या", "शुभ रात्रि")
+            HINDI    -> listOf("सुप्रभात", "शुभ दोपहर", "शुभ संध्या", "शुभ रात्रि")
             TAMIL    -> listOf("காலை வணக்கம்", "மதிய வணக்கம்", "மாலை வணக்கம்", "இனிய இரவு")
             TELUGU   -> listOf("శుభోదయం", "శుభ మధ్యాహ్నం", "శుభ సాయంత్రం", "శుభ రాత్రి")
             BENGALI  -> listOf("সুপ্রভাত", "শুভ অপরাহ্ন", "শুভ সন্ধ্যা", "শুভ রাত্রি")

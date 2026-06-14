@@ -101,7 +101,7 @@ object PersonalityCatalog {
             "End complex answers with one question that nudges the student to think further.",
             "Never use emojis. Never use exclamation marks.",
         ),
-        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 0.85f, rate = 0.92f),
+        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 0.82f, rate = 0.90f),
     )
 
     val DADI = Personality(
@@ -150,7 +150,10 @@ object PersonalityCatalog {
             // Cross-turn consistency anchor.
             "Stay consistent across the conversation. If you recommended option A earlier, do not flip to option B in a later reply without explicitly acknowledging \"earlier I said X, here's why I'd adjust\".",
         ),
-        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 1.05f, rate = 1.08f),
+        // Pitch lowered well below neutral so it reads clearly MALE even on a
+        // device whose only Hindi voice is female-ish; fast rate keeps the
+        // energetic coach character.
+        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 0.90f, rate = 1.10f),
     )
 
     val KATHAKAR = Personality(
@@ -179,7 +182,7 @@ object PersonalityCatalog {
             "Use one vivid sensory detail (a sound, a smell, a place) when telling a story — never more, the detail should land, not crowd.",
             "Never use bullet lists or numbered steps. Prose only.",
         ),
-        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 0.95f, rate = 0.96f),
+        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 0.88f, rate = 0.96f),
     )
 
     val CODE_GURU = Personality(
@@ -207,7 +210,7 @@ object PersonalityCatalog {
             "Mention complexity (O-notation) and one common pitfall ONLY when the question is about an algorithm or performance-sensitive code path. Skip for UI, styling, config, or one-liner questions.",
             "Never start with 'Great question', 'Sure!', 'Of course!', or any filler. Never end with 'Hope this helps!'.",
         ),
-        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 1.00f, rate = 1.05f),
+        voiceHint = VoiceHint(gender = VoiceGender.MALE, pitch = 0.90f, rate = 1.05f),
     )
 
     val all: List<Personality> = listOf(SAARTHI, PANDIT, DADI, COACH, KATHAKAR, CODE_GURU)
