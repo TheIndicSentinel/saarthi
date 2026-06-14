@@ -1371,13 +1371,7 @@ class ChatRepositoryImpl @Inject constructor(
         }
         val timeStr = java.text.SimpleDateFormat("HH:mm 'on' EEE, d MMM yyyy", java.util.Locale.US)
             .format(now.time)
-        // Hand the model the EXACT greeting for the band, in the user's language
-        // (same source of truth as the home screen — SupportedLanguage.timeGreeting),
-        // so even weaker models greet correctly instead of defaulting to "good
-        // morning". The "only if you greet" guard keeps it from forcing a greeting.
-        val greeting = language.timeGreeting(hour)
-        return "Current local time is $timeStr — it is $band. Only if you greet the user, " +
-            "use a $band-appropriate greeting such as \"$greeting\" — never a morning greeting at night or vice versa."
+        return "Current local time is $timeStr — it is $band."
     }
 
     /**
