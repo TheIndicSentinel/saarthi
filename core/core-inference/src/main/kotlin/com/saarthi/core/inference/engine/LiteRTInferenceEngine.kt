@@ -505,7 +505,11 @@ class LiteRTInferenceEngine @Inject constructor(
     // truncated grounded replies at ~80–190 tokens. See [isRepetitionLoop].
     private fun detectRepetitionLoop(buf: StringBuilder): Boolean {
         if (buf.length < 60) return false
-        return isRepetitionLoop(buf.substring(maxOf(0, buf.length - 240)))
+        // 360-char window so a longer repeating UNIT can still be caught: check #1
+        // needs 3 copies in the window, so the period it can detect is window/3.
+        // 240 only caught ≤80-char periods; the Kisan-pack 1B loop repeated an
+        // ~88-char header line, which slipped through. 360 → periods up to ~120.
+        return isRepetitionLoop(buf.substring(maxOf(0, buf.length - 360)))
     }
 
     // ── Initialize ────────────────────────────────────────────────────────────
@@ -1503,8 +1507,11 @@ internal fun isRepetitionLoop(tail: String): Boolean {
     // 1. A phrase of length L that repeats 3× immediately back-to-back at the
     //    very end ("X. X. X." / "abcabcabc"). Prose never does this; a stuck
     //    model does. Per-token streaming means we hit a period boundary within a
-    //    few tokens of a real loop starting.
-    val maxL = minOf(40, tail.length / 3)
+    //    few tokens of a real loop starting. Cap raised 40→120 so a repeated
+    //    sentence/header (the Kisan 1B loop was an ~88-char line) is caught, not
+    //    just short word loops. Still 3× CONSECUTIVE identical — coherent answers
+    //    never do that, so grounded/legal replies are unaffected.
+    val maxL = minOf(120, tail.length / 3)
     for (l in maxL downTo 8) {
         val a = tail.substring(tail.length - l)
         val b = tail.substring(tail.length - 2 * l, tail.length - l)

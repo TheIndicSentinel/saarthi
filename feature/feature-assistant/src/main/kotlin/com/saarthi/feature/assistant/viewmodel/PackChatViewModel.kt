@@ -10,6 +10,7 @@ import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.ConversationEntity
 import com.saarthi.feature.assistant.data.RagDocumentRepository
@@ -62,6 +63,7 @@ class PackChatViewModel @Inject constructor(
     private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
     private val kisanPackPreference: com.saarthi.core.i18n.KisanPackPreference,
     private val packInstaller: com.saarthi.feature.assistant.data.KisanPackInstaller,
+    private val systemPromptProvider: SystemPromptProvider,
 ) : ViewModel() {
 
     private val packSessionId = PackId.KISAN.sessionId            // RAG chunks
@@ -341,6 +343,32 @@ class PackChatViewModel @Inject constructor(
                 used += block.length
             }
         }.trim()
+
+        // ── COMPACT (Gemma 1B) — lean prompt ─────────────────────────────────
+        // The full advisor prompt below is ~2 000 chars of nuanced rules. The 1B
+        // can't follow that many instructions; it latches onto the persona header
+        // and loops (the "PM-KISAN … advisor's guide!" parroting). Give it a
+        // minimal notes+question prompt instead — the same lean approach the main
+        // chat uses for COMPACT. STANDARD/LARGE keep the full prompt unchanged.
+        if (systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+            == SystemPromptProvider.ModelTier.COMPACT
+        ) {
+            val compactLang = lang.systemPromptInstruction
+            return buildString {
+                if (compactLang.isNotBlank()) { append(compactLang); append("\n\n") }
+                append("Answer the farmer's question using ONLY the notes below. ")
+                append("Be brief, clear and direct — a few short sentences, no headings. ")
+                append("Never repeat a line. Do not write a \"Source:\" line or [1] citations. ")
+                append("If the notes don't cover it, say it isn't in the offline pack and give one short general tip.\n\n")
+                append("=== NOTES ===\n")
+                append(sources)
+                append("\n=== END NOTES ===\n\n")
+                append("Question: ")
+                append(question)
+                append("\nAnswer:")
+                if (compactLang.isNotBlank()) { append("\n\n"); append(compactLang) }
+            }
+        }
 
         // Language directive — same mechanism the main chat uses. Notes
         // remain in English (the curated pack), but the model answers in

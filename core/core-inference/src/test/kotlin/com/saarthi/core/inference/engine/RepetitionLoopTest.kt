@@ -72,4 +72,14 @@ class RepetitionLoopTest {
         val loop = "Maharashtra is a state. ".repeat(6)
         assertTrue(isRepetitionLoop(loop.takeLast(240)))
     }
+
+    @Test
+    fun `a long header line repeated back-to-back is a loop`() {
+        // The real Kisan-pack 1B loop: an ~88-char header line repeated many
+        // times. Its period exceeds the old 40/240 limits, so it slipped through;
+        // the widened 120/360 window must now catch it.
+        val line = "PM-KISAN (Pradhan Mantri Kisan Samman Nidhi) - A warm, practical farming advisor's guide! "
+        val loop = line.repeat(6)
+        assertTrue("Long repeating header must be caught", isRepetitionLoop(loop.takeLast(360)))
+    }
 }
