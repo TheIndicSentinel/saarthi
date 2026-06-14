@@ -98,21 +98,25 @@ class VoicePackManager @Inject constructor(
             val pack = VoiceCatalog.findById(packId) ?: return@launch
             File(voicesDir, pack.extractedDir).deleteRecursively()
             pref.markRemoved(packId)
-            reloadActiveEngine()
+            registerActivePack()
             _states[packId]?.value = DownloadState.Idle
             DebugLogger.log("TTS", "VoicePackManager: removed $packId")
         }
     }
 
-    /** Call on app start to reload any previously downloaded voice. */
+    /**
+     * Call on app start to make a previously-downloaded voice available. This
+     * only REGISTERS the pack (cheap) — it does NOT load the heavy native engine
+     * here. Loading happens lazily on first speak (see TtsManager), so it never
+     * collides with the litertlm model load at startup (which previously caused
+     * a SIGKILL crash-loop).
+     */
     fun restoreOnStartup() {
         if (!isNeuralSupported) return
         scope.launch {
             val installed = pref.installedPackIds.first()
             if (installed.isEmpty()) return@launch
-            // Prefer the first installed pack for the active language.
-            // A future UI can let users switch between packs.
-            reloadActiveEngine()
+            registerActivePack()
         }
     }
 
@@ -160,10 +164,14 @@ class VoicePackManager @Inject constructor(
         tarFile.delete()
         DebugLogger.log("TTS", "VoicePackManager: extracted ${pack.extractedDir}")
 
-        // ── 3. Persist + load ────────────────────────────────────────────────
+        // ── 3. Persist + register (NOT load) ─────────────────────────────────
+        // Register only — do NOT init the native engine here. Right after
+        // onboarding the litertlm model is still loading on the GPU; loading
+        // the sherpa-onnx native runtime concurrently SIGKILLs the process.
+        // The engine loads lazily on the first speak instead.
         pref.markInstalled(pack.id)
         stateFlow.value = DownloadState.Ready
-        reloadActiveEngine()
+        registerActivePack()
     }
 
     private fun extractTarBz2(tarFile: File, destDir: File) {
@@ -186,34 +194,47 @@ class VoicePackManager @Inject constructor(
         }
     }
 
-    private suspend fun reloadActiveEngine() = withContext(Dispatchers.IO) {
+    /**
+     * Register the installed pack (matching the gender preference) with
+     * [TtsManager] as a LAZY loader. The heavy native init is deferred to the
+     * first speak in a supported language — never run here, so it can't collide
+     * with the litertlm model load.
+     */
+    private suspend fun registerActivePack() = withContext(Dispatchers.IO) {
         val installed = pref.installedPackIds.first()
         val gender = pref.voiceGender.first()
-        // Prefer the pack matching the user's gender preference; fall back to any installed.
         val pack = VoiceCatalog.entries.firstOrNull { it.id in installed && it.gender == gender }
             ?: VoiceCatalog.entries.firstOrNull { it.id in installed }
         if (pack == null) {
-            ttsManager.setNeuralEngine(null, emptySet())
+            ttsManager.clearNeuralPack()
             return@withContext
         }
-        val engine = NeuralTtsEngine(voicesDir, pack)
-        if (engine.init()) {
-            val languages = VoiceCatalog.entries
-                .filter { it.id in installed }
-                .map { it.language }
-                .toSet()
-            ttsManager.setNeuralEngine(engine, languages)
-            DebugLogger.log("TTS", "VoicePackManager: neural engine active  pack=${pack.id}  gender=$gender  langs=${languages.map { it.code }}")
-        } else {
-            ttsManager.setNeuralEngine(null, emptySet())
-        }
+        val languages = VoiceCatalog.entries
+            .filter { it.id in installed }
+            .map { it.language }
+            .toSet()
+        val voices = voicesDir
+        ttsManager.registerNeuralPack(
+            loader = {
+                // Runs lazily on TtsManager's IO scope on first speak.
+                val engine = NeuralTtsEngine(voices, pack)
+                if (engine.init()) {
+                    DebugLogger.log("TTS", "VoicePackManager: neural engine loaded (lazy)  pack=${pack.id}")
+                    engine
+                } else {
+                    null
+                }
+            },
+            supportedLanguages = languages,
+        )
+        DebugLogger.log("TTS", "VoicePackManager: neural pack registered (lazy)  pack=${pack.id}  gender=$gender  langs=${languages.map { it.code }}")
     }
 
-    /** Switch to the pack matching the new gender preference, reloading if needed. */
+    /** Switch to the pack matching the new gender preference; re-registers lazily. */
     fun setGender(gender: String) {
         scope.launch {
             pref.setVoiceGender(gender)
-            reloadActiveEngine()
+            registerActivePack()
         }
     }
 

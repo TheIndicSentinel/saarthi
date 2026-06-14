@@ -5,9 +5,13 @@ import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.VoiceGender
 import com.saarthi.core.i18n.VoiceHint
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
@@ -66,32 +70,44 @@ class TtsManager @Inject constructor(
 
     // ── Engine slots ──────────────────────────────────────────────────────────
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private val systemEngine: SystemTtsEngine = SystemTtsEngine(context)
 
     /**
-     * Neural engine slot — null until Phase 2 is installed.
-     * Settable so [NeuralTtsEngine] (Phase 2) can be injected at runtime
-     * without modifying this class: the voice-pack install flow calls
-     * [setNeuralEngine] after downloading and loading the model files.
+     * LAZY neural engine. CRITICAL: the neural engine's native init (sherpa-onnx
+     * + onnxruntime) must NOT run eagerly at startup or right after download —
+     * doing so collides with litertlm's GPU model load and SIGKILLs the process
+     * (observed crash-loop: "killed during MODEL_LOAD"). Instead, the voice-pack
+     * subsystem registers a [neuralLoader] factory; the engine is constructed +
+     * init'd on a background thread the FIRST TIME we actually speak in a
+     * supported language — by which point the LLM is already loaded and idle.
      */
-    @Volatile
-    private var neuralEngine: TtsEngine? = null
+    @Volatile private var neuralLoader: (suspend () -> TtsEngine?)? = null
+    @Volatile private var neuralSupportedLanguages: Set<SupportedLanguage> = emptySet()
+    @Volatile private var neuralEngine: TtsEngine? = null
+    @Volatile private var neuralLoading: Boolean = false
 
     /**
-     * The languages for which the current [neuralEngine] has a loaded voice
-     * model. Empty until Phase 2 provides a neural pack.
+     * Register a neural voice pack as AVAILABLE. [loader] constructs AND
+     * initialises the engine (the heavy native load) and returns it, or null on
+     * failure. It is invoked lazily off the main thread on first use — never
+     * here. Re-registering (e.g. after a gender switch) drops the cached engine
+     * so the next speak reloads the new voice.
      */
-    @Volatile
-    private var neuralSupportedLanguages: Set<SupportedLanguage> = emptySet()
-
-    /**
-     * Called by the voice-pack subsystem (Phase 2) after successfully loading
-     * a neural voice model. Passing null clears the neural slot and routes
-     * all synthesis back to the system engine.
-     */
-    fun setNeuralEngine(engine: TtsEngine?, supportedLanguages: Set<SupportedLanguage>) {
-        neuralEngine = engine
+    fun registerNeuralPack(loader: suspend () -> TtsEngine?, supportedLanguages: Set<SupportedLanguage>) {
+        neuralLoader = loader
         neuralSupportedLanguages = supportedLanguages
+        neuralEngine?.let { old -> scope.launch { runCatching { old.release() } } }
+        neuralEngine = null
+    }
+
+    /** Drop the neural pack entirely — all synthesis returns to the system engine. */
+    fun clearNeuralPack() {
+        neuralLoader = null
+        neuralSupportedLanguages = emptySet()
+        neuralEngine?.let { old -> scope.launch { runCatching { old.release() } } }
+        neuralEngine = null
     }
 
     // ── Public API (unchanged surface — no callers need updating) ─────────────
@@ -133,6 +149,32 @@ class TtsManager @Inject constructor(
         return id
     }
 
+    /**
+     * Pick the engine for [language]. If a neural pack is registered for it but
+     * not yet loaded, kick off the background load (so the NEXT reply uses the
+     * neural voice) and use the system engine for THIS utterance. This is what
+     * keeps the heavy native load off the startup / model-load path.
+     */
+    private fun pickEngine(language: SupportedLanguage): TtsEngine {
+        val wantsNeural = neuralLoader != null && language in neuralSupportedLanguages
+        if (!wantsNeural) return systemEngine
+
+        val loaded = neuralEngine
+        if (loaded != null && loaded.isAvailable) return loaded
+
+        // Not loaded yet → start the one-time background load, speak via system now.
+        if (!neuralLoading) {
+            neuralLoading = true
+            val loader = neuralLoader
+            scope.launch {
+                val e = runCatching { loader?.invoke() }.getOrNull()
+                neuralEngine = e?.takeIf { it.isAvailable }
+                neuralLoading = false
+            }
+        }
+        return systemEngine
+    }
+
     fun stop() {
         systemEngine.stop()
         neuralEngine?.stop()
@@ -148,14 +190,6 @@ class TtsManager @Inject constructor(
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
-
-    private fun pickEngine(language: SupportedLanguage): TtsEngine {
-        val neural = neuralEngine
-        if (neural != null && neural.isAvailable && language in neuralSupportedLanguages) {
-            return neural
-        }
-        return systemEngine
-    }
 
     private fun ttsLocaleFor(language: SupportedLanguage): Locale = when (language) {
         SupportedLanguage.ENGLISH  -> Locale("en", "IN")
