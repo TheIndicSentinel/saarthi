@@ -37,6 +37,7 @@ internal class NeuralTtsEngine(
 
     private val modelDir = File(voicesDir, pack.extractedDir)
     private val modelPath = File(modelDir, pack.modelFilename).absolutePath
+    private val tokensPath = File(modelDir, pack.tokensFilename).absolutePath
     private val espeakDataDir = File(modelDir, "espeak-ng-data").absolutePath
 
     private var tts: OfflineTts? = null
@@ -54,8 +55,10 @@ internal class NeuralTtsEngine(
      * interrupted). The caller falls back to SystemTtsEngine.
      */
     fun init(): Boolean {
-        if (!File(modelPath).exists()) {
-            DebugLogger.log("TTS", "NeuralTts: model not found at $modelPath — skipping")
+        // All three inputs must exist or sherpa-onnx native init crashes the
+        // process rather than throwing. tokens.txt is REQUIRED for Piper VITS.
+        if (!File(modelPath).exists() || !File(tokensPath).exists() || !File(espeakDataDir).isDirectory) {
+            DebugLogger.log("TTS", "NeuralTts: incomplete pack at $modelDir (model/tokens/espeak missing) — skipping")
             return false
         }
         return runCatching {
@@ -63,6 +66,7 @@ internal class NeuralTtsEngine(
                 model = OfflineTtsModelConfig(
                     vits = OfflineTtsVitsModelConfig(
                         model   = modelPath,
+                        tokens  = tokensPath,
                         dataDir = espeakDataDir,
                     ),
                     numThreads = 2,

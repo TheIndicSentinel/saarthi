@@ -2,8 +2,8 @@ package com.saarthi.app
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.saarthi.feature.assistant.data.VoicePackManager
 import com.saarthi.core.i18n.VoicePackPreference
+import com.saarthi.feature.assistant.data.VoicePackManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,5 +24,11 @@ class VoiceSettingsViewModel @Inject constructor(
     val voiceGender: StateFlow<String> = pref.voiceGender
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "male")
 
-    fun setGender(gender: String) = manager.setGender(gender)
+    fun stateFor(packId: String) = manager.stateFor(packId)
+
+    /** Download (or retry) a voice pack. */
+    fun download(packId: String) = manager.download(packId)
+
+    /** Select an already-installed voice (male/female) as the active one. */
+    fun selectGender(gender: String) = manager.setGender(gender)
 }

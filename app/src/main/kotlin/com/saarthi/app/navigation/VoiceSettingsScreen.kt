@@ -14,13 +14,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,16 +41,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saarthi.app.VoiceSettingsViewModel
 import com.saarthi.core.ui.components.SaarthiTopBar
 import com.saarthi.core.ui.theme.SaarthiColors
+import com.saarthi.feature.assistant.data.VoiceCatalog
+import com.saarthi.feature.assistant.data.VoicePackManager
 
 /**
- * Simple voice style screen — Male or Female.
- *
- * The voice itself was downloaded automatically during onboarding (or is
- * downloading in the background). Users don't need to know about packs,
- * file sizes, or download mechanics. They just pick a voice they prefer.
- *
- * If neural TTS isn't available on this device, a brief honest note is shown
- * and the toggle is hidden — no dead-end "download" option shown.
+ * Pick Saarthi's Hindi voice (Male / Female). The voice usually downloads
+ * automatically right after onboarding; this screen shows live progress, an
+ * error + retry path if that auto-download failed, and lets the user switch
+ * between male and female. On devices that can't run neural TTS, a short honest
+ * note is shown instead — no download offered.
  */
 @Composable
 fun VoiceSettingsScreen(
@@ -54,7 +58,6 @@ fun VoiceSettingsScreen(
 ) {
     val gender by viewModel.voiceGender.collectAsStateWithLifecycle()
     val installed by viewModel.installedPackIds.collectAsStateWithLifecycle()
-    val hasVoice = installed.isNotEmpty()
 
     Column(
         modifier = Modifier
@@ -70,100 +73,149 @@ fun VoiceSettingsScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            when {
-                !viewModel.isNeuralSupported -> {
-                    // LOW/MINIMAL device — just tell the truth, no options
-                    Text(
-                        "Saarthi uses your phone's built-in voice. It works offline " +
-                            "and needs no setup — the built-in voice is what's available on this device.",
-                        style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
-                    )
-                }
-
-                !hasVoice -> {
-                    // Neural supported but download hasn't finished yet (or was skipped)
-                    Text(
-                        "An Indian voice is being prepared in the background. " +
-                            "Once ready, come back here to choose male or female.",
-                        style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
-                    )
-                }
-
-                else -> {
-                    // Voice is ready — show the simple Male / Female choice
-                    Text(
-                        "Choose the voice Saarthi speaks in.",
-                        style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    GenderOption(
-                        label = "Male",
-                        description = "Calm, clear and friendly",
-                        selected = gender == "male",
-                        onClick = { viewModel.setGender("male") },
-                    )
-                    GenderOption(
-                        label = "Female",
-                        description = "Warm and natural",
-                        selected = gender == "female",
-                        onClick = { viewModel.setGender("female") },
-                    )
-                }
+            if (!viewModel.isNeuralSupported) {
+                Text(
+                    "Saarthi uses your phone's built-in voice. It works offline with no " +
+                        "setup — that's what's available on this device.",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
+                )
+                return@Column
             }
+
+            Text(
+                "Choose the Hindi voice Saarthi reads replies in. Each voice is a one-time " +
+                    "~20 MB download and then works fully offline.",
+                style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
+            )
+            Spacer(Modifier.height(2.dp))
+
+            VoiceCatalog.entries.forEach { pack ->
+                val state by viewModel.stateFor(pack.id).collectAsStateWithLifecycle()
+                VoiceRow(
+                    pack       = pack,
+                    state      = state,
+                    installed  = pack.id in installed,
+                    selected   = pack.gender == gender && pack.id in installed,
+                    onDownload = { viewModel.download(pack.id) },
+                    onSelect   = { viewModel.selectGender(pack.gender) },
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Voice: Piper (MIT) · Engine: sherpa-onnx (Apache 2.0)",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = SaarthiColors.Text3,
+                    fontSize = 10.sp,
+                ),
+            )
         }
     }
 }
 
 @Composable
-private fun GenderOption(
-    label: String,
-    description: String,
+private fun VoiceRow(
+    pack: VoiceCatalog.VoicePack,
+    state: VoicePackManager.DownloadState,
+    installed: Boolean,
     selected: Boolean,
-    onClick: () -> Unit,
+    onDownload: () -> Unit,
+    onSelect: () -> Unit,
 ) {
-    Row(
+    val borderColor = if (selected) SaarthiColors.JadeBd else SaarthiColors.Border
+    val bgColor = if (selected) SaarthiColors.JadeSoft else SaarthiColors.Surface
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(
-                if (selected) SaarthiColors.JadeSoft else SaarthiColors.Surface
-            )
-            .border(
-                1.dp,
-                if (selected) SaarthiColors.JadeBd else SaarthiColors.Border,
-                RoundedCornerShape(16.dp),
-            )
-            .clickable(onClick = onClick)
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .let { if (installed) it.clickable(onClick = onSelect) else it }
             .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Outlined.RecordVoiceOver,
-            null,
-            tint = if (selected) SaarthiColors.Jade else SaarthiColors.Text3,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                label,
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (selected) SaarthiColors.Jade else SaarthiColors.Text,
-                ),
-            )
-            Text(
-                description,
-                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
-            )
-        }
-        if (selected) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                Icons.Outlined.Check,
+                Icons.Outlined.RecordVoiceOver,
                 null,
-                tint = SaarthiColors.Jade,
-                modifier = Modifier.size(18.dp),
+                tint = if (selected) SaarthiColors.Jade else SaarthiColors.Text3,
+                modifier = Modifier.size(20.dp),
             )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    pack.displayName,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (selected) SaarthiColors.Jade else SaarthiColors.Text,
+                    ),
+                )
+                Text(
+                    if (installed) "Installed" else "~${pack.approximateSizeMb} MB download",
+                    style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3),
+                )
+            }
+
+            when {
+                selected -> Icon(Icons.Outlined.Check, null, tint = SaarthiColors.Jade, modifier = Modifier.size(20.dp))
+                installed -> Text(
+                    "Select",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = SaarthiColors.Jade, fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+                state is VoicePackManager.DownloadState.Downloading ||
+                state is VoicePackManager.DownloadState.Extracting -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp), color = SaarthiColors.Jade, strokeWidth = 2.dp,
+                    )
+                }
+                state is VoicePackManager.DownloadState.Error -> {
+                    Button(
+                        onClick = onDownload,
+                        colors = ButtonDefaults.buttonColors(containerColor = SaarthiColors.Marigold),
+                    ) {
+                        Icon(Icons.Outlined.Refresh, null, modifier = Modifier.size(16.dp))
+                        Text("  Retry")
+                    }
+                }
+                else -> {
+                    Button(
+                        onClick = onDownload,
+                        colors = ButtonDefaults.buttonColors(containerColor = SaarthiColors.Jade),
+                    ) {
+                        Icon(Icons.Outlined.Download, null, modifier = Modifier.size(16.dp))
+                        Text("  Get")
+                    }
+                }
+            }
+        }
+
+        // Progress / error detail line below the row.
+        when (state) {
+            is VoicePackManager.DownloadState.Downloading -> {
+                Spacer(Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = { state.progressPct / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = SaarthiColors.Jade,
+                )
+            }
+            is VoicePackManager.DownloadState.Extracting -> {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Installing…",
+                    style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3),
+                )
+            }
+            is VoicePackManager.DownloadState.Error -> {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Download failed — tap Retry. (${state.message})",
+                    style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Rose),
+                )
+            }
+            else -> {}
         }
     }
 }

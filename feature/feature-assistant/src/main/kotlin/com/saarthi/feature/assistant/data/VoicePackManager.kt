@@ -55,6 +55,7 @@ class VoicePackManager @Inject constructor(
 
     private val voicesDir: File = File(context.filesDir, "voices")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val MAX_ATTEMPTS = 4
 
     private val _states = HashMap<String, MutableStateFlow<DownloadState>>()
     private val http = OkHttpClient.Builder()
@@ -129,34 +130,13 @@ class VoicePackManager @Inject constructor(
         voicesDir.mkdirs()
         val tarFile = File(voicesDir, pack.tarFilename)
 
-        // ── 1. Download ──────────────────────────────────────────────────────
-        stateFlow.value = DownloadState.Downloading(0)
-        DebugLogger.log("TTS", "VoicePackManager: downloading ${pack.tarUrl}")
-
-        val request = Request.Builder().url(pack.tarUrl).build()
-        val response = http.newCall(request).execute()
-        if (!response.isSuccessful) {
-            throw Exception("HTTP ${response.code}: ${response.message}")
-        }
-        val totalBytes = response.body?.contentLength() ?: -1L
-        var written = 0L
-
-        response.body?.byteStream()?.use { input ->
-            tarFile.outputStream().use { output ->
-                val buf = ByteArray(32 * 1024)
-                var n: Int
-                while (input.read(buf).also { n = it } >= 0) {
-                    output.write(buf, 0, n)
-                    written += n
-                    if (totalBytes > 0) {
-                        stateFlow.value = DownloadState.Downloading(
-                            (written * 100 / totalBytes).toInt().coerceIn(0, 99)
-                        )
-                    }
-                }
-            }
-        }
-        DebugLogger.log("TTS", "VoicePackManager: downloaded ${written / 1_048_576} MB → ${tarFile.name}")
+        // ── 1. Download with retry + HTTP-Range resume ───────────────────────
+        // The previous version had no retry: a single "Software caused
+        // connection abort" (common when the voice download runs alongside the
+        // multi-GB model downloads) failed the whole thing. Now we retry up to
+        // MAX_ATTEMPTS, resuming from the partial file via a Range header so no
+        // bytes are re-downloaded.
+        downloadWithResume(pack, tarFile, stateFlow)
 
         // ── 2. Extract ───────────────────────────────────────────────────────
         stateFlow.value = DownloadState.Extracting
@@ -172,6 +152,62 @@ class VoicePackManager @Inject constructor(
         pref.markInstalled(pack.id)
         stateFlow.value = DownloadState.Ready
         registerActivePack()
+    }
+
+    private suspend fun downloadWithResume(
+        pack: VoiceCatalog.VoicePack,
+        tarFile: File,
+        stateFlow: MutableStateFlow<DownloadState>,
+    ) {
+        var attempt = 0
+        while (true) {
+            attempt++
+            try {
+                val existing = if (tarFile.exists()) tarFile.length() else 0L
+                stateFlow.value = DownloadState.Downloading(0)
+
+                val request = Request.Builder()
+                    .url(pack.tarUrl)
+                    .apply { if (existing > 0) addHeader("Range", "bytes=$existing-") }
+                    .build()
+                val response = http.newCall(request).execute()
+                val code = response.code
+                if (!response.isSuccessful && code != 206) {
+                    response.close()
+                    throw java.io.IOException("HTTP $code: ${response.message}")
+                }
+                val body = response.body ?: throw java.io.IOException("empty body")
+                // Resume only if the server honoured the Range (206). If it sent
+                // 200 with a full body despite our Range, restart from byte 0 so
+                // we don't append a full file onto a partial one (corruption).
+                val resuming = existing > 0 && code == 206
+                val total = body.contentLength().takeIf { it >= 0 }
+                    ?.plus(if (resuming) existing else 0L) ?: -1L
+                var written = if (resuming) existing else 0L
+
+                body.byteStream().use { input ->
+                    java.io.FileOutputStream(tarFile, resuming).use { output ->
+                        val buf = ByteArray(64 * 1024)
+                        var n: Int
+                        while (input.read(buf).also { n = it } >= 0) {
+                            output.write(buf, 0, n)
+                            written += n
+                            if (total > 0) {
+                                stateFlow.value = DownloadState.Downloading(
+                                    (written * 100 / total).toInt().coerceIn(0, 99)
+                                )
+                            }
+                        }
+                    }
+                }
+                DebugLogger.log("TTS", "VoicePackManager: downloaded ${written / 1_048_576} MB → ${tarFile.name}")
+                return  // success
+            } catch (e: Exception) {
+                DebugLogger.log("TTS", "VoicePackManager: download attempt $attempt failed: ${e.message}")
+                if (attempt >= MAX_ATTEMPTS) throw e
+                kotlinx.coroutines.delay(attempt * 2000L)  // linear back-off, then resume
+            }
+        }
     }
 
     private fun extractTarBz2(tarFile: File, destDir: File) {

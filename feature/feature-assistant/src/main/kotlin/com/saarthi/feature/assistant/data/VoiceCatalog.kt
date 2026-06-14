@@ -34,48 +34,50 @@ object VoiceCatalog {
         /** tarball filename — single download that expands to modelDir + espeak-ng-data. */
         val tarFilename: String,
         val tarUrl: String,
-        /** ~size in MB shown to the user before download. */
+        /** Download size in MB shown to the user (compressed tarball). */
         val approximateSizeMb: Int,
         /**
-         * Directory name the tarball expands into under files/voices/.
-         * After extraction: files/voices/<extractedDir>/<model>.onnx
-         *                   files/voices/<extractedDir>/<model>.onnx.json
-         *                   files/voices/<extractedDir>/espeak-ng-data/
+         * Directory the tarball expands into under files/voices/. After extract:
+         *   files/voices/<extractedDir>/<modelFilename>      (.onnx)
+         *   files/voices/<extractedDir>/<tokensFilename>     (tokens.txt)
+         *   files/voices/<extractedDir>/espeak-ng-data/
          */
         val extractedDir: String,
-        /** .onnx filename inside extractedDir. */
         val modelFilename: String,
-        /** .onnx.json filename inside extractedDir. */
-        val configFilename: String,
+        /** tokens.txt — REQUIRED by sherpa-onnx Piper VITS; init fails without it. */
+        val tokensFilename: String,
         val requiredTier: DeviceTier = DeviceTier.MID,
     )
 
+    // Using the int8-quantised packs: ~20 MB download (vs 64 MB medium) and
+    // ~36 MB on disk. Quality is effectively identical for read-aloud, and the
+    // smaller download is far more reliable to complete.
     val entries: List<VoicePack> = listOf(
         // ── Hindi — male (pratham) ───────────────────────────────────────────
         VoicePack(
-            id               = "hi_IN-pratham-medium",
+            id               = "hi_IN-pratham-medium-int8",
             language         = SupportedLanguage.HINDI,
             displayName      = "Hindi · Pratham (male)",
             gender           = "male",
-            tarFilename      = "vits-piper-hi_IN-pratham-medium.tar.bz2",
-            tarUrl           = "$SHERPA_BASE/vits-piper-hi_IN-pratham-medium.tar.bz2",
-            approximateSizeMb = 64,
-            extractedDir     = "vits-piper-hi_IN-pratham-medium",
+            tarFilename      = "vits-piper-hi_IN-pratham-medium-int8.tar.bz2",
+            tarUrl           = "$SHERPA_BASE/vits-piper-hi_IN-pratham-medium-int8.tar.bz2",
+            approximateSizeMb = 20,
+            extractedDir     = "vits-piper-hi_IN-pratham-medium-int8",
             modelFilename    = "hi_IN-pratham-medium.onnx",
-            configFilename   = "hi_IN-pratham-medium.onnx.json",
+            tokensFilename   = "tokens.txt",
         ),
         // ── Hindi — female (priyamvada) ──────────────────────────────────────
         VoicePack(
-            id               = "hi_IN-priyamvada-medium",
+            id               = "hi_IN-priyamvada-medium-int8",
             language         = SupportedLanguage.HINDI,
             displayName      = "Hindi · Priyamvada (female)",
             gender           = "female",
-            tarFilename      = "vits-piper-hi_IN-priyamvada-medium.tar.bz2",
-            tarUrl           = "$SHERPA_BASE/vits-piper-hi_IN-priyamvada-medium.tar.bz2",
-            approximateSizeMb = 64,
-            extractedDir     = "vits-piper-hi_IN-priyamvada-medium",
+            tarFilename      = "vits-piper-hi_IN-priyamvada-medium-int8.tar.bz2",
+            tarUrl           = "$SHERPA_BASE/vits-piper-hi_IN-priyamvada-medium-int8.tar.bz2",
+            approximateSizeMb = 20,
+            extractedDir     = "vits-piper-hi_IN-priyamvada-medium-int8",
             modelFilename    = "hi_IN-priyamvada-medium.onnx",
-            configFilename   = "hi_IN-priyamvada-medium.onnx.json",
+            tokensFilename   = "tokens.txt",
         ),
         // Telugu and other languages: no verified sherpa-onnx tarball exists yet.
         // Add here when available; they will automatically appear in the UI.

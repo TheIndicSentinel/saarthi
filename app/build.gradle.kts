@@ -24,8 +24,8 @@ android {
     }
     defaultConfig {
         applicationId = "com.saarthi.app"
-        versionCode = 26
-        versionName = "1.0.25"
+        versionCode = 27
+        versionName = "1.0.26"
         // Instrumentation runner for the androidTest APK (Firebase Test Lab /
         // `connectedAndroidTest`). The app convention plugin doesn't set this
         // — only the library one did — so the generated test APK referenced a
