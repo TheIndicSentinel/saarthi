@@ -5,9 +5,9 @@ package com.saarthi.feature.assistant.data
  *
  * This is the runtime gate applied BEFORE scheduling: the on-device model
  * (Gemma) over-emits `[SAARTHI_REMINDER]` markers — it has been seen to attach
- * one to casual topics ("GGUF optimization") — so we only schedule when the
- * user's own words show reminder intent. The model emitting a marker is
- * necessary but not sufficient.
+ * one to ordinary chat with no reminder intent at all — so we only schedule
+ * when the user's own words show reminder intent. The model emitting a marker
+ * is necessary but not sufficient.
  *
  * Balance: the earlier hand-listed phrase set was too narrow and silently
  * DROPPED legitimate requests like "give me a reminder after 1 min" (device

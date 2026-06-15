@@ -51,7 +51,7 @@ class ReminderRequestDetectorTest {
     fun `rejects casual messages with no reminder intent`() {
         // These must NOT schedule even if the model over-emits a marker.
         val casual = listOf(
-            "Tell me about GGUF optimization",
+            "Tell me about crop rotation",
             "What is the capital of India?",
             "Explain photosynthesis simply",
             "How do I cook dal?",
