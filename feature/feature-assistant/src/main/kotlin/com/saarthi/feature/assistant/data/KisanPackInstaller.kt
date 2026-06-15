@@ -97,41 +97,94 @@ class KisanPackInstaller @Inject constructor(
                 DebugLogger.log("PACK", "Kisan install failed: malformed pack JSON from $source")
                 return@withContext null
             }
-        val entities = parsed.entries.mapIndexed { idx, entry ->
-            RagChunkEntity(
-                sessionId  = PackId.KISAN.sessionId,
-                docUri     = "pack://kisan/${parsed.version}/${idx}",
-                docName    = entry.topic.take(80),
-                mimeType   = MIME_PACK,
-                chunkIndex = idx,
-                text       = entry.toIndexedText(),
-            )
-        }
+        val entities = parsed.toEntities()
         if (entities.isEmpty()) {
             DebugLogger.log("PACK", "Kisan install skipped: pack has 0 entries (source=$source)")
             return@withContext null
         }
-        // Atomic swap: drop old pack rows, insert new ones. RagChunkDao
-        // has no @Transaction wrapper for these two but the gap is
-        // microseconds — even if a search interleaves it'll just hit
-        // a slightly-stale corpus for one turn.
-        ragChunkDao.deleteBySession(PackId.KISAN.sessionId)
-        ragChunkDao.insertAll(entities)
-        // Persist the raw pack JSON so the browse screen can render
-        // topic + sourceUrl + tags without re-parsing chunks. Failure
-        // here is non-fatal: install still succeeds, browsing just
-        // falls back to the bundled seed asset on next read.
-        runCatching {
-            val packsDir = File(context.filesDir, PACKS_DIR).apply { mkdirs() }
-            File(packsDir, ACTIVE_PACK_FILE).writeText(raw, Charsets.UTF_8)
-        }.onFailure { Timber.w(it, "Failed to persist raw Kisan pack to filesDir") }
-        preference.recordInstall(version = parsed.version, language = parsed.language)
+
+        // Rollback safety: snapshot the current good pack into the "previous"
+        // slot BEFORE we mutate anything. If the swap below fails partway we
+        // revert to it (see rollbackToPrevious), and loadInstalledPack can
+        // self-heal to it on a corrupt active file. The new pack is only
+        // committed AFTER it has fully parsed and produced non-empty entries —
+        // a malformed pack never reaches this point, so the old pack stays.
+        backupActiveToPrevious()
+
+        val committed = runCatching {
+            ragChunkDao.deleteBySession(PackId.KISAN.sessionId)
+            ragChunkDao.insertAll(entities)
+            writeActiveFile(raw)
+            preference.recordInstall(version = parsed.version, language = parsed.language)
+        }.isSuccess
+
+        if (!committed) {
+            DebugLogger.log("PACK", "Kisan install commit failed (source=$source) — rolling back to previous pack")
+            val restored = rollbackToPrevious()
+            DebugLogger.log("PACK", "Kisan rollback ${if (restored) "succeeded" else "found no previous pack"}")
+            return@withContext null
+        }
+
         DebugLogger.log(
             "PACK",
             "Kisan pack v${parsed.version} (${parsed.language}, ${entities.size} entries) installed from $source",
         )
         parsed.version
     }
+
+    /**
+     * Revert to the last known-good pack saved in the "previous" slot. Used
+     * when a fresh install's commit fails, and available to PackUpdateWorker
+     * for operational rollback if a downloaded pack is later found bad.
+     * Rebuilds BOTH the RAG chunks and the active file from the previous
+     * snapshot. Returns false when there is no usable previous pack.
+     */
+    suspend fun rollbackToPrevious(): Boolean = withContext(Dispatchers.IO) {
+        val prev = previousPackFile()
+        val raw = runCatching {
+            if (prev.exists() && prev.length() > 0L) prev.readText(Charsets.UTF_8) else null
+        }.getOrNull() ?: return@withContext false
+        val parsed = runCatching { parsePackJson(raw) }.getOrNull() ?: return@withContext false
+        val entities = parsed.toEntities()
+        if (entities.isEmpty()) return@withContext false
+        runCatching {
+            ragChunkDao.deleteBySession(PackId.KISAN.sessionId)
+            ragChunkDao.insertAll(entities)
+            writeActiveFile(raw)
+            preference.recordInstall(version = parsed.version, language = parsed.language)
+        }.isSuccess
+    }
+
+    // ── File helpers (rollback / self-heal) ───────────────────────────────
+    private fun activePackFile(): File = File(context.filesDir, "$PACKS_DIR/$ACTIVE_PACK_FILE")
+    private fun previousPackFile(): File = File(context.filesDir, "$PACKS_DIR/$PREVIOUS_PACK_FILE")
+
+    private fun writeActiveFile(raw: String) {
+        val dir = File(context.filesDir, PACKS_DIR).apply { mkdirs() }
+        File(dir, ACTIVE_PACK_FILE).writeText(raw, Charsets.UTF_8)
+    }
+
+    /** Copy the current active pack into the previous slot (best-effort). */
+    private fun backupActiveToPrevious() {
+        runCatching {
+            val active = activePackFile()
+            if (active.exists() && active.length() > 0L) {
+                active.copyTo(previousPackFile(), overwrite = true)
+            }
+        }.onFailure { Timber.w(it, "Kisan: failed to back up active pack to previous") }
+    }
+
+    private fun ParsedPack.toEntities(): List<RagChunkEntity> =
+        entries.mapIndexed { idx, entry ->
+            RagChunkEntity(
+                sessionId  = PackId.KISAN.sessionId,
+                docUri     = "pack://kisan/$version/$idx",
+                docName    = entry.topic.take(80),
+                mimeType   = MIME_PACK,
+                chunkIndex = idx,
+                text       = entry.toIndexedText(),
+            )
+        }
 
     /**
      * Read back the currently-installed pack with full structured
@@ -146,15 +199,25 @@ class KisanPackInstaller @Inject constructor(
      * browse screen handles that with an empty-state message.
      */
     suspend fun loadInstalledPack(): InstalledPack? = withContext(Dispatchers.IO) {
-        val activeFile = File(context.filesDir, "$PACKS_DIR/$ACTIVE_PACK_FILE")
-        val raw = if (activeFile.exists() && activeFile.length() > 0L) {
-            runCatching { activeFile.readText(Charsets.UTF_8) }.getOrNull()
-        } else null
-        val sourceLabel = if (raw != null) "filesDir/$PACKS_DIR/$ACTIVE_PACK_FILE" else "assets/$SEED_ASSET_PATH"
-        val text = raw
-            ?: runCatching { context.assets.open(SEED_ASSET_PATH).bufferedReader().use { it.readText() } }.getOrNull()
-            ?: return@withContext null
-        runCatching { parsePackJson(text).toInstalled(sourceLabel) }.getOrNull()
+        // Self-healing fallback chain: active → previous → bundled seed.
+        // Each step tolerates a missing or corrupt source, so a damaged active
+        // file silently recovers to the last good pack (or the seed) rather
+        // than showing the user an empty pack.
+        readInstalledFrom(activePackFile(), "filesDir/$PACKS_DIR/$ACTIVE_PACK_FILE")
+            ?.let { return@withContext it }
+        readInstalledFrom(previousPackFile(), "filesDir/$PACKS_DIR/$PREVIOUS_PACK_FILE")
+            ?.let { return@withContext it }
+        val seed = runCatching {
+            context.assets.open(SEED_ASSET_PATH).bufferedReader().use { it.readText() }
+        }.getOrNull() ?: return@withContext null
+        runCatching { parsePackJson(seed).toInstalled("assets/$SEED_ASSET_PATH") }.getOrNull()
+    }
+
+    /** Read + parse a pack file into the UI model, or null if missing/corrupt. */
+    private fun readInstalledFrom(file: File, label: String): InstalledPack? {
+        if (!file.exists() || file.length() == 0L) return null
+        val raw = runCatching { file.readText(Charsets.UTF_8) }.getOrNull() ?: return null
+        return runCatching { parsePackJson(raw).toInstalled(label) }.getOrNull()
     }
 
     // ── Public domain model (for the browse screen) ────────────────
@@ -253,5 +316,8 @@ class KisanPackInstaller @Inject constructor(
         private const val MIME_PACK = "application/x-saarthi-pack"
         private const val PACKS_DIR = "packs"
         private const val ACTIVE_PACK_FILE = "kisan_active.json"
+        // Last known-good pack, kept for rollback + the loadInstalledPack
+        // self-heal chain (active → previous → bundled seed).
+        private const val PREVIOUS_PACK_FILE = "kisan_previous.json"
     }
 }
