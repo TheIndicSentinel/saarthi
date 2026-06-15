@@ -1200,17 +1200,13 @@ class ChatRepositoryImpl @Inject constructor(
 
     /**
      * True when the user's message contains an explicit ask for a reminder /
-     * alert / alarm. Used as a runtime gate before scheduling, so an over-eager
-     * model can't fire a notification for a casual discussion topic.
-     *
-     * Covers English and the most common Indian-language reminder phrases.
-     * Conservative on purpose — false negatives are ok (user can rephrase),
-     * false positives are not (unwanted notifications break trust fast).
+     * alert / alarm. Runtime gate before scheduling, so an over-eager model
+     * can't fire a notification for a casual topic. Delegates to the pure,
+     * unit-tested [ReminderRequestDetector] (see it for the detection rule and
+     * why it was broadened — the old narrow list dropped real requests).
      */
-    private fun userAskedForReminder(userMessage: String): Boolean {
-        val msg = userMessage.lowercase()
-        return REMINDER_TRIGGER_PHRASES.any { msg.contains(it) }
-    }
+    private fun userAskedForReminder(userMessage: String): Boolean =
+        ReminderRequestDetector.wasRequested(userMessage)
 
     // Dietary preference terms matched by the diet extractor above.
     // Kept separate so adding new terms doesn't risk widening the profession regex.
@@ -1225,33 +1221,6 @@ class ChatRepositoryImpl @Inject constructor(
         "bit", "little", "lot", "fan", "big", "huge", "small", "good", "bad",
         "great", "happy", "sad", "tired", "fine", "beginner", "expert", "newbie",
         "student",  // handled as education, not profession
-    )
-
-    private val REMINDER_TRIGGER_PHRASES = listOf(
-        // English — direct explicit request verbs.
-        "remind me", "remind us", "reminder for", "reminder to", "reminder at",
-        "set a reminder", "set me a reminder", "set reminder",
-        "schedule a reminder", "schedule reminder",
-        "alert me", "notify me", "ping me",
-        "wake me", "wake me up",
-        "set an alarm", "set alarm", "alarm at", "alarm for",
-        // Natural-language / implicit — unambiguously requesting a reminder.
-        "don't let me forget",  "don't let me miss",
-        "make sure i remember", "help me remember",
-        "need a reminder",  "want a reminder",
-        "can you remind",   "could you remind",
-        "please remind",    "kindly remind",
-        // Contextual — user mentions a scheduled event + time (implicit ask).
-        "i have a meeting at", "my meeting is at",
-        "my appointment is at", "my appointment at",
-        "my class is at", "my class starts at",
-        // Hindi (Latin + Devanagari)
-        "yaad dila", "yaad rakh", "yaad dilana", "yaad dilao", "yaad karwa",
-        "mujhe yaad kara", "mujhe remind kar",
-        "याद दिला", "याद रख", "रिमाइंडर", "अलार्म",
-        // Tamil / Telugu / Bengali / Marathi / Kannada / Gujarati / Punjabi / Odia
-        "ninaivu padut", "gnabakam unchu", "mone koriye dao",
-        "athavan karun", "nenapu ittuko", "yaad rakhjo",
     )
 
     /**
