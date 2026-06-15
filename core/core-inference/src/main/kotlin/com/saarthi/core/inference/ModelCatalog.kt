@@ -93,13 +93,13 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma4-e2b-it-qualcomm-sm8750",
             displayName   = "Gemma 4 · Fastest  ⚡",
-            description   = "Optimised for your Snapdragon 8 Gen 3 processor. Fastest responses. Supports voice, text, and images. ~3.0 GB download.",
+            description   = "The quickest answers on your phone — great for everyday questions, farming and health tips, and writing letters.",
             downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it_qualcomm_sm8750.litertlm",
             fileSizeBytes = 3_242_086_400L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             contextLength = 8192,
-            tags          = listOf("Fastest", "New", "Snapdragon 8 Gen 3"),
+            tags          = listOf("Fastest", "Recommended"),
             socTarget     = SocFamily.QUALCOMM_SM8750,
             baseModelId   = "gemma4-e2b-it-litert",
         ),
@@ -108,26 +108,26 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma4-e2b-it-litert",
             displayName   = "Gemma 4 · Recommended  🌟",
-            description   = "Google's latest AI. Great for government schemes, farming advice, health tips, and letter writing. ~2.5 GB download.",
+            description   = "The best all-round choice for most phones. Smart, helpful answers for government schemes, farming, health, and writing.",
             downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
             fileSizeBytes = 2_583_085_056L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             contextLength = 8192,
-            tags          = listOf("Recommended", "New", "Best for Most Phones"),
+            tags          = listOf("Recommended", "Best for most phones"),
         ),
 
         // ── Gemma 4 E4B · Generic (flagship, GPU required) ───────────────────
         ModelEntry(
             id            = "gemma4-e4b-it-litert",
             displayName   = "Gemma 4 · Best Quality  ✨",
-            description   = "Deepest knowledge for complex questions on law, farming, finance, and health. ~3.5 GB download. Requires a powerful phone.",
+            description   = "The most detailed answers for tricky questions on law, money, farming, and health. Works best on newer, high-end phones.",
             downloadUrl   = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
             fileSizeBytes = 3_758_096_384L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.FLAGSHIP,
             contextLength = 8192,
-            tags          = listOf("Best Quality", "New", "Powerful Phone Required"),
+            tags          = listOf("Best answers", "For high-end phones"),
         ),
 
         // ══════════════════════════════════════════════════════════════════════
@@ -145,13 +145,13 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3n-e2b-it-litert-int4",
             displayName   = "Gemma 3n · Fast & Smart  ⭐",
-            description   = "Built for smartphones. Handles everyday questions on government schemes, farming, and local topics. ~3.5 GB download. For phones with 6 GB+ RAM.",
+            description   = "A balanced choice — quick, helpful answers for everyday questions on government schemes, farming, and daily life.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4.litertlm",
             fileSizeBytes = 3_655_827_456L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.MID,
             contextLength = 8192,
-            tags          = listOf("Fast", "Smart", "6 GB+ RAM"),
+            tags          = listOf("Balanced", "Everyday use"),
         ),
 
         // ── Gemma 3n E4B · Generic (flagship only, 10 GB+ total RAM) ─────────
@@ -163,13 +163,13 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3n-e4b-it-litert-int4",
             displayName   = "Gemma 3n · High Quality  ⭐",
-            description   = "Best quality for detailed farming, health, and government scheme questions. ~4.2 GB download. Requires a flagship phone (10 GB+ RAM).",
+            description   = "Higher-quality, detailed answers for farming, health, and government schemes. Works best on high-end phones.",
             downloadUrl   = "https://huggingface.co/google/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4.litertlm",
             fileSizeBytes = 4_405_655_031L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.FLAGSHIP,
             contextLength = 8192,
-            tags          = listOf("High Quality", "Flagship"),
+            tags          = listOf("Detailed answers", "For high-end phones"),
         ),
 
         // ══════════════════════════════════════════════════════════════════════
@@ -180,13 +180,13 @@ class ModelCatalog @Inject constructor() {
         ModelEntry(
             id            = "gemma3-1b-it-litert-int4",
             displayName   = "Gemma 3 · Compact & Fast  ⚡",
-            description   = "Smallest AI model — quick answers for simple, everyday questions. ~584 MB download. Works on any Android phone.",
+            description   = "A small, light option that works on almost any phone. Best for short, simple questions — not for knowledge packs like Kisan.",
             downloadUrl   = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.litertlm",
             fileSizeBytes = 584_417_280L,
             engineType    = EngineType.LITERT,
             requiredTier  = DeviceTier.LOW,
             contextLength = 4096,
-            tags          = listOf("Compact", "Fast", "Works on Any Phone"),
+            tags          = listOf("Smallest", "Works on any phone"),
         ),
     )
 

@@ -37,6 +37,70 @@ class SystemPromptProviderTest {
         assertEquals(SystemPromptProvider.ModelTier.STANDARD, provider.tierFor(""))
     }
 
+    /**
+     * Guard the load-bearing coupling between marketing copy and runtime tier:
+     * the active model name passed to [SystemPromptProvider.tierFor] IS the
+     * catalog [ModelEntry.displayName] (see MainViewModel — `modelName =
+     * catalogEntry.displayName`). The Kisan-pack capability gate and the
+     * sampler/token-budget logic all key off that classification, so a future
+     * rename of a model's displayName must not silently change its tier.
+     *
+     * Specifically: the compact 1B must classify COMPACT (so the Kisan chat
+     * stays blocked on it), and nothing else may collapse into COMPACT.
+     */
+    @Test
+    fun tierFor_over_every_catalog_displayName_is_stable() {
+        val catalog = com.saarthi.core.inference.ModelCatalog()
+        val byId = catalog.allModels.associateBy({ it.id }, { provider.tierFor(it.displayName) })
+
+        assertEquals(
+            "The compact 1B model must classify COMPACT so the Kisan chat is gated off on it",
+            SystemPromptProvider.ModelTier.COMPACT,
+            byId["gemma3-1b-it-litert-int4"],
+        )
+        // No other catalog model may classify COMPACT — that would wrongly
+        // disable the Kisan chat on a capable model.
+        catalog.allModels
+            .filter { it.id != "gemma3-1b-it-litert-int4" }
+            .forEach { model ->
+                assertNotEquals(
+                    "${model.displayName} must NOT classify COMPACT",
+                    SystemPromptProvider.ModelTier.COMPACT,
+                    provider.tierFor(model.displayName),
+                )
+            }
+        // Gemma 4 family stays LARGE (richer prompt + larger token budget).
+        listOf("gemma4-e2b-it-litert", "gemma4-e4b-it-litert", "gemma4-e2b-it-qualcomm-sm8750")
+            .forEach { id ->
+                assertEquals(
+                    "$id must classify LARGE",
+                    SystemPromptProvider.ModelTier.LARGE,
+                    byId[id],
+                )
+            }
+    }
+
+    // ── supportsPackChat (knowledge-pack capability gate, all packs) ────────
+
+    @Test
+    fun supportsPackChat_is_false_only_on_the_compact_tier() {
+        // The compact 1B loops on grounded pack prompts → pack chat is gated off
+        // for EVERY pack (Kisan and any future pack), not just Kisan.
+        val catalog = com.saarthi.core.inference.ModelCatalog()
+        val compact = catalog.findById("gemma3-1b-it-litert-int4")!!
+        assertFalse(provider.supportsPackChat(compact.displayName))
+
+        // Every non-compact catalog model must allow pack chat.
+        catalog.allModels
+            .filter { it.id != "gemma3-1b-it-litert-int4" }
+            .forEach { model ->
+                assertTrue(
+                    "${model.displayName} must support pack chat",
+                    provider.supportsPackChat(model.displayName),
+                )
+            }
+    }
+
     // ── build: invariants every prompt must satisfy ────────────────────────
 
     @Test

@@ -193,26 +193,32 @@ private fun LoadedPackContent(
         // ── Capability warning ──
         if (!packSupportedOnCurrentModel) {
             item {
-                CapabilityHint(activeModelName, canRunBetterModel)
+                CapabilityHint(canRunBetterModel)
             }
         }
 
-        // ── Quick-ask section header ──
-        item {
-            SectionHeader(text = language.kisanQuickAsk, subtitle = "")
-        }
+        // ── Chat entry (quick-asks + CTA) — only when the active model can
+        //    actually run the pack chat. On the compact 1B the chat is blocked
+        //    (it loops on grounded answers); the CapabilityHint above explains
+        //    why and points to a capable model. Topics below stay browseable. ──
+        if (packSupportedOnCurrentModel) {
+            // ── Quick-ask section header ──
+            item {
+                SectionHeader(text = language.kisanQuickAsk, subtitle = "")
+            }
 
-        // ── Suggested questions (chips) ──
-        item {
-            QuickAskGrid(
-                quickAsks = quickAsks,
-                onAsk = { _ -> onOpenChat() },
-            )
-        }
+            // ── Suggested questions (chips) ──
+            item {
+                QuickAskGrid(
+                    quickAsks = quickAsks,
+                    onAsk = { _ -> onOpenChat() },
+                )
+            }
 
-        // ── Open-chat CTA ──
-        item {
-            OpenChatCta(label = language.kisanOpenChat, onClick = onOpenChat)
+            // ── Open-chat CTA ──
+            item {
+                OpenChatCta(label = language.kisanOpenChat, onClick = onOpenChat)
+            }
         }
 
         // ── Topic list section header ──
@@ -294,7 +300,7 @@ private fun StatusCard(
 }
 
 @Composable
-private fun CapabilityHint(activeModelName: String?, canRunBetterModel: Boolean) {
+private fun CapabilityHint(canRunBetterModel: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -305,8 +311,10 @@ private fun CapabilityHint(activeModelName: String?, canRunBetterModel: Boolean)
     ) {
         Column {
             Text(
-                // On a device that can't run a bigger model, don't dangle one.
-                text = if (canRunBetterModel) "Best with Gemma 4 or 3n" else "Running the compact model",
+                // Chat is blocked on the compact model (it loops on grounded
+                // answers), so the copy says so plainly. On a device that can't
+                // run a bigger model, don't dangle an upgrade it can't use.
+                text = if (canRunBetterModel) "Kisan chat needs a bigger model" else "Kisan chat isn't available on this phone",
                 style = MaterialTheme.typography.titleSmall.copy(
                     color = SaarthiColors.Marigold,
                     fontWeight = FontWeight.SemiBold,
@@ -318,9 +326,9 @@ private fun CapabilityHint(activeModelName: String?, canRunBetterModel: Boolean)
                 // model, so a "switch model" nudge would be a dead-end. Set
                 // honest expectations instead of pointing at an unavailable upgrade.
                 text = if (canRunBetterModel) {
-                    "You're on ${activeModelName?.substringAfter('/')?.substringBefore('.') ?: "the small model"}. The Kisan pack is browseable on every model, but chat answers stay sharper on the larger ones — switch from Settings → Models."
+                    "The compact model is too small to answer Kisan questions reliably. You can still read every topic below. For chat, switch to Gemma 4 or Gemma 3n in Settings → Models."
                 } else {
-                    "This phone runs Saarthi's compact model, so Kisan answers will be short and simple — that's expected on this device. Everything still works fully offline."
+                    "This phone can only run Saarthi's compact model, which is too small for reliable Kisan chat. You can still read all the curated topics below — they work fully offline."
                 },
                 style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text2, lineHeight = 17.sp),
             )

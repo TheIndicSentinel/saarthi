@@ -176,6 +176,25 @@ class PackChatViewModel @Inject constructor(
                 return@launch
             }
 
+            // Capability gate (defense behind the pack screen's UI gate). The
+            // compact 1B model cannot follow grounded RAG instructions across a
+            // turn boundary — it loops / repeats on the second answer (see the
+            // "[REP] Loop detected" device logs). This engine is shared by every
+            // knowledge pack, so the gate covers all of them, not just Kisan.
+            // Rather than emit garbage, pack chat is browse-only on this tier and
+            // blocked with a clear, honest message. Reached only if the user
+            // switched to the compact model AFTER opening the chat — rare, but it
+            // must degrade gracefully.
+            if (!systemPromptProvider.supportsPackChat(inferenceEngine.activeModelName)) {
+                finish(
+                    streamingId,
+                    "The compact model on this phone is too small for reliable pack answers. " +
+                        "You can still read the pack topics offline. For chat, switch to " +
+                        "Gemma 4 or Gemma 3n in Settings → Models.",
+                )
+                return@launch
+            }
+
             val lang = languageManager.selectedLanguage.value
 
             // Center → State hierarchy. Capture the user's state if they
@@ -344,31 +363,9 @@ class PackChatViewModel @Inject constructor(
             }
         }.trim()
 
-        // ── COMPACT (Gemma 1B) — lean prompt ─────────────────────────────────
-        // The full advisor prompt below is ~2 000 chars of nuanced rules. The 1B
-        // can't follow that many instructions; it latches onto the persona header
-        // and loops (the "PM-KISAN … advisor's guide!" parroting). Give it a
-        // minimal notes+question prompt instead — the same lean approach the main
-        // chat uses for COMPACT. STANDARD/LARGE keep the full prompt unchanged.
-        if (systemPromptProvider.tierFor(inferenceEngine.activeModelName)
-            == SystemPromptProvider.ModelTier.COMPACT
-        ) {
-            val compactLang = lang.systemPromptInstruction
-            return buildString {
-                if (compactLang.isNotBlank()) { append(compactLang); append("\n\n") }
-                append("Answer the farmer's question using ONLY the notes below. ")
-                append("Be brief, clear and direct — a few short sentences, no headings. ")
-                append("Never repeat a line. Do not write a \"Source:\" line or [1] citations. ")
-                append("If the notes don't cover it, say it isn't in the offline pack and give one short general tip.\n\n")
-                append("=== NOTES ===\n")
-                append(sources)
-                append("\n=== END NOTES ===\n\n")
-                append("Question: ")
-                append(question)
-                append("\nAnswer:")
-                if (compactLang.isNotBlank()) { append("\n\n"); append(compactLang) }
-            }
-        }
+        // NOTE: the COMPACT (Gemma 1B) tier never reaches here — ask() blocks the
+        // Kisan chat on that tier (the 1B loops on grounded RAG prompts). Only
+        // STANDARD / LARGE build the full advisor prompt below.
 
         // Language directive — same mechanism the main chat uses. Notes
         // remain in English (the curated pack), but the model answers in

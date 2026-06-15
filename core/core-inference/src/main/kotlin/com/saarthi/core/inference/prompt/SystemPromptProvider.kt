@@ -67,6 +67,20 @@ class SystemPromptProvider @Inject constructor() {
     }
 
     /**
+     * Whether the active model can run a KNOWLEDGE-PACK chat (Kisan today, and
+     * any pack added later). Packs answer from grounded RAG context, and the
+     * COMPACT (Gemma 1B) tier loops / repeats on grounded prompts across a turn
+     * boundary (see the "[REP] Loop detected" device logs) — so pack chat is
+     * gated to STANDARD+ for EVERY pack, not just Kisan. Browsing pack content
+     * stays available on all tiers; only the AI chat is gated.
+     *
+     * Single source of truth so the shared pack-chat engine and every pack's
+     * landing screen apply the exact same rule.
+     */
+    fun supportsPackChat(modelName: String?): Boolean =
+        tierFor(modelName) != ModelTier.COMPACT
+
+    /**
      * Build the full system prompt.
      *
      * @param languageInstruction language line like "Always respond in हिन्दी." —

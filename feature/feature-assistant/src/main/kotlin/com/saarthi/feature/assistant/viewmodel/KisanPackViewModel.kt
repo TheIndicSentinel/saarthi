@@ -88,8 +88,10 @@ class KisanPackViewModel @Inject constructor(
         // capable?" hint reflects the current selection in realtime.
         inferenceEngine.activeModelNameFlow
             .map { name ->
-                val tier = systemPromptProvider.tierFor(name)
-                Pair(name, tier != SystemPromptProvider.ModelTier.COMPACT)
+                // Same policy the shared pack-chat engine enforces — packs need
+                // STANDARD+; the compact 1B is browse-only (it loops on grounded
+                // answers). Centralised so every pack screen agrees.
+                Pair(name, systemPromptProvider.supportsPackChat(name))
             }
             .onEach { (name, capable) ->
                 _ui.update {
