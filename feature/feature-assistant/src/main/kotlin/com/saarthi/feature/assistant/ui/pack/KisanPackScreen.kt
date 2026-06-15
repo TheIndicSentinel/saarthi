@@ -484,12 +484,24 @@ private fun TopicCard(
                         lineHeight = 20.sp,
                     ),
                 )
-                entry.sourceUrl?.let { url ->
+                if (entry.effectiveDate.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "As of ${entry.effectiveDate}",
+                        style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3),
+                    )
+                }
+                // All citable sources (v2 may carry several). Falls back to the
+                // single v1 sourceUrl when sources[] is empty.
+                val links = entry.sources.ifEmpty {
+                    entry.sourceUrl?.let { listOf(KisanPackInstaller.PackSource(it, it)) } ?: emptyList()
+                }
+                links.forEach { src ->
                     Spacer(Modifier.height(10.dp))
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { onOpenSource(url) }
+                            .clickable { onOpenSource(src.url) }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -501,7 +513,7 @@ private fun TopicCard(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "View source",
+                            text = src.label.ifBlank { "View source" },
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = SaarthiColors.Marigold,
                                 fontWeight = FontWeight.SemiBold,

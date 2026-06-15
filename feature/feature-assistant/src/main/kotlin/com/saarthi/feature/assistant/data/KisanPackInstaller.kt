@@ -263,7 +263,14 @@ class KisanPackInstaller @Inject constructor(
         val content: String,
         val sourceUrl: String?,
         val tags: List<String>,
+        /** All citable source links (v2). v1 packs yield a single-element list. */
+        val sources: List<PackSource> = emptyList(),
+        /** "As of" date for the entry's facts (v2; blank for v1). */
+        val effectiveDate: String = "",
     )
+
+    /** One citable source link for a pack entry. */
+    data class PackSource(val label: String, val url: String)
 
     // ── Internal ─────────────────────────────────────────────────────
 
@@ -291,6 +298,8 @@ class KisanPackInstaller @Inject constructor(
         val content: String,
         val sourceUrl: String?,
         val tags: List<String>,
+        val sources: List<PackSource> = emptyList(),
+        val effectiveDate: String = "",
     ) {
         /**
          * Text BM25 will tokenise. Topic + tags are stuffed in too so
@@ -305,7 +314,8 @@ class KisanPackInstaller @Inject constructor(
                 append("\n\nTags: ").append(tags.joinToString(", "))
             }
         }
-        fun toPublic(): InstalledEntry = InstalledEntry(topic, content, sourceUrl, tags)
+        fun toPublic(): InstalledEntry =
+            InstalledEntry(topic, content, sourceUrl, tags, sources, effectiveDate)
     }
 
     private fun parsePackJson(raw: String): ParsedPack {
@@ -326,21 +336,28 @@ class KisanPackInstaller @Inject constructor(
                 val topic = o.optString("topic").trim()
                 val content = o.optString("content").trim()
                 if (topic.isEmpty() || content.isEmpty()) continue
-                // v1: single "sourceUrl". v2: "sources":[{label,url},…] — take
-                // the first url so the browse screen still has a link (full
-                // multi-link rendering is a later step).
-                val sourceUrl = o.optString("sourceUrl").takeIf { it.isNotBlank() }
-                    ?: o.optJSONArray("sources")?.let { arr ->
-                        (0 until arr.length())
-                            .asSequence()
-                            .mapNotNull { i -> arr.optJSONObject(i)?.optString("url")?.takeIf { u -> u.isNotBlank() } }
-                            .firstOrNull()
+                // v2: "sources":[{label,url},…]. v1: single "sourceUrl".
+                val sourcesArr = o.optJSONArray("sources")
+                val v2Sources = if (sourcesArr != null) {
+                    (0 until sourcesArr.length()).mapNotNull { idx ->
+                        val so = sourcesArr.optJSONObject(idx) ?: return@mapNotNull null
+                        val url = so.optString("url").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        PackSource(label = so.optString("label").takeIf { it.isNotBlank() } ?: url, url = url)
                     }
+                } else emptyList()
+                val legacyUrl = o.optString("sourceUrl").takeIf { it.isNotBlank() }
+                val sources = when {
+                    v2Sources.isNotEmpty() -> v2Sources
+                    legacyUrl != null -> listOf(PackSource(label = legacyUrl, url = legacyUrl))
+                    else -> emptyList()
+                }
+                val sourceUrl = sources.firstOrNull()?.url
+                val effectiveDate = o.optString("effectiveDate", "")
                 val tagsArr = o.optJSONArray("tags")
                 val tags = if (tagsArr != null) {
                     (0 until tagsArr.length()).mapNotNull { tagsArr.optString(it).takeIf { t -> t.isNotBlank() } }
                 } else emptyList()
-                add(Entry(topic, content, sourceUrl, tags))
+                add(Entry(topic, content, sourceUrl, tags, sources, effectiveDate))
             }
         }
         return ParsedPack(version, language, title, source, publishedAt, entries)
