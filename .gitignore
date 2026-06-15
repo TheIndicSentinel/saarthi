@@ -18,6 +18,12 @@ local.properties
 keystore/*.jks
 keystore/*.keystore
 
+# Secrets — never commit. Pack signing private key lives in .keys/ (offline);
+# Firebase config is intentionally absent (no telemetry).
+.keys/
+*.pem
+google-services.json
+
 # Kotlin compiler transient session files
 .kotlin/
 

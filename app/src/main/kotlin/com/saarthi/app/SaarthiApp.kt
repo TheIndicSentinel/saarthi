@@ -94,10 +94,9 @@ class SaarthiApp : Application() {
                         DebugLogger.log("CRASH", "  at $frame")
                     }
                 }
-                // Route into the CrashReporter abstraction too — currently the
-                // LocalCrashReporter writes to the same on-device debug log, but
-                // once Firebase Crashlytics is bound in DI this becomes the
-                // single line of code that ships crashes off-device.
+                // Route into the CrashReporter abstraction too. LocalCrashReporter
+                // writes to the on-device debug log only — Saarthi ships no
+                // crash/analytics telemetry off the device.
                 crashReporter.recordException(
                     throwable,
                     mapOf(

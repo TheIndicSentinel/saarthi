@@ -9,19 +9,14 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
 /**
- * Binds the default [LocalCrashReporter]. Swap to a Firebase-backed
- * implementation once `google-services.json` is in place (see
- * [CrashReporter] for the migration recipe).
+ * Binds [LocalCrashReporter] — crash/diagnostic events go ONLY to the on-device
+ * `saarthi_debug.log`, never off the phone. No Firebase / Crashlytics / Analytics:
+ * Saarthi sends no telemetry to any server.
  */
 @Module
 @InstallIn(SingletonComponent::class)
 object CrashReporterModule {
     @Provides
     @Singleton
-    fun provideCrashReporter(): CrashReporter =
-        // Prefer Crashlytics when Firebase is on the classpath + initialised
-        // (i.e. google-services.json was bundled at build time). Falls back to
-        // on-device DebugLogger writes otherwise — keeping the offline-first
-        // promise for self-built / unconfigured installs.
-        com.saarthi.core.common.CrashlyticsCrashReporter.tryCreate() ?: LocalCrashReporter()
+    fun provideCrashReporter(): CrashReporter = LocalCrashReporter()
 }
