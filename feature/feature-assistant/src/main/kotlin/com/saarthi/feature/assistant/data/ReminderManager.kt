@@ -81,55 +81,39 @@ class ReminderManager @Inject constructor(
         )
 
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val exact = canScheduleExact(am)
         return try {
-            // setAlarmClock() is the most reliable delivery path for a reminder
-            // the user explicitly asked for, and the reason we use it over
-            // setExact*/setAndAllowWhileIdle:
-            //  • It fires on time even under Doze and aggressive OEM battery
-            //    management (Samsung One UI, MIUI, ColorOS) — the OS treats it
-            //    as a user-visible alarm and never batches it away.
-            //  • It does NOT require the SCHEDULE_EXACT_ALARM permission, which
-            //    is DENIED BY DEFAULT for apps targeting Android 13+ (API 33).
-            //    The previous code degraded to setAndAllowWhileIdle (inexact) in
-            //    that case, so short reminders ("remind me in 1 minute") were
-            //    batched by Doze and silently never fired on modern devices —
-            //    exactly the bug reported on the Samsung S918B (Android 16).
-            am.setAlarmClock(AlarmManager.AlarmClockInfo(triggerMs, showIntentFor(id)), pi)
-            Timber.d("ReminderManager: scheduled id=$id text='$text' at ${java.util.Date(triggerMs)}")
-            true
-        } catch (e: Exception) {
-            // Defensive fallback if a device/OEM rejects setAlarmClock for any
-            // reason — best-effort exact alarm, then inexact, so we never crash
-            // the chat turn over a reminder.
-            scheduleFallback(am, triggerMs, pi)
-        }
-    }
-
-    /**
-     * PendingIntent fired when the user taps the pending alarm chip (status bar
-     * / lock screen) — opens Saarthi. Required by [AlarmManager.AlarmClockInfo].
-     */
-    private fun showIntentFor(id: Int): PendingIntent? {
-        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
-            ?: return null
-        return PendingIntent.getActivity(
-            context, id, launch,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
-
-    private fun scheduleFallback(am: AlarmManager, triggerMs: Long, pi: PendingIntent): Boolean =
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
-                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pi)
-            } else {
+            // Industry-standard scheduling for a NOTIFICATION reminder — the same
+            // mechanism Google Keep / Tasks / Samsung Reminder use. An exact,
+            // Doze-exempt alarm silently wakes the app at the requested time to
+            // post a Saarthi notification (see ReminderReceiver). It is invisible:
+            // no status-bar alarm icon, no sound, no system "next alarm" entry —
+            // that behaviour belongs to setAlarmClock(), which we deliberately do
+            // NOT use.
+            //
+            // setExactAndAllowWhileIdle needs the "Alarms & reminders" access on
+            // Android 12+ — granted by default on API ≤ 32, and requested once
+            // after onboarding on API 33+ (see MainActivity). When the user has
+            // not granted it we fall back to an inexact alarm so the reminder
+            // still fires (best-effort) rather than failing; exact is what makes
+            // "in 1 minute" land on time even under aggressive OEM battery
+            // management (Samsung One UI, MIUI), which was the reported bug.
+            if (exact) {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pi)
+            } else {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pi)
             }
+            Timber.d("ReminderManager: scheduled id=$id text='$text' at ${java.util.Date(triggerMs)} exact=$exact")
             true
         } catch (e: Exception) {
             Timber.e(e, "ReminderManager: failed to schedule")
             false
         }
+    }
+
+    /** Whether the app may schedule exact alarms (always true below Android 12). */
+    private fun canScheduleExact(am: AlarmManager): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
 
     private fun emojiTitleFor(text: String): String {
         // text may be in any of the 10 supported Indian languages — match native keywords
