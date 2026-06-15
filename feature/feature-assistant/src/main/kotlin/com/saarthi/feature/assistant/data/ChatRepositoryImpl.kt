@@ -386,10 +386,10 @@ class ChatRepositoryImpl @Inject constructor(
 
                     // Defensive reminder gate. The system prompt tells the model to
                     // emit reminder markers ONLY when the user explicitly asked, but
-                    // Gemma 4 at temperature=1.0 still over-emits — the user reported
-                    // notifications firing for casual topics like "GGUF optimization".
-                    // We refuse to schedule unless the user's most recent message
-                    // actually contains a reminder trigger phrase.
+                    // Gemma 4 at temperature=1.0 still over-emits — it has fired
+                    // markers on ordinary chat with no reminder intent. We refuse to
+                    // schedule unless the user's most recent message actually shows
+                    // reminder intent (see ReminderRequestDetector).
                     if (parsed.reminders.isNotEmpty()) {
                         if (userAskedForReminder(userMessage)) {
                             parsed.reminders.forEach { marker ->
