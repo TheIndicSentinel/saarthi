@@ -58,6 +58,23 @@ gh release create kisan-v8 \
 GitHub then serves the manifest at the stable URL the app polls:
 `https://github.com/TheIndicSentinel/saarthi-packs/releases/latest/download/manifest.json`
 
+### No `gh` installed?
+Install it (`brew install gh` → `gh auth login`), then create the repo if needed
+with a commit so a release can attach to it:
+```bash
+gh repo create TheIndicSentinel/saarthi-packs --public --add-readme
+```
+
+Or do it entirely in the **web UI** (no CLI):
+1. Create the repo: github.com/new → name `saarthi-packs` → Public → **Add a README** → Create.
+2. Repo → **Releases** → **Draft a new release**.
+3. **Choose a tag** → type `kisan-v8` → "Create new tag on publish".
+4. Title `Kisan pack v8`; drag in BOTH `kisan_pack.json` and `manifest.json`.
+5. **Publish release**.
+
+(A release needs a repo with at least one commit — that's why the README step
+matters for a brand-new repo.)
+
 ## 4. Verify the channel end-to-end
 ```bash
 # Manifest resolves and is valid JSON:
