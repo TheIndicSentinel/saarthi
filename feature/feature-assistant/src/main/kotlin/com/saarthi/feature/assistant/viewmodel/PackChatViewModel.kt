@@ -72,6 +72,9 @@ class PackChatViewModel @Inject constructor(
     /** When the installed pack data was published — surfaced so the model can
      *  flag figures as "as of <date>" rather than presenting stale data as live. */
     @Volatile private var packPublishedAt: String = ""
+    /** Installed pack version — surfaced in the freshness footer + log so data
+     *  provenance is auditable (which pack snapshot produced this answer). */
+    @Volatile private var packVersion: Int = 0
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -105,9 +108,12 @@ class PackChatViewModel @Inject constructor(
         ttsManager.isSpeaking
             .onEach { speaking -> if (!speaking) _speakingMessageId.value = null }
             .launchIn(viewModelScope)
-        // Load the pack's publish date once so answers can flag data freshness.
+        // Load the pack's publish date + version once so answers + logs can show
+        // data freshness/provenance (which snapshot this answer came from).
         viewModelScope.launch {
-            packPublishedAt = runCatching { packInstaller.loadInstalledPack()?.publishedAt }.getOrNull().orEmpty()
+            val installed = runCatching { packInstaller.loadInstalledPack() }.getOrNull()
+            packPublishedAt = installed?.publishedAt.orEmpty()
+            packVersion = installed?.version ?: 0
         }
     }
 
@@ -235,7 +241,7 @@ class PackChatViewModel @Inject constructor(
             // topics (or "General" on no match) — never authored by the model,
             // so it's always a real pack scheme name, not the prompt header.
             val sourceLabel = sourceLabelFor(chunks)
-            DebugLogger.log("PACK", "Kisan Q&A — chunks=${chunks.size} lang=${lang.code} state=${userState.ifBlank { "-" }} source=$sourceLabel promptChars=${prompt.length}")
+            DebugLogger.log("PACK", "Kisan Q&A — packV=$packVersion asOf=${freshnessDate().ifBlank { "?" }} chunks=${chunks.size} lang=${lang.code} state=${userState.ifBlank { "-" }} source=$sourceLabel promptChars=${prompt.length}")
 
             InferenceService.startGenerating(context)
             val acc = StringBuilder()
@@ -262,7 +268,10 @@ class PackChatViewModel @Inject constructor(
                         val fellBackToGeneral = body.startsWith("[GENERAL]")
                         if (fellBackToGeneral) body = body.removePrefix("[GENERAL]").trimStart()
                         val label = if (fellBackToGeneral) "General" else sourceLabel
-                        val withSource = if (body.isBlank()) body else "$body\n\n_Source: ${label}_"
+                        // Freshness footer: which pack snapshot + as-of date this
+                        // answer came from, so the user can judge how current it is.
+                        val asOf = freshnessDate().takeIf { it.isNotBlank() }?.let { " · as of $it" }.orEmpty()
+                        val withSource = if (body.isBlank()) body else "$body\n\n_Source: ${label}$asOf_"
                         finish(streamingId, withSource)
                     }
                 }
@@ -309,6 +318,9 @@ class PackChatViewModel @Inject constructor(
      * deduped, the two most relevant. "General" when nothing matched — the
      * graceful-fallback case. Never derived from model output.
      */
+    /** Pack publish date as a plain YYYY-MM-DD (or "" if unknown). */
+    private fun freshnessDate(): String = packPublishedAt.take(10)
+
     private fun sourceLabelFor(chunks: List<RetrievedChunk>): String {
         if (chunks.isEmpty()) return "General"
         return chunks
