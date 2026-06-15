@@ -133,6 +133,30 @@ class KisanPackInstaller @Inject constructor(
     }
 
     /**
+     * Verify a downloaded pack's integrity (SHA-256) AND authenticity (ECDSA
+     * signature) BEFORE installing it. This is the only entry point
+     * [PackUpdateWorker] uses for remote packs — the crypto gate is never
+     * bypassed. A failed check returns null with the current pack untouched.
+     */
+    suspend fun installVerified(
+        rawBytes: ByteArray,
+        expectedSha256: String,
+        signatureB64: String,
+        publicKeyB64: String,
+        source: String,
+    ): Int? = withContext(Dispatchers.IO) {
+        if (!PackVerifier.matchesSha256(rawBytes, expectedSha256)) {
+            DebugLogger.log("PACK", "Kisan pack REJECTED — SHA-256 mismatch (source=$source)")
+            return@withContext null
+        }
+        if (!PackVerifier.verify(rawBytes, signatureB64, publicKeyB64)) {
+            DebugLogger.log("PACK", "Kisan pack REJECTED — invalid signature (source=$source)")
+            return@withContext null
+        }
+        installFrom(rawBytes.inputStream(), source)
+    }
+
+    /**
      * Revert to the last known-good pack saved in the "previous" slot. Used
      * when a fresh install's commit fails, and available to PackUpdateWorker
      * for operational rollback if a downloaded pack is later found bad.
@@ -286,8 +310,10 @@ class KisanPackInstaller @Inject constructor(
 
     private fun parsePackJson(raw: String): ParsedPack {
         val root = JSONObject(raw)
+        // v1 uses "version"; v2 uses "packVersion" — accept either.
         val version = root.optInt("version", 0).takeIf { it > 0 }
-            ?: error("pack: missing or invalid 'version'")
+            ?: root.optInt("packVersion", 0).takeIf { it > 0 }
+            ?: error("pack: missing or invalid version")
         val language = root.optString("language", "en")
         val title = root.optString("title", "Kisan Knowledge")
         val source = root.optString("source", "")
@@ -300,7 +326,16 @@ class KisanPackInstaller @Inject constructor(
                 val topic = o.optString("topic").trim()
                 val content = o.optString("content").trim()
                 if (topic.isEmpty() || content.isEmpty()) continue
+                // v1: single "sourceUrl". v2: "sources":[{label,url},…] — take
+                // the first url so the browse screen still has a link (full
+                // multi-link rendering is a later step).
                 val sourceUrl = o.optString("sourceUrl").takeIf { it.isNotBlank() }
+                    ?: o.optJSONArray("sources")?.let { arr ->
+                        (0 until arr.length())
+                            .asSequence()
+                            .mapNotNull { i -> arr.optJSONObject(i)?.optString("url")?.takeIf { u -> u.isNotBlank() } }
+                            .firstOrNull()
+                    }
                 val tagsArr = o.optJSONArray("tags")
                 val tags = if (tagsArr != null) {
                     (0 until tagsArr.length()).mapNotNull { tagsArr.optString(it).takeIf { t -> t.isNotBlank() } }

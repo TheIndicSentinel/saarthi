@@ -31,9 +31,11 @@ android {
         // — only the library one did — so the generated test APK referenced a
         // runner it didn't package, which is the upload error Firebase showed.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Kisan knowledge-pack manifest URL. Empty by default (in which
-        // case PackUpdateWorker is a no-op and users only ever see the
-        // bundled seed pack). When the server is live, set this via:
+        // Kisan knowledge-pack manifest URL. Defaults to the public
+        // saarthi-packs GitHub Releases "latest" manifest, so the signed
+        // update channel works in a stock build. Until the first signed
+        // release is published the URL simply 404s and PackUpdateWorker
+        // backs off (Result.retry) — harmless. Override via:
         //   local.properties → kisan.pack.manifest.url=https://…/manifest.json
         //   CI env           → KISAN_PACK_MANIFEST_URL=https://…/manifest.json
         val kisanManifestUrl = System.getenv("KISAN_PACK_MANIFEST_URL")
@@ -41,8 +43,18 @@ android {
                 Properties().apply { f.inputStream().use { load(it) } }
                     .getProperty("kisan.pack.manifest.url")
             })
-            ?: ""
+            ?: "https://github.com/TheIndicSentinel/saarthi-packs/releases/latest/download/manifest.json"
         buildConfigField("String", "KISAN_PACK_MANIFEST_URL", "\"$kisanManifestUrl\"")
+
+        // ECDSA P-256 (secp256r1) public key — X.509 SPKI, base64 — used to
+        // verify the signature of every downloaded Kisan pack before install.
+        // The matching PRIVATE key is held OFFLINE by the maintainer and is
+        // never in the repo. Rotating the key = change this value + re-sign.
+        buildConfigField(
+            "String",
+            "KISAN_PACK_PUBLIC_KEY",
+            "\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAET92OpbPOpjrzlo6eOURyOtsbxfpBPElsQcCo8hce3VBfpKLTkCr7szYyMiifJE/Mko/ZCwqvqFOpk7hfdyia9Q==\"",
+        )
 
         // Ship only arm64-v8a. Every Android 7.0+ device that can run a
         // 1B+ on-device LLM has a 64-bit ARM CPU — keeping armeabi-v7a /
