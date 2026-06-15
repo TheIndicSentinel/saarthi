@@ -573,11 +573,12 @@ fun AssistantScreen(
                 com.saarthi.core.common.BatteryOptimizationPrompt.markPrompted(activity)
             },
             containerColor = SaarthiColors.NavyMid,
-            title = { Text("Keep replies running smoothly?", color = SaarthiColors.TextPrimary) },
+            title = { Text("Keep replies & reminders on time?", color = SaarthiColors.TextPrimary) },
             text = {
                 Text(
-                    "Android may pause Saarthi mid-reply to save battery. " +
-                        "Letting the app skip battery optimization means long answers finish without being cut off.",
+                    "Android may pause Saarthi to save battery. Letting the app skip battery " +
+                        "optimization keeps long answers from being cut off mid-reply, and makes " +
+                        "your reminders fire on time instead of being delayed.",
                     color = SaarthiColors.TextSecondary,
                 )
             },

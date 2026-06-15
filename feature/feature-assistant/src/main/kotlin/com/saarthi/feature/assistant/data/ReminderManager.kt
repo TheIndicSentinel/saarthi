@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.saarthi.core.inference.DebugLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import java.util.Calendar
@@ -103,9 +104,18 @@ class ReminderManager @Inject constructor(
             } else {
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pi)
             }
+            val mins = ((triggerMs - System.currentTimeMillis()) / 60_000.0)
+            // File-visible (DebugLogger) so reminder behaviour shows up in the
+            // shared debug log alongside [PROMPT]/[CHAT] — Timber alone only
+            // reaches logcat, which is why earlier logs had zero reminder data.
+            DebugLogger.log(
+                "REMINDER",
+                "scheduled id=$id exact=$exact in=${"%.1f".format(mins)}min at=${java.util.Date(triggerMs)} text=\"${text.take(40)}\"",
+            )
             Timber.d("ReminderManager: scheduled id=$id text='$text' at ${java.util.Date(triggerMs)} exact=$exact")
             true
         } catch (e: Exception) {
+            DebugLogger.log("REMINDER", "schedule FAILED id=$id exact=$exact err=${e.message}")
             Timber.e(e, "ReminderManager: failed to schedule")
             false
         }

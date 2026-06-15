@@ -74,9 +74,16 @@ class ReminderReceiver : BroadcastReceiver() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
+                // File-visible so a "reminder didn't show" report is diagnosable:
+                // the alarm DID fire, but the OS suppressed the notification
+                // because the user hasn't granted POST_NOTIFICATIONS.
+                com.saarthi.core.inference.DebugLogger.log(
+                    "REMINDER", "fired id=$id but SUPPRESSED — POST_NOTIFICATIONS not granted",
+                )
                 return
             }
         }
+        com.saarthi.core.inference.DebugLogger.log("REMINDER", "fired id=$id — posting notification")
 
         // Tap → open the app, preferring an existing task.
         val tapIntent = context.packageManager
