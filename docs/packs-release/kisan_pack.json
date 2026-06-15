@@ -1,0 +1,870 @@
+{
+  "schemaVersion": 2,
+  "packId": "kisan",
+  "packVersion": 8,
+  "language": "en",
+  "title": "Kisan Knowledge",
+  "publishedAt": "2026-06-15T00:00:00Z",
+  "generator": "manual-first-release",
+  "sections": [
+    {
+      "id": "central",
+      "version": 1,
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "tier": "curated"
+    },
+    {
+      "id": "msp",
+      "version": 1,
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "tier": "curated"
+    },
+    {
+      "id": "state-overlays",
+      "version": 1,
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "tier": "curated"
+    }
+  ],
+  "entries": [
+    {
+      "id": "central/pm-kisan-samman-nidhi",
+      "section": "central",
+      "topic": "PM-KISAN Samman Nidhi — direct cash benefit",
+      "content": "The Pradhan Mantri Kisan Samman Nidhi (PM-KISAN) is a Central Sector Scheme launched in February 2019 that gives every eligible landholding farmer family ₹6,000 per year in three equal instalments of ₹2,000, transferred directly to the Aadhaar-seeded bank account every four months. Land records are verified by the State / UT government; income-tax-payer families, institutional landholders and former / current constitutional post-holders are excluded. Beneficiaries register through the PM-KISAN portal or a Common Service Centre (CSC); status of payments can be checked at pmkisan.gov.in with the Aadhaar or registered mobile number.",
+      "tags": [
+        "pm-kisan",
+        "scheme",
+        "income-support",
+        "central"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "pmkisan.gov.in",
+          "url": "https://pmkisan.gov.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/kisan-credit-card-(kcc)",
+      "section": "central",
+      "topic": "Kisan Credit Card (KCC) — short-term crop loan",
+      "content": "The Kisan Credit Card scheme provides short-term credit for cultivation, post-harvest expenses, household consumption, working capital for farm-asset maintenance and investment credit for allied activities like dairy, fisheries and animal husbandry. The interest rate is 7% per annum with a 3% prompt-repayment incentive that brings the effective rate down to 4% on loans up to ₹3 lakh repaid on time. Both crop loans (under interest subvention) and term loans for farm investment are covered. Any farmer — owner-cultivator, tenant farmer, oral lessee, sharecropper or SHG member — can apply through the nearest commercial bank, RRB or cooperative bank.",
+      "tags": [
+        "kcc",
+        "credit",
+        "loan",
+        "interest-subvention"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "www.rbi.org.in",
+          "url": "https://www.rbi.org.in/Scripts/BS_ViewMasCirculardetails.aspx?Id=11456",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "msp/minimum-support-price-(msp)",
+      "section": "msp",
+      "topic": "Minimum Support Price (MSP) — key Kharif and Rabi crops",
+      "content": "MSP is the price at which the Government procures crops directly from farmers via FCI, NAFED and state agencies. For Rabi marketing season 2024-25 the Cabinet Committee on Economic Affairs fixed MSP for wheat at ₹2,275/quintal, mustard at ₹5,650/quintal and gram at ₹5,440/quintal. For Kharif marketing season 2024-25 paddy (common) is ₹2,300/quintal, paddy (Grade A) ₹2,320/quintal, jowar (hybrid) ₹3,371/quintal, bajra ₹2,625/quintal, tur (arhar) ₹7,550/quintal, moong ₹8,682/quintal, urad ₹7,400/quintal, groundnut ₹6,783/quintal, soybean (yellow) ₹4,892/quintal and cotton (medium staple) ₹7,121/quintal. CACP recommends MSPs by computing A2+FL cost (paid-out cost plus imputed family labour) and adds a margin of at least 50%.",
+      "tags": [
+        "msp",
+        "price",
+        "kharif",
+        "rabi",
+        "procurement"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "agriwelfare.gov.in",
+          "url": "https://agriwelfare.gov.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/soil-health-card",
+      "section": "central",
+      "topic": "Soil Health Card — testing and balanced fertiliser advice",
+      "content": "Under the Soil Health Card scheme every farm is sampled once every three years and the soil is tested for 12 parameters: pH, electrical conductivity, organic carbon, primary nutrients (N, P, K), secondary nutrients (S), and micronutrients (Zn, Fe, Cu, Mn, B). The card provides crop-wise fertiliser recommendations along with adjustments needed to maintain soil health, and is delivered free to the farmer through the State Agriculture Department. Farmers can collect samples themselves using the prescribed procedure and submit them to the nearest Soil Testing Laboratory.",
+      "tags": [
+        "soil",
+        "testing",
+        "fertiliser",
+        "shc"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "soilhealth.dac.gov.in",
+          "url": "https://soilhealth.dac.gov.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/pradhan-mantri-fasal-bima-yojana-(pmfby)",
+      "section": "central",
+      "topic": "Pradhan Mantri Fasal Bima Yojana (PMFBY) — crop insurance",
+      "content": "PMFBY is the flagship crop insurance scheme covering pre-sowing to post-harvest losses caused by non-preventable natural risks. Farmer premium is 2% of sum insured for Kharif food and oilseed crops, 1.5% for Rabi crops, and 5% for annual commercial / horticultural crops; the balance is paid by the Centre and the State in equal shares (the Centre shoulders the full subsidy in north-eastern states). Enrolment is voluntary for all farmers since 2020. Claim disbursement uses Crop Cutting Experiments (CCE) for yield-based losses and remote-sensing add-ons for prevented-sowing and post-harvest losses. Farmers apply through banks, CSCs or the National Crop Insurance Portal.",
+      "tags": [
+        "insurance",
+        "pmfby",
+        "crop",
+        "risk"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "pmfby.gov.in",
+          "url": "https://pmfby.gov.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/drip-and-sprinkler-irrigation",
+      "section": "central",
+      "topic": "Drip and sprinkler irrigation — PMKSY Per Drop More Crop",
+      "content": "Under the Pradhan Mantri Krishi Sinchai Yojana (PMKSY) — Per Drop More Crop component, central assistance for micro-irrigation is provided at 55% of system cost for small and marginal farmers and 45% for other farmers; many states top this up further. Drip irrigation typically cuts water use by 30-70% versus flood irrigation, increases yields of orchard crops and vegetables by 20-90% and improves nutrient-use efficiency through fertigation. Applications go through the State Horticulture / Agriculture Mission or the PMKSY portal. The Micro Irrigation Fund (MIF) at NABARD provides loans to states for additional subsidies and dedicated micro-irrigation infrastructure.",
+      "tags": [
+        "irrigation",
+        "drip",
+        "sprinkler",
+        "pmksy",
+        "water"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "pmksy.gov.in",
+          "url": "https://pmksy.gov.in/microirrigation/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/wheat-sowing-calendar-and-recommended-varieties-(north-india)",
+      "section": "central",
+      "topic": "Wheat sowing calendar and recommended varieties (North India)",
+      "content": "In the Indo-Gangetic plains the optimum wheat sowing window is 1 November to 25 November; late sowing after 15 December reduces yield by 25-40 kg/ha per day of delay. Recommended varieties for timely sowing under irrigated conditions: HD-3226, HD-2967, PBW-725, DBW-187 (Karan Vandana), DBW-303 (Karan Vaishnavi). For late sowing: HD-3059, HD-3271, WH-1124, DBW-173. Seed rate is 100 kg/ha (timely) to 125 kg/ha (late). Recommended NPK is 150:60:40 kg/ha; the full P and K plus one-third N is applied as basal, with the remaining N split between first irrigation (CRI stage, ~21 DAS) and tillering. Two to four irrigations are needed depending on rainfall and soil.",
+      "tags": [
+        "wheat",
+        "sowing",
+        "varieties",
+        "north-india",
+        "calendar"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "icar.org.in",
+          "url": "https://icar.org.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/paddy-nursery-and-transplanting",
+      "section": "central",
+      "topic": "Paddy nursery and transplanting — Kharif",
+      "content": "Healthy paddy nurseries need 600-800 g of seed per 100 m² nursery bed for raising seedlings to transplant 1 hectare. Seed should be treated with Carbendazim @ 2 g/kg seed for blast and Bavistin / hot water (52°C for 30 min) for nematodes before sowing. Nursery is ready for transplanting at 21-25 days for short-duration varieties and 28-35 days for medium/long-duration varieties. Transplant 2-3 seedlings per hill at 20 × 15 cm spacing in fertile soils, 20 × 10 cm in light soils. Avoid transplanting older than 35-40 day seedlings — yield drops sharply. Maintain 5 cm standing water during tillering and panicle initiation.",
+      "tags": [
+        "paddy",
+        "rice",
+        "nursery",
+        "transplanting",
+        "kharif"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "icar.org.in",
+          "url": "https://icar.org.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/fall-armyworm-(spodoptera-frugiperda)-in-maize",
+      "section": "central",
+      "topic": "Fall armyworm (Spodoptera frugiperda) in maize — IPM advisory",
+      "content": "Fall armyworm has been a major pest of maize in India since 2018. Scout weekly from V3 stage by inspecting 10 plants in each of 5 spots per acre; treat when egg masses or 1-3 larvae per plant are found on >5% of plants. Cultural: deep summer ploughing, balanced fertilisation (avoid excess N), inter-cropping with pulses, light traps at 1/acre, and pheromone traps at 4-5/acre for monitoring. Mechanical: hand-picking and crushing egg masses and early-instar larvae; whorl application of dry sand + lime (9:1) for early infestation. Biological: Trichogramma chilonis @ 50,000/acre at egg stage; Telenomus remus @ 200,000/ha. Chemical (when ETL crossed): spinetoram 11.7 SC @ 0.5 ml/L or chlorantraniliprole 18.5 SC @ 0.4 ml/L or emamectin benzoate 5 SG @ 0.4 g/L — direct spray into the whorl in early morning or late evening. Rotate modes of action across sprays to delay resistance.",
+      "tags": [
+        "maize",
+        "makka",
+        "makai",
+        "makki",
+        "makha",
+        "bhutta",
+        "corn",
+        "pest",
+        "pests",
+        "insect",
+        "keeda",
+        "keede",
+        "keet",
+        "kira",
+        "kire",
+        "sundi",
+        "illi",
+        "fall-armyworm",
+        "fall armyworm",
+        "armyworm",
+        "army worm",
+        "armywork",
+        "ipm",
+        "pest-management",
+        "control",
+        "niyantran",
+        "spray",
+        "dawai"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "ppqs.gov.in",
+          "url": "https://ppqs.gov.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/e-nam-(national-agriculture-market)",
+      "section": "central",
+      "topic": "e-NAM (National Agriculture Market) — selling at remunerative prices",
+      "content": "e-NAM is the pan-India electronic trading portal that networks existing APMC mandis to create a unified national market. Farmers can list their produce online after delivering it to any e-NAM mandi; quality is assayed and bidding takes place electronically. Major benefits: better price discovery via wider buyer participation, transparent weighment, electronic payment within T+1 to the farmer's bank account, and ability to participate in inter-mandi and inter-state trade. Required documents for first-time registration: Aadhaar, mobile number and bank passbook. Registration is free at any e-NAM mandi or through the e-NAM mobile app. As of 2025 over 1,400 mandis across 28 states/UTs are integrated.",
+      "tags": [
+        "enam",
+        "mandi",
+        "market",
+        "price",
+        "selling"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "enam.gov.in",
+          "url": "https://enam.gov.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/drought-tolerant-practices",
+      "section": "central",
+      "topic": "Drought-tolerant practices — moisture conservation and crop choice",
+      "content": "In rainfed and drought-prone areas, the proven moisture-conservation package is: (1) summer ploughing to a depth of 15-20 cm to break the hard pan; (2) creation of compartmental bunds or contour bunding to slow runoff; (3) tied-ridging across the slope for row crops; (4) mulching with crop residues, polythene or weed biomass to cut evaporation losses by 30-40%; (5) zai pits and trench planting for high-value horticultural crops. Drought-tolerant crop and variety choices: pearl millet (HHB-67 Improved, HHB-299), sorghum (CSV-15, CSV-22), finger millet (GPU-28, GPU-66), pigeon pea (BSMR-736), groundnut (TG-37A) and short-duration pulses. Always pair drought-tolerant varieties with seed treatment, balanced nutrition and timely sowing — variety alone is not enough.",
+      "tags": [
+        "drought",
+        "rainfed",
+        "moisture",
+        "millets",
+        "variety"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "www.crida.in",
+          "url": "https://www.crida.in/",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "central/fpo-formation-under-10,000-fpo-scheme",
+      "section": "central",
+      "topic": "FPO formation under 10,000 FPO scheme — eligibility and benefits",
+      "content": "The Government's scheme for formation and promotion of 10,000 Farmer Producer Organisations (FPOs) provides ₹18 lakh per FPO over a five-year handholding period through implementing agencies like NABARD, SFAC and NCDC. Each FPO is professionally managed by a Cluster Based Business Organisation (CBBO) for the handholding period and receives equity grant up to ₹2,000 per farmer (max ₹15 lakh per FPO) and credit guarantee cover up to ₹2 crore. Eligibility: minimum 300 farmer-members in plains and 100 in north-eastern / hilly areas, registered as a Producer Company under the Companies Act 2013 or as a Cooperative Society. FPOs get easier access to KCC, post-harvest infrastructure, custom hiring centres and e-NAM trading.",
+      "tags": [
+        "fpo",
+        "scheme",
+        "sfac",
+        "nabard",
+        "ncdc"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "sfacindia.com",
+          "url": "https://sfacindia.com/FPOS.aspx",
+          "tier": "curated"
+        }
+      ]
+    },
+    {
+      "id": "state-overlays/maharashtra",
+      "section": "state-overlays",
+      "topic": "Maharashtra — Namo Shetkari Maha Samman Nidhi (state add-on)",
+      "content": "STATE OVERLAY for Maharashtra. Namo Shetkari Maha Samman Nidhi is a Maharashtra state scheme paid IN ADDITION TO central PM-KISAN: ₹9,000/year from the state in 3 instalments of ₹3,000, so with PM-KISAN's ₹6,000 an eligible farmer family gets about ₹15,000/year in total. No separate registration — it is auto-linked to the PM-KISAN beneficiary database. Check status on the Maharashtra agriculture portal or myscheme.gov.in. Confirm the current instalment status before advising.",
+      "tags": [
+        "maharashtra",
+        "namo shetkari",
+        "maha samman nidhi",
+        "pm-kisan top-up",
+        "income support",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "krishi.maharashtra.gov.in",
+          "url": "https://krishi.maharashtra.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Maharashtra"
+    },
+    {
+      "id": "state-overlays/telangana",
+      "section": "state-overlays",
+      "topic": "Telangana — Rythu Bharosa (state investment support)",
+      "content": "STATE OVERLAY for Telangana. Rythu Bharosa (which replaced Rythu Bandhu in January 2025) is a Telangana investment-support scheme paying land-owning farmers ₹12,000 per acre per year — ₹6,000 for Kharif and ₹6,000 for Rabi. Telangana also pays a paddy bonus of ₹500/quintal. This is separate from central schemes. Portal: rythubharosa.telangana.gov.in. Confirm current eligibility and payout dates before advising.",
+      "tags": [
+        "telangana",
+        "rythu bharosa",
+        "rythu bandhu",
+        "investment support",
+        "paddy bonus",
+        "per acre",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "rythubandhu.telangana.gov.in",
+          "url": "https://rythubandhu.telangana.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Telangana"
+    },
+    {
+      "id": "state-overlays/madhya-pradesh",
+      "section": "state-overlays",
+      "topic": "Madhya Pradesh — Bhavantar Bhugtan Yojana (price-deficiency payment)",
+      "content": "STATE OVERLAY for Madhya Pradesh. Bhavantar Bhugtan Yojana is a price-deficiency scheme: the state pays the difference between the MSP and the actual market price directly to the registered farmer by DBT, instead of physically procuring the crop. The 2025 revival covers soybean (MSP ₹5,328/quintal); earlier rounds also covered pulses, oilseeds, wheat, gram and mustard. Register in advance and sell in a notified mandi within the window. Portal: mpeuparjan.nic.in. Confirm covered crops and the current MSP before advising.",
+      "tags": [
+        "madhya pradesh",
+        "bhavantar",
+        "bhavantar bhugtan",
+        "price deficiency",
+        "soybean",
+        "dbt",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "mpeuparjan.nic.in",
+          "url": "https://mpeuparjan.nic.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Madhya Pradesh"
+    },
+    {
+      "id": "state-overlays/karnataka",
+      "section": "state-overlays",
+      "topic": "Karnataka — Krishi Bhagya (farm pond + micro-irrigation)",
+      "content": "STATE OVERLAY for Karnataka. Krishi Bhagya helps rain-fed farmers harvest and reuse rainwater: the farm-pond (krishi honda) bundle is subsidised about 80% for general farmers (roughly ₹70,000) and 90% for SC/ST farmers (roughly ₹80,000), including polythene lining, fencing and shade net; drip and sprinkler systems are subsidised separately. Apply through the local Raitha Samparka Kendra. Portal: raitamitra.karnataka.gov.in. Confirm the current subsidy share before advising.",
+      "tags": [
+        "karnataka",
+        "krishi bhagya",
+        "farm pond",
+        "krishi honda",
+        "irrigation subsidy",
+        "drip",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "raitamitra.karnataka.gov.in",
+          "url": "https://raitamitra.karnataka.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Karnataka"
+    },
+    {
+      "id": "state-overlays/bihar",
+      "section": "state-overlays",
+      "topic": "Bihar — Rajya Fasal Sahayata Yojana (state crop assistance)",
+      "content": "STATE OVERLAY for Bihar. Rajya Fasal Sahayata Yojana is Bihar's crop-loss scheme (run in place of PMFBY) with NO premium charged to the farmer: a notified yield loss up to 20% pays ₹7,500 per hectare, and loss above 20% pays ₹10,000 per hectare, up to a maximum of 2 hectares per farmer, for both Kharif and Rabi. Enrol online each season before the cut-off at pacsonline.bih.nic.in. Confirm the current enrolment window before advising.",
+      "tags": [
+        "bihar",
+        "rajya fasal sahayata",
+        "crop loss",
+        "crop assistance",
+        "no premium",
+        "state crop insurance",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "pacsonline.bih.nic.in",
+          "url": "https://pacsonline.bih.nic.in/fsy/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Bihar"
+    },
+    {
+      "id": "state-overlays/odisha",
+      "section": "state-overlays",
+      "topic": "Odisha — KALIA (livelihood & income support)",
+      "content": "STATE OVERLAY for Odisha. KALIA (Krushak Assistance for Livelihood and Income Augmentation): small and marginal farmers get ₹10,000/year (this includes the central PM-KISAN ₹6,000 plus a ₹4,000 state top-up). Landless agricultural households get a ₹12,500 livelihood lump sum. KALIA also gives interest-free crop loans up to ₹50,000, life insurance of ₹2 lakh and accident cover of ₹2 lakh. Check status on the state KALIA portal. Confirm current amounts before advising.",
+      "tags": [
+        "odisha",
+        "kalia",
+        "livelihood support",
+        "income support",
+        "crop loan",
+        "insurance",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "agri.odisha.gov.in",
+          "url": "https://agri.odisha.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Odisha"
+    },
+    {
+      "id": "state-overlays/west-bengal",
+      "section": "state-overlays",
+      "topic": "West Bengal — Krishak Bandhu (assured income & death benefit)",
+      "content": "STATE OVERLAY for West Bengal. Krishak Bandhu: farmers with 1 acre or more get ₹10,000/year (₹5,000 Kharif + ₹5,000 Rabi); farmers below 1 acre get a pro-rata minimum of ₹4,000/year. It also includes a one-time death-benefit grant of ₹2,00,000 to the family if a registered farmer aged 18–60 dies (no premium). Apply at duare sarkar camps or krishakbandhu.net. Confirm the current rate before advising.",
+      "tags": [
+        "west bengal",
+        "krishak bandhu",
+        "assured income",
+        "death benefit",
+        "income support",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "krishakbandhu.net",
+          "url": "https://krishakbandhu.net/",
+          "tier": "curated"
+        }
+      ],
+      "state": "West Bengal"
+    },
+    {
+      "id": "state-overlays/punjab",
+      "section": "state-overlays",
+      "topic": "Punjab — Wheat sowing window (PAU Ludhiana guidance)",
+      "content": "STATE OVERLAY for Punjab (EXAMPLE entry — verify with Punjab Agricultural University, Ludhiana, or your local KVK for the current season). For Punjab, PAU generally advises sowing timely wheat varieties from about the last week of October to the third week of November; very late sowing into December lowers yield, so short-duration varieties are recommended if delayed. Use the recommended seed rate and treat seed before sowing. NOTE: exact dates and recommended varieties are revised each season by PAU and the State Agriculture Department — confirm the latest before advising.",
+      "tags": [
+        "punjab",
+        "wheat",
+        "sowing calendar",
+        "sowing window",
+        "pau",
+        "rabi",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "www.pau.edu",
+          "url": "https://www.pau.edu/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Punjab"
+    },
+    {
+      "id": "state-overlays/jharkhand",
+      "section": "state-overlays",
+      "topic": "Jharkhand — Mukhyamantri Krishi Ashirwad Yojana (input support)",
+      "content": "STATE OVERLAY for Jharkhand. Mukhyamantri Krishi Ashirwad Yojana pays small and marginal farmers ₹5,000 per acre per year, up to a maximum of 5 acres, credited by DBT to the bank account to help with Kharif input costs. Confirm current eligibility and disbursement with the Jharkhand Agriculture Department.",
+      "tags": [
+        "jharkhand",
+        "krishi ashirwad",
+        "mukhyamantri krishi ashirwad",
+        "input support",
+        "per acre",
+        "dbt",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "jharkhand.gov.in",
+          "url": "https://jharkhand.gov.in/agriculture",
+          "tier": "curated"
+        }
+      ],
+      "state": "Jharkhand"
+    },
+    {
+      "id": "state-overlays/uttar-pradesh",
+      "section": "state-overlays",
+      "topic": "Uttar Pradesh — state top-up on PM-KISAN (Kisan Kalyan Mission)",
+      "content": "STATE OVERLAY for Uttar Pradesh. Alongside the central PM-KISAN (₹6,000/year), Uttar Pradesh adds a state top-up of ₹6,000/year, taking an eligible farmer's total to about ₹12,000/year; the state's Kisan Kalyan Mission also runs input, training and market-linkage support. Confirm the current state top-up status with the UP Agriculture Department. These figures are as of 2025-26 and are revised at budget time each year — confirm the current amount with the state agriculture department before the season.",
+      "tags": [
+        "uttar pradesh",
+        "kisan kalyan mission",
+        "pm-kisan top-up",
+        "income support",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "upagriculture.com",
+          "url": "https://upagriculture.com/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Uttar Pradesh"
+    },
+    {
+      "id": "state-overlays/rajasthan",
+      "section": "state-overlays",
+      "topic": "Rajasthan — Mukhyamantri Kisan Samman Nidhi (PM-KISAN top-up)",
+      "content": "STATE OVERLAY for Rajasthan. Rajasthan tops up the central PM-KISAN to a total of about ₹9,000/year (the state adds roughly ₹3,000). Farmers also get a wheat MSP bonus of ₹150/quintal, interest-free short-term crop loans (from a large state cooperative loan pool), and micro-irrigation (drip/sprinkler) subsidy up to about 75%. Confirm current rates with the Rajasthan Agriculture Department. These figures are as of 2025-26 and are revised at budget time each year — confirm the current amount with the state agriculture department before the season.",
+      "tags": [
+        "rajasthan",
+        "kisan samman nidhi",
+        "pm-kisan top-up",
+        "wheat bonus",
+        "micro irrigation",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "rajkisan.rajasthan.gov.in",
+          "url": "https://rajkisan.rajasthan.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Rajasthan"
+    },
+    {
+      "id": "state-overlays/chhattisgarh",
+      "section": "state-overlays",
+      "topic": "Chhattisgarh — Rajiv Gandhi Kisan Nyay Yojana (input subsidy)",
+      "content": "STATE OVERLAY for Chhattisgarh. Rajiv Gandhi Kisan Nyay Yojana pays an input subsidy by DBT in instalments: about ₹6,000 per acre for paddy and up to ₹10,000 per acre for other notified crops (paddy, maize, soybean, pulses, oilseeds, banana, papaya); sugarcane gets an FRP of ₹355/quintal. Confirm current per-acre rates and covered crops with the state Agriculture Department.",
+      "tags": [
+        "chhattisgarh",
+        "rajiv gandhi kisan nyay",
+        "input subsidy",
+        "paddy",
+        "per acre",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "rgkny.cg.nic.in",
+          "url": "https://rgkny.cg.nic.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Chhattisgarh"
+    },
+    {
+      "id": "state-overlays/andhra-pradesh",
+      "section": "state-overlays",
+      "topic": "Andhra Pradesh — Annadatha Sukhibhava (income support)",
+      "content": "STATE OVERLAY for Andhra Pradesh. Annadatha Sukhibhava (which replaced YSR Rythu Bharosa in 2025) pays eligible farmer families about ₹20,000/year in three instalments — this total INCLUDES the central PM-KISAN ₹6,000. There is no separate registration; it is linked to the PM-KISAN database. Confirm the current instalment status with the AP Agriculture Department.",
+      "tags": [
+        "andhra pradesh",
+        "annadatha sukhibhava",
+        "ysr rythu bharosa",
+        "pm-kisan top-up",
+        "income support",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "agriculture.ap.gov.in",
+          "url": "https://agriculture.ap.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Andhra Pradesh"
+    },
+    {
+      "id": "state-overlays/gujarat",
+      "section": "state-overlays",
+      "topic": "Gujarat — iKhedut subsidies (Khet Talavadi + micro-irrigation)",
+      "content": "STATE OVERLAY for Gujarat. Through the iKhedut portal, Gujarat offers a free geo-membrane lining for farm ponds (khet talavadi, up to about 40x40x6 m) and a state top-up on the central PMKSY micro-irrigation subsidy, taking drip/sprinkler support to roughly 70–80%. Apply at ikhedut.gujarat.gov.in. Confirm the current component list and subsidy share before advising.",
+      "tags": [
+        "gujarat",
+        "ikhedut",
+        "khet talavadi",
+        "geo membrane",
+        "farm pond",
+        "micro irrigation",
+        "drip",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "ikhedut.gujarat.gov.in",
+          "url": "https://ikhedut.gujarat.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Gujarat"
+    },
+    {
+      "id": "state-overlays/haryana",
+      "section": "state-overlays",
+      "topic": "Haryana — Bhavantar Bharpai / Meri Fasal Mera Byora",
+      "content": "STATE OVERLAY for Haryana. Haryana's Bhavantar Bharpai Yojana pays a price-deficiency amount on 21 notified horticultural crops when market prices fall below the protected price; wheat and paddy are procured close to 100% at MSP through HAFED. Farmers must register their crop and area on the Meri Fasal Mera Byora portal (fasal.haryana.gov.in) to claim. Confirm covered crops and current rates before advising.",
+      "tags": [
+        "haryana",
+        "bhavantar bharpai",
+        "meri fasal mera byora",
+        "price deficiency",
+        "procurement",
+        "horticulture",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "fasal.haryana.gov.in",
+          "url": "https://fasal.haryana.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Haryana"
+    },
+    {
+      "id": "state-overlays/tamil-nadu",
+      "section": "state-overlays",
+      "topic": "Tamil Nadu — paddy procurement + free crop insurance",
+      "content": "STATE OVERLAY for Tamil Nadu. The Tamil Nadu Civil Supplies Corporation (TNCSC) procures paddy at MSP with a state incentive bonus on top; the crop-insurance premium for notified crops is borne fully by the state (free to the farmer); micro-irrigation (drip/sprinkler) is subsidised up to about 75–100% for small and marginal farmers. Confirm the current bonus and enrolment with the TN Agriculture Department.",
+      "tags": [
+        "tamil nadu",
+        "tncsc",
+        "paddy procurement",
+        "msp bonus",
+        "crop insurance",
+        "micro irrigation",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "www.tnagrisnet.tn.gov.in",
+          "url": "https://www.tnagrisnet.tn.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Tamil Nadu"
+    },
+    {
+      "id": "state-overlays/assam",
+      "section": "state-overlays",
+      "topic": "Assam — Krishi Sa Sajuli Yojana & farm support",
+      "content": "STATE OVERLAY for Assam. Mukhya Mantri Krishi Sa Sajuli Yojana gives a ₹5,000 one-time grant for farm tools and implements to small and marginal farmers who own at least 1 acre and have farmed for 3 years. Tractor subsidy up to 70% (maximum ₹5.5 lakh) is available under CMSGUY. Canal irrigation is free of cost. There is no state top-up on PM-KISAN. Confirm current amounts and eligibility with the Assam Agriculture Department.",
+      "tags": [
+        "assam",
+        "krishi sa sajuli",
+        "sa sajuli",
+        "cmsguy",
+        "tractor subsidy",
+        "farm tools",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "diragri.assam.gov.in",
+          "url": "https://diragri.assam.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Assam"
+    },
+    {
+      "id": "state-overlays/kerala",
+      "section": "state-overlays",
+      "topic": "Kerala — paddy royalty, farmer pension & state crop insurance",
+      "content": "STATE OVERLAY for Kerala. Rice cultivation royalty: ₹5,500/hectare for sustainable paddy cultivation; paddy-land conservation support ₹3,000/hectare. Welfare Pension for Agriculturists (age 60+, holding below 2 ha): ₹1,600/month. Kerala Karshaka Kshemanidhi pension: ₹1,000/month at 60+, with ₹1 lakh accidental-death benefit and ₹50,000 permanent-disability benefit from the fund. The State Crop Insurance scheme is state-funded and covers 27 crops (paddy, coconut, rubber, pepper, cardamom, vegetables and more) including wild-animal attacks and hailstorm — which central PMFBY does not. Karuthal group insurance premium is ₹650 total (state pays ₹500, farmer ₹150). No state top-up on PM-KISAN. Apply through the AIMS portal and local Krishi Bhavans. Confirm current rates before relying on them.",
+      "tags": [
+        "kerala",
+        "paddy royalty",
+        "farmer pension",
+        "karshaka kshemanidhi",
+        "state crop insurance",
+        "karuthal",
+        "krishi bhavan",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "www.keralaagriculture.gov.in",
+          "url": "https://www.keralaagriculture.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Kerala"
+    },
+    {
+      "id": "state-overlays/uttarakhand",
+      "section": "state-overlays",
+      "topic": "Uttarakhand — interest-free loans, irrigation & horticulture support",
+      "content": "STATE OVERLAY for Uttarakhand. Interest-free crop loans up to ₹3 lakh. Canal irrigation is free of cost across the state. Farm-machinery subsidy up to 80%. Kiwi orchard support (launched April 2025) at 70% state subsidy; dragon-fruit cultivation supported at 80%. Farmer pension of ₹1,000–₹1,200/month for age 60+ holding up to 2 hectares. No state top-up on PM-KISAN. Confirm current schemes and rates with the Uttarakhand Agriculture / Horticulture Department.",
+      "tags": [
+        "uttarakhand",
+        "interest-free loan",
+        "canal irrigation",
+        "farm machinery",
+        "kiwi",
+        "dragon fruit",
+        "farmer pension",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "agriculture.uk.gov.in",
+          "url": "https://agriculture.uk.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Uttarakhand"
+    },
+    {
+      "id": "state-overlays/himachal-pradesh",
+      "section": "state-overlays",
+      "topic": "Himachal Pradesh — hail nets, solar fencing, polyhouse & natural farming",
+      "content": "STATE OVERLAY for Himachal Pradesh. Anti-hail net subsidy 80% (individual) / 85% (group) for up to 5,000 sqm — protects apple and stone fruit. Solar fencing 80% (individual) / 85% (group) to keep monkeys and wild animals out (unique to hill states). Polyhouse subsidy up to 85% under the Mukhya Mantri Nutan Polyhouse project for high-value off-season vegetables. Natural farming under Prakritik Kheti Khushhal Kisan Yojana: ₹25,000 for an indigenous cow, ₹8,000 for cowshed improvement, ₹750 per drum for on-farm inputs. Apple rejuvenation: a ₹500 crore five-year high-density plantation project. A Market Intervention Scheme gives price protection by DBT during bumper harvests. No state top-up on PM-KISAN. Confirm current rates before relying on them.",
+      "tags": [
+        "himachal pradesh",
+        "anti-hail net",
+        "solar fencing",
+        "polyhouse",
+        "natural farming",
+        "prakritik kheti",
+        "apple",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "hpagrisnet.gov.in",
+          "url": "https://hpagrisnet.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Himachal Pradesh"
+    },
+    {
+      "id": "state-overlays/jammu-and-kashmir",
+      "section": "state-overlays",
+      "topic": "Jammu and Kashmir — Holistic Agriculture Development Programme (HADP)",
+      "content": "STATE OVERLAY for Jammu and Kashmir. The Holistic Agriculture Development Programme (HADP) covers 29 projects — seed quality, mechanisation, high-density plantation, dairy, sheep, poultry and market linkages — with subsidies from 20% to 95% depending on the activity. As a Himalayan classified state, micro-irrigation gets 25% extra unit-cost assistance on top of central PMKSY rates. HADP loans offer up to 90% financing with a back-ended government subsidy. Service delivery is through the hadp.jk.gov.in portal and Kisan Khidmat Ghars. Confirm the current project list and subsidy share before relying on them.",
+      "tags": [
+        "jammu and kashmir",
+        "hadp",
+        "holistic agriculture",
+        "high-density plantation",
+        "micro irrigation",
+        "kisan khidmat ghar",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "hadp.jk.gov.in",
+          "url": "https://hadp.jk.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "Jammu and Kashmir"
+    },
+    {
+      "id": "state-overlays/north-east-states",
+      "section": "state-overlays",
+      "topic": "North East States — crop insurance & enhanced central support",
+      "content": "STATE OVERLAY for the North-Eastern states (Arunachal Pradesh, Manipur, Meghalaya, Mizoram, Nagaland, Tripura, Sikkim). Under PMFBY crop insurance the central government bears 100% of the premium for these states — the farmer pays ZERO premium, unlike the rest of India where farmers pay about 2% for Kharif crops. PM-KISAN operates normally at ₹6,000/year. Most central scheme subsidies are enhanced for NE states. For state-specific schemes, contact the local agriculture department as they vary by state.",
+      "tags": [
+        "arunachal pradesh",
+        "manipur",
+        "meghalaya",
+        "mizoram",
+        "nagaland",
+        "tripura",
+        "sikkim",
+        "north east",
+        "ne states",
+        "crop insurance",
+        "pmfby",
+        "zero premium",
+        "state scheme"
+      ],
+      "effectiveDate": "2026-06-15",
+      "retrievedAt": "2026-06-15T00:00:00Z",
+      "sources": [
+        {
+          "label": "pmfby.gov.in",
+          "url": "https://pmfby.gov.in/",
+          "tier": "curated"
+        }
+      ],
+      "state": "North East States"
+    }
+  ]
+}
