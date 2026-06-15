@@ -15,7 +15,7 @@ package com.saarthi.feature.assistant.data
  * the top cause of "reminders sometimes don't work". For a reminder *feature*,
  * a missed real request is worse than a rare spurious one (which still also
  * requires the model to have emitted a marker). So detection keys off the
- * substring "remind", which covers EVERY remind*/reminder* phrasing at once
+ * substring "remind", which covers every remind / reminder phrasing at once
  * ("remind me", "give me a reminder", "reminder after", "reminded"…), plus the
  * common alarm/alert vocabulary and the main Indian-language equivalents.
  *
