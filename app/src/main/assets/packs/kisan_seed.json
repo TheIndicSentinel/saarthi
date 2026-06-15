@@ -1,6 +1,6 @@
 {
   "packId": "kisan",
-  "version": 6,
+  "version": 7,
   "language": "en",
   "title": "Kisan Knowledge — starter pack",
   "source": "Government of India open data (data.gov.in, Agmarknet) + Ministry of Agriculture publications. Snapshot bundled with Saarthi v1.0.24.",
@@ -31,7 +31,7 @@
     {
       "topic": "Minimum Support Price (MSP) — key Kharif and Rabi crops",
       "content": "MSP is the price at which the Government procures crops directly from farmers via FCI, NAFED and state agencies. For Rabi marketing season 2024-25 the Cabinet Committee on Economic Affairs fixed MSP for wheat at ₹2,275/quintal, mustard at ₹5,650/quintal and gram at ₹5,440/quintal. For Kharif marketing season 2024-25 paddy (common) is ₹2,300/quintal, paddy (Grade A) ₹2,320/quintal, jowar (hybrid) ₹3,371/quintal, bajra ₹2,625/quintal, tur (arhar) ₹7,550/quintal, moong ₹8,682/quintal, urad ₹7,400/quintal, groundnut ₹6,783/quintal, soybean (yellow) ₹4,892/quintal and cotton (medium staple) ₹7,121/quintal. CACP recommends MSPs by computing A2+FL cost (paid-out cost plus imputed family labour) and adds a margin of at least 50%.",
-      "sourceUrl": "https://cacp.dacnet.nic.in/",
+      "sourceUrl": "https://agriwelfare.gov.in/",
       "tags": [
         "msp",
         "price",
@@ -77,7 +77,7 @@
     {
       "topic": "Wheat sowing calendar and recommended varieties (North India)",
       "content": "In the Indo-Gangetic plains the optimum wheat sowing window is 1 November to 25 November; late sowing after 15 December reduces yield by 25-40 kg/ha per day of delay. Recommended varieties for timely sowing under irrigated conditions: HD-3226, HD-2967, PBW-725, DBW-187 (Karan Vandana), DBW-303 (Karan Vaishnavi). For late sowing: HD-3059, HD-3271, WH-1124, DBW-173. Seed rate is 100 kg/ha (timely) to 125 kg/ha (late). Recommended NPK is 150:60:40 kg/ha; the full P and K plus one-third N is applied as basal, with the remaining N split between first irrigation (CRI stage, ~21 DAS) and tillering. Two to four irrigations are needed depending on rainfall and soil.",
-      "sourceUrl": "https://icar-iiwbr.icar.gov.in/",
+      "sourceUrl": "https://icar.org.in/",
       "tags": [
         "wheat",
         "sowing",
@@ -89,7 +89,7 @@
     {
       "topic": "Paddy nursery and transplanting — Kharif",
       "content": "Healthy paddy nurseries need 600-800 g of seed per 100 m² nursery bed for raising seedlings to transplant 1 hectare. Seed should be treated with Carbendazim @ 2 g/kg seed for blast and Bavistin / hot water (52°C for 30 min) for nematodes before sowing. Nursery is ready for transplanting at 21-25 days for short-duration varieties and 28-35 days for medium/long-duration varieties. Transplant 2-3 seedlings per hill at 20 × 15 cm spacing in fertile soils, 20 × 10 cm in light soils. Avoid transplanting older than 35-40 day seedlings — yield drops sharply. Maintain 5 cm standing water during tillering and panicle initiation.",
-      "sourceUrl": "https://icar-nrri.in/",
+      "sourceUrl": "https://icar.org.in/",
       "tags": [
         "paddy",
         "rice",
@@ -101,7 +101,7 @@
     {
       "topic": "Fall armyworm (Spodoptera frugiperda) in maize — IPM advisory",
       "content": "Fall armyworm has been a major pest of maize in India since 2018. Scout weekly from V3 stage by inspecting 10 plants in each of 5 spots per acre; treat when egg masses or 1-3 larvae per plant are found on >5% of plants. Cultural: deep summer ploughing, balanced fertilisation (avoid excess N), inter-cropping with pulses, light traps at 1/acre, and pheromone traps at 4-5/acre for monitoring. Mechanical: hand-picking and crushing egg masses and early-instar larvae; whorl application of dry sand + lime (9:1) for early infestation. Biological: Trichogramma chilonis @ 50,000/acre at egg stage; Telenomus remus @ 200,000/ha. Chemical (when ETL crossed): spinetoram 11.7 SC @ 0.5 ml/L or chlorantraniliprole 18.5 SC @ 0.4 ml/L or emamectin benzoate 5 SG @ 0.4 g/L — direct spray into the whorl in early morning or late evening. Rotate modes of action across sprays to delay resistance.",
-      "sourceUrl": "https://ppqs.gov.in/sites/default/files/fall_armyworm_advisory.pdf",
+      "sourceUrl": "https://ppqs.gov.in/",
       "tags": [
         "maize",
         "makka",
@@ -241,7 +241,7 @@
     {
       "topic": "Odisha — KALIA (livelihood & income support)",
       "content": "STATE OVERLAY for Odisha. KALIA (Krushak Assistance for Livelihood and Income Augmentation): small and marginal farmers get ₹10,000/year (this includes the central PM-KISAN ₹6,000 plus a ₹4,000 state top-up). Landless agricultural households get a ₹12,500 livelihood lump sum. KALIA also gives interest-free crop loans up to ₹50,000, life insurance of ₹2 lakh and accident cover of ₹2 lakh. Check status on the state KALIA portal. Confirm current amounts before advising.",
-      "sourceUrl": "https://kalia.odisha.gov.in/",
+      "sourceUrl": "https://agri.odisha.gov.in/",
       "tags": [
         "odisha",
         "kalia",
@@ -282,7 +282,7 @@
     {
       "topic": "Jharkhand — Mukhyamantri Krishi Ashirwad Yojana (input support)",
       "content": "STATE OVERLAY for Jharkhand. Mukhyamantri Krishi Ashirwad Yojana pays small and marginal farmers ₹5,000 per acre per year, up to a maximum of 5 acres, credited by DBT to the bank account to help with Kharif input costs. Confirm current eligibility and disbursement with the Jharkhand Agriculture Department.",
-      "sourceUrl": "https://mmkay.jharkhand.gov.in/",
+      "sourceUrl": "https://jharkhand.gov.in/agriculture",
       "tags": [
         "jharkhand",
         "krishi ashirwad",
@@ -334,7 +334,7 @@
     {
       "topic": "Andhra Pradesh — Annadatha Sukhibhava (income support)",
       "content": "STATE OVERLAY for Andhra Pradesh. Annadatha Sukhibhava (which replaced YSR Rythu Bharosa in 2025) pays eligible farmer families about ₹20,000/year in three instalments — this total INCLUDES the central PM-KISAN ₹6,000. There is no separate registration; it is linked to the PM-KISAN database. Confirm the current instalment status with the AP Agriculture Department.",
-      "sourceUrl": "https://ysrrythubharosa.ap.gov.in/",
+      "sourceUrl": "https://agriculture.ap.gov.in/",
       "tags": [
         "andhra pradesh",
         "annadatha sukhibhava",
@@ -376,7 +376,7 @@
     {
       "topic": "Tamil Nadu — paddy procurement + free crop insurance",
       "content": "STATE OVERLAY for Tamil Nadu. The Tamil Nadu Civil Supplies Corporation (TNCSC) procures paddy at MSP with a state incentive bonus on top; the crop-insurance premium for notified crops is borne fully by the state (free to the farmer); micro-irrigation (drip/sprinkler) is subsidised up to about 75–100% for small and marginal farmers. Confirm the current bonus and enrolment with the TN Agriculture Department.",
-      "sourceUrl": "https://www.tn.gov.in/scheme/department_wise/9",
+      "sourceUrl": "https://www.tnagrisnet.tn.gov.in/",
       "tags": [
         "tamil nadu",
         "tncsc",

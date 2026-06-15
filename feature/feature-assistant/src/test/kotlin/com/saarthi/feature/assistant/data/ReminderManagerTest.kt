@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.pm.PackageManager
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -22,9 +23,10 @@ import org.junit.Test
  * without needing a real device or emulator.
  *
  * Android system-service calls (AlarmManager, NotificationManager, PendingIntent)
- * are all mocked. Build.VERSION.SDK_INT defaults to 0 in JVM tests, which means
- * the else-branch in scheduleAt() always runs — i.e. setExactAndAllowWhileIdle()
- * is the verified path.
+ * are all mocked. Reminders are scheduled via AlarmManager.setAlarmClock() — the
+ * reliable path that fires under Doze and needs no SCHEDULE_EXACT_ALARM grant;
+ * scheduleFallback() (setExact*/setAndAllowWhileIdle) only runs if setAlarmClock
+ * throws.
  */
 class ReminderManagerTest {
 
@@ -49,6 +51,11 @@ class ReminderManagerTest {
         every {
             PendingIntent.getBroadcast(any(), any(), any(), any())
         } returns mockPendingIntent
+        // showIntentFor() returns null when there is no launch intent, so the
+        // alarm-clock "show" PendingIntent path stays out of these tests.
+        val mockPackageManager = mockk<PackageManager>(relaxed = true)
+        every { mockContext.packageManager } returns mockPackageManager
+        every { mockPackageManager.getLaunchIntentForPackage(any()) } returns null
 
         manager = ReminderManager(mockContext)
     }
@@ -61,40 +68,54 @@ class ReminderManagerTest {
     // ── scheduleByDelay ────────────────────────────────────────────────────────
 
     @Test
-    fun `scheduleByDelay returns true and calls AlarmManager`() {
+    fun `scheduleByDelay returns true and calls setAlarmClock`() {
         val result = manager.scheduleByDelay("dinner", 30)
 
         assertTrue("scheduleByDelay must return true on success", result)
+        verify { mockAlarmManager.setAlarmClock(any(), mockPendingIntent) }
+    }
+
+    @Test
+    fun `scheduleByDelay falls back to exact alarm when setAlarmClock throws`() {
+        every {
+            mockAlarmManager.setAlarmClock(any(), any())
+        } throws SecurityException("alarm clock rejected")
+
+        val result = manager.scheduleByDelay("wake up", 10)
+
+        // SDK_INT is 0 in JVM tests → fallback takes the setExactAndAllowWhileIdle branch.
+        assertTrue("Must still schedule via fallback", result)
         verify { mockAlarmManager.setExactAndAllowWhileIdle(any(), any(), mockPendingIntent) }
     }
 
     @Test
-    fun `scheduleByDelay returns false when AlarmManager throws`() {
+    fun `scheduleByDelay returns false when both setAlarmClock and fallback throw`() {
+        every { mockAlarmManager.setAlarmClock(any(), any()) } throws SecurityException("no alarm clock")
         every {
             mockAlarmManager.setExactAndAllowWhileIdle(any(), any(), any())
         } throws SecurityException("no exact alarms")
 
         val result = manager.scheduleByDelay("wake up", 10)
 
-        assertFalse("Must return false on AlarmManager exception", result)
+        assertFalse("Must return false when every scheduling path fails", result)
     }
 
     // ── scheduleReminder (HH:MM absolute time) ─────────────────────────────────
 
     @Test
-    fun `scheduleReminder with valid time calls AlarmManager and returns true`() {
+    fun `scheduleReminder with valid time calls setAlarmClock and returns true`() {
         val result = manager.scheduleReminder("meeting", "14:00")
 
         assertTrue("scheduleReminder must return true for valid time", result)
-        verify { mockAlarmManager.setExactAndAllowWhileIdle(any(), any(), mockPendingIntent) }
+        verify { mockAlarmManager.setAlarmClock(any(), mockPendingIntent) }
     }
 
     @Test
-    fun `scheduleReminder with invalid format returns false without calling AlarmManager`() {
+    fun `scheduleReminder with invalid format returns false without scheduling`() {
         val result = manager.scheduleReminder("meeting", "not-a-time")
 
         assertFalse("Must return false for unparseable time string", result)
-        verify(exactly = 0) { mockAlarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
+        verify(exactly = 0) { mockAlarmManager.setAlarmClock(any(), any()) }
     }
 
     @Test
@@ -102,7 +123,7 @@ class ReminderManagerTest {
         val result = manager.scheduleReminder("alarm", "14")
 
         assertFalse("Single-part time string must fail gracefully", result)
-        verify(exactly = 0) { mockAlarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
+        verify(exactly = 0) { mockAlarmManager.setAlarmClock(any(), any()) }
     }
 
     // ── Notification channel ───────────────────────────────────────────────────
