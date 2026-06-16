@@ -271,7 +271,7 @@ class PackChatViewModel @Inject constructor(
                         // Freshness footer: which pack snapshot + as-of date this
                         // answer came from, so the user can judge how current it is.
                         val asOf = freshnessDate().takeIf { it.isNotBlank() }?.let { " · as of $it" }.orEmpty()
-                        val withSource = if (body.isBlank()) body else "$body\n\n_Source: ${label}$asOf_"
+                        val withSource = if (body.isBlank()) body else "$body\n\n_Source: ${label}${asOf}_"
                         finish(streamingId, withSource)
                     }
                 }
