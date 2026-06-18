@@ -668,6 +668,11 @@ class LiteRTInferenceEngine @Inject constructor(
                 logDeviceState("INIT")
                 val profile = deviceProfiler.profile()
 
+                // If we have less than 70% of the model's size in free RAM, the mmap will thrash the OS.
+                if (profile.availableRamMb < (sizeMb * 0.70)) {
+                    throw RuntimeException("Not enough active memory to run this model safely. Please close other apps or use a smaller model.")
+                }
+
                 val gpuBanned = gpuPreviouslyCrashedDuringGen(config.modelPath)
 
                 // maxNumTokens = total context window (input + output tokens).
@@ -795,7 +800,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 // availableRamMb further without OOM risk.
                 val gpuMemMultiplier = when (profile.tier) {
                     com.saarthi.core.inference.model.DeviceTier.FLAGSHIP -> 0.85
-                    com.saarthi.core.inference.model.DeviceTier.MID      -> 0.70
+                    com.saarthi.core.inference.model.DeviceTier.MID      -> 0.80
                     else                                                 -> 0.60
                 }
                 val memoryPressureBannedGpu = sizeMb > (profile.availableRamMb * gpuMemMultiplier)

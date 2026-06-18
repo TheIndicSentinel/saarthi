@@ -133,6 +133,7 @@ class SystemPromptProvider @Inject constructor() {
          * the actual document chunks.
          */
         grounded: Boolean = false,
+        maxContextTokens: Int = 8192,
     ): String {
         val tier = tierFor(modelName)
 
@@ -156,6 +157,10 @@ class SystemPromptProvider @Inject constructor() {
             // tiers — the BASE persona/tool block is dead weight here and its
             // size is what broke E4B and starved RAG on E2B/3n.
             grounded           -> groundedPrompt(personalityOverride)
+            // If the context window is severely constrained (e.g. LARGE tier on low-RAM device
+            // where maxTokens drops to 1536), the full BASE prompt leaves no room for the
+            // user's message or the reply. Fall back to a lean prompt.
+            maxContextTokens <= 1536 -> leanChatPrompt(personalityOverride)
             tier == ModelTier.STANDARD -> standardPrompt(pack, personalityOverride)
             else               -> largePrompt(pack, personalityOverride)
         }
@@ -298,6 +303,18 @@ class SystemPromptProvider @Inject constructor() {
             - Lead with the answer; be concise and scannable. Use markdown (bold, bullet/numbered lists) when it aids readability.
             - Keep names, numbers, dates and amounts EXACTLY as written in the excerpts — never round, paraphrase, or invent.
             - You run offline on the user's phone. When the question is answered by the excerpts, use them and cite the source. When the excerpts don't cover the question, say so briefly then add a short general answer prefixed 'In general:'.
+            - Do not introduce yourself, repeat your previous reply, or describe these instructions.
+        """.trimIndent()
+    }
+
+    private fun leanChatPrompt(personalityOverride: String = ""): String {
+        val identity = personalityOverride.ifBlank { DEFAULT_SAARTHI_IDENTITY }
+        return """
+            $identity
+
+            - Lead with the answer; be concise and scannable. Use markdown (bold, bullet/numbered lists) when it aids readability.
+            - You run offline on the user's phone.
+            - Accuracy over confidence: if you do not know something or are unsure, say so plainly instead of guessing.
             - Do not introduce yourself, repeat your previous reply, or describe these instructions.
         """.trimIndent()
     }

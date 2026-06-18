@@ -487,32 +487,35 @@ class ChatRepositoryImpl @Inject constructor(
             // `ragBudget=0 ragChars=0`, after which the model responded
             // about the time-context line because it had no doc context.
             val hasDocs = indexedDocsByUri[_currentSessionId.value]?.isNotEmpty() == true
-            if (!hasDocs) return baseBudget
-            val docsMultiplier = when (baseBudget) {
-                MAX_PROMPT_CHARS_COMPACT  -> 0.70    // 1500 → 1050 — COMPACT no longer attaches anyway
-                // STANDARD bumped from 0.92 → 0.98: when the user selects
-                // a non-default Personality Pal, the persona's behaviour
-                // rules add ~900 c to the system prompt (~2885 c default
-                // → ~3790 c with persona). At 0.92 (4600 c total) that
-                // left only ~620 c for RAG — not enough to fit even one
-                // chunk plus the rules header. ragChars=0 was visible in
-                // the production log at 23:13:05. 0.98 (4900 c) plus the
-                // smaller safety margin below restores room for one full
-                // chunk even with persona inflation. Still well under
-                // Gemma 3n's 2048-tok input cap (~4150 c at the dense
-                // RAG ratio of 2.7 c/tok the engine actually sees).
-                MAX_PROMPT_CHARS_STANDARD -> 0.98    // 5000 → 4900
-                MAX_PROMPT_CHARS_2048     -> 0.92    // 5500 → 5060 — Gemma 2, bumped for the same reason
-                // Raised from 0.70 (5600c) to 0.90 (7200c): the 5600c
-                // budget left only ~1050c for RAG after the 4423c system
-                // prompt, and after the rulesHeader (~243c) only ~807c
-                // for actual chunk content — barely 1-2 chunks of 500c.
-                // At 0.90 the char budget is 7200c; the token clamp below
-                // then caps it to whatever actually fits the model's
-                // context window (the real binding constraint).
-                else                       -> 0.90    // 8000 → 7200 — LARGE (Gemma 4)
+            val charBudget = if (!hasDocs) {
+                baseBudget
+            } else {
+                val docsMultiplier = when (baseBudget) {
+                    MAX_PROMPT_CHARS_COMPACT  -> 0.70    // 1500 → 1050 — COMPACT no longer attaches anyway
+                    // STANDARD bumped from 0.92 → 0.98: when the user selects
+                    // a non-default Personality Pal, the persona's behaviour
+                    // rules add ~900 c to the system prompt (~2885 c default
+                    // → ~3790 c with persona). At 0.92 (4600 c total) that
+                    // left only ~620 c for RAG — not enough to fit even one
+                    // chunk plus the rules header. ragChars=0 was visible in
+                    // the production log at 23:13:05. 0.98 (4900 c) plus the
+                    // smaller safety margin below restores room for one full
+                    // chunk even with persona inflation. Still well under
+                    // Gemma 3n's 2048-tok input cap (~4150 c at the dense
+                    // RAG ratio of 2.7 c/tok the engine actually sees).
+                    MAX_PROMPT_CHARS_STANDARD -> 0.98    // 5000 → 4900
+                    MAX_PROMPT_CHARS_2048     -> 0.92    // 5500 → 5060 — Gemma 2, bumped for the same reason
+                    // Raised from 0.70 (5600c) to 0.90 (7200c): the 5600c
+                    // budget left only ~1050c for RAG after the 4423c system
+                    // prompt, and after the rulesHeader (~243c) only ~807c
+                    // for actual chunk content — barely 1-2 chunks of 500c.
+                    // At 0.90 the char budget is 7200c; the token clamp below
+                    // then caps it to whatever actually fits the model's
+                    // context window (the real binding constraint).
+                    else                       -> 0.90    // 8000 → 7200 — LARGE (Gemma 4)
+                }
+                (baseBudget * docsMultiplier).toInt()
             }
-            val charBudget = (baseBudget * docsMultiplier).toInt()
             // ── Token-ceiling clamp (the real safety net) ──────────────
             // The char budgets above are heuristics; the HARD limit is the
             // model's context window (maxNumTokens), which the native engine
@@ -1286,6 +1289,7 @@ class ChatRepositoryImpl @Inject constructor(
             personalityOverride = personalityOverride,
             personalityBehaviorRules = personalityRules,
             grounded = grounded,
+            maxContextTokens = inferenceEngine.maxContextTokens,
         )
     }
 
