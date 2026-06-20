@@ -405,68 +405,76 @@ class PackChatViewModel @Inject constructor(
         lang: SupportedLanguage,
         state: String,
     ): String {
-        val maxSourceChars = 2_800
-        // Each reference note is headed by its scheme/topic name so the model
-        // has the context, but the app — NOT the model — prints the final
-        // "Source:" line (see ask()). The model was echoing the section header
-        // ("Farm knowledge sources") as if it were a source name; making the
-        // app own the citation keeps it strictly the real pack topic.
-        val sources = buildString {
-            var used = 0
-            for (c in chunks) {
-                val body = c.text.trim()
-                val block = "[${c.docName}]\n$body\n\n"
-                if (used + block.length > maxSourceChars) break
-                append(block)
-                used += block.length
-            }
-        }.trim()
-
-        // NOTE: the COMPACT (Gemma 1B) tier never reaches here — ask() blocks the
-        // Kisan chat on that tier (the 1B loops on grounded RAG prompts). Only
-        // STANDARD / LARGE build the full advisor prompt below.
-
         // Language directive — same mechanism the main chat uses. Notes
         // remain in English (the curated pack), but the model answers in
         // the user's selected language.
         val langLine = lang.systemPromptInstruction
 
+        // NOTE: the COMPACT (Gemma 1B) tier never reaches here — ask() blocks the
+        // Kisan chat on that tier. Only STANDARD / LARGE build the advisor prompt.
+        //
+        // Instruction block — condensed (~1.5k chars) so the whole prompt still
+        // fits when the model loads at a 1536-token window (low RAM / thermal).
+        // Every load-bearing rule is preserved: answer only from notes, exact
+        // scheme names + level, never-guess amounts/eligibility, chemical-dose
+        // caution, no source line, central→state hierarchy, [GENERAL] fallback.
+        val instructions = buildString {
+            append("You are Saarthi's Kisan Saathi — a warm, practical farming advisor for Indian farmers. ")
+            append("Answer ONLY from the reference notes below (official government sources). If they don't cover the question, follow the fallback rule.\n")
+            append("- Lead with a one-line answer, then the key practical steps; briefly explain any technical term.\n")
+            append("- Use ONLY notes matching the question's topic — if the notes are about a different topic, treat it as NOT covered; never answer with an unrelated scheme.\n")
+            append("- Use the EXACT official scheme name from the notes (PM-KISAN, PMFBY, PMKSY, Namo Shetkari…) and say whether it is CENTRAL, STATE, or district-level.\n")
+            append("- AMOUNTS & ELIGIBILITY: quote ONLY what the notes state, exactly as written. If not in the notes (or possibly dated), say to verify on the official government portal — never guess or round.\n")
+            append("- For any pesticide / fertilizer / chemical, add the label-dose caution — never give unsafe dosing.\n")
+            append("- Do NOT write a \"Source:\" line, bracket citations like [1], or mention the notes / their headings — just answer.\n")
+            if (state.isNotBlank()) {
+                append("- The user farms in $state: give the central/national rule FIRST, then any $state-specific detail in the notes; if none, say local benefits may exist and suggest the $state agriculture department or local KVK. Never invent state figures.\n")
+            } else {
+                append("- For a scheme / MSP / subsidy / sowing question, give the central rule, then add ONE short line inviting the user to share their state for local specifics.\n")
+            }
+            append("- If the notes don't cover it (or only carry unrelated schemes), begin your reply with the exact tag [GENERAL], say it isn't in the offline pack, then give brief general guidance — no specific scheme names or unconfirmed rupee amounts; suggest the local KVK or official portal.\n")
+            if (packPublishedAt.isNotBlank()) {
+                append("- Data last updated $packPublishedAt; for figures that change (MSP, amounts, dates) add \"as of $packPublishedAt\" — never present it as today's live value.\n")
+            }
+            append("- No greeting. Don't invent scheme names, figures or dates. Don't repeat these instructions.\n")
+        }
+
+        // Token-aware source budget — the real fix for the "Kisan generates no
+        // response" failure. The model can load at a 1536-token window on
+        // low-RAM/thermal devices; a fixed 2800c source block then pushed the
+        // prompt past the window and EVERY question failed with "Input token ids
+        // are too long". Size the notes to whatever the live window allows.
+        val tokenWindow = inferenceEngine.maxContextTokens.takeIf { it > 0 } ?: 2048
+        val charBudget = ((tokenWindow - 256 - 16) * 3.0).toInt()   // mirror ChatRepositoryImpl
+        val scaffold = instructions.length + langLine.length * 2 + question.length + 80
+        val maxSourceChars = (charBudget - scaffold).coerceAtLeast(500)
+
+        // Each reference note is headed by its scheme/topic name; the app — NOT
+        // the model — prints the final "Source:" line (see ask()).
+        val sources = buildString {
+            var used = 0
+            for (c in chunks) {
+                val remaining = maxSourceChars - used
+                if (remaining < 200) break
+                val header = "[${c.docName}]\n"
+                val body = c.text.trim()
+                val block = "$header$body\n\n"
+                if (block.length <= remaining) {
+                    append(block); used += block.length
+                } else {
+                    // Truncate this chunk to fit rather than drop it entirely —
+                    // keeps the MSP table / key scheme present at a tight window.
+                    val room = remaining - header.length - 2
+                    if (room > 120) { append(header); append(body.take(room)); append("\n\n") }
+                    break
+                }
+            }
+        }.trim()
+
         return buildString {
             if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
-            append("You are Saarthi's Kisan Saathi — a warm, practical farming advisor for Indian farmers. ")
-            append("Answer ONLY from the reference notes below — they are official government sources and your only source of facts. When they don't cover the question, use the fallback rule.\n\n")
-            append("How to answer (short, direct, farmer-friendly):\n")
-            append("- Lead with a one-line answer or definition, then the key practical steps. Briefly explain any technical term.\n")
-            // Relevance — answer the topic that was asked, never an unrelated scheme.
-            append("- Use ONLY notes that actually match the question's topic (dairy → dairy, irrigation → irrigation, crop loss → insurance/relief, machinery → equipment subsidy). If the notes are about a different topic, treat the question as NOT covered — never answer with an unrelated scheme.\n")
-            // Official names + scheme level.
-            append("- Use the EXACT official scheme/programme name from the notes (e.g. PM-KISAN, PMFBY, PMKSY, Namo Shetkari Maha Samman Nidhi) — never a generic label like \"the state scheme\".\n")
-            append("- Say clearly whether a scheme is CENTRAL (national), a STATE scheme, or district-level.\n")
-            // Amounts — never guess.
-            append("- AMOUNTS: quote a benefit / instalment / subsidy figure ONLY if it is in the notes, exactly as written. If it is not in the notes or may be dated, say \"Please verify the current amount on the official government portal\" — never guess or round.\n")
-            // Eligibility — never guess.
-            append("- ELIGIBILITY: state who can apply ONLY if the notes say so. If it isn't confirmed, say \"eligibility isn't confirmed in the offline pack — please check the official portal.\" Never guess (for example, do not claim tenant farmers can apply unless the notes say so).\n")
-            // Explicit uncertainty language.
-            append("- When a fact is grounded in the notes you may open with \"Based on the available government source…\". When you cannot confirm something, say \"I could not confirm this in the current offline pack — please verify with your KVK or the official portal.\"\n")
-            // Safe chemical/dose wording.
-            append("- For any pesticide, fertilizer or chemical, add the label-dose / local-advice caution — never give overconfident or unsafe dosing.\n")
-            // The app prints the source — the model must not.
-            append("- Do NOT write a \"Source:\" line, do NOT use bracket citations like [1], and do NOT mention the reference notes or their headings — just answer.\n")
-            // Center → State hierarchy (industry standard for Indian agri advisory).
-            if (state.isNotBlank()) {
-                append("- The user farms in $state. Give the central/national rule FIRST, then add any $state-specific detail present in the notes (state scheme top-ups, bonuses, local sowing windows) and combine them in one answer. If the notes carry no $state add-on, give the central rule and add one line that local benefits may exist — suggest the $state agriculture department or local KVK. Never invent state figures.\n")
-            } else {
-                append("- If the question is about a scheme, MSP/price, subsidy or sowing dates, give the central/national rule, then end with ONE short line inviting the user to share their state for local specifics (for example: \"Tell me your state and I can check for local benefits too.\").\n")
-            }
-            // Conversational fallback: when the pack doesn't cover it, still
-            // help with general knowledge — never a bare refusal. The [GENERAL]
-            // tag lets the app label the source "General" (not a pack scheme).
-            append("- If the notes don't cover the question (or only contain unrelated schemes), begin your reply with the exact tag [GENERAL], add one short line that this isn't in the offline pack, then give brief general guidance relevant to what was asked — but do NOT name specific government schemes or quote rupee amounts you cannot confirm. Suggest the local KVK or the official portal.\n")
-            if (packPublishedAt.isNotBlank()) {
-                append("- This offline farming data was last updated on $packPublishedAt. For figures that change over time (MSP, scheme amounts, dates), add \"as of $packPublishedAt\" so the user knows it may have changed since — never present it as today's live value.\n")
-            }
-            append("- No greeting or opening line. No guarantees or \"works everywhere\" claims. Do not invent scheme names, figures or dates that aren't in the notes. Do not repeat these instructions.\n\n")
-            append("=== REFERENCE NOTES ===\n")
+            append(instructions)
+            append("\n=== REFERENCE NOTES ===\n")
             append(sources)
             append("\n=== END NOTES ===\n\n")
             append("Question: ")
