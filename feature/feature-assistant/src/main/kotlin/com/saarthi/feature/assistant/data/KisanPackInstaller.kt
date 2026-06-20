@@ -272,6 +272,69 @@ class KisanPackInstaller @Inject constructor(
     /** One citable source link for a pack entry. */
     data class PackSource(val label: String, val url: String)
 
+    /**
+     * A CRITICAL structured MSP value, read verbatim from the signed pack's
+     * machine-readable `msp` object. The app renders this via a fixed template —
+     * the LLM never produces or modifies the number.
+     */
+    data class MspRecord(
+        val crop: String,
+        val cropKey: String,
+        val cropHi: String,
+        val value: Int,
+        val unit: String,
+        val season: String,
+        val marketingYear: String,
+        val effectiveDate: String,
+        val sourceDocument: String,
+        val sourceUrl: String,
+    )
+
+    /**
+     * Structured MSP records from the installed pack (active → previous → seed),
+     * for deterministic rendering. Empty when the pack has no `msp` objects.
+     */
+    suspend fun loadMspRecords(): List<MspRecord> = withContext(Dispatchers.IO) {
+        val raw = rawActivePackText() ?: return@withContext emptyList()
+        runCatching {
+            val arr = JSONObject(raw).optJSONArray("entries") ?: return@runCatching emptyList<MspRecord>()
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val m = o.optJSONObject("msp") ?: continue
+                    val value = m.optInt("value", 0)
+                    if (value <= 0) continue
+                    add(
+                        MspRecord(
+                            crop = m.optString("crop"),
+                            cropKey = m.optString("cropKey"),
+                            cropHi = m.optJSONObject("cropLocalized")?.optString("hi").orEmpty(),
+                            value = value,
+                            unit = m.optString("unit", "per quintal"),
+                            season = m.optString("season"),
+                            marketingYear = m.optString("marketingYear"),
+                            effectiveDate = o.optString("effectiveDate"),
+                            sourceDocument = m.optString("sourceDocument"),
+                            sourceUrl = o.optJSONArray("sources")?.optJSONObject(0)?.optString("url").orEmpty(),
+                        ),
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** Raw installed-pack JSON text along the active → previous → seed chain. */
+    private fun rawActivePackText(): String? {
+        for (f in listOf(activePackFile(), previousPackFile())) {
+            if (f.exists() && f.length() > 0L) {
+                runCatching { f.readText(Charsets.UTF_8) }.getOrNull()?.let { return it }
+            }
+        }
+        return runCatching {
+            context.assets.open(SEED_ASSET_PATH).bufferedReader().use { it.readText() }
+        }.getOrNull()
+    }
+
     // ── Internal ─────────────────────────────────────────────────────
 
     private data class ParsedPack(
