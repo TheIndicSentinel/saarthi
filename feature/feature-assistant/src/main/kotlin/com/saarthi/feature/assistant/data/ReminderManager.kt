@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.inference.DebugLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
@@ -17,6 +18,7 @@ import javax.inject.Singleton
 @Singleton
 class ReminderManager @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val languageManager: LanguageManager,
 ) {
     companion object {
         const val CHANNEL_ID = "saarthi_reminders"
@@ -245,7 +247,7 @@ class ReminderManager @Inject constructor(
 
             else -> "🔔"
         }
-        return "$emoji Saarthi Reminder"
+        return "$emoji ${languageManager.selectedLanguage.value.reminderNotificationTitle}"
     }
 
     private fun String.containsAny(vararg keywords: String) = keywords.any { this.contains(it) }

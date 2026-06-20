@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.saarthi.app.wisdom.WisdomNotificationScheduler
 import com.saarthi.core.i18n.DailyWisdomCatalog
+import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.feature.assistant.data.ReminderManager
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -35,6 +36,7 @@ import javax.inject.Inject
 class ReminderReceiver : BroadcastReceiver() {
 
     @Inject lateinit var wisdomScheduler: WisdomNotificationScheduler
+    @Inject lateinit var languageManager: LanguageManager
 
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
@@ -46,19 +48,21 @@ class ReminderReceiver : BroadcastReceiver() {
     // ── Per-action handlers ──────────────────────────────────────────────
 
     private fun handleReminder(context: Context, intent: Intent) {
-        val title = intent.getStringExtra(ReminderManager.EXTRA_TITLE) ?: "Saarthi Reminder"
+        val lang = languageManager.selectedLanguage.value
+        val title = intent.getStringExtra(ReminderManager.EXTRA_TITLE) ?: lang.reminderNotificationTitle
         val text  = intent.getStringExtra(ReminderManager.EXTRA_TEXT)  ?: return
         val id    = intent.getIntExtra(ReminderManager.EXTRA_ID, System.currentTimeMillis().toInt())
         post(context, id = id, title = title, text = text)
     }
 
     private fun handleDailyWisdom(context: Context) {
+        val lang = languageManager.selectedLanguage.value
         val wisdom = DailyWisdomCatalog.forDate()
         post(
             context = context,
             id = WisdomNotificationScheduler.NOTIFICATION_ID,
-            title = "🪔 Thought of the day",
-            text = "${wisdom.sanskrit}\n${wisdom.english}",
+            title = "🪔 ${lang.wisdomNotificationTitle}",
+            text = wisdom.localized(lang),
         )
         // Always re-arm — even if posting was blocked by permission, the
         // user may grant POST_NOTIFICATIONS later and we want the alarm

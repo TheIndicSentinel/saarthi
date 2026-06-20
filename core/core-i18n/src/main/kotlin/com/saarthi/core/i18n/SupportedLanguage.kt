@@ -670,6 +670,64 @@ enum class SupportedLanguage(
         ODIA     -> "ମୁଁ ସାରଥୀ, ଭାରତ ପାଇଁ ତିଆରି ଆପଣଙ୍କ ବନ୍ଧୁତ୍ୱପୂର୍ଣ୍ଣ AI ସହାୟକ। ମୁଁ ସମ୍ପୂର୍ଣ୍ଣ ଆପଣଙ୍କ ଫୋନରେ ଅଫଲାଇନ ଚାଲେ, ତେଣୁ ଆମ କଥାବାର୍ତ୍ତା ଗୋପନୀୟ ରହେ — ଟେକ୍ସଟ, ସ୍ୱର, ଫଟୋ କିମ୍ବା ଫାଇଲରେ ଯାହା ବି ପଚାରନ୍ତୁ।"
     }
 
+    // ── Notification copy (localized) ────────────────────────────────────────
+
+    /** Title of a one-off user reminder notification (an emoji is prefixed in code). */
+    val reminderNotificationTitle: String get() = when (this) {
+        ENGLISH  -> "Saarthi Reminder"
+        HINDI    -> "सारथी रिमाइंडर"
+        TAMIL    -> "சாரதி நினைவூட்டல்"
+        TELUGU   -> "సారథి రిమైండర్"
+        BENGALI  -> "সারথি রিমাইন্ডার"
+        MARATHI  -> "सारथी स्मरणपत्र"
+        KANNADA  -> "ಸಾರಥಿ ಜ್ಞಾಪನೆ"
+        GUJARATI -> "સારથી રિમાઇન્ડર"
+        PUNJABI  -> "ਸਾਰਥੀ ਰਿਮਾਈਂਡਰ"
+        ODIA     -> "ସାରଥୀ ସ୍ମାରକ"
+    }
+
+    /** Title of the daily wisdom notification (a lamp emoji is prefixed in code). */
+    val wisdomNotificationTitle: String get() = when (this) {
+        ENGLISH  -> "Thought of the day"
+        HINDI    -> "आज का विचार"
+        TAMIL    -> "இன்றைய சிந்தனை"
+        TELUGU   -> "నేటి ఆలోచన"
+        BENGALI  -> "আজকের ভাবনা"
+        MARATHI  -> "आजचा विचार"
+        KANNADA  -> "ಇಂದಿನ ಚಿಂತನೆ"
+        GUJARATI -> "આજનો વિચાર"
+        PUNJABI  -> "ਅੱਜ ਦਾ ਵਿਚਾਰ"
+        ODIA     -> "ଆଜିର ଚିନ୍ତା"
+    }
+
+    /** Title of the "Kisan pack refreshed" notification (a crop emoji is prefixed in code). */
+    val packUpdatedTitle: String get() = when (this) {
+        ENGLISH  -> "Kisan pack updated"
+        HINDI    -> "किसान पैक अपडेट हुआ"
+        TAMIL    -> "கிசான் தொகுப்பு புதுப்பிக்கப்பட்டது"
+        TELUGU   -> "కిసాన్ ప్యాక్ నవీకరించబడింది"
+        BENGALI  -> "কিষাণ প্যাক আপডেট হয়েছে"
+        MARATHI  -> "किसान पॅक अपडेट झाले"
+        KANNADA  -> "ಕಿಸಾನ್ ಪ್ಯಾಕ್ ನವೀಕರಿಸಲಾಗಿದೆ"
+        GUJARATI -> "કિસાન પૅક અપડેટ થયું"
+        PUNJABI  -> "ਕਿਸਾਨ ਪੈਕ ਅੱਪਡੇਟ ਹੋਇਆ"
+        ODIA     -> "କିସାନ ପ୍ୟାକ ଅପଡେଟ ହେଲା"
+    }
+
+    /** Body of the "Kisan pack refreshed" notification. */
+    val packUpdatedBody: String get() = when (this) {
+        ENGLISH  -> "Saarthi refreshed the Kisan knowledge pack with the latest government data."
+        HINDI    -> "सारथी ने किसान ज्ञान पैक को नवीनतम सरकारी डेटा के साथ अपडेट किया है।"
+        TAMIL    -> "சாரதி கிசான் அறிவுத் தொகுப்பை சமீபத்திய அரசு தரவுடன் புதுப்பித்துள்ளது."
+        TELUGU   -> "సారథి కిసాన్ నాలెడ్జ్ ప్యాక్‌ను తాజా ప్రభుత్వ డేటాతో నవీకరించింది."
+        BENGALI  -> "সারথি কিষাণ জ্ঞান প্যাকটি সর্বশেষ সরকারি তথ্য দিয়ে আপডেট করেছে।"
+        MARATHI  -> "सारथीने किसान ज्ञान पॅक नवीनतम सरकारी डेटासह अपडेट केले आहे."
+        KANNADA  -> "ಸಾರಥಿ ಕಿಸಾನ್ ಜ್ಞಾನ ಪ್ಯಾಕ್ ಅನ್ನು ಇತ್ತೀಚಿನ ಸರ್ಕಾರಿ ಡೇಟಾದೊಂದಿಗೆ ನವೀಕರಿಸಿದೆ."
+        GUJARATI -> "સારથીએ કિસાન જ્ઞાન પૅકને નવીનતમ સરકારી ડેટા સાથે અપડેટ કર્યું છે."
+        PUNJABI  -> "ਸਾਰਥੀ ਨੇ ਕਿਸਾਨ ਗਿਆਨ ਪੈਕ ਨੂੰ ਨਵੀਨਤਮ ਸਰਕਾਰੀ ਡੇਟਾ ਨਾਲ ਅੱਪਡੇਟ ਕੀਤਾ ਹੈ।"
+        ODIA     -> "ସାରଥୀ କିସାନ ଜ୍ଞାନ ପ୍ୟାକକୁ ସର୍ବଶେଷ ସରକାରୀ ତଥ୍ୟ ସହ ଅପଡେଟ କରିଛି।"
+    }
+
     /**
      * Instruction sandwiched at the TOP and BOTTOM of the system prompt so
      * the model responds in this language.

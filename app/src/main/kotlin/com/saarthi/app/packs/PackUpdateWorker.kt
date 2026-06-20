@@ -58,6 +58,7 @@ class PackUpdateWorker(
     interface Deps {
         fun installer(): KisanPackInstaller
         fun preference(): KisanPackPreference
+        fun languageManager(): com.saarthi.core.i18n.LanguageManager
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -124,7 +125,7 @@ class PackUpdateWorker(
         // just after onboarding. A brand-new user shouldn't get a "pack updated"
         // notification before they've even used the app.
         if (installedVersion > 0) {
-            notifyPackUpdated(manifest.title.ifBlank { "Kisan Knowledge" }, newVersion)
+            notifyPackUpdated(deps.languageManager().selectedLanguage.value)
         } else {
             DebugLogger.log("PACK", "First pack install (seed) — suppressing update notification")
         }
@@ -198,7 +199,7 @@ class PackUpdateWorker(
 
     // ── User-facing notification ──────────────────────────────────────
 
-    private fun notifyPackUpdated(packTitle: String, version: Int) {
+    private fun notifyPackUpdated(lang: com.saarthi.core.i18n.SupportedLanguage) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ActivityCompat.checkSelfPermission(
                 applicationContext, Manifest.permission.POST_NOTIFICATIONS,
@@ -214,11 +215,9 @@ class PackUpdateWorker(
         )
         val notification = NotificationCompat.Builder(applicationContext, ReminderManager.CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("🌾 $packTitle updated")
-            .setContentText("Saarthi has refreshed the Kisan knowledge pack to v$version with the latest Govt data.")
-            .setStyle(NotificationCompat.BigTextStyle().bigText(
-                "Saarthi has refreshed the Kisan knowledge pack to v$version with the latest Govt data sources. Open the chat and ask in Kisan mode to use it.",
-            ))
+            .setContentTitle("🌾 ${lang.packUpdatedTitle}")
+            .setContentText(lang.packUpdatedBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(lang.packUpdatedBody))
             .setContentIntent(tapPi)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
