@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.onboarding
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.model.DownloadProgress
@@ -110,20 +111,27 @@ fun OnboardingScreen(
             label = "onb-step",
         ) { step ->
             when (step) {
-                OnboardingStep.SPLASH -> SplashScreen(onContinue = viewModel::goToWelcome)
-                OnboardingStep.WELCOME -> Onb1Welcome(
-                    onNext = viewModel::goToLanguageSelect,
-                    onSkip = { /* no skip from welcome */ },
-                )
+                // Language-first flow (industry standard for a multilingual
+                // India-first app): splash → LANGUAGE → welcome → privacy →
+                // model pick. Everything after the language pick renders in the
+                // chosen language; only the splash + the picker itself are
+                // bilingual English/Hindi (shown before a language exists).
+                OnboardingStep.SPLASH -> SplashScreen(onContinue = viewModel::goToLanguageSelect)
                 OnboardingStep.LANGUAGE_SELECT -> Onb2Language(
                     selected = state.selectedLanguage,
                     onSelect = viewModel::selectLanguage,
+                    onNext = viewModel::goToWelcome,
+                    onBack = { /* first interactive step — no back */ },
+                )
+                OnboardingStep.WELCOME -> Onb1Welcome(
+                    lang = state.selectedLanguage,
                     onNext = viewModel::goToPrivacy,
-                    onBack = viewModel::goToWelcome,
+                    onBack = viewModel::goToLanguageSelect,
                 )
                 OnboardingStep.PRIVACY -> Onb3Privacy(
+                    lang = state.selectedLanguage,
                     onNext = viewModel::proceedToModelPick,
-                    onBack = viewModel::goToLanguageSelect,
+                    onBack = viewModel::goToWelcome,
                 )
                 OnboardingStep.MODEL_PICK -> Onb4ModelPick(
                     state = state,
@@ -141,6 +149,7 @@ fun OnboardingScreen(
                     onBack = { viewModel.goBackTo(OnboardingStep.MODEL_PICK) },
                 )
                 OnboardingStep.CHAT_TEST -> SetupCompleteScreen(
+                    lang = state.selectedLanguage,
                     onContinue = viewModel::completeOnboarding,
                 )
                 OnboardingStep.DONE -> {}
@@ -313,13 +322,14 @@ private fun IconCircle(onClick: () -> Unit, content: @Composable () -> Unit) {
 // ── Onb1 — Welcome ────────────────────────────────────────────────────────────
 
 @Composable
-private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
+private fun Onb1Welcome(lang: SupportedLanguage, onNext: () -> Unit, onBack: () -> Unit) {
+    val o = lang.onboarding
     OnbStepShell(
-        stepIdx = 0,
+        stepIdx = 1,
         total = 4,
-        onBack = {},
+        onBack = onBack,
         onSkip = null,
-        primaryLabel = "Get Started",
+        primaryLabel = o.getStarted,
         onPrimary = onNext,
     ) {
         Column(
@@ -335,7 +345,7 @@ private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
             Text("सारथी", style = DisplayAccent.copy(fontSize = 20.sp))
             Spacer(Modifier.height(10.dp))
             Text(
-                "Your private AI,",
+                o.welcomeTitle1,
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontSize = 27.sp,
                     fontWeight = FontWeight.Bold,
@@ -344,7 +354,7 @@ private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Text(
-                "made for India.",
+                o.welcomeTitle2,
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontSize = 27.sp,
                     fontWeight = FontWeight.Bold,
@@ -364,30 +374,30 @@ private fun Onb1Welcome(onNext: () -> Unit, onSkip: () -> Unit) {
             ) {
                 WelcomeOutcome(
                     icon = Icons.Outlined.Description,
-                    title = "Documents",
-                    subtitle = "Ask questions about any PDF or photo",
+                    title = o.welcomeDocTitle,
+                    subtitle = o.welcomeDocSub,
                     tint = SaarthiColors.Marigold,
                     tintSoft = SaarthiColors.MarigoldSoft,
                     tintBd = SaarthiColors.MarigoldBd,
                 )
                 WelcomeOutcome(
                     icon = Icons.Outlined.Spa,
-                    title = "Kisan helper",
-                    subtitle = "Crops, schemes & live mandi prices",
+                    title = o.welcomeKisanTitle,
+                    subtitle = o.welcomeKisanSub,
                     tint = SaarthiColors.Jade,
                     tintSoft = SaarthiColors.JadeSoft,
                     tintBd = SaarthiColors.JadeBd,
                 )
                 WelcomeOutcome(
                     icon = Icons.Outlined.Mic,
-                    title = "Voice",
-                    subtitle = "Speak your question, hear the answer",
+                    title = o.welcomeVoiceTitle,
+                    subtitle = o.welcomeVoiceSub,
                     tint = SaarthiColors.Indigo,
                     tintSoft = SaarthiColors.IndigoSoft,
                     tintBd = SaarthiColors.IndigoBd,
                 )
                 Spacer(Modifier.height(2.dp))
-                WelcomeOfflineNote()
+                WelcomeOfflineNote(o.welcomeOfflineNote)
             }
         }
     }
@@ -441,7 +451,7 @@ private fun WelcomeOutcome(
 
 /** Privacy reassurance — a dashed pill so it reads as a guarantee, not a feature. */
 @Composable
-private fun WelcomeOfflineNote() {
+private fun WelcomeOfflineNote(note: String) {
     val borderColor = SaarthiColors.JadeBd
     Row(
         modifier = Modifier
@@ -462,7 +472,7 @@ private fun WelcomeOfflineNote() {
         Icon(Icons.Outlined.Lock, null, tint = SaarthiColors.Jade, modifier = Modifier.size(15.dp))
         Spacer(Modifier.width(10.dp))
         Text(
-            "Works offline — nothing ever leaves your phone",
+            note,
             style = MaterialTheme.typography.bodySmall.copy(
                 color = SaarthiColors.Text2,
                 fontSize = 12.5.sp,
@@ -481,7 +491,7 @@ private fun Onb2Language(
     onBack: () -> Unit,
 ) {
     OnbStepShell(
-        stepIdx = 1,
+        stepIdx = 0,
         total = 4,
         onBack = onBack,
         onSkip = null,
@@ -568,13 +578,14 @@ private fun LanguageRow(lang: SupportedLanguage, selected: Boolean, onClick: () 
 // ── Onb3 — Privacy ────────────────────────────────────────────────────────────
 
 @Composable
-private fun Onb3Privacy(onNext: () -> Unit, onBack: () -> Unit) {
+private fun Onb3Privacy(lang: SupportedLanguage, onNext: () -> Unit, onBack: () -> Unit) {
+    val o = lang.onboarding
     OnbStepShell(
         stepIdx = 2,
         total = 4,
         onBack = onBack,
         onSkip = null,
-        primaryLabel = "I understand",
+        primaryLabel = o.iUnderstand,
         onPrimary = onNext,
     ) {
         Column(
@@ -605,7 +616,7 @@ private fun Onb3Privacy(onNext: () -> Unit, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(24.dp))
             Text(
-                "Private by design",
+                o.privateByDesign,
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
@@ -615,16 +626,16 @@ private fun Onb3Privacy(onNext: () -> Unit, onBack: () -> Unit) {
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "Saarthi runs the AI on your phone. Your questions, files, and answers never leave your device.",
+                o.privacyBody,
                 style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2),
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(24.dp))
-            PrivacyRow(Icons.Outlined.WifiOff, "No internet needed", "Works on a flight, in a village, anywhere")
+            PrivacyRow(Icons.Outlined.WifiOff, o.privNoInternet, o.privNoInternetSub)
             Spacer(Modifier.height(10.dp))
-            PrivacyRow(Icons.Outlined.Lock, "Zero data collection", "No accounts, no tracking, no servers")
+            PrivacyRow(Icons.Outlined.Lock, o.privZeroData, o.privZeroDataSub)
             Spacer(Modifier.height(10.dp))
-            PrivacyRow(Icons.Outlined.Memory, "Runs on your hardware", "Google Gemma model, optimized for mobile")
+            PrivacyRow(Icons.Outlined.Memory, o.privHardware, o.privHardwareSub)
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -671,6 +682,7 @@ private fun Onb4ModelPick(
     onProceed: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val o = state.selectedLanguage.onboarding
     val pickedReady = state.catalogModels.any {
         state.selectedModelPath?.endsWith(it.fileName) == true && it.id in state.downloadedModelIds
     }
@@ -679,7 +691,7 @@ private fun Onb4ModelPick(
         total = 4,
         onBack = onBack,
         onSkip = null,
-        primaryLabel = if (pickedReady) "Continue" else "Download & Continue",
+        primaryLabel = if (pickedReady) o.continueLabel else o.downloadContinue,
         onPrimary = onProceed,
         primaryEnabled = state.catalogModels.isNotEmpty(),
     ) {
@@ -687,7 +699,7 @@ private fun Onb4ModelPick(
             modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),
         ) {
             Text(
-                "Pick your AI brain",
+                o.pickBrain,
                 style = MaterialTheme.typography.headlineLarge.copy(
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
@@ -696,7 +708,7 @@ private fun Onb4ModelPick(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Download once · Works offline forever",
+                o.downloadOnce,
                 style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
             )
             Spacer(Modifier.height(14.dp))
@@ -935,6 +947,7 @@ private fun DownloadingScreen(
     state: com.saarthi.feature.onboarding.viewmodel.OnboardingUiState,
     onBack: () -> Unit,
 ) {
+    val o = state.selectedLanguage.onboarding
     // Pick the model currently downloading or being initialized
     val activeProgress = state.downloadProgress.entries.firstOrNull {
         it.value is DownloadProgress.Downloading
@@ -977,7 +990,7 @@ private fun DownloadingScreen(
             SaarthiLogo(size = 156.dp, progress = (pct / 100f).coerceIn(0f, 1f))
             Spacer(Modifier.height(28.dp))
             Text(
-                if (isInit) "INITIALIZING" else "DOWNLOADING",
+                if (isInit) o.initializingLabel else o.downloadingLabel,
                 style = MaterialTheme.typography.labelSmall.copy(
                     color = SaarthiColors.Text3,
                     letterSpacing = 1.4.sp,
@@ -995,8 +1008,7 @@ private fun DownloadingScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                if (isInit) "Loading weights into memory…"
-                else "Setting up your AI brain. After this, Saarthi works fully offline — forever.",
+                if (isInit) o.initDesc else o.downloadDesc,
                 style = MaterialTheme.typography.bodyLarge.copy(
                     color = SaarthiColors.Text2,
                     fontSize = 13.sp,
@@ -1040,7 +1052,7 @@ private fun DownloadingScreen(
             }
             Spacer(Modifier.weight(1f))
             Text(
-                "Tip: You can keep using your phone — we'll finish in the background.",
+                o.downloadTip,
                 style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp, start = 8.dp, end = 8.dp),
@@ -1052,7 +1064,8 @@ private fun DownloadingScreen(
 // ── Setup Complete ────────────────────────────────────────────────────────────
 
 @Composable
-private fun SetupCompleteScreen(onContinue: () -> Unit) {
+private fun SetupCompleteScreen(lang: SupportedLanguage, onContinue: () -> Unit) {
+    val o = lang.onboarding
     LaunchedEffect(Unit) {
         delay(1800)
         onContinue()
@@ -1085,7 +1098,7 @@ private fun SetupCompleteScreen(onContinue: () -> Unit) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Ready, Saarthi",
+                o.readyTitle,
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontSize = 30.sp,
                     fontWeight = FontWeight.Bold,
@@ -1095,7 +1108,7 @@ private fun SetupCompleteScreen(onContinue: () -> Unit) {
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "Your AI companion is set up and waiting. From here on, everything happens on your device.",
+                o.readyBody,
                 style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2),
                 textAlign = TextAlign.Center,
             )
