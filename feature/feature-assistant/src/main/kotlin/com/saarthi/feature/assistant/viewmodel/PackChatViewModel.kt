@@ -179,11 +179,7 @@ class PackChatViewModel @Inject constructor(
                 // NOT that no model exists. Telling such a user to "download a
                 // model" they already have is wrong and confusing. Give an
                 // accurate, actionable message instead.
-                finish(
-                    streamingId,
-                    "Saarthi's model isn't loaded right now — your phone may be low on memory. " +
-                        "Close a few background apps and try again in a moment. Everything still works offline.",
-                )
+                finish(streamingId, languageManager.selectedLanguage.value.packModelNotLoaded)
                 return@launch
             }
 
@@ -197,12 +193,7 @@ class PackChatViewModel @Inject constructor(
             // switched to the compact model AFTER opening the chat — rare, but it
             // must degrade gracefully.
             if (!systemPromptProvider.supportsPackChat(inferenceEngine.activeModelName)) {
-                finish(
-                    streamingId,
-                    "The compact model on this phone is too small for reliable pack answers. " +
-                        "You can still read the pack topics offline. For chat, switch to " +
-                        "Gemma 4 or Gemma 3n in Settings → Models.",
-                )
+                finish(streamingId, languageManager.selectedLanguage.value.packModelTooSmall)
                 return@launch
             }
 
@@ -265,7 +256,7 @@ class PackChatViewModel @Inject constructor(
                     // Never surface raw native errors (e.g. token-overflow) to the
                     // farmer — show a clean, actionable message instead.
                     DebugLogger.log("PACK", "Kisan generation error: ${e.message}")
-                    finish(streamingId, "Sorry, I couldn't generate an answer just now. Please try again, or ask a shorter question.")
+                    finish(streamingId, lang.packGenerationError)
                 }
                 .onEach { token ->
                     acc.append(token)

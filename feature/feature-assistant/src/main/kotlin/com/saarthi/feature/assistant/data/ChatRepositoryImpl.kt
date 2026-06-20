@@ -284,7 +284,7 @@ class ChatRepositoryImpl @Inject constructor(
                     if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
                     // Surface engine errors as a visible assistant message — never crash the app.
                     val errMsg = e.message?.takeIf { it.isNotBlank() }
-                        ?: "Something went wrong. Please try again."
+                        ?: currentLanguage.errorGeneric
                     DebugLogger.log("CHAT", "streamResponse ERROR: $errMsg")
                     _history.update { history ->
                         history.map { msg ->
@@ -334,11 +334,15 @@ class ChatRepositoryImpl @Inject constructor(
                     val isCancelled = throwable is kotlinx.coroutines.CancellationException
                     val isError = throwable != null && !isCancelled
                     val partial = _history.value.firstOrNull { it.id == streamingId }?.content.orEmpty()
+                    val lang = currentLanguage
                     val finalContent = resolveAssistantReply(
                         cleanedText = parsed.cleanText,
                         isCancelled = isCancelled,
                         isError = isError,
                         partialVisible = partial,
+                        errorText = lang.errorGenerating,
+                        stoppedText = lang.stoppedReply,
+                        emptyText = lang.emptyReply,
                     )
                     val finalMsg = ChatMessage(
                         id = streamingId,
@@ -1689,20 +1693,24 @@ internal fun resolveAssistantReply(
     isCancelled: Boolean,
     isError: Boolean,
     partialVisible: String,
+    // Localized fallbacks (English defaults keep the pure unit tests valid).
+    errorText: String = "Something went wrong generating a reply. Please try again.",
+    stoppedText: String = "Stopped.",
+    emptyText: String = "I couldn't generate a reply just now. Please try again — if it keeps " +
+        "happening on this device, switch to a lighter model in Settings → Models.",
 ): String {
     if (cleanedText.isNotBlank()) return cleanedText
     // No usable generated text below this point.
     if (isError) {
         // Keep whatever .catch surfaced; otherwise a generic, non-scary notice.
-        return partialVisible.ifBlank { "Something went wrong generating a reply. Please try again." }
+        return partialVisible.ifBlank { errorText }
     }
     if (isCancelled) {
         // User stopped — keep any partial text; otherwise a brief note.
-        return partialVisible.ifBlank { "Stopped." }
+        return partialVisible.ifBlank { stoppedText }
     }
     // Normal completion but the model produced nothing — almost always device
     // memory pressure (2–3 tokens at <1 tok/s in the logs). Give an actionable
     // next step instead of a blank bubble.
-    return "I couldn't generate a reply just now. Please try again — if it keeps " +
-        "happening on this device, switch to a lighter model in Settings → Models."
+    return emptyText
 }
