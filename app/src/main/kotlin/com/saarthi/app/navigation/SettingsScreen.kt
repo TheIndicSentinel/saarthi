@@ -66,7 +66,9 @@ import com.saarthi.core.ui.components.SaarthiListRow
 import com.saarthi.core.ui.components.SaarthiLogo
 import com.saarthi.core.ui.components.SaarthiToggle
 import com.saarthi.core.ui.components.SaarthiTopBar
+import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.settings
+import com.saarthi.core.i18n.settingsDetail
 import com.saarthi.core.ui.components.SectionLabel
 import com.saarthi.core.ui.theme.DisplayAccent
 import com.saarthi.core.ui.theme.SaarthiColors
@@ -449,9 +451,10 @@ private fun ProChip() {
 // ── Privacy details ───────────────────────────────────────────────────────────
 
 @Composable
-fun PrivacyScreen(onBack: () -> Unit) {
+fun PrivacyScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = SupportedLanguage.HINDI) {
+    val d = currentLanguage.settingsDetail
     Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
-        SaarthiTopBar(title = "Privacy", subtitle = "What stays on your device", onBack = onBack)
+        SaarthiTopBar(title = d.privacyTitle, subtitle = d.privacyTopSub, onBack = onBack)
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -487,7 +490,7 @@ fun PrivacyScreen(onBack: () -> Unit) {
                     }
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "Nothing leaves your phone",
+                        d.privacyHeroTitle,
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
@@ -496,39 +499,39 @@ fun PrivacyScreen(onBack: () -> Unit) {
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Saarthi has no server. The AI lives on your device — questions are processed locally and never travel over the internet.",
+                        d.privacyHeroBody,
                         style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2, fontSize = 13.sp),
                     )
                 }
             }
 
             Spacer(Modifier.height(10.dp))
-            SectionLabel("Stored on this device only")
+            SectionLabel(d.privacyStoredHere)
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) },
-                title = "Your chat history",
+                title = d.privacyChatHistory,
                 tone = ChipTone.Jade,
-                trailing = { Text("Local", style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3)) },
+                trailing = { Text(d.privacyLocal, style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3)) },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Memory, null) },
-                title = "AI model weights",
+                title = d.privacyModelWeights,
                 tone = ChipTone.Jade,
-                trailing = { Text("Local", style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3)) },
+                trailing = { Text(d.privacyLocal, style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3)) },
             )
 
             Spacer(Modifier.height(10.dp))
-            SectionLabel("How Saarthi works")
+            SectionLabel(d.privacyHowWorks)
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Bolt, null) },
-                title = "Runs on your hardware",
-                subtitle = "Gemma model, Vulkan / CPU inference",
+                title = d.privacyRunsHardware,
+                subtitle = d.privacyRunsHardwareSub,
                 tone = ChipTone.Marigold,
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Public, null) },
-                title = "No accounts, no tracking",
-                subtitle = "Works without internet",
+                title = d.privacyNoAccounts,
+                subtitle = d.privacyNoAccountsSub,
                 tone = ChipTone.Indigo,
             )
         }
@@ -538,7 +541,8 @@ fun PrivacyScreen(onBack: () -> Unit) {
 // ── About ─────────────────────────────────────────────────────────────────────
 
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = SupportedLanguage.HINDI) {
+    val d = currentLanguage.settingsDetail
     Box(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
         Box(
             modifier = Modifier
@@ -551,7 +555,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 ),
         )
         Column(modifier = Modifier.fillMaxSize()) {
-            SaarthiTopBar(title = "About Saarthi", onBack = onBack)
+            SaarthiTopBar(title = d.aboutTitle, onBack = onBack)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -580,31 +584,31 @@ fun AboutScreen(onBack: () -> Unit) {
                 RangoliDivider(width = 120.dp, color = SaarthiColors.Marigold)
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "A free, offline AI companion built for the next billion users — designed in India, for India.",
+                    d.aboutTagline,
                     style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2),
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
                 Spacer(Modifier.height(22.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    StatTile("10", "Languages", Modifier.weight(1f))
-                    StatTile("4+", "AI models", Modifier.weight(1f))
-                    StatTile("100%", "Offline", Modifier.weight(1f))
+                    StatTile("10", d.statLanguages, Modifier.weight(1f))
+                    StatTile("4+", d.statModels, Modifier.weight(1f))
+                    StatTile("100%", d.statOffline, Modifier.weight(1f))
                 }
 
                 Spacer(Modifier.height(22.dp))
-                SectionLabel("Built with")
+                SectionLabel(d.aboutBuiltWith)
                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     SaarthiListRow(
                         leadingIcon = { Icon(Icons.Outlined.Memory, null) },
                         title = "Google Gemma",
-                        subtitle = "On-device language model",
+                        subtitle = d.aboutGemmaSub,
                         trailing = { SaarthiChip(text = "Apache 2.0", small = true) },
                     )
                     SaarthiListRow(
                         leadingIcon = { Icon(Icons.Outlined.Bolt, null) },
                         title = "LiteRT",
-                        subtitle = "Mobile inference runtime",
+                        subtitle = d.aboutLiteRtSub,
                         trailing = { SaarthiChip(text = "Apache 2.0", small = true) },
                     )
                 }
@@ -616,7 +620,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "\"May all be happy\" · Made in Bharat with care",
+                    d.aboutBlessing,
                     style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text4),
                 )
                 Spacer(Modifier.height(28.dp))
@@ -655,14 +659,16 @@ private fun StatTile(num: String, sub: String, modifier: Modifier = Modifier) {
 @Composable
 fun ResponseStyleScreen(
     onBack: () -> Unit,
+    currentLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     viewModel: com.saarthi.app.ResponseStyleViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
     genViewModel: com.saarthi.app.GenerationSettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
+    val d = currentLanguage.settingsDetail
     val style by viewModel.style.collectAsStateWithLifecycle()
     val temperature by genViewModel.temperature.collectAsStateWithLifecycle()
     val isAutoTemp by genViewModel.isAuto.collectAsStateWithLifecycle()
     Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
-        SaarthiTopBar(title = "Response style", subtitle = "How Saarthi talks to you", onBack = onBack)
+        SaarthiTopBar(title = d.rsTitle, subtitle = d.rsTopSub, onBack = onBack)
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -670,28 +676,29 @@ fun ResponseStyleScreen(
                 .padding(16.dp),
         ) {
             SegmentedCard(
-                title = "Answer length",
+                title = d.rsAnswerLength,
                 value = style.length,
                 onChange = viewModel::setLength,
-                options = listOf("short" to "Short", "medium" to "Medium", "long" to "Long"),
+                options = listOf("short" to d.optShort, "medium" to d.optMedium, "long" to d.optLong),
             )
             Spacer(Modifier.height(14.dp))
             SegmentedCard(
-                title = "Tone",
+                title = d.rsTone,
                 value = style.tone,
                 onChange = viewModel::setTone,
-                options = listOf("warm" to "Warm", "balanced" to "Balanced", "formal" to "Formal"),
+                options = listOf("warm" to d.optWarm, "balanced" to d.optBalanced, "formal" to d.optFormal),
             )
             Spacer(Modifier.height(14.dp))
             SegmentedCard(
-                title = "Language style",
+                title = d.rsLanguageStyle,
                 value = style.languageMix,
                 onChange = viewModel::setLanguageMix,
-                options = listOf("pure" to "Pure", "mix" to "Hinglish", "eng" to "English"),
+                options = listOf("pure" to d.optPure, "mix" to d.optHinglish, "eng" to d.optEnglish),
             )
 
             Spacer(Modifier.height(14.dp))
             CreativityCard(
+                d = d,
                 temperature = temperature,
                 isAuto = isAutoTemp,
                 onPreset = genViewModel::setTemperature,
@@ -702,8 +709,8 @@ fun ResponseStyleScreen(
             Spacer(Modifier.height(20.dp))
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Shield, null) },
-                title = "Show disclaimers",
-                subtitle = "Add safety notes for legal & medical topics",
+                title = d.rsShowDisclaimers,
+                subtitle = d.rsShowDisclaimersSub,
                 trailing = {
                     SaarthiToggle(
                         on = style.showDisclaimers,
@@ -714,8 +721,8 @@ fun ResponseStyleScreen(
             Spacer(Modifier.height(6.dp))
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.MenuBook, null) },
-                title = "Include examples",
-                subtitle = "Anchor explanations with real-world cases",
+                title = d.rsIncludeExamples,
+                subtitle = d.rsIncludeExamplesSub,
                 trailing = {
                     SaarthiToggle(
                         on = style.includeExamples,
@@ -726,10 +733,10 @@ fun ResponseStyleScreen(
             Spacer(Modifier.height(20.dp))
             // Live preview — shows the user what a Saarthi reply will look
             // like under their current preferences. Pure UI, no model call.
-            ResponseStylePreview(style)
+            ResponseStylePreview(style, d.rsPreview)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Preferences are applied to every model you load.",
+                d.rsAppliedNote,
                 style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
@@ -738,7 +745,7 @@ fun ResponseStyleScreen(
 }
 
 @Composable
-private fun ResponseStylePreview(style: com.saarthi.core.i18n.ResponseStyle) {
+private fun ResponseStylePreview(style: com.saarthi.core.i18n.ResponseStyle, previewLabel: String) {
     val examplePrompt = "How do I make ginger tea for a sore throat?"
     val exampleReply = remember(style) { buildPreviewReply(style) }
     Column(
@@ -757,7 +764,7 @@ private fun ResponseStylePreview(style: com.saarthi.core.i18n.ResponseStyle) {
             .padding(16.dp),
     ) {
         Text(
-            "PREVIEW",
+            previewLabel,
             style = MaterialTheme.typography.labelSmall.copy(
                 color = SaarthiColors.Marigold,
                 letterSpacing = 1.4.sp,
@@ -894,6 +901,7 @@ private fun SegmentedCard(
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun CreativityCard(
+    d: com.saarthi.core.i18n.SettingsDetailStrings,
     temperature: Float,
     isAuto: Boolean,
     onPreset: (Float) -> Unit,
@@ -901,9 +909,9 @@ private fun CreativityCard(
     onReset: () -> Unit,
 ) {
     val presets = listOf(
-        Triple("Precise", 0.3f, "Focused & repeatable"),
-        Triple("Balanced", 0.7f, "Everyday default"),
-        Triple("Creative", 1.0f, "Varied & expressive"),
+        Triple(d.optPrecise, 0.3f, d.hintPrecise),
+        Triple(d.optBalanced, 0.7f, d.hintBalanced),
+        Triple(d.optCreative, 1.0f, d.hintCreative),
     )
     Column {
         Row(
@@ -911,13 +919,13 @@ private fun CreativityCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Response creativity",
+                d.rsCreativity,
                 style = MaterialTheme.typography.titleSmall.copy(color = SaarthiColors.Text),
                 modifier = Modifier.weight(1f),
             )
             if (!isAuto) {
                 Text(
-                    "Reset",
+                    d.rsReset,
                     style = MaterialTheme.typography.labelMedium.copy(
                         color = SaarthiColors.Marigold,
                         fontWeight = FontWeight.SemiBold,
@@ -979,12 +987,12 @@ private fun CreativityCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Temperature",
+                d.rsTemperature,
                 style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text2),
                 modifier = Modifier.weight(1f),
             )
             Text(
-                if (isAuto) "Auto · %.2f".format(temperature) else "%.2f".format(temperature),
+                if (isAuto) "${d.rsAuto} · %.2f".format(temperature) else "%.2f".format(temperature),
                 style = MaterialTheme.typography.bodySmall.copy(
                     color = if (isAuto) SaarthiColors.Text3 else SaarthiColors.Marigold,
                     fontWeight = FontWeight.SemiBold,
@@ -1013,7 +1021,7 @@ private fun CreativityCard(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
         )
         Text(
-            "Lower keeps answers focused and consistent; higher makes them more varied and creative. Applies to normal chat — document and Kisan answers stay precise.",
+            d.rsCreativityHelp,
             style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3, lineHeight = 14.sp),
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
         )
@@ -1026,8 +1034,10 @@ private fun CreativityCard(
 fun ManageDownloadsScreen(
     onBack: () -> Unit,
     onAddModel: () -> Unit = {},
+    currentLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     viewModel: com.saarthi.app.ManageDownloadsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
+    val d = currentLanguage.settingsDetail
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val installedBytes = remember(state.installed) { state.installed.sumOf { it.sizeBytes } }
     val totalGb = state.phoneTotalBytes / 1_073_741_824f
@@ -1040,7 +1050,7 @@ fun ManageDownloadsScreen(
 
     Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
         SaarthiTopBar(
-            title = "Manage downloads",
+            title = d.mdTitle,
             subtitle = "${state.installed.size} model${if (state.installed.size == 1) "" else "s"} · %.1f GB used".format(saarthiGb),
             onBack = onBack,
         )
@@ -1060,7 +1070,7 @@ fun ManageDownloadsScreen(
                     .padding(16.dp),
             ) {
                 Text(
-                    "PHONE STORAGE",
+                    d.mdPhoneStorage,
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = SaarthiColors.Text3,
                         letterSpacing = 1.4.sp,
@@ -1096,8 +1106,8 @@ fun ManageDownloadsScreen(
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    StorageLegend(color = SaarthiColors.Marigold, label = "Saarthi models · %.1f GB".format(saarthiGb))
-                    StorageLegend(color = Color(0x2EF5EEE3), label = "Other")
+                    StorageLegend(color = SaarthiColors.Marigold, label = "${d.mdSaarthiModels} · %.1f GB".format(saarthiGb))
+                    StorageLegend(color = Color(0x2EF5EEE3), label = d.mdOther)
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -1108,7 +1118,7 @@ fun ManageDownloadsScreen(
 
             Spacer(Modifier.height(18.dp))
             Text(
-                "INSTALLED MODELS",
+                d.mdInstalledModels,
                 style = MaterialTheme.typography.labelSmall.copy(
                     color = SaarthiColors.Text3,
                     letterSpacing = 1.4.sp,
@@ -1119,7 +1129,7 @@ fun ManageDownloadsScreen(
 
             if (state.installed.isEmpty()) {
                 Text(
-                    "No models downloaded yet.",
+                    d.mdNoModels,
                     style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text3),
                     modifier = Modifier.padding(vertical = 12.dp),
                 )
@@ -1128,6 +1138,7 @@ fun ManageDownloadsScreen(
                     state.installed.forEach { m ->
                         InstalledModelRow(
                             model = m,
+                            activeLabel = d.mdActive,
                             onDelete = { viewModel.deleteModel(m.entry) },
                         )
                     }
@@ -1157,7 +1168,7 @@ fun ManageDownloadsScreen(
                 )
                 Spacer(Modifier.size(8.dp))
                 Text(
-                    "Download more models",
+                    d.mdDownloadMore,
                     style = MaterialTheme.typography.titleSmall.copy(
                         color = SaarthiColors.Text2,
                         fontWeight = FontWeight.SemiBold,
@@ -1186,6 +1197,7 @@ private fun StorageLegend(color: Color, label: String) {
 @Composable
 private fun InstalledModelRow(
     model: com.saarthi.app.DownloadedModel,
+    activeLabel: String,
     onDelete: () -> Unit,
 ) {
     Row(
@@ -1214,7 +1226,7 @@ private fun InstalledModelRow(
                     style = MaterialTheme.typography.titleSmall.copy(color = SaarthiColors.Text),
                 )
                 if (model.active) {
-                    SaarthiChip(text = "Active", tone = ChipTone.Jade, small = true)
+                    SaarthiChip(text = activeLabel, tone = ChipTone.Jade, small = true)
                 }
             }
             Text(
@@ -1246,9 +1258,10 @@ private fun InstalledModelRow(
 // ── History (placeholder — current chat session list lives in the assistant drawer) ──
 
 @Composable
-fun HistoryScreen(onBack: () -> Unit) {
+fun HistoryScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = SupportedLanguage.HINDI) {
+    val d = currentLanguage.settingsDetail
     Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
-        SaarthiTopBar(title = "Conversations", subtitle = "All stored on your device", onBack = onBack)
+        SaarthiTopBar(title = d.histTitle, subtitle = d.histTopSub, onBack = onBack)
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1257,7 +1270,7 @@ fun HistoryScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                "Past conversations appear in the chat drawer (☰). This list view will land in a future update.",
+                d.histBody,
                 style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2),
             )
         }

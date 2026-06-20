@@ -222,16 +222,16 @@ fun SaarthiNavHost(
         }
 
         composable(Route.Privacy.path) {
-            PrivacyScreen(onBack = { navController.popBackStack() })
+            PrivacyScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)
         }
         composable(Route.About.path) {
-            AboutScreen(onBack = { navController.popBackStack() })
+            AboutScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)
         }
         composable(Route.Support.path) {
             SupportScreen(onBack = { navController.popBackStack() })
         }
         composable(Route.ResponseStyle.path) {
-            ResponseStyleScreen(onBack = { navController.popBackStack() })
+            ResponseStyleScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)
         }
         composable(Route.Downloads.path) {
             ManageDownloadsScreen(
@@ -239,10 +239,11 @@ fun SaarthiNavHost(
                 onAddModel = {
                     navController.navigate("${Route.Onboarding.path}?modelChange=true")
                 },
+                currentLanguage = currentLanguage,
             )
         }
         composable(Route.History.path) {
-            HistoryScreen(onBack = { navController.popBackStack() })
+            HistoryScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)
         }
 
         composable(
