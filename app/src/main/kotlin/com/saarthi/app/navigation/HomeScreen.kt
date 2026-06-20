@@ -85,6 +85,9 @@ fun HomeScreen(
     currentLanguage: SupportedLanguage = SupportedLanguage.HINDI,
     greeting: String = currentLanguage.greeting,
     exploreSubtitle: String = currentLanguage.exploreSubtitle,
+    /** The user's name, learned from chat (USER_SCOPE memory). When present the
+     *  greeting personalises to "Good evening, {name}"; otherwise it's generic. */
+    userName: String? = null,
 ) {
     var showLanguagePicker by remember { mutableStateOf(false) }
 
@@ -115,16 +118,17 @@ fun HomeScreen(
 
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                 Spacer(Modifier.height(6.dp))
-                GreetingBlock(currentLanguage)
+                GreetingBlock(currentLanguage, userName)
                 Spacer(Modifier.height(22.dp))
                 HeroComposer(
+                    lang = currentLanguage,
                     onClick = { onNavigate(Route.Assistant) },
                     onSuggestionChip = onSuggestionChip,
                 )
                 Spacer(Modifier.height(20.dp))
 
                 Text(
-                    "SPECIALIST MODES",
+                    currentLanguage.specialistModesLabel,
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = SaarthiColors.Text3,
                         letterSpacing = 1.4.sp,
@@ -135,6 +139,7 @@ fun HomeScreen(
                 // so the section-level chip is gone (it was redundant).
                 Spacer(Modifier.height(10.dp))
                 SpecialistsGrid(
+                    lang           = currentLanguage,
                     onKisanClick   = onKisanTap,
                     onVidyaClick   = { onNavigate(Route.Vidya) },
                     onKarigarClick = { onNavigate(Route.Karigar) },
@@ -142,7 +147,7 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.height(18.dp))
 
-                ThoughtOfTheDay()
+                ThoughtOfTheDay(currentLanguage)
                 Spacer(Modifier.height(32.dp))
             }
         }
@@ -229,7 +234,7 @@ private fun HomeTopBar(
 }
 
 @Composable
-private fun GreetingBlock(lang: SupportedLanguage) {
+private fun GreetingBlock(lang: SupportedLanguage, userName: String?) {
     // Compute hour on every recomposition so the greeting updates correctly when
     // the user returns to this screen later in the day (remember(lang) would have
     // cached "Good morning" from the morning and never refreshed it).
@@ -238,8 +243,14 @@ private fun GreetingBlock(lang: SupportedLanguage) {
     Column {
         Text(
             buildAnnotatedString {
-                append("$greeting, ")
-                withStyle(SpanStyle(color = SaarthiColors.Marigold)) { append("friend") }
+                // Personalise with the user's name when we know it ("Good
+                // evening, Arjun"); otherwise show just the time-of-day greeting.
+                if (!userName.isNullOrBlank()) {
+                    append("$greeting, ")
+                    withStyle(SpanStyle(color = SaarthiColors.Marigold)) { append(userName) }
+                } else {
+                    append(greeting)
+                }
             },
             style = MaterialTheme.typography.displayLarge.copy(
                 fontSize = 30.sp,
@@ -250,7 +261,7 @@ private fun GreetingBlock(lang: SupportedLanguage) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "What can I help you with?",
+            lang.homeHelperText,
             style = MaterialTheme.typography.bodyLarge.copy(
                 color = SaarthiColors.Text3,
                 fontSize = 14.sp,
@@ -260,7 +271,7 @@ private fun GreetingBlock(lang: SupportedLanguage) {
 }
 
 @Composable
-private fun HeroComposer(onClick: () -> Unit, onSuggestionChip: (String) -> Unit = {}) {
+private fun HeroComposer(lang: SupportedLanguage, onClick: () -> Unit, onSuggestionChip: (String) -> Unit = {}) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -295,7 +306,7 @@ private fun HeroComposer(onClick: () -> Unit, onSuggestionChip: (String) -> Unit
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Ask Saarthi anything",
+                        lang.askCardTitle,
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
@@ -303,20 +314,23 @@ private fun HeroComposer(onClick: () -> Unit, onSuggestionChip: (String) -> Unit
                         ),
                     )
                     Text(
-                        "Text · Voice · File · Image",
+                        lang.homeInputModes,
                         style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                     )
                 }
                 Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = SaarthiColors.Text3, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.height(14.dp))
+            // Three highest-frequency quick actions, localized. The chip text is
+            // also the prompt sent on tap, so it stays a full natural phrase.
+            val chips = lang.homeQuickActions
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SuggestionPill("Summarize a PDF", onClick = { onSuggestionChip("Summarize a PDF") })
-                SuggestionPill("PM Kisan eligibility", onClick = { onSuggestionChip("PM Kisan eligibility") })
+                chips.getOrNull(0)?.let { SuggestionPill(it, onClick = { onSuggestionChip(it) }) }
+                chips.getOrNull(1)?.let { SuggestionPill(it, onClick = { onSuggestionChip(it) }) }
             }
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SuggestionPill("Translate to हिंदी", onClick = { onSuggestionChip("Translate to हिंदी") })
+                chips.getOrNull(2)?.let { SuggestionPill(it, onClick = { onSuggestionChip(it) }) }
             }
         }
     }
@@ -345,6 +359,7 @@ private fun SuggestionPill(text: String, onClick: () -> Unit = {}) {
 
 @Composable
 private fun SpecialistsGrid(
+    lang: SupportedLanguage,
     onKisanClick: () -> Unit,
     onVidyaClick: () -> Unit,
     onKarigarClick: () -> Unit,
@@ -359,13 +374,13 @@ private fun SpecialistsGrid(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SpecialistTile(
-                Icons.Outlined.Spa, "Kisan", "Farming · Mandi · Schemes",
+                Icons.Outlined.Spa, "Kisan", lang.kisanKeywords,
                 tone = ChipTone.Jade, onClick = onKisanClick,
                 comingSoon = false,   // Kisan is LIVE
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             SpecialistTile(
-                Icons.AutoMirrored.Outlined.MenuBook, "Vidya", "NCERT · Science · GK",
+                Icons.AutoMirrored.Outlined.MenuBook, "Vidya", lang.vidyaKeywords,
                 tone = ChipTone.Indigo, onClick = onVidyaClick,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
@@ -375,12 +390,12 @@ private fun SpecialistsGrid(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SpecialistTile(
-                Icons.Outlined.Build, "Karigar", "Manuals · Error codes",
+                Icons.Outlined.Build, "Karigar", lang.karigarKeywords,
                 tone = ChipTone.Terracotta, onClick = onKarigarClick,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             SpecialistTile(
-                Icons.Outlined.Favorite, "Swasth", "Wellness · First-aid",
+                Icons.Outlined.Favorite, "Swasth", lang.swasthKeywords,
                 tone = ChipTone.Marigold, onClick = onSwasthClick,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
@@ -494,7 +509,7 @@ private fun SpecialistTile(
 }
 
 @Composable
-private fun ThoughtOfTheDay() {
+private fun ThoughtOfTheDay(lang: SupportedLanguage) {
     // Cycles deterministically by day-of-year — same wisdom everywhere on
     // the same calendar day, no per-device drift, no random feel. The
     // catalog lives in core-i18n so the daily notification can pull the
@@ -519,7 +534,7 @@ private fun ThoughtOfTheDay() {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Outlined.Star, null, tint = SaarthiColors.Marigold, modifier = Modifier.size(12.dp))
                 Text(
-                    "THOUGHT OF THE DAY",
+                    lang.thoughtOfDayLabel,
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = SaarthiColors.Marigold,
                         letterSpacing = 1.4.sp,
@@ -527,15 +542,20 @@ private fun ThoughtOfTheDay() {
                 )
             }
             Spacer(Modifier.height(8.dp))
+            // Localized quote in the user's language (no Sanskrit-only content).
             Text(
-                wisdom.sanskrit,
+                wisdom.localized(lang),
                 style = DisplayAccent.copy(fontSize = 18.sp, color = SaarthiColors.Text),
             )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "\"${wisdom.english}\"",
-                style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
-            )
+            // For non-English users, show the English gloss as a quiet secondary
+            // line (helps if the script differs); English users see just the quote.
+            if (lang != SupportedLanguage.ENGLISH) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "\"${wisdom.english}\"",
+                    style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+                )
+            }
         }
     }
 }

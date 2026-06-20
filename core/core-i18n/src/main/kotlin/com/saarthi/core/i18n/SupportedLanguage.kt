@@ -508,6 +508,149 @@ enum class SupportedLanguage(
         )
     }
 
+    // ── Home screen copy (localized) ─────────────────────────────────────────
+
+    /** Helper line under the greeting — the assistant's primary capability. */
+    val homeHelperText: String get() = when (this) {
+        ENGLISH  -> "Ask in text, voice, image, or file."
+        HINDI    -> "टेक्स्ट, आवाज़, फ़ोटो या फ़ाइल से पूछें।"
+        TAMIL    -> "உரை, குரல், படம் அல்லது கோப்பில் கேளுங்கள்."
+        TELUGU   -> "టెక్స్ట్, వాయిస్, ఫోటో లేదా ఫైల్‌తో అడగండి."
+        BENGALI  -> "টেক্সট, ভয়েস, ছবি বা ফাইলে জিজ্ঞাসা করুন।"
+        MARATHI  -> "मजकूर, आवाज, फोटो किंवा फाइलने विचारा."
+        KANNADA  -> "ಪಠ್ಯ, ಧ್ವನಿ, ಚಿತ್ರ ಅಥವಾ ಫೈಲ್‌ನಲ್ಲಿ ಕೇಳಿ."
+        GUJARATI -> "ટેક્સ્ટ, અવાજ, ફોટો કે ફાઇલથી પૂછો."
+        PUNJABI  -> "ਟੈਕਸਟ, ਆਵਾਜ਼, ਫ਼ੋਟੋ ਜਾਂ ਫ਼ਾਈਲ ਨਾਲ ਪੁੱਛੋ।"
+        ODIA     -> "ଟେକ୍ସଟ, ସ୍ୱର, ଫଟୋ କିମ୍ବା ଫାଇଲରେ ପଚାରନ୍ତୁ।"
+    }
+
+    /** Primary "Ask Saarthi" card title — brand name preserved per language. */
+    val askCardTitle: String get() = when (this) {
+        ENGLISH  -> "Ask Saarthi"
+        HINDI    -> "सारथी से पूछें"
+        TAMIL    -> "சாரதியிடம் கேள்"
+        TELUGU   -> "సారథిని అడుగు"
+        BENGALI  -> "সারথিকে জিজ্ঞাসা করুন"
+        MARATHI  -> "सारथीला विचारा"
+        KANNADA  -> "ಸಾರಥಿಯನ್ನು ಕೇಳಿ"
+        GUJARATI -> "સારથીને પૂછો"
+        PUNJABI  -> "ਸਾਰਥੀ ਨੂੰ ਪੁੱਛੋ"
+        ODIA     -> "ସାରଥୀଙ୍କୁ ପଚାରନ୍ତୁ"
+    }
+
+    /** Card subtitle listing the input modes (dot-separated). */
+    val homeInputModes: String get() = when (this) {
+        ENGLISH  -> "Text · Voice · File · Image"
+        HINDI    -> "टेक्स्ट · आवाज़ · फ़ाइल · फ़ोटो"
+        TAMIL    -> "உரை · குரல் · கோப்பு · படம்"
+        TELUGU   -> "టెక్స్ట్ · వాయిస్ · ఫైల్ · ఫోటో"
+        BENGALI  -> "টেক্সট · ভয়েস · ফাইল · ছবি"
+        MARATHI  -> "मजकूर · आवाज · फाइल · फोटो"
+        KANNADA  -> "ಪಠ್ಯ · ಧ್ವನಿ · ಫೈಲ್ · ಚಿತ್ರ"
+        GUJARATI -> "ટેક્સ્ટ · અવાજ · ફાઇલ · ફોટો"
+        PUNJABI  -> "ਟੈਕਸਟ · ਆਵਾਜ਼ · ਫ਼ਾਈਲ · ਫ਼ੋਟੋ"
+        ODIA     -> "ଟେକ୍ସଟ · ସ୍ୱର · ଫାଇଲ · ଫଟୋ"
+    }
+
+    /** Three home quick-action chips (highest-frequency tasks). Also sent as
+     *  the prompt when tapped, so they are full natural phrases. */
+    val homeQuickActions: List<String> get() = when (this) {
+        ENGLISH  -> listOf("Summarize a PDF", "Check PM-Kisan eligibility", "Translate")
+        HINDI    -> listOf("PDF का सारांश दें", "PM-Kisan पात्रता जाँचें", "अनुवाद करें")
+        TAMIL    -> listOf("PDF சுருக்கம் தா", "PM-Kisan தகுதி சரிபார்", "மொழிபெயர்")
+        TELUGU   -> listOf("PDF సారాంశం ఇవ్వు", "PM-Kisan అర్హత తనిఖీ", "అనువదించు")
+        BENGALI  -> listOf("PDF সারসংক্ষেপ দাও", "PM-Kisan যোগ্যতা দেখো", "অনুবাদ করো")
+        MARATHI  -> listOf("PDF चा सारांश द्या", "PM-Kisan पात्रता तपासा", "भाषांतर करा")
+        KANNADA  -> listOf("PDF ಸಾರಾಂಶ ನೀಡಿ", "PM-Kisan ಅರ್ಹತೆ ಪರಿಶೀಲಿಸಿ", "ಅನುವಾದಿಸಿ")
+        GUJARATI -> listOf("PDF નો સારાંશ આપો", "PM-Kisan પાત્રતા તપાસો", "અનુવાદ કરો")
+        PUNJABI  -> listOf("PDF ਦਾ ਸਾਰ ਦਿਓ", "PM-Kisan ਯੋਗਤਾ ਜਾਂਚੋ", "ਅਨੁਵਾਦ ਕਰੋ")
+        ODIA     -> listOf("PDF ସାରାଂଶ ଦିଅନ୍ତୁ", "PM-Kisan ଯୋଗ୍ୟତା ଯାଞ୍ଚ", "ଅନୁବାଦ କରନ୍ତୁ")
+    }
+
+    /** "SPECIALIST MODES" section label. */
+    val specialistModesLabel: String get() = when (this) {
+        ENGLISH  -> "SPECIALIST MODES"
+        HINDI    -> "विशेषज्ञ मोड"
+        TAMIL    -> "சிறப்பு பயன்முறைகள்"
+        TELUGU   -> "ప్రత్యేక మోడ్‌లు"
+        BENGALI  -> "বিশেষজ্ঞ মোড"
+        MARATHI  -> "तज्ज्ञ मोड"
+        KANNADA  -> "ತಜ್ಞ ಮೋಡ್‌ಗಳು"
+        GUJARATI -> "નિષ્ણાત મોડ"
+        PUNJABI  -> "ਮਾਹਰ ਮੋਡ"
+        ODIA     -> "ବିଶେଷଜ୍ଞ ମୋଡ୍"
+    }
+
+    /** Kisan tile keywords (Agriculture • Market • Schemes). */
+    val kisanKeywords: String get() = when (this) {
+        ENGLISH  -> "Farming · Mandi · Schemes"
+        HINDI    -> "खेती · मंडी · योजनाएँ"
+        TAMIL    -> "விவசாயம் · சந்தை · திட்டங்கள்"
+        TELUGU   -> "వ్యవసాయం · మార్కెట్ · పథకాలు"
+        BENGALI  -> "কৃষি · বাজার · প্রকল্প"
+        MARATHI  -> "शेती · बाजार · योजना"
+        KANNADA  -> "ಕೃಷಿ · ಮಾರುಕಟ್ಟೆ · ಯೋಜನೆಗಳು"
+        GUJARATI -> "ખેતી · બજાર · યોજનાઓ"
+        PUNJABI  -> "ਖੇਤੀ · ਮੰਡੀ · ਸਕੀਮਾਂ"
+        ODIA     -> "କୃଷି · ବଜାର · ଯୋଜନା"
+    }
+
+    /** Vidya tile keywords (Learning • NCERT • GK). */
+    val vidyaKeywords: String get() = when (this) {
+        ENGLISH  -> "Learning · NCERT · GK"
+        HINDI    -> "पढ़ाई · NCERT · सामान्य ज्ञान"
+        TAMIL    -> "கல்வி · NCERT · பொது அறிவு"
+        TELUGU   -> "చదువు · NCERT · జనరల్ నాలెడ్జ్"
+        BENGALI  -> "পড়াশোনা · NCERT · সাধারণ জ্ঞান"
+        MARATHI  -> "अभ्यास · NCERT · सामान्य ज्ञान"
+        KANNADA  -> "ಕಲಿಕೆ · NCERT · ಸಾಮಾನ್ಯ ಜ್ಞಾನ"
+        GUJARATI -> "અભ્યાસ · NCERT · સામાન્ય જ્ઞાન"
+        PUNJABI  -> "ਪੜ੍ਹਾਈ · NCERT · ਆਮ ਗਿਆਨ"
+        ODIA     -> "ପଢ଼ା · NCERT · ସାଧାରଣ ଜ୍ଞାନ"
+    }
+
+    /** Karigar tile keywords (Manuals • Repairs). */
+    val karigarKeywords: String get() = when (this) {
+        ENGLISH  -> "Manuals · Repairs"
+        HINDI    -> "मैनुअल · मरम्मत"
+        TAMIL    -> "கையேடுகள் · பழுதுபார்ப்பு"
+        TELUGU   -> "మాన్యువల్స్ · మరమ్మతులు"
+        BENGALI  -> "ম্যানুয়াল · মেরামত"
+        MARATHI  -> "मॅन्युअल · दुरुस्ती"
+        KANNADA  -> "ಕೈಪಿಡಿಗಳು · ದುರಸ್ತಿ"
+        GUJARATI -> "મેન્યુઅલ · સમારકામ"
+        PUNJABI  -> "ਮੈਨੂਅਲ · ਮੁਰੰਮਤ"
+        ODIA     -> "ମାନୁଆଲ · ମରାମତି"
+    }
+
+    /** Swasth tile keywords (Health • First Aid). */
+    val swasthKeywords: String get() = when (this) {
+        ENGLISH  -> "Wellness · First-aid"
+        HINDI    -> "सेहत · प्राथमिक उपचार"
+        TAMIL    -> "நலம் · முதலுதவி"
+        TELUGU   -> "ఆరోగ్యం · ప్రథమ చికిత్స"
+        BENGALI  -> "সুস্থতা · প্রাথমিক চিকিৎসা"
+        MARATHI  -> "आरोग्य · प्रथमोपचार"
+        KANNADA  -> "ಆರೋಗ್ಯ · ಪ್ರಥಮ ಚಿಕಿತ್ಸೆ"
+        GUJARATI -> "આરોગ્ય · પ્રાથમિક સારવાર"
+        PUNJABI  -> "ਸਿਹਤ · ਮੁੱਢਲੀ ਸਹਾਇਤਾ"
+        ODIA     -> "ସୁସ୍ଥତା · ପ୍ରଥମ ଚିକିତ୍ସା"
+    }
+
+    /** "THOUGHT OF THE DAY" card label. */
+    val thoughtOfDayLabel: String get() = when (this) {
+        ENGLISH  -> "THOUGHT OF THE DAY"
+        HINDI    -> "आज का विचार"
+        TAMIL    -> "இன்றைய சிந்தனை"
+        TELUGU   -> "నేటి ఆలోచన"
+        BENGALI  -> "আজকের ভাবনা"
+        MARATHI  -> "आजचा विचार"
+        KANNADA  -> "ಇಂದಿನ ಚಿಂತನೆ"
+        GUJARATI -> "આજનો વિચાર"
+        PUNJABI  -> "ਅੱਜ ਦਾ ਵਿਚਾਰ"
+        ODIA     -> "ଆଜିର ଚିନ୍ତା"
+    }
+
     /**
      * Instruction sandwiched at the TOP and BOTTOM of the system prompt so
      * the model responds in this language.

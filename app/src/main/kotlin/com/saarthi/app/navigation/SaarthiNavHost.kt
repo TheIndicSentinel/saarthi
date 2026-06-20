@@ -72,6 +72,7 @@ fun SaarthiNavHost(
 ) {
     val startState by mainViewModel.startState.collectAsStateWithLifecycle()
     val currentLanguage by mainViewModel.currentLanguage.collectAsStateWithLifecycle()
+    val userName by mainViewModel.userName.collectAsStateWithLifecycle()
 
     // Show deep-space loading screen while reading prefs / initialising engine
     if (startState == AppStartState.Loading) {
@@ -189,6 +190,7 @@ fun SaarthiNavHost(
                 currentLanguage = currentLanguage,
                 greeting = currentLanguage.greeting,
                 exploreSubtitle = currentLanguage.exploreSubtitle,
+                userName = userName,
             )
         }
 
