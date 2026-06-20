@@ -1079,6 +1079,11 @@ class ChatRepositoryImpl @Inject constructor(
             turns = turns,
             isLarge = tier == SystemPromptProvider.ModelTier.LARGE,
             grounded = grounded,
+            // High-end devices get a 4096-token window → an 8000c no-docs
+            // budget (vs 5328c on mid-range). When that extra room exists,
+            // carry more turns of history so long chats stay conversational.
+            // Mid-range stays at the tighter default.
+            roomy = maxPromptChars >= 7000,
         )
     }
 
@@ -1194,13 +1199,66 @@ class ChatRepositoryImpl @Inject constructor(
 
         // ── Diet / food preference ───────────────────────────────────────────
         // "I'm a vegetarian" → was the exact case in the log that was never
-        // captured because the model mis-emitted SAARTHI_REMINDER instead of
-        // SAARTHI_MEMORY, and no implicit pattern existed for diet preferences.
-        // Pattern requires a first-person verb before the term to avoid catching
-        // "find me a vegetarian restaurant" type queries.
-        Regex("(?i)\\b(?:i'?m|i am|i eat|i follow|i prefer|i'm a|i am a)\\s+(?:a |an |strictly |purely )?([a-zA-Z-]{3,20})\\b")
-            .find(msg)?.groupValues?.get(1)?.let { d ->
-                if (d.lowercase() in DIET_TERMS) out += "diet" to d.lowercase()
+        // captured. Pattern requires a first-person verb before the term to
+        // avoid catching "find me a vegetarian restaurant" type queries.
+        // findAll (not find): "I'm Arjun and I'm vegetarian" has TWO first-person
+        // clauses — find() stopped at "Arjun" (not a diet term) and never saw
+        // "vegetarian". Scan all clauses and keep the first that IS a diet term.
+        Regex("(?i)\\b(?:i'?m|i am|i eat|i follow|i prefer)\\s+(?:a |an |strictly |purely )?([a-zA-Z-]{3,20})\\b")
+            .findAll(msg)
+            .map { it.groupValues[1].lowercase() }
+            .firstOrNull { it in DIET_TERMS }
+            ?.let { out += "diet" to it }
+
+        // ── Name (generic first-person) ──────────────────────────────────────
+        // "I'm Arjun", "I am Arjun", "main Arjun hoon/hu" — the most common way
+        // users give their name (the earlier patterns only caught "my name is").
+        // High-precision guards: require a Capitalised token (proper noun) and
+        // reject diet/profession/stopword captures so "I'm tired"/"I'm vegetarian"
+        // never become a name. Native-script names rely on the "मेरा नाम X" /
+        // [SAARTHI_MEMORY] paths instead (no reliable capitalisation signal).
+        if (out.none { it.first == "name" }) {
+            fun nameOk(n: String): Boolean {
+                val low = n.lowercase()
+                return low !in DIET_TERMS && low !in NON_PROFESSION_WORDS &&
+                    low !in NON_NAME_WORDS && firstWordOk(n)
+            }
+            // English "I'm Arjun" / "I am Arjun": case-insensitive prefix, but the
+            // name itself must be Capitalised (a proper noun) to avoid catching
+            // "I'm tired"-style states.
+            Regex("(?:[Ii]'?m|[Ii] am)\\s+([A-Z][a-zA-Z'-]{1,20})\\b")
+                .findAll(msg).map { it.groupValues[1] }
+                .firstOrNull(::nameOk)
+                ?.let { out += "name" to it }
+            // Romanised Hindi "main Arjun hoon/hu/hun" — the trailing copula makes
+            // this high-precision even without a capitalisation signal.
+            if (out.none { it.first == "name" }) {
+                Regex("(?i)\\bmain\\s+([\\p{L}][\\p{L}'-]{1,20})\\s+(?:hoon|hun|hu)\\b")
+                    .find(msg)?.groupValues?.get(1)
+                    ?.let { it.trim().replaceFirstChar { c -> c.uppercase() } }
+                    ?.takeIf(::nameOk)
+                    ?.let { out += "name" to it }
+            }
+        }
+
+        // ── Likes / dislikes ─────────────────────────────────────────────────
+        // A personal assistant should remember preferences. English + romanised
+        // Hindi, first-person only. Captured as free-text values under the
+        // 'likes'/'dislikes' keys (the memory layer stores multiple values).
+        Regex("(?i)\\bi (?:really )?(?:like|love|enjoy|prefer)\\s+([\\p{L}][\\p{L}\\s'-]{2,40})")
+            .findAll(msg).map { clean(it.groupValues[1]) }
+            .firstOrNull { it.length in 3..40 && firstWordOk(it) }
+            ?.let { out += "likes" to it }
+        Regex("(?i)\\bi (?:really )?(?:dislike|hate|don'?t like|do not like|can'?t stand)\\s+([\\p{L}][\\p{L}\\s'-]{2,40})")
+            .findAll(msg).map { clean(it.groupValues[1]) }
+            .firstOrNull { it.length in 3..40 && firstWordOk(it) }
+            ?.let { out += "dislikes" to it }
+        // romanised Hindi: "mujhe X pasand hai" (like) / "pasand nahi" (dislike)
+        Regex("(?i)\\bmujhe\\s+([\\p{L}][\\p{L}\\s'-]{2,40}?)\\s+pasand\\s+(nahi|nahin|nahee)?\\b")
+            .find(msg)?.let { m ->
+                val v = clean(m.groupValues[1])
+                val neg = m.groupValues[2].isNotBlank()
+                if (v.length in 3..40 && firstWordOk(v)) out += (if (neg) "dislikes" else "likes") to v
             }
 
         // ── Employer ─────────────────────────────────────────────────────────
@@ -1230,6 +1288,17 @@ class ChatRepositoryImpl @Inject constructor(
     private val DIET_TERMS = setOf(
         "vegetarian", "vegan", "jain", "eggetarian",
         "non-vegetarian", "nonvegetarian",
+    )
+
+    // Capitalised words that can follow "I'm / I am / main" at a sentence start
+    // but are NOT a name — guards the generic name extractor against
+    // "I'm Looking…", "I'm Sorry", "Main Hoon" style false positives.
+    private val NON_NAME_WORDS = setOf(
+        "looking", "trying", "going", "sorry", "here", "there", "back", "done",
+        "new", "good", "fine", "okay", "ok", "ready", "happy", "sad", "tired",
+        "busy", "glad", "sure", "just", "also", "really", "from", "not", "still",
+        "always", "now", "interested", "thinking", "feeling", "hoping", "wondering",
+        "hoon", "hun", "hu", "main", "hello", "hi",
     )
 
     // Words that follow "I am a/an …" but are NOT a profession — guards the
@@ -1511,13 +1580,18 @@ internal fun formatConversationContext(
     turns: List<Pair<String, String>>,
     isLarge: Boolean,
     grounded: Boolean,
+    roomy: Boolean = false,
 ): String {
     if (turns.isEmpty()) return ""
 
-    val maxTurns      = if (isLarge) 3 else 2
+    // `roomy` = a high-end device with the scaled 4096-token window (8000c
+    // budget). Only then do we deepen LARGE history; mid-range keeps the
+    // tighter caps so its prompt still fits the 2048-token window.
+    val deep          = isLarge && roomy
+    val maxTurns      = if (deep) 6 else if (isLarge) 3 else 2
     val perUserChars  = if (isLarge) 160 else 110
     val perReplyChars = if (isLarge) { if (grounded) 220 else 320 } else { if (grounded) 150 else 200 }
-    val blockBudget   = if (isLarge) { if (grounded) 1100 else 1500 } else { if (grounded) 560 else 760 }
+    val blockBudget   = if (deep) { if (grounded) 2200 else 3000 } else if (isLarge) { if (grounded) 1100 else 1500 } else { if (grounded) 560 else 760 }
 
     fun trunc(s: String, n: Int): String {
         val c = s.trim()

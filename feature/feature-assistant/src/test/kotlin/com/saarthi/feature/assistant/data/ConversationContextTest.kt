@@ -83,6 +83,27 @@ class ConversationContextTest {
     }
 
     @Test
+    fun `roomy LARGE (high-end window) keeps more turns than default LARGE`() {
+        val turns = (1..6).map { turn("q$it", "a$it") }
+        val roomy = formatConversationContext(turns, isLarge = true, grounded = false, roomy = true)
+        // High-end deepens to up to 6 turns — older turns the default drops survive.
+        assertTrue("Turn 1 should be kept on a roomy device. Got:\n$roomy", roomy.contains("q1"))
+        assertTrue(roomy.contains("q6"))
+        // …and it carries strictly more than the tighter mid-range default.
+        val default = formatConversationContext(turns, isLarge = true, grounded = false, roomy = false)
+        assertTrue("roomy must carry at least as much as default", roomy.length >= default.length)
+        assertFalse("default LARGE must still drop turn 1", default.contains("q1"))
+    }
+
+    @Test
+    fun `roomy only deepens LARGE, not STANDARD`() {
+        val turns = (1..6).map { turn("q$it", "a$it") }
+        // STANDARD ignores roomy (mid-range 3n must stay within its small window).
+        val std = formatConversationContext(turns, isLarge = false, grounded = false, roomy = true)
+        assertFalse("STANDARD must not deepen even when roomy. Got:\n$std", std.contains("q3"))
+    }
+
+    @Test
     fun `STANDARD keeps a smaller window than LARGE`() {
         val turns = (1..4).map { turn("q$it", "a$it") }
         val out = formatConversationContext(turns, isLarge = false, grounded = false)

@@ -735,6 +735,19 @@ class LiteRTInferenceEngine @Inject constructor(
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=${config.maxTokens} (caller override)")
                             config.maxTokens
                         }
+                        isLargeTier && headroomMb >= 2400 -> {
+                            // High-end scaling: when the device has ample RAM
+                            // headroom, double the window so long multi-turn
+                            // chats keep more history before the recap has to
+                            // drop turns. KV-cache for E2B at 4096 is only
+                            // ~300 MB — comfortably inside a 2400 MB headroom —
+                            // and the crash-recovery ladder above still steps
+                            // back to 2048/1536 if any device proves unstable.
+                            // Mid-range stays at 2048 (next branch); low-RAM at
+                            // 1536. No effect on the mid-range primary audience.
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=4096 (LARGE tier, high RAM headroom=${headroomMb}MB — scaled context)  model=${sizeMb}MB")
+                            4096
+                        }
                         isLargeTier && headroomMb >= 1500 -> {
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (LARGE tier — Gemma 4 needs room for system+recap+reply)  headroom=${headroomMb}MB  model=${sizeMb}MB")
                             2048
