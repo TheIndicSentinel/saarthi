@@ -76,10 +76,6 @@ class PackChatViewModel @Inject constructor(
      *  provenance is auditable (which pack snapshot produced this answer). */
     @Volatile private var packVersion: Int = 0
 
-    /** Critical structured MSP values from the signed pack, rendered
-     *  deterministically (the LLM never produces/modifies these numbers). */
-    @Volatile private var mspRecords: List<com.saarthi.feature.assistant.data.KisanPackInstaller.MspRecord> = emptyList()
-
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
@@ -118,7 +114,6 @@ class PackChatViewModel @Inject constructor(
             val installed = runCatching { packInstaller.loadInstalledPack() }.getOrNull()
             packPublishedAt = installed?.publishedAt.orEmpty()
             packVersion = installed?.version ?: 0
-            mspRecords = runCatching { packInstaller.loadMspRecords() }.getOrDefault(emptyList())
         }
     }
 
@@ -207,17 +202,6 @@ class PackChatViewModel @Inject constructor(
             }
 
             val lang = languageManager.selectedLanguage.value
-
-            // Critical structured data: MSP figures are rendered deterministically
-            // from the signed pack, bypassing the LLM entirely — it can never
-            // generate, infer, translate, or modify a government number. The crop
-            // name comes from a deterministic dictionary, not AI translation.
-            val mspAnswer = renderMspIfAsked(question, lang)
-            if (mspAnswer != null) {
-                DebugLogger.log("PACK", "MSP deterministic answer (no LLM)  packV=$packVersion asOf=${freshnessDate().ifBlank { "?" }}")
-                finish(streamingId, mspAnswer)
-                return@launch
-            }
 
             // Center → State hierarchy. Capture the user's state if they
             // mention it (conversational), persist it pack-scoped, and use it
@@ -336,53 +320,6 @@ class PackChatViewModel @Inject constructor(
      */
     /** Pack publish date as a plain YYYY-MM-DD (or "" if unknown). */
     private fun freshnessDate(): String = packPublishedAt.take(10)
-
-    private val mspTriggers = listOf(
-        "msp", "minimum support price", "support price",
-        "समर्थन मूल्य", "एमएसपी", "samarthan",
-    )
-
-    /**
-     * If the question is about MSP, render the answer DETERMINISTICALLY from the
-     * structured pack values (no LLM). Returns null when it isn't an MSP question
-     * (then the normal RAG+LLM path runs). Numbers are copied verbatim from the
-     * signed pack; crop names come from the deterministic localization dictionary.
-     */
-    private fun renderMspIfAsked(question: String, lang: SupportedLanguage): String? {
-        if (mspRecords.isEmpty()) return null
-        val q = question.lowercase()
-        if (mspTriggers.none { q.contains(it) }) return null
-        val matched = mspRecords.filter { r ->
-            val cropEn = r.crop.lowercase().substringBefore(" (").trim()
-            val cropHi = r.cropHi.substringBefore(" (").trim()
-            (cropEn.isNotBlank() && q.contains(cropEn)) ||
-                (r.cropKey.isNotBlank() && q.contains(r.cropKey.replace("_", " "))) ||
-                (cropHi.isNotBlank() && question.contains(cropHi))
-        }
-        return renderMspTemplate(matched.ifEmpty { mspRecords }, lang)
-    }
-
-    /** Fixed-template MSP answer. The only dynamic parts are values + names
-     *  taken verbatim from the structured pack — never model-generated. */
-    private fun renderMspTemplate(records: List<com.saarthi.feature.assistant.data.KisanPackInstaller.MspRecord>, lang: SupportedLanguage): String {
-        val hindi = lang.code == "hi"
-        val src = records.firstOrNull()?.sourceDocument.orEmpty()
-        val sb = StringBuilder()
-        sb.append(if (hindi) "📋 न्यूनतम समर्थन मूल्य (MSP) — सरकारी घोषित:\n" else "📋 Minimum Support Price (MSP) — official:\n")
-        records.forEach { r ->
-            val name = if (hindi && r.cropHi.isNotBlank()) r.cropHi else r.crop
-            sb.append(
-                if (hindi) "• $name (${r.season} ${r.marketingYear}): ₹${r.value} प्रति क्विंटल\n"
-                else "• $name (${r.season} ${r.marketingYear}): ₹${r.value} per quintal\n",
-            )
-        }
-        sb.append(
-            if (hindi) "\nयह सरकार द्वारा घोषित गारंटीड मूल्य है; मंडी भाव अलग हो सकते हैं।"
-            else "\nThis is the guaranteed government price; mandi (market) prices may differ.",
-        )
-        if (src.isNotBlank()) sb.append(if (hindi) "\n_स्रोत: ${src}_" else "\n_Source: ${src}_")
-        return sb.toString().trimEnd()
-    }
 
     private fun sourceLabelFor(chunks: List<RetrievedChunk>): String {
         if (chunks.isEmpty()) return "General"
