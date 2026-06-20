@@ -770,7 +770,21 @@ class ChatRepositoryImpl @Inject constructor(
             }.let { prompt ->
                 // trimPrompt() is now a safety net rather than the primary
                 // cutter — the RAG block was already sized to fit.
-                val finalPrompt = trimPrompt(prompt, budget, pinnedTail = userMessage)
+                //
+                // When it DOES fire on an over-budget single-turn prompt, it
+                // keeps the user tail and take()s the FRONT of the system block
+                // — which silently drops the END of the system prompt, i.e. the
+                // BOTTOM (recency-anchored) language directive of the sandwich.
+                // On weaker models (Gemma 4 E2B) the bottom directive is what
+                // actually forces the reply language, so losing it made every
+                // reply revert to English regardless of the selected language.
+                // Pin the bottom language directive to the user tail (no docs
+                // turn only — on doc turns RAG sits between them) so trimming
+                // can never cut it.
+                val langTail = currentLanguage.systemPromptInstruction
+                val pinnedTail = if (fileContext.isEmpty() && langTail.isNotBlank())
+                    "$langTail\n\n$userMessage" else userMessage
+                val finalPrompt = trimPrompt(prompt, budget, pinnedTail = pinnedTail)
                 DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget")
                 finalPrompt
             }
