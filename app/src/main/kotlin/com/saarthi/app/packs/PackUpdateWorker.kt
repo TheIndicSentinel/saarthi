@@ -119,7 +119,15 @@ class PackUpdateWorker(
             return@withContext Result.success()
         }
 
-        notifyPackUpdated(manifest.title.ifBlank { "Kisan Knowledge" }, newVersion)
+        // Notify only on a GENUINE later refresh — never on the first install
+        // (installedVersion == 0), which is the initial seed pulled during /
+        // just after onboarding. A brand-new user shouldn't get a "pack updated"
+        // notification before they've even used the app.
+        if (installedVersion > 0) {
+            notifyPackUpdated(manifest.title.ifBlank { "Kisan Knowledge" }, newVersion)
+        } else {
+            DebugLogger.log("PACK", "First pack install (seed) — suppressing update notification")
+        }
         Result.success()
     }
 
