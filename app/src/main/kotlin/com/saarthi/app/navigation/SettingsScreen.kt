@@ -66,6 +66,7 @@ import com.saarthi.core.ui.components.SaarthiListRow
 import com.saarthi.core.ui.components.SaarthiLogo
 import com.saarthi.core.ui.components.SaarthiToggle
 import com.saarthi.core.ui.components.SaarthiTopBar
+import com.saarthi.core.i18n.settings
 import com.saarthi.core.ui.components.SectionLabel
 import com.saarthi.core.ui.theme.DisplayAccent
 import com.saarthi.core.ui.theme.SaarthiColors
@@ -80,6 +81,7 @@ fun SettingsScreen(
     settingsViewModel: com.saarthi.app.SettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
     themeViewModel: com.saarthi.app.ThemeViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
+    val s = currentLanguage.settings
     var showLangPicker by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
@@ -95,7 +97,7 @@ fun SettingsScreen(
     Column(
         modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg),
     ) {
-        SaarthiTopBar(title = "Settings", onBack = onBack)
+        SaarthiTopBar(title = s.settings, onBack = onBack)
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -115,27 +117,27 @@ fun SettingsScreen(
                 onClick = { onNavigate("pro") },
             )
 
-            SectionLabel("AI & Models")
+            SectionLabel(s.sectionAiModels)
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Memory, null) },
-                title = "Active model",
-                subtitle = "Choose & manage AI models",
+                title = s.activeModel,
+                subtitle = s.activeModelSub,
                 tone = ChipTone.Marigold,
                 trailing = { ChevronRight() },
                 onClick = onChangeModel,
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.CloudDownload, null) },
-                title = "Manage downloads",
-                subtitle = "Models stored on this device",
+                title = s.manageDownloads,
+                subtitle = s.manageDownloadsSub,
                 tone = ChipTone.Indigo,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("downloads") },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Tune, null) },
-                title = "Response style",
-                subtitle = "How Saarthi talks to you",
+                title = s.responseStyle,
+                subtitle = s.responseStyleSub,
                 tone = ChipTone.Terracotta,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("response-style") },
@@ -148,39 +150,37 @@ fun SettingsScreen(
             val activePersona by settingsPersonaVm.active.collectAsStateWithLifecycle()
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Face, contentDescription = null) },
-                title = "Persona",
+                title = s.persona,
                 subtitle = "${activePersona.displayName} · ${activePersona.tagline}",
                 tone = ChipTone.Indigo,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("assistant") },
             )
 
-            SectionLabel("App")
+            SectionLabel(s.sectionApp)
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Public, null) },
-                title = "Language",
+                title = s.language,
                 subtitle = "${currentLanguage.nativeName} · ${currentLanguage.englishName}",
                 trailing = { ChevronRight() },
                 onClick = { showLangPicker = true },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) },
-                title = "Chat history",
+                title = s.chatHistory,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("history") },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Notifications, null) },
-                title = "Daily wisdom notifications",
-                subtitle = if (notifOn) "A Sanskrit thought every morning at 8 AM"
-                           else "Off — no daily notification",
+                title = s.dailyWisdom,
+                subtitle = if (notifOn) s.wisdomOn else s.wisdomOff,
                 trailing = { SaarthiToggle(on = notifOn, onToggle = { wisdomVm.setEnabled(!notifOn) }) },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.DarkMode, null) },
-                title = "Dark theme",
-                subtitle = if (darkOn) "On — warm dark ink"
-                           else "Off — daylight-friendly light",
+                title = s.darkTheme,
+                subtitle = if (darkOn) s.darkOn else s.darkOff,
                 trailing = { SaarthiToggle(on = darkOn, onToggle = { themeViewModel.toggle() }) },
             )
             // Read replies aloud (TTS) — hands-free auto-read is a Pro feature;
@@ -193,7 +193,7 @@ fun SettingsScreen(
                     leadingIcon = {
                         Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
                     },
-                    title = "Read replies aloud",
+                    title = s.readAloud,
                     subtitle = if (ttsOn) "Saarthi speaks each reply when it's ready"
                                else "Tap Listen on a reply to hear it",
                     trailing = { SaarthiToggle(on = ttsOn, onToggle = { ttsVm.toggle() }) },
@@ -203,7 +203,7 @@ fun SettingsScreen(
                     leadingIcon = {
                         Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
                     },
-                    title = "Read replies aloud",
+                    title = s.readAloud,
                     subtitle = "Saarthi Pro — auto-read every reply, hands-free",
                     tone = ChipTone.Marigold,
                     trailing = { ProChip() },
@@ -211,52 +211,52 @@ fun SettingsScreen(
                 )
             }
 
-            SectionLabel("Privacy")
+            SectionLabel(s.sectionPrivacy)
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Shield, null) },
-                title = "Privacy details",
-                subtitle = "100% on-device · Zero collection",
+                title = s.privacyDetails,
+                subtitle = s.privacyDetailsSub,
                 tone = ChipTone.Jade,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("privacy") },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Delete, null) },
-                title = "Clear chat history",
-                subtitle = "Permanently delete all conversations",
+                title = s.clearHistory,
+                subtitle = s.clearHistorySub,
                 tone = ChipTone.Rose,
                 danger = true,
                 trailing = { ChevronRight() },
                 onClick = { showClearDialog = true },
             )
 
-            SectionLabel("About")
+            SectionLabel(s.sectionAbout)
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Person, null) },
-                title = "About Saarthi",
-                subtitle = "Version, credits, source code",
+                title = s.aboutSaarthi,
+                subtitle = s.aboutSaarthiSub,
                 tone = ChipTone.Marigold,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("about") },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.HelpOutline, null) },
-                title = "Help & support",
-                subtitle = "Contact us, report a problem, refunds",
+                title = s.helpSupport,
+                subtitle = s.helpSupportSub,
                 tone = ChipTone.Jade,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("support") },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.FavoriteBorder, null) },
-                title = "Rate Saarthi",
-                subtitle = "Share your feedback",
+                title = s.rateSaarthi,
+                subtitle = s.rateSaarthiSub,
                 tone = ChipTone.Rose,
                 trailing = { ChevronRight() },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Share, null) },
-                title = "Share with friends",
+                title = s.shareFriends,
                 trailing = { ChevronRight() },
             )
 
@@ -273,7 +273,7 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Made with care in India",
+                    s.madeWithCare,
                     style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text4),
                 )
                 Spacer(Modifier.height(24.dp))
@@ -296,10 +296,10 @@ fun SettingsScreen(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showClearDialog = false },
             containerColor = SaarthiColors.Bg2,
-            title = { Text("Clear chat history?", color = SaarthiColors.Text) },
+            title = { Text(s.clearDialogTitle, color = SaarthiColors.Text) },
             text = {
                 Text(
-                    "This permanently deletes every saved conversation across all sessions. The active model stays loaded.",
+                    s.clearDialogBody,
                     color = SaarthiColors.Text2,
                 )
             },
@@ -308,12 +308,12 @@ fun SettingsScreen(
                     settingsViewModel.clearAllChatHistory()
                     showClearDialog = false
                 }) {
-                    Text("Delete all", color = SaarthiColors.Rose, fontWeight = FontWeight.Bold)
+                    Text(s.deleteAll, color = SaarthiColors.Rose, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel", color = SaarthiColors.Text2)
+                    Text(s.cancel, color = SaarthiColors.Text2)
                 }
             },
         )
@@ -326,11 +326,12 @@ private fun SettingsLanguageDialog(
     onSelect: (com.saarthi.core.i18n.SupportedLanguage) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val s = current.settings
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SaarthiColors.Bg2,
         title = {
-            Text("Change language", color = SaarthiColors.Text)
+            Text(s.changeLanguage, color = SaarthiColors.Text)
         },
         text = {
             androidx.compose.foundation.lazy.LazyColumn(
@@ -377,7 +378,7 @@ private fun SettingsLanguageDialog(
         confirmButton = {},
         dismissButton = {
             androidx.compose.material3.TextButton(onClick = onDismiss) {
-                Text("Cancel", color = SaarthiColors.Text2)
+                Text(s.cancel, color = SaarthiColors.Text2)
             }
         },
     )
