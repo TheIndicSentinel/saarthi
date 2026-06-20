@@ -76,6 +76,10 @@ class PackChatViewModel @Inject constructor(
      *  provenance is auditable (which pack snapshot produced this answer). */
     @Volatile private var packVersion: Int = 0
 
+    /** Official MSP values from the signed pack. Used to GROUND MSP answers in
+     *  the exact table (the LLM then renders in the user's language). */
+    @Volatile private var mspRecords: List<com.saarthi.feature.assistant.data.KisanPackInstaller.MspRecord> = emptyList()
+
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
@@ -114,6 +118,7 @@ class PackChatViewModel @Inject constructor(
             val installed = runCatching { packInstaller.loadInstalledPack() }.getOrNull()
             packPublishedAt = installed?.publishedAt.orEmpty()
             packVersion = installed?.version ?: 0
+            mspRecords = runCatching { packInstaller.loadMspRecords() }.getOrDefault(emptyList())
         }
     }
 
@@ -212,20 +217,29 @@ class PackChatViewModel @Inject constructor(
             }
             val userState = detectedState ?: kisanPackPreference.userState.value
 
-            // Inject the state into the retrieval query so a matching state
-            // overlay surfaces alongside the central baseline.
-            val searchQuery = if (userState.isNotBlank()) "$question $userState" else question
-            val rawChunks = runCatching { ragRepository.search(packSessionId, searchQuery, topK = 5) }
-                .getOrDefault(emptyList())
-            // Keep every central chunk; keep a STATE-OVERLAY chunk only when it
-            // matches the user's state. With no state set, all overlays are
-            // dropped → no-state answers are exactly as before this feature.
-            val chunks = rawChunks.filter { c ->
-                val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
-                cs == null ||
-                    cs.equals(userState, ignoreCase = true) ||
-                    (cs == com.saarthi.core.i18n.IndianStates.NORTH_EAST &&
-                        com.saarthi.core.i18n.IndianStates.isNorthEast(userState))
+            // MSP is critical structured data. When the user asks about MSP,
+            // ground the answer in the FULL official MSP table (exact values from
+            // the signed pack) so the right crop + value are always present —
+            // BM25 alone can't match a Marathi/Telugu query against 26 near-
+            // identical English MSP entries. The LLM then renders it in the
+            // selected language. Non-MSP questions use normal BM25 retrieval.
+            val mspGrounding = mspGroundingIfAsked(question)
+            val chunks = if (mspGrounding != null) {
+                DebugLogger.log("PACK", "MSP grounded (official table → LLM renders in lang)  packV=$packVersion crops=${mspRecords.size}")
+                mspGrounding
+            } else {
+                val searchQuery = if (userState.isNotBlank()) "$question $userState" else question
+                val rawChunks = runCatching { ragRepository.search(packSessionId, searchQuery, topK = 5) }
+                    .getOrDefault(emptyList())
+                // Keep every central chunk; keep a STATE-OVERLAY chunk only when
+                // it matches the user's state.
+                rawChunks.filter { c ->
+                    val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
+                    cs == null ||
+                        cs.equals(userState, ignoreCase = true) ||
+                        (cs == com.saarthi.core.i18n.IndianStates.NORTH_EAST &&
+                            com.saarthi.core.i18n.IndianStates.isNorthEast(userState))
+                }
             }
 
             // No pack match → still answer, but as clearly-labelled general
@@ -320,6 +334,39 @@ class PackChatViewModel @Inject constructor(
      */
     /** Pack publish date as a plain YYYY-MM-DD (or "" if unknown). */
     private fun freshnessDate(): String = packPublishedAt.take(10)
+
+    // MSP intent across the supported languages. "msp" (Latin) is the safest
+    // catch-all; the rest are best-effort — a miss just falls back to BM25.
+    private val mspTriggers = listOf(
+        "msp", "minimum support price", "support price", "samarthan",
+        "समर्थन मूल्य", "एमएसपी",
+        "हमीभाव", "हमी भाव",
+        "మద్దతు ధర",
+        "ஆதரவு விலை",
+        "সহায়ক মূল্য",
+        "ಬೆಂಬಲ ಬೆಲೆ",
+        "ટેકાનો ભાવ",
+        "ਸਮਰਥਨ ਮੁੱਲ",
+    )
+
+    /**
+     * If the question is about MSP, return the FULL official MSP table as a
+     * single grounding chunk (exact values, verbatim from the signed pack). The
+     * normal LLM path then answers the specific crop in the user's language.
+     * Returns null when it isn't an MSP question (then BM25 runs as usual).
+     * This sidesteps BM25's cross-lingual miss on 26 near-identical MSP entries.
+     */
+    private fun mspGroundingIfAsked(question: String): List<RetrievedChunk>? {
+        if (mspRecords.isEmpty()) return null
+        val q = question.lowercase()
+        if (mspTriggers.none { q.contains(it.lowercase()) }) return null
+        val table = mspRecords.joinToString("\n") { r ->
+            "${r.crop} (${r.season} ${r.marketingYear}): Rs ${r.value} per quintal"
+        }
+        val src = mspRecords.firstOrNull()?.sourceDocument.orEmpty()
+        val text = "Official Minimum Support Price (MSP), per quintal:\n$table\nSource: $src"
+        return listOf(RetrievedChunk(text = text, docName = "Minimum Support Price (MSP)", score = 1.0, chunkIndex = 0))
+    }
 
     private fun sourceLabelFor(chunks: List<RetrievedChunk>): String {
         if (chunks.isEmpty()) return "General"
