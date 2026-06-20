@@ -4,6 +4,8 @@ import android.app.AlarmManager
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import com.saarthi.core.i18n.LanguageManager
+import com.saarthi.core.i18n.SupportedLanguage
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -50,7 +52,11 @@ class ReminderManagerTest {
             PendingIntent.getBroadcast(any(), any(), any(), any())
         } returns mockPendingIntent
 
-        manager = ReminderManager(mockContext)
+        val mockLanguageManager = mockk<LanguageManager>(relaxed = true)
+        every { mockLanguageManager.selectedLanguage } returns
+            kotlinx.coroutines.flow.MutableStateFlow(SupportedLanguage.ENGLISH)
+
+        manager = ReminderManager(mockContext, mockLanguageManager)
     }
 
     @After
