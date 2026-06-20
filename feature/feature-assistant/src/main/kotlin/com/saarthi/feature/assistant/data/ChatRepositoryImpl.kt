@@ -592,6 +592,25 @@ class ChatRepositoryImpl @Inject constructor(
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
         val sessionId = _currentSessionId.value
 
+        // Identity questions ("who are you", "tumhare bare me", "तुम्ही कोण",
+        // etc., in any language) are answered from the localized canonical
+        // identity — small models (esp. in non-English) otherwise leak a base
+        // "I'm a large language model" reply despite the system-prompt guards.
+        // Giving the exact localized answer to render leaves no room to invent.
+        if (attachments.isEmpty() && tier != SystemPromptProvider.ModelTier.COMPACT &&
+            isIdentityQuestion(userMessage)
+        ) {
+            val lang = currentLanguage
+            val langLine = lang.systemPromptInstruction
+            DebugLogger.log("PROMPT", "Identity question → grounded identity answer  lang=${lang.code}")
+            return buildString {
+                if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
+                append("The user is asking who or what you are. Reply naturally and warmly in the user's language, conveying exactly this and nothing else. Never call yourself a language model, LLM, AI model, or name any company or technology:\n")
+                append(lang.identityAnswer)
+                if (langLine.isNotBlank()) { append("\n\n"); append(langLine) }
+            }
+        }
+
         // ── RAG (BM25, persisted) ────────────────────────────────────────
         // The session's indexed chunks live in Room. Score every chunk
         // against this turn's query so each follow-up gets a fresh slice
@@ -1282,6 +1301,38 @@ class ChatRepositoryImpl @Inject constructor(
      */
     private fun userAskedForReminder(userMessage: String): Boolean =
         ReminderRequestDetector.wasRequested(userMessage)
+
+    /**
+     * True when the user is asking who/what Saarthi is ("who are you",
+     * "introduce yourself", "about Saarthi", or the equivalent in an Indian
+     * language / romanized form). Deliberately conservative — short messages
+     * only, anchored phrases — so a normal question is never mistaken for an
+     * identity ask. Drives the deterministic localized identity reply.
+     */
+    private fun isIdentityQuestion(message: String): Boolean {
+        val m = message.trim().lowercase()
+        if (m.length !in 2..80) return false
+        val latin = listOf(
+            "who are you", "who r u", "what are you", "who is saarthi", "what is saarthi",
+            "about saarthi", "introduce yourself", "tell me about yourself", "tell me about you",
+            "about you", "your name", "what is your name", "what's your name", "who made you",
+            "tum kaun", "tum kon", "aap kaun", "tumhare bare", "tumhari jaankari", "apne bare",
+            "kaun ho", "tumhi kon", "tujhya baddal", "tumchya baddal", "tumcha baddal",
+        )
+        if (latin.any { m.contains(it) }) return true
+        val native = listOf(
+            "तुम कौन", "आप कौन", "तुम क्या हो", "अपने बारे", "तुम्हारे बारे", "सारथी कौन", "सारथी क्या",
+            "तू कोण", "तुम्ही कोण", "तुमच्याबद्दल", "तुझ्याबद्दल", "स्वतःबद्दल",
+            "నువ్వు ఎవరు", "మీరు ఎవరు", "నీ గురించి", "మీ గురించి",
+            "நீ யார்", "நீங்கள் யார்", "உங்களை பற்றி", "உன்னை பற்றி",
+            "তুমি কে", "আপনি কে", "তোমার সম্পর্কে", "নিজের সম্পর্কে",
+            "ನೀನು ಯಾರು", "ನೀವು ಯಾರು", "ನಿಮ್ಮ ಬಗ್ಗೆ",
+            "તમે કોણ", "તું કોણ", "તમારા વિશે",
+            "ਤੁਸੀਂ ਕੌਣ", "ਤੂੰ ਕੌਣ", "ਆਪਣੇ ਬਾਰੇ",
+            "ଆପଣ କିଏ", "ତୁମେ କିଏ", "ନିଜ ବିଷୟରେ",
+        )
+        return native.any { message.contains(it) }
+    }
 
     // Dietary preference terms matched by the diet extractor above.
     // Kept separate so adding new terms doesn't risk widening the profession regex.
