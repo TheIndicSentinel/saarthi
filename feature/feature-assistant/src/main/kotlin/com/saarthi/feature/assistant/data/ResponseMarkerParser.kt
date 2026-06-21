@@ -291,6 +291,26 @@ object ResponseMarkerParser {
         out = Regex("""[,–-]?\s*(?:गूगल|डीपमाइंड|Google|DeepMind)[^।]*?(?:विकसित|प्रशिक्षित|निर्मित|तयार|बनवले|बनाया)[^।]*""")
             .replace(out, "")
 
+        // ── Other Indian scripts (Telugu/Tamil/Bengali/Kannada/Gujarati/Punjabi/
+        // Odia) ──────────────────────────────────────────────────────────────
+        // Same neutralisation: replace the localized "(big) language/AI model"
+        // noun-phrase with the brand name in that script. Best-effort coverage
+        // of the common spellings the model emits; the deterministic identity
+        // grounding remains the primary defence. A spelling that doesn't match
+        // is simply a no-op (never a degradation).
+        val localizedLlmByScript = listOf(
+            Regex("""(పెద్ద\s+)?(?:భాషా|ఏఐ|AI)\s+(?:మోడల్|మోడెల్|నమూనా)""") to "సారథి",       // Telugu
+            Regex("""(பெரிய\s+)?(?:மொழி|ஏஐ|AI)\s+(?:மாதிரி|மாடல்|மாட்டல்)""") to "சாரதி",      // Tamil
+            Regex("""(বড়\s+)?(?:ভাষা|এআই|AI)\s+মডেল""") to "সারথি",                          // Bengali
+            Regex("""(ದೊಡ್ಡ\s+)?(?:ಭಾಷಾ|ಎಐ|AI)\s+(?:ಮಾದರಿ|ಮಾಡೆಲ್|ಮಾಡಲ್)""") to "ಸಾರಥಿ",     // Kannada
+            Regex("""(મોટું\s+)?(?:ભાષા|એઆઈ|AI)\s+(?:મૉડલ|મોડેલ)""") to "સારથી",              // Gujarati
+            Regex("""(ਵੱਡਾ\s+)?(?:ਭਾਸ਼ਾ|ਏਆਈ|AI)\s+ਮਾਡਲ""") to "ਸਾਰਥੀ",                        // Punjabi
+            Regex("""(ବଡ଼\s+)?(?:ଭାଷା|ଏଆଇ|AI)\s+(?:ମଡେଲ|ମୋଡେଲ)""") to "ସାରଥୀ",                 // Odia
+        )
+        for ((pattern, replacement) in localizedLlmByScript) {
+            out = pattern.replace(out, replacement)
+        }
+
         // Tidy up any double spaces / dangling punctuation we just created
         // (including a stray comma / danda left after a strip).
         out = out.replace(Regex("""\s{2,}"""), " ")

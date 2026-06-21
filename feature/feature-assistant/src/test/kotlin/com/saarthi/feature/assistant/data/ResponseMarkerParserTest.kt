@@ -114,6 +114,14 @@ class ResponseMarkerParserTest {
     }
 
     @Test
+    fun rewriteIdentity_scrubs_telugu_language_model_claim() {
+        val raw = "నేను ఒక పెద్ద భాషా మోడల్‌ను."
+        val out = ResponseMarkerParser.rewriteIdentity(raw)
+        assertTrue("Must not leak Telugu 'భాషా మోడల్'. Got: $out", !out.contains("భాషా మోడల్"))
+        assertTrue("Must keep the Saarthi identity. Got: $out", out.contains("సారథి"))
+    }
+
+    @Test
     fun rewriteIdentity_leaves_legitimate_devanagari_google_mention_alone() {
         val raw = "तुम गूगल पर खोज सकते हो।"
         assertEquals(raw, ResponseMarkerParser.rewriteIdentity(raw))
