@@ -287,9 +287,19 @@ object ResponseMarkerParser {
         // Latin brand spelling). e.g. ", जिसे गूगल डीपमाइंड द्वारा विकसित किया गया है".
         out = Regex(""",?\s*(?:जिसे|जिसको|जो)\s+[^।]*?(?:गूगल|डीपमाइंड|Google|DeepMind)[^।]*""")
             .replace(out, "")
-        // Bare provenance without a relative pronoun: "गूगल (डीपमाइंड) द्वारा/ने … विकसित/प्रशिक्षित …".
-        out = Regex("""[,–-]?\s*(?:गूगल|डीपमाइंड|Google|DeepMind)[^।]*?(?:विकसित|प्रशिक्षित|निर्मित|तयार|बनवले|बनाया)[^।]*""")
-            .replace(out, "")
+        // Bare provenance without a relative pronoun, ANY Indian script:
+        // "<brand> … <developed/trained verb> …". Bound the clause by a sentence
+        // terminator (danda ।, period, or newline) so it never crosses into the
+        // next sentence and a legitimate brand mention without a provenance verb
+        // (e.g. "search on గూగుల్") is never stripped. Brands are matched in
+        // Latin AND each native script; verbs cover the common "made/developed/
+        // trained/created" forms across languages.
+        val brand = "गूगल|डीपमाइंड|గూగుల్|கூகிள்|গুগল|ಗೂಗಲ್|ગૂગલ|ਗੂਗਲ|ଗୁଗଲ|Google|DeepMind"
+        val devVerb = "विकसित|प्रशिक्षित|निर्मित|तयार|बनवले|बनाया|अभिवृद्ध|" +
+            "అభివృద్ధి|తయారు|రూపొందించ|" + "உருவாக்க|பயிற்சி|" + "তৈরি|প্রশিক্ষিত|" +
+            "ತಯಾರಿಸ|ಅಭಿವೃದ್ಧಿ|" + "બનાવ|વિકસાવ|" + "ਬਣਾ|ਵਿਕਸਿਤ|" + "ତିଆରି|ବିକଶିତ|" +
+            "developed|trained|created|built|made"
+        out = Regex("""[,–-]?\s*(?:$brand)[^।.\n]*?(?:$devVerb)[^।.\n]*""").replace(out, "")
 
         // ── Other Indian scripts (Telugu/Tamil/Bengali/Kannada/Gujarati/Punjabi/
         // Odia) ──────────────────────────────────────────────────────────────
