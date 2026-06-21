@@ -95,6 +95,22 @@ object ResponseMarkerParser {
         """(?m)^\s*(?:text|key|value|time|delay_minutes)\s*=\s*"[^"\n]*"(?:\s+(?:text|key|value|time|delay_minutes)\s*=\s*"[^"\n]*")*\s*\]?\s*$""",
     )
 
+    // YAML / colon-form marker leak. Small models (esp. in non-English) ignore
+    // the bracket syntax and instead dump a block like:
+    //     marker:
+    //     text: "memory_updated"
+    //     delay_minutes: 0
+    //     time: "11:05 2026"
+    //     key: "help_offered"
+    //     value: "Arjun is vegetarian"
+    // None of the equals-based patterns catch the COLON form, so it leaked into
+    // the bubble. Strip a standalone `marker:` label line and any line that is
+    // solely one of our marker fields in `field: value` form (quoted or not).
+    private val MARKER_LABEL_LINE = Regex("""(?im)^\s*marker\s*:\s*$""")
+    private val ORPHAN_MARKER_COLON_LINE = Regex(
+        """(?im)^\s*(?:text|key|value|time|delay_minutes)\s*:\s*.*$""",
+    )
+
     /**
      * Returns true when the value is empty or a literal template placeholder
      * the model copied from the prompt instead of filling in.
@@ -301,6 +317,9 @@ object ResponseMarkerParser {
             // or more marker attribute fragments. Covers the multi-line-leak
             // case where the marker keyword landed on a prior line.
             .replace(ORPHAN_MARKER_ATTRIBUTE_LINE, "")
+            // Third pass — the YAML / colon-form leak ("marker:" + "key: ...").
+            .replace(MARKER_LABEL_LINE, "")
+            .replace(ORPHAN_MARKER_COLON_LINE, "")
         for (token in GEMMA_SPECIAL_TOKENS) {
             out = out.replace(token, "")
         }

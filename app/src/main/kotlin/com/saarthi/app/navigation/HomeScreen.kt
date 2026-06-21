@@ -376,12 +376,14 @@ private fun SpecialistsGrid(
             SpecialistTile(
                 Icons.Outlined.Spa, "Kisan", lang.kisanKeywords,
                 tone = ChipTone.Jade, onClick = onKisanClick,
+                liveLabel = lang.liveBadge, soonLabel = lang.soonBadge,
                 comingSoon = false,   // Kisan is LIVE
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             SpecialistTile(
                 Icons.AutoMirrored.Outlined.MenuBook, "Vidya", lang.vidyaKeywords,
                 tone = ChipTone.Indigo, onClick = onVidyaClick,
+                liveLabel = lang.liveBadge, soonLabel = lang.soonBadge,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
@@ -392,11 +394,13 @@ private fun SpecialistsGrid(
             SpecialistTile(
                 Icons.Outlined.Build, "Karigar", lang.karigarKeywords,
                 tone = ChipTone.Terracotta, onClick = onKarigarClick,
+                liveLabel = lang.liveBadge, soonLabel = lang.soonBadge,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             SpecialistTile(
                 Icons.Outlined.Favorite, "Swasth", lang.swasthKeywords,
                 tone = ChipTone.Marigold, onClick = onSwasthClick,
+                liveLabel = lang.liveBadge, soonLabel = lang.soonBadge,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
@@ -410,6 +414,8 @@ private fun SpecialistTile(
     sub: String,
     tone: ChipTone,
     onClick: () -> Unit,
+    liveLabel: String,
+    soonLabel: String,
     modifier: Modifier = Modifier,
     comingSoon: Boolean = true,
 ) {
@@ -462,7 +468,7 @@ private fun SpecialistTile(
                 Spacer(Modifier.weight(1f))
                 if (comingSoon) {
                     Text(
-                        "SOON",
+                        soonLabel,
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = SaarthiColors.Text3,
                             fontSize = 9.5.sp,
@@ -476,7 +482,7 @@ private fun SpecialistTile(
                     )
                 } else {
                     Text(
-                        "LIVE",
+                        liveLabel,
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = toneColor,
                             fontSize = 9.5.sp,

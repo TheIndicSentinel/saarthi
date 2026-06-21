@@ -139,6 +139,22 @@ class ResponseMarkerParserTest {
     }
 
     @Test
+    fun stripForDisplay_removes_yaml_colon_form_marker_block() {
+        // Non-English reproducer: the model dumped a "marker:" YAML block with
+        // colon-form fields instead of the [SAARTHI_*] bracket syntax. None of
+        // the equals-based strippers caught it, so it leaked into the bubble.
+        val raw = "मैं आपकी मदद कर सकता हूँ।\n" +
+            "marker:\n" +
+            "text: \"help_offered\"\n" +
+            "delay_minutes: 0\n" +
+            "time: \"11:07 2026\"\n" +
+            "key: \"help_offered\"\n" +
+            "value: \"Can help with various tasks\""
+        val out = ResponseMarkerParser.stripForDisplay(raw, streaming = false)
+        assertEquals("मैं आपकी मदद कर सकता हूँ।", out)
+    }
+
+    @Test
     fun stripForDisplay_removes_partial_or_broken_marker() {
         // Belt-and-braces: even a marker with a missing field must not leak.
         val raw = "ok [SAARTHI_REMINDER text=\"x\"]"

@@ -444,6 +444,62 @@ enum class SupportedLanguage(
         ODIA     -> "AI ମଡେଲ ବଦଳନ୍ତୁ"
     }
 
+    /** Chat menu "Persona" label (followed by the active persona name). */
+    val personaLabel: String get() = when (this) {
+        ENGLISH  -> "Persona"
+        HINDI    -> "व्यक्तित्व"
+        TAMIL    -> "ஆளுமை"
+        TELUGU   -> "వ్యక్తిత్వం"
+        BENGALI  -> "ব্যক্তিত্ব"
+        MARATHI  -> "व्यक्तिमत्त्व"
+        KANNADA  -> "ವ್ಯಕ್ತಿತ್ವ"
+        GUJARATI -> "વ્યક્તિત્વ"
+        PUNJABI  -> "ਸ਼ਖਸੀਅਤ"
+        ODIA     -> "ବ୍ୟକ୍ତିତ୍ୱ"
+    }
+
+    /** Chat menu "Clear chat" label. */
+    val clearChat: String get() = when (this) {
+        ENGLISH  -> "Clear chat"
+        HINDI    -> "चैट साफ़ करें"
+        TAMIL    -> "அரட்டையை அழி"
+        TELUGU   -> "చాట్ క్లియర్ చేయి"
+        BENGALI  -> "চ্যাট সাফ করুন"
+        MARATHI  -> "चॅट साफ करा"
+        KANNADA  -> "ಚಾಟ್ ತೆರವುಗೊಳಿಸಿ"
+        GUJARATI -> "ચેટ સાફ કરો"
+        PUNJABI  -> "ਚੈਟ ਸਾਫ਼ ਕਰੋ"
+        ODIA     -> "ଚାଟ ସଫା କରନ୍ତୁ"
+    }
+
+    /** Pack tile "LIVE" badge (an available pack). */
+    val liveBadge: String get() = when (this) {
+        ENGLISH  -> "LIVE"
+        HINDI    -> "उपलब्ध"
+        TAMIL    -> "தயார்"
+        TELUGU   -> "అందుబాటులో"
+        BENGALI  -> "চালু"
+        MARATHI  -> "उपलब्ध"
+        KANNADA  -> "ಲಭ್ಯ"
+        GUJARATI -> "ઉપલબ્ધ"
+        PUNJABI  -> "ਉਪਲਬਧ"
+        ODIA     -> "ଉପଲବ୍ଧ"
+    }
+
+    /** Pack tile "SOON" badge (a coming-soon pack). */
+    val soonBadge: String get() = when (this) {
+        ENGLISH  -> "SOON"
+        HINDI    -> "जल्द"
+        TAMIL    -> "விரைவில்"
+        TELUGU   -> "త్వరలో"
+        BENGALI  -> "শীঘ্রই"
+        MARATHI  -> "लवकरच"
+        KANNADA  -> "ಶೀಘ್ರ"
+        GUJARATI -> "જલ્દી"
+        PUNJABI  -> "ਜਲਦੀ"
+        ODIA     -> "ଶୀଘ୍ର"
+    }
+
     /** Quick-suggestion chips shown on the empty chat screen — India-relevant. */
     val suggestions: List<String> get() = when (this) {
         ENGLISH  -> listOf(

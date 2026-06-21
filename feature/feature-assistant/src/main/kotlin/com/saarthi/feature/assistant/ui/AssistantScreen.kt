@@ -901,24 +901,24 @@ private fun ChatTopBar(
                         .border(1.dp, SaarthiColors.BorderHi, RoundedCornerShape(12.dp)),
                 ) {
                     DropdownMenuItem(
-                        text = { Text("New chat", color = SaarthiColors.Text) },
+                        text = { Text(language.newChat, color = SaarthiColors.Text) },
                         leadingIcon = { Icon(Icons.Default.Add, null, tint = SaarthiColors.Marigold) },
                         onClick = { onNewChat(); showMenu = false },
                     )
                     DropdownMenuItem(
-                        text = { Text("Conversations", color = SaarthiColors.Text) },
+                        text = { Text(language.conversationsLabel, color = SaarthiColors.Text) },
                         leadingIcon = { Icon(Icons.Default.Chat, null, tint = SaarthiColors.Marigold) },
                         onClick = { onShowConversations(); showMenu = false },
                     )
                     DropdownMenuItem(
-                        text = { Text("Change model", color = SaarthiColors.Text) },
+                        text = { Text(language.changeModel, color = SaarthiColors.Text) },
                         leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = SaarthiColors.Marigold) },
                         onClick = { onChangeModel(); showMenu = false },
                     )
                     DropdownMenuItem(
                         text = {
                             Text(
-                                "Persona · ${activePersonalityName}",
+                                "${language.personaLabel} · ${activePersonalityName}",
                                 color = SaarthiColors.Text,
                             )
                         },
@@ -932,7 +932,7 @@ private fun ChatTopBar(
                         color = SaarthiColors.Border,
                     )
                     DropdownMenuItem(
-                        text = { Text("Clear chat", color = SaarthiColors.Rose) },
+                        text = { Text(language.clearChat, color = SaarthiColors.Rose) },
                         leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = SaarthiColors.Rose) },
                         onClick = { onClearChat(); showMenu = false },
                     )
