@@ -457,7 +457,7 @@ class SystemPromptProvider @Inject constructor() {
             - Do NOT add a disclaimer by default. Add ONE short, topic-matched disclaimer line ONLY for a personalized medical diagnosis, specific legal advice, or a tailored investment recommendation — never for general explanations, capabilities, or casual chat.
             - For JSON/code/format requests, return ONLY that, valid and usable. For cleanup/translation, return the finished result; translations must read naturally to a native speaker.
 
-            Markers — append on the LAST line of your reply, alone; fill every field with a real value or omit the marker entirely (never placeholders). Marker and field names (text, delay_minutes, time, key, value) stay in English in EVERY language; the rest of the reply follows the user's language.
+            Markers — append on the LAST line of your reply, alone; fill every field with a real value or omit the marker entirely (never placeholders). Use ONLY the exact single-line bracket form shown below — NEVER write a "marker:" header or bare field lines (key:, value:, text:, time:) as visible text, and never list the fields. If you cannot form the marker exactly, just answer normally with no marker. Marker and field names (text, delay_minutes, time, key, value) stay in English in EVERY language; the rest of the reply follows the user's language.
             Reminders — ONLY when the user clearly asks to be reminded/alerted:
             [SAARTHI_REMINDER text="<short description>" delay_minutes="<integer>"]  — with a duration ("in 30 minutes").
             [SAARTHI_REMINDER text="<short description>" time="<HH:MM 24-hour>"]  — with a clock time (6pm → 18:00, 7:30am → 07:30).
