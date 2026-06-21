@@ -54,6 +54,7 @@ private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
 class ModelDownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val hfTokenManager: HuggingFaceTokenManager,
+    private val languageManager: com.saarthi.core.i18n.LanguageManager,
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -154,7 +155,7 @@ class ModelDownloadManager @Inject constructor(
             url = model.downloadUrl,
             tmpPath = tmpPathFor(model).absolutePath,
             destPath = finalFile.absolutePath,
-            title = "Downloading ${model.displayName}",
+            title = "${languageManager.selectedLanguage.value.downloadingTitlePrefix} ${model.displayName}",
             token = hfToken,
             replace = replace,
         )

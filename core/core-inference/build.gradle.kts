@@ -57,6 +57,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.datastore.preferences)
     implementation(project(":core:core-common"))
+    implementation(project(":core:core-i18n"))
     implementation(libs.timber)
 
     // LiteRT-LM: Google AI Edge inference library (same runtime as AI Edge Gallery)

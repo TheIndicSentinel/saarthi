@@ -70,6 +70,7 @@ private class DownloadHttpException(val code: Int, message: String) : IOExceptio
 class ModelDownloadService : Service() {
 
     @Inject lateinit var manager: ModelDownloadManager
+    @Inject lateinit var languageManager: com.saarthi.core.i18n.LanguageManager
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -392,7 +393,7 @@ class ModelDownloadService : Service() {
                     setContentText("$pct%  ·  ${dlMb}MB / ${totMb}MB")
                     setProgress(100, pct, false)
                 } else {
-                    setContentText("Starting download…")
+                    setContentText(languageManager.selectedLanguage.value.startingDownload)
                     setProgress(0, 0, true)
                 }
             }

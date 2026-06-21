@@ -912,6 +912,34 @@ enum class SupportedLanguage(
         ODIA     -> "ଆଜିର ଚିନ୍ତା"
     }
 
+    /** Model-download notification: title prefix before the model name ("Downloading Gemma 4"). */
+    val downloadingTitlePrefix: String get() = when (this) {
+        ENGLISH  -> "Downloading"
+        HINDI    -> "डाउनलोड हो रहा है"
+        TAMIL    -> "பதிவிறக்குகிறது"
+        TELUGU   -> "డౌన్‌లోడ్ అవుతోంది"
+        BENGALI  -> "ডাউনলোড হচ্ছে"
+        MARATHI  -> "डाउनलोड होत आहे"
+        KANNADA  -> "ಡೌನ್‌ಲೋಡ್ ಆಗುತ್ತಿದೆ"
+        GUJARATI -> "ડાઉનલોડ થઈ રહ્યું છે"
+        PUNJABI  -> "ਡਾਊਨਲੋਡ ਹੋ ਰਿਹਾ ਹੈ"
+        ODIA     -> "ଡାଉନଲୋଡ ହେଉଛି"
+    }
+
+    /** Model-download notification: shown before progress numbers arrive. */
+    val startingDownload: String get() = when (this) {
+        ENGLISH  -> "Starting download…"
+        HINDI    -> "डाउनलोड शुरू हो रहा है…"
+        TAMIL    -> "பதிவிறக்கம் தொடங்குகிறது…"
+        TELUGU   -> "డౌన్‌లోడ్ ప్రారంభమవుతోంది…"
+        BENGALI  -> "ডাউনলোড শুরু হচ্ছে…"
+        MARATHI  -> "डाउनलोड सुरू होत आहे…"
+        KANNADA  -> "ಡೌನ್‌ಲೋಡ್ ಪ್ರಾರಂಭವಾಗುತ್ತಿದೆ…"
+        GUJARATI -> "ડાઉનલોડ શરૂ થઈ રહ્યું છે…"
+        PUNJABI  -> "ਡਾਊਨਲੋਡ ਸ਼ੁਰੂ ਹੋ ਰਿਹਾ ਹੈ…"
+        ODIA     -> "ଡାଉନଲୋଡ ଆରମ୍ଭ ହେଉଛି…"
+    }
+
     /** Title of the "Kisan pack refreshed" notification (a crop emoji is prefixed in code). */
     val packUpdatedTitle: String get() = when (this) {
         ENGLISH  -> "Kisan pack updated"
