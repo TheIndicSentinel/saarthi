@@ -97,6 +97,29 @@ class ResponseMarkerParserTest {
     }
 
     @Test
+    fun rewriteIdentity_scrubs_hindi_language_model_claim() {
+        val raw = "नमस्ते अर्जुन! मैं एक बड़ा भाषा मॉडल हूँ, जिसे गूगल डीपमाइंड द्वारा विकसित किया गया है। मैं मदद कर सकता हूँ।"
+        val out = ResponseMarkerParser.rewriteIdentity(raw)
+        assertTrue("Must not leak 'भाषा मॉडल'. Got: $out", !out.contains("भाषा मॉडल"))
+        assertTrue("Must not leak 'गूगल'. Got: $out", !out.contains("गूगल"))
+        assertTrue("Must keep the Saarthi identity. Got: $out", out.contains("सारथी"))
+    }
+
+    @Test
+    fun rewriteIdentity_scrubs_marathi_language_model_claim() {
+        val raw = "मी एक भाषा मॉडेल आहे, जो गूगलने तयार केले आहे."
+        val out = ResponseMarkerParser.rewriteIdentity(raw)
+        assertTrue("Must not leak 'भाषा मॉडेल'. Got: $out", !out.contains("भाषा मॉडेल"))
+        assertTrue("Must not leak 'गूगल'. Got: $out", !out.contains("गूगल"))
+    }
+
+    @Test
+    fun rewriteIdentity_leaves_legitimate_devanagari_google_mention_alone() {
+        val raw = "तुम गूगल पर खोज सकते हो।"
+        assertEquals(raw, ResponseMarkerParser.rewriteIdentity(raw))
+    }
+
+    @Test
     fun rewriteIdentity_is_a_no_op_for_normal_text() {
         val raw = "Sure, I will remind you about lunch in 5 minutes."
         assertEquals(raw, ResponseMarkerParser.rewriteIdentity(raw))

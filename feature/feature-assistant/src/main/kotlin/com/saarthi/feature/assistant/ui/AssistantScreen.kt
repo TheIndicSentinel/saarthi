@@ -605,17 +605,17 @@ fun AssistantScreen(
         AlertDialog(
             onDismissRequest = viewModel::dismissClearDialog,
             containerColor = SaarthiColors.NavyMid,
-            title = { Text("Clear conversation?", color = SaarthiColors.TextPrimary) },
-            text = { Text("All messages in this chat will be deleted.", color = SaarthiColors.TextSecondary) },
+            title = { Text(currentLanguage.clearChatTitle, color = SaarthiColors.TextPrimary) },
+            text = { Text(currentLanguage.clearChatMessage, color = SaarthiColors.TextSecondary) },
             confirmButton = {
                 Button(
                     onClick = { viewModel.clearChat() },
                     colors = ButtonDefaults.buttonColors(containerColor = SaarthiColors.Error),
-                ) { Text("Clear") }
+                ) { Text(currentLanguage.clearConfirm) }
             },
             dismissButton = {
                 TextButton(onClick = viewModel::dismissClearDialog) {
-                    Text("Cancel", color = SaarthiColors.TextSecondary)
+                    Text(currentLanguage.cancelLabel, color = SaarthiColors.TextSecondary)
                 }
             },
         )

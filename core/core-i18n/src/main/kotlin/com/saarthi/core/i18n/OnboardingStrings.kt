@@ -134,12 +134,12 @@ val SupportedLanguage.onboarding: OnboardingStrings
             readyTitle = "সব প্রস্তুত", readyBody = "আপনার AI সঙ্গী প্রস্তুত। এখন থেকে সবকিছু আপনার ডিভাইসেই হবে।",
         )
         SupportedLanguage.MARATHI -> OnboardingStrings(
-            welcomeTitle1 = "तुमचा खाजगी AI,", welcomeTitle2 = "भारतासाठी बनवलेला.",
+            welcomeTitle1 = "तुमचा AI सहायक,", welcomeTitle2 = "भारतासाठी तयार केलेला.",
             getStarted = "सुरू करा",
-            welcomeDocTitle = "दस्तऐवज", welcomeDocSub = "कोणत्याही PDF किंवा फोटोबद्दल विचारा",
-            welcomeKisanTitle = "किसान सहाय्यक", welcomeKisanSub = "पिके, योजना आणि ताजे बाजारभाव",
+            welcomeDocTitle = "दस्तऐवज", welcomeDocSub = "PDF आणि फोटोंमधून माहिती मिळवा",
+            welcomeKisanTitle = "किसान सहाय्यक", welcomeKisanSub = "पिके, योजना आणि बाजारभाव",
             welcomeVoiceTitle = "आवाज", welcomeVoiceSub = "बोलून विचारा, उत्तर ऐका",
-            welcomeOfflineNote = "ऑफलाइन काम करते — काहीही फोनबाहेर जात नाही",
+            welcomeOfflineNote = "ऑफलाइन कार्य करते — तुमचा डेटा बाहेर जात नाही",
             iUnderstand = "मला समजले", privateByDesign = "रचनेनुसार खाजगी",
             privacyBody = "सारथी AI तुमच्या फोनवरच चालवते. तुमचे प्रश्न, फायली आणि उत्तरे डिव्हाइसबाहेर जात नाहीत.",
             privNoInternet = "इंटरनेटची गरज नाही", privNoInternetSub = "विमानात, गावात, कुठेही काम करते",

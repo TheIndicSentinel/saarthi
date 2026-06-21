@@ -249,6 +249,12 @@ object ResponseMarkerParser {
             Regex("""(?i)\bI'm\s+an\s+AI\s+language\s+model\b""")             to "I'm Saarthi, your AI assistant",
             Regex("""(?i)\bI\s+am\s+an?\s+(?:large\s+)?LLM\b""")              to "I am Saarthi",
             Regex("""(?i)\bI'm\s+an?\s+(?:large\s+)?LLM\b""")                 to "I'm Saarthi",
+            // Broader English: "(large) language model" / "AI model" / "AI" with
+            // no "large" qualifier — the model leaks these too.
+            Regex("""(?i)\bI\s+am\s+an?\s+(?:AI\s+)?language\s+model\b""")     to "I am Saarthi",
+            Regex("""(?i)\bI'm\s+an?\s+(?:AI\s+)?language\s+model\b""")        to "I'm Saarthi",
+            Regex("""(?i)\bI\s+am\s+an?\s+AI\s+model\b""")                    to "I am Saarthi",
+            Regex("""(?i)\bI'm\s+an?\s+AI\s+model\b""")                       to "I'm Saarthi",
         )
         for ((pattern, replacement) in selfIntroPatterns) {
             out = pattern.replace(out, replacement)
@@ -267,9 +273,29 @@ object ResponseMarkerParser {
             out = pattern.replace(out, "")
         }
 
-        // Tidy up any double spaces / dangling punctuation we just created.
+        // ── Localized identity leaks (Devanagari: Hindi / Marathi) ───────────
+        // The model says e.g. "मैं एक बड़ा भाषा मॉडल हूँ, जिसे गूगल डीपमाइंड
+        // द्वारा विकसित किया गया है" even in non-English sessions. The English
+        // patterns above can't catch these. Neutralise the LLM noun-phrase to
+        // the brand name and strip any "developed/trained by Google/DeepMind"
+        // provenance clause (relative clause bounded by the Devanagari danda
+        // so it never eats the next sentence).
+        out = Regex("""(एक\s+)?(बड़ा\s+|बड़ी\s+|मोठा\s+|मोठे\s+|विशाल\s+|एआई\s+|AI\s+)*भाषा\s+मॉ(?:डल|डेल)""")
+            .replace(out, "सारथी")
+        out = Regex("""(एक\s+)?(एआई|AI)\s+मॉ(?:डल|डेल)""").replace(out, "सारथी")
+        // Provenance relative clause containing Google / DeepMind (Devanagari or
+        // Latin brand spelling). e.g. ", जिसे गूगल डीपमाइंड द्वारा विकसित किया गया है".
+        out = Regex(""",?\s*(?:जिसे|जिसको|जो)\s+[^।]*?(?:गूगल|डीपमाइंड|Google|DeepMind)[^।]*""")
+            .replace(out, "")
+        // Bare provenance without a relative pronoun: "गूगल (डीपमाइंड) द्वारा/ने … विकसित/प्रशिक्षित …".
+        out = Regex("""[,–-]?\s*(?:गूगल|डीपमाइंड|Google|DeepMind)[^।]*?(?:विकसित|प्रशिक्षित|निर्मित|तयार|बनवले|बनाया)[^।]*""")
+            .replace(out, "")
+
+        // Tidy up any double spaces / dangling punctuation we just created
+        // (including a stray comma / danda left after a strip).
         out = out.replace(Regex("""\s{2,}"""), " ")
                  .replace(Regex("""\s+([,.!?])"""), "$1")
+                 .replace(Regex("""[\s,]+।"""), "।")
         return out
     }
 

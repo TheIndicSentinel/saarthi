@@ -472,6 +472,62 @@ enum class SupportedLanguage(
         ODIA     -> "ଚାଟ ସଫା କରନ୍ତୁ"
     }
 
+    /** Clear-chat confirmation dialog title. */
+    val clearChatTitle: String get() = when (this) {
+        ENGLISH  -> "Clear conversation?"
+        HINDI    -> "बातचीत साफ़ करें?"
+        TAMIL    -> "உரையாடலை அழிக்கவா?"
+        TELUGU   -> "సంభాషణను క్లియర్ చేయాలా?"
+        BENGALI  -> "কথোপকথন সাফ করবেন?"
+        MARATHI  -> "संभाषण साफ करायचे?"
+        KANNADA  -> "ಸಂಭಾಷಣೆ ತೆರವುಗೊಳಿಸಬೇಕೆ?"
+        GUJARATI -> "વાતચીત સાફ કરવી?"
+        PUNJABI  -> "ਗੱਲਬਾਤ ਸਾਫ਼ ਕਰੀਏ?"
+        ODIA     -> "ବାର୍ତ୍ତାଳାପ ସଫା କରିବେ?"
+    }
+
+    /** Clear-chat confirmation dialog body. */
+    val clearChatMessage: String get() = when (this) {
+        ENGLISH  -> "All messages in this chat will be deleted."
+        HINDI    -> "इस चैट के सभी संदेश हटा दिए जाएँगे।"
+        TAMIL    -> "இந்த அரட்டையின் எல்லா செய்திகளும் நீக்கப்படும்."
+        TELUGU   -> "ఈ చాట్‌లోని అన్ని సందేశాలు తొలగించబడతాయి."
+        BENGALI  -> "এই চ্যাটের সমস্ত বার্তা মুছে ফেলা হবে।"
+        MARATHI  -> "या चॅटमधील सर्व संदेश हटवले जातील."
+        KANNADA  -> "ಈ ಚಾಟ್‌ನ ಎಲ್ಲಾ ಸಂದೇಶಗಳು ಅಳಿಸಲ್ಪಡುತ್ತವೆ."
+        GUJARATI -> "આ ચેટના બધા સંદેશા કાઢી નાખવામાં આવશે."
+        PUNJABI  -> "ਇਸ ਚੈਟ ਦੇ ਸਾਰੇ ਸੁਨੇਹੇ ਮਿਟਾ ਦਿੱਤੇ ਜਾਣਗੇ।"
+        ODIA     -> "ଏହି ଚାଟର ସମସ୍ତ ବାର୍ତ୍ତା ବିଲୋପ ହେବ।"
+    }
+
+    /** Generic "Clear" confirm button. */
+    val clearConfirm: String get() = when (this) {
+        ENGLISH  -> "Clear"
+        HINDI    -> "साफ़ करें"
+        TAMIL    -> "அழி"
+        TELUGU   -> "క్లియర్"
+        BENGALI  -> "সাফ করুন"
+        MARATHI  -> "साफ करा"
+        KANNADA  -> "ತೆರವುಗೊಳಿಸಿ"
+        GUJARATI -> "સાફ કરો"
+        PUNJABI  -> "ਸਾਫ਼ ਕਰੋ"
+        ODIA     -> "ସଫା କରନ୍ତୁ"
+    }
+
+    /** Generic "Cancel" button. */
+    val cancelLabel: String get() = when (this) {
+        ENGLISH  -> "Cancel"
+        HINDI    -> "रद्द करें"
+        TAMIL    -> "ரத்து"
+        TELUGU   -> "రద్దు"
+        BENGALI  -> "বাতিল"
+        MARATHI  -> "रद्द करा"
+        KANNADA  -> "ರದ್ದು"
+        GUJARATI -> "રદ કરો"
+        PUNJABI  -> "ਰੱਦ ਕਰੋ"
+        ODIA     -> "ବାତିଲ"
+    }
+
     /** Pack tile "LIVE" badge (an available pack). */
     val liveBadge: String get() = when (this) {
         ENGLISH  -> "LIVE"
