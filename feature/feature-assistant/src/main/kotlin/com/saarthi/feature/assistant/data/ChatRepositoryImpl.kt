@@ -591,6 +591,33 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
+    /**
+     * Low-relevance retrieval guard (anti repetition-loop).
+     *
+     * For a generic "give an overview / summarise this" query, BM25 has nothing
+     * to lexically match, so it returns the document outline (score 1.0) plus a
+     * SCATTERED set of body chunks that ALL score ~0 (e.g. parts 1, 3, 5, 7, 9…).
+     * Feeding a small model 8–9 disjoint fragments reliably induces a repetition
+     * loop (seen in the log as "[REP] Loop detected" on doc overviews). When no
+     * body chunk has a real lexical hit, keep the outline + the first few chunks
+     * in DOCUMENT ORDER — a coherent opening excerpt the model can actually
+     * summarise — instead of the scattered selection.
+     *
+     * Untouched (no degradation) when ANY body chunk scored > 0 (a real,
+     * relevant question) or when there are already few chunks.
+     */
+    private fun coherentExcerptForLowRelevance(
+        retrieved: List<RetrievedChunk>,
+    ): List<RetrievedChunk> {
+        if (retrieved.size <= 4) return retrieved
+        val body = retrieved.filter { it.chunkIndex >= 0 }
+        val anyRelevant = body.any { it.score > 0.0 }
+        if (anyRelevant) return retrieved   // real lexical match — leave ranking as-is
+        val outline = retrieved.filter { it.chunkIndex < 0 }
+        val firstInOrder = body.sortedBy { it.chunkIndex }.take(4)
+        return outline + firstInOrder
+    }
+
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
         val isFresh = inferenceEngine.isFreshConversation
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
@@ -649,6 +676,7 @@ class ChatRepositoryImpl @Inject constructor(
                 priorQuery = priorUserQuery?.takeIf { it != userMessage && it.length > 8 },
             )
         }.getOrDefault(emptyList())
+            .let(::coherentExcerptForLowRelevance)
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
 
         // Per-chunk retrieval log — names + chunk index + BM25 score +
