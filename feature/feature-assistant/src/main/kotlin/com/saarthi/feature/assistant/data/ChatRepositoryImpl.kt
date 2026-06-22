@@ -1260,6 +1260,17 @@ class ChatRepositoryImpl @Inject constructor(
             .map { it.groupValues[1].lowercase() }
             .firstOrNull { it in DIET_TERMS }
             ?.let { out += "diet" to it }
+        // Conjunction case: "I'm Arjun and vegetarian" — the diet term sits after
+        // "and" with no first-person verb of its own, so the pattern above misses
+        // it. Require a leading first-person clause so "vegetarian restaurant"
+        // style queries don't trigger. Only fill if not already captured.
+        if (out.none { it.first == "diet" }) {
+            Regex("(?i)\\b(?:i'?m|i am)\\s+[a-z]+(?:\\s+and|,)\\s+(?:a |an |strictly |purely )?([a-zA-Z-]{3,20})\\b")
+                .findAll(msg)
+                .map { it.groupValues[1].lowercase() }
+                .firstOrNull { it in DIET_TERMS }
+                ?.let { out += "diet" to it }
+        }
 
         // ── Name (generic first-person) ──────────────────────────────────────
         // "I'm Arjun", "I am Arjun", "main Arjun hoon/hu" — the most common way
