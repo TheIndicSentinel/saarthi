@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
@@ -292,6 +293,7 @@ fun AssistantScreen(
                     onChangeModel = onChangeModel,
                     onNewChat = viewModel::newChat,
                     onShowConversations = viewModel::openDrawer,
+                    onShareChat = { shareConversation(activity, messages, currentLanguage.shareYouLabel) },
                     onChangePersonality = { showPersonalitySheet = true },
                     activePersonalityEmoji = activePersonality.emoji,
                     activePersonalityName = activePersonality.displayName,
@@ -767,6 +769,35 @@ private fun SessionItem(
 // ── Top Bar ──────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Builds a plain-text transcript of the visible conversation (markers stripped)
+ * and fires the standard Android share sheet (ACTION_SEND). Industry-standard
+ * "share chat" — the receiver gets the questions and answers as readable text.
+ */
+private fun shareConversation(
+    context: android.content.Context,
+    messages: List<com.saarthi.feature.assistant.domain.ChatMessage>,
+    youLabel: String,
+) {
+    val transcript = messages
+        .filter { !it.isStreaming && it.content.isNotBlank() }
+        .joinToString("\n\n") { m ->
+            val who = if (m.role == com.saarthi.feature.assistant.domain.MessageRole.USER) youLabel else "Saarthi"
+            val text = com.saarthi.feature.assistant.data.ResponseMarkerParser
+                .stripForDisplay(m.content, streaming = false)
+            "$who: $text"
+        }
+    if (transcript.isBlank()) return
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "Saarthi chat")
+        putExtra(android.content.Intent.EXTRA_TEXT, transcript)
+    }
+    val chooser = android.content.Intent.createChooser(send, null)
+        .apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
+    runCatching { context.startActivity(chooser) }
+}
+
 @Composable
 private fun ChatTopBar(
     language: SupportedLanguage,
@@ -784,6 +815,7 @@ private fun ChatTopBar(
     onChangeModel: () -> Unit = {},
     onNewChat: () -> Unit = {},
     onShowConversations: () -> Unit = {},
+    onShareChat: () -> Unit = {},
     onChangePersonality: () -> Unit = {},
     activePersonalityEmoji: String = "🪔",
     activePersonalityName: String = "Saarthi",
@@ -909,6 +941,11 @@ private fun ChatTopBar(
                         text = { Text(language.conversationsLabel, color = SaarthiColors.Text) },
                         leadingIcon = { Icon(Icons.Default.Chat, null, tint = SaarthiColors.Marigold) },
                         onClick = { onShowConversations(); showMenu = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(language.shareChat, color = SaarthiColors.Text) },
+                        leadingIcon = { Icon(Icons.Default.Share, null, tint = SaarthiColors.Marigold) },
+                        onClick = { onShareChat(); showMenu = false },
                     )
                     DropdownMenuItem(
                         text = { Text(language.changeModel, color = SaarthiColors.Text) },

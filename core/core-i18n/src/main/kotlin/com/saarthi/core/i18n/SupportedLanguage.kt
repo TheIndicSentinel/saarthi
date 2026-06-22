@@ -458,6 +458,34 @@ enum class SupportedLanguage(
         ODIA     -> "ବ୍ୟକ୍ତିତ୍ୱ"
     }
 
+    /** Chat menu "Share chat" label. */
+    val shareChat: String get() = when (this) {
+        ENGLISH  -> "Share chat"
+        HINDI    -> "चैट साझा करें"
+        TAMIL    -> "அரட்டையைப் பகிர்"
+        TELUGU   -> "చాట్‌ను షేర్ చేయి"
+        BENGALI  -> "চ্যাট শেয়ার করুন"
+        MARATHI  -> "चॅट शेअर करा"
+        KANNADA  -> "ಚಾಟ್ ಹಂಚಿಕೊಳ್ಳಿ"
+        GUJARATI -> "ચેટ શેર કરો"
+        PUNJABI  -> "ਚੈਟ ਸਾਂਝੀ ਕਰੋ"
+        ODIA     -> "ଚାଟ ସେୟାର କରନ୍ତୁ"
+    }
+
+    /** "You" speaker label in a shared chat transcript. */
+    val shareYouLabel: String get() = when (this) {
+        ENGLISH  -> "You"
+        HINDI    -> "आप"
+        TAMIL    -> "நீங்கள்"
+        TELUGU   -> "మీరు"
+        BENGALI  -> "আপনি"
+        MARATHI  -> "तुम्ही"
+        KANNADA  -> "ನೀವು"
+        GUJARATI -> "તમે"
+        PUNJABI  -> "ਤੁਸੀਂ"
+        ODIA     -> "ଆପଣ"
+    }
+
     /** Chat menu "Clear chat" label. */
     val clearChat: String get() = when (this) {
         ENGLISH  -> "Clear chat"
