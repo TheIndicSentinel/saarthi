@@ -2,7 +2,6 @@ package com.saarthi.feature.onboarding.viewmodel
 
 import android.content.ContentUris
 import android.content.Context
-import android.os.BatteryManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -162,26 +161,10 @@ class OnboardingViewModel @Inject constructor(
                     funnel.track(com.saarthi.core.inference.FunnelEvent.MODEL_DOWNLOAD_COMPLETED)
                     val path = (progress as DownloadProgress.Completed).filePath
                     DebugLogger.log("DOWNLOAD", "Success: $path")
-                    // Auto-prefer Gemma 4 E4B on a charging flagship: if the model
-                    // that JUST finished is the preferred E4B and the device
-                    // qualifies, make it the active default (the user downloaded it
-                    // to use it). Otherwise keep the existing default. A manual pick
-                    // later in the model list still overrides this.
-                    val downloadedIds = modelCatalog.allModels
-                        .filter { downloadManager.isDownloaded(it) }.map { it.id }.toSet()
-                    val preferred = modelCatalog.preferredAutoModel(
-                        profile = deviceProfiler.profile(),
-                        downloadedIds = downloadedIds,
-                        charging = isDeviceCharging(),
-                    )
-                    val makePreferredDefault = preferred != null && preferred.id == modelId
-                    if (makePreferredDefault) {
-                        DebugLogger.log("DOWNLOAD", "Auto-preferring E4B on charging flagship: ${path.substringAfterLast('/')}")
-                    }
                     _uiState.update {
                         val currentPath = it.selectedModelPath
                         it.copy(
-                            selectedModelPath = if (makePreferredDefault) path else (currentPath ?: path),
+                            selectedModelPath = currentPath ?: path,
                             modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
                             error = null,
                         )
@@ -230,11 +213,6 @@ class OnboardingViewModel @Inject constructor(
             }
         }
     }
-
-    /** True when the device is currently charging — gates the E4B auto-preference. */
-    private fun isDeviceCharging(): Boolean = runCatching {
-        appContext.getSystemService(BatteryManager::class.java)?.isCharging == true
-    }.getOrDefault(false)
 
     fun selectLanguage(language: SupportedLanguage) =
         _uiState.update { it.copy(selectedLanguage = language) }

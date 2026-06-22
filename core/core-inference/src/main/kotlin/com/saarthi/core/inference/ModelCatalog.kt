@@ -8,9 +8,6 @@ import com.saarthi.core.inference.model.SocFamily
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Catalog id of the generic Gemma 4 E4B entry — the flagship reasoning step-up. */
-private const val GEMMA4_E4B_ID = "gemma4-e4b-it-litert"
-
 @Singleton
 class ModelCatalog @Inject constructor() {
 
@@ -53,28 +50,6 @@ class ModelCatalog @Inject constructor() {
             model.requiredTier.ordinal == nextTierOrdinal &&
             model.fileSizeMb <= profile.availableStorageMb - 200 &&
             model.socTarget == SocFamily.GENERIC
-        }
-    }
-
-    /**
-     * Auto-default preference. On a FLAGSHIP device that is CHARGING, prefer
-     * Gemma 4 E4B (materially stronger reasoning than E2B) — but ONLY when E4B is
-     * already downloaded and memory-safe for the device. Returns null in every
-     * other case so the caller keeps its existing default.
-     *
-     * Pure + side-effect-free (unit-testable). Used ONLY to pick the auto-default
-     * the moment E4B finishes downloading; a manual pick in Settings always wins,
-     * and we never toggle a live, already-loaded model based on charging state
-     * (that would force a disruptive reload mid-use).
-     */
-    fun preferredAutoModel(
-        profile: DeviceProfile,
-        downloadedIds: Set<String>,
-        charging: Boolean,
-    ): ModelEntry? {
-        if (profile.tier != DeviceTier.FLAGSHIP || !charging) return null
-        return allModels.firstOrNull { entry ->
-            entry.id == GEMMA4_E4B_ID && entry.id in downloadedIds && entry.isSafeFor(profile)
         }
     }
 
