@@ -1740,7 +1740,15 @@ internal fun formatConversationContext(
     // `roomy` = a high-end device with the scaled 4096-token window (8000c
     // budget). Only then do we deepen LARGE history; mid-range keeps the
     // tighter caps so its prompt still fits the 2048-token window.
-    val deep          = isLarge && roomy
+    //
+    // BUT only deepen on DOCUMENT (grounded) turns. In plain chat, feeding a 2B
+    // model 6 turns / 3000c of its OWN prior verbose answers (Hindi bullets,
+    // math steps) back as context reliably triggers repetition loops — the very
+    // "enlarge the window then fill it" failure the small model can't absorb.
+    // Normal chat therefore keeps the tight isLarge caps (3 turns / 1500c) that
+    // worked before the high-RAM scaling; only grounded follow-ups (where the
+    // document anchors the model and "explain more" needs continuity) go deep.
+    val deep          = isLarge && roomy && grounded
     val maxTurns      = if (deep) 6 else if (isLarge) 3 else 2
     val perUserChars  = if (isLarge) 160 else 110
     val perReplyChars = if (isLarge) { if (grounded) 220 else 320 } else { if (grounded) 150 else 200 }
