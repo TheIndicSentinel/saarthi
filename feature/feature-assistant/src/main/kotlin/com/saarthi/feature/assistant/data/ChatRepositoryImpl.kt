@@ -1180,12 +1180,32 @@ class ChatRepositoryImpl @Inject constructor(
         // "called the doctor", "is a bit busy" are not names/places.
         val stopStarts = setOf("the", "a", "an", "my", "this", "that", "here", "there", "not", "just", "so", "very", "really")
         fun firstWordOk(s: String) = s.split(Regex("\\s+")).firstOrNull()?.lowercase() !in stopStarts
+        // A name is 1–3 tokens. Cut the capture at the first conjunction / clause
+        // boundary so trailing junk never gets stored:
+        // "Arjun and I'm vegetarian" → "Arjun", "Arjun aur main shakahari" → "Arjun".
+        // Stops at and/or/with/&, romanised+Devanagari "and" (aur/और), a stray
+        // "I'm/I", any copula (hai/hoon/है), or a diet term.
+        val nameBreakers = setOf(
+            "and", "&", "or", "aur", "और", "with", "i'm", "im", "i", "also", "but",
+            "hai", "hain", "hoon", "hun", "hu", "है", "हैं",
+        )
+        fun nameHead(s: String): String {
+            val kept = mutableListOf<String>()
+            for (t in clean(s).split(Regex("\\s+"))) {
+                val low = t.lowercase().trim('.', ',', '।')
+                if (low.isEmpty()) continue
+                if (low in nameBreakers || low in DIET_TERMS) break
+                kept += t
+                if (kept.size == 3) break
+            }
+            return kept.joinToString(" ")
+        }
 
         // ── English ──────────────────────────────────────────────────────────
         // name: "my name is X", "I am called X", "call me X"
         Regex("(?i)\\b(?:my name is|i am called|call me|i'm called)\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})")
             .find(msg)?.groupValues?.get(1)?.let { n ->
-                val name = clean(n).split(Regex("\\s+")).take(3).joinToString(" ")
+                val name = nameHead(n)
                 if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
             }
         // profession: "I am a teacher", "I work as an electrician", "I'm an engineer"
@@ -1217,7 +1237,7 @@ class ChatRepositoryImpl @Inject constructor(
         // \\p{L} matches all Unicode letters including Devanagari correctly.
         Regex("मेरा नाम\\s+([\\p{L}][\\p{L}\\s.'-]{0,38})\\s*(?:है|हैं)?")
             .find(msg)?.groupValues?.get(1)?.let { n ->
-                val name = clean(n.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
+                val name = nameHead(n)
                 if (name.length in 2..40) out += "name" to name
             }
         // city: "मैं X से हूँ" / "मैं X से हूं" — "I am from X"
@@ -1238,7 +1258,7 @@ class ChatRepositoryImpl @Inject constructor(
         // name: "mera naam X hai" / "mera naam X"
         Regex("(?i)\\bmera\\s+naam\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})(?:\\s+hai)?\\b")
             .find(msg)?.groupValues?.get(1)?.let { n ->
-                val name = clean(n).split(Regex("\\s+")).take(3).joinToString(" ")
+                val name = nameHead(n)
                 if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
             }
         // city: "main X se hun/hoon" — "I am from X"
