@@ -134,6 +134,14 @@ class SystemPromptProvider @Inject constructor() {
          */
         grounded: Boolean = false,
         maxContextTokens: Int = 8192,
+        /**
+         * Extra reasoning-quality rules (premises-only logic, answer-first,
+         * honest uncertainty, no fabrication). Injected ONLY by the caller when
+         * the budget is roomy (the high-RAM 4096 window) — empty on the tight
+         * 2048 path so it can never push that prompt over budget. Placed in the
+         * end-of-prompt behaviour block where attention is strongest.
+         */
+        reasoningRules: String = "",
     ): String {
         val tier = tierFor(modelName)
 
@@ -184,6 +192,10 @@ class SystemPromptProvider @Inject constructor() {
                 if (isNotEmpty()) append('\n')
                 append("REPLY-STYLE CONSTRAINTS (the user has set these in Settings — honour them):\n")
                 append(responseStyleSuffix)
+            }
+            if (reasoningRules.isNotBlank()) {
+                if (isNotEmpty()) append('\n')
+                append(reasoningRules)
             }
         }.trimEnd()
         // Sandwich layout — language directive at BOTH ends of the prompt.

@@ -74,6 +74,19 @@ private const val MAX_PROMPT_CHARS_LARGE    = 8_000   // Gemma 4
 // high-fill repetition loops observed in production (19:37:30 / 19:42:01).
 private const val RECAP_MAX_CHARS = 280
 
+// Reasoning-quality rules injected ONLY on the roomy high-RAM path (4096 window,
+// budget >= 7000). On the tight 2048 path this is never added, so it cannot push
+// that prompt over budget — the mid-range behaviour is provably unchanged.
+// English meta-instructions are fine; the bottom language directive still forces
+// the reply language. Kept compact (~500c) — trivial against the 8000c budget.
+private const val REASONING_RULES = """REASONING (apply only when the message calls for it):
+- Give the direct answer first in one line, then explain briefly if useful.
+- For logic or puzzles, reason ONLY from the stated facts — even if they contradict the real world — and follow chains (if A > B and B > C then A > C). If the facts don't decide it, say it cannot be concluded.
+- Never invent books, reports, products, people, or events. If you cannot verify something, say so and ask for details instead of guessing.
+- State any key assumption you relied on, and name real uncertainties honestly — never claim there are none when asked.
+- For a device or app problem, first ask which device and what exactly happens before suggesting drastic fixes.
+- Do not restate who you are or that you run offline unless the user asks."""
+
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -1514,6 +1527,14 @@ class ChatRepositoryImpl @Inject constructor(
         val isDefaultPersona = persona.id == com.saarthi.core.i18n.PersonalityCatalog.SAARTHI.id
         val personalityOverride = if (isDefaultPersona) "" else persona.systemPersona
         val personalityRules = if (isDefaultPersona) emptyList() else persona.behaviorRules
+        // Reasoning-quality block: ONLY on the roomy high-RAM path (budget >= 7000,
+        // the 4096 window). On grounded (document) turns the prompt is already a
+        // compact instruction core with no room to spare, so skip it there too.
+        val reasoning = if (
+            tier == SystemPromptProvider.ModelTier.LARGE &&
+            !grounded &&
+            maxPromptChars >= 7000
+        ) REASONING_RULES else ""
         return systemPromptProvider.build(
             modelName = modelName,
             pack = PackType.BASE,
@@ -1526,6 +1547,7 @@ class ChatRepositoryImpl @Inject constructor(
             personalityBehaviorRules = personalityRules,
             grounded = grounded,
             maxContextTokens = inferenceEngine.maxContextTokens,
+            reasoningRules = reasoning,
         )
     }
 
