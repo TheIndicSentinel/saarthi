@@ -1389,6 +1389,7 @@ class ChatRepositoryImpl @Inject constructor(
             "tusi kaun", "tuhada naam", "tera naa", "tuhade bare",
             // Odia
             "tume kie", "apan kie", "tuma naam", "nija bisaya",
+        )
         if (latin.any { m.contains(it) }) return true
         val native = listOf(
             // Hindi
