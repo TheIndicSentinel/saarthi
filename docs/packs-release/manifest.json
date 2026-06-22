@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "packId": "kisan",
+  "packVersion": 8,
+  "language": "en",
+  "title": "Kisan Knowledge",
+  "publishedAt": "2026-06-15T18:18:22Z",
+  "minAppVersionCode": 30,
+  "pack": {
+    "url": "https://github.com/TheIndicSentinel/saarthi-packs/releases/download/kisan-v8/kisan_pack.json",
+    "sha256": "8a82cc22e2b8e8512561b63ef89a4d6f6accad8362a72dc63a939afdc879046f",
+    "sizeBytes": 41531,
+    "signature": "MEQCIBr2exnVb9oz75Bcnu7RYEa/gK+nNnvtg+m2mmfeJcWmAiBet/Q/oBmXgF5bY9w9nrbUjhGJPM18YU4K/v49Qf/CUA==",
+    "signatureAlgo": "ecdsa-p256-sha256",
+    "keyId": "saarthi-pack-2026-06"
+  }
+}

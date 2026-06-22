@@ -1255,7 +1255,7 @@ class ChatRepositoryImpl @Inject constructor(
         // findAll (not find): "I'm Arjun and I'm vegetarian" has TWO first-person
         // clauses — find() stopped at "Arjun" (not a diet term) and never saw
         // "vegetarian". Scan all clauses and keep the first that IS a diet term.
-        Regex("(?i)\\b(?:i'?m|i am|i eat|i follow|i prefer)\\s+(?:a |an |strictly |purely )?([a-zA-Z-]{3,20})\\b")
+        Regex("(?i)\\b(?:i'?m|i am|i eat|i follow|i prefer|main|mai|mae)\\s+(?:a |an |strictly |purely )?([a-zA-Z-]{3,20})\\b")
             .findAll(msg)
             .map { it.groupValues[1].lowercase() }
             .firstOrNull { it in DIET_TERMS }
@@ -1265,7 +1265,9 @@ class ChatRepositoryImpl @Inject constructor(
         // it. Require a leading first-person clause so "vegetarian restaurant"
         // style queries don't trigger. Only fill if not already captured.
         if (out.none { it.first == "diet" }) {
-            Regex("(?i)\\b(?:i'?m|i am)\\s+[a-z]+(?:\\s+and|,)\\s+(?:a |an |strictly |purely )?([a-zA-Z-]{3,20})\\b")
+            // English "I'm Arjun and vegetarian" + romanised Hindi "Mae/main Arjun
+            // and vegetarian" / "main Arjun, vegetarian".
+            Regex("(?i)\\b(?:i'?m|i am|main|mai|mae)\\s+[a-z]+(?:\\s+and|,)\\s+(?:a |an |strictly |purely )?([a-zA-Z-]{3,20})\\b")
                 .findAll(msg)
                 .map { it.groupValues[1].lowercase() }
                 .firstOrNull { it in DIET_TERMS }
@@ -1298,6 +1300,16 @@ class ChatRepositoryImpl @Inject constructor(
                 Regex("(?i)\\bmain\\s+([\\p{L}][\\p{L}'-]{1,20})\\s+(?:hoon|hun|hu)\\b")
                     .find(msg)?.groupValues?.get(1)
                     ?.let { it.trim().replaceFirstChar { c -> c.uppercase() } }
+                    ?.takeIf(::nameOk)
+                    ?.let { out += "name" to it }
+            }
+            // Romanised Hindi "Mae/main/mai Arjun ..." with no copula — common in
+            // Hinglish ("Mae Arjun and vegetarian"). Anchor at the message start
+            // and require a Capitalised proper noun so only a deliberate self-intro
+            // matches (case-sensitive name; prefix allows either case).
+            if (out.none { it.first == "name" }) {
+                Regex("^(?:[Mm]ae|[Mm]ain|[Mm]ai)\\s+([A-Z][a-zA-Z'-]{1,20})\\b")
+                    .find(msg.trim())?.groupValues?.get(1)
                     ?.takeIf(::nameOk)
                     ?.let { out += "name" to it }
             }
@@ -1359,8 +1371,10 @@ class ChatRepositoryImpl @Inject constructor(
             "who are you", "who r u", "what are you", "who is saarthi", "what is saarthi",
             "about saarthi", "introduce yourself", "tell me about yourself", "tell me about you",
             "about you", "your name", "what is your name", "what's your name", "who made you",
-            "tum kaun", "tum kon", "aap kaun", "tumhare bare", "tumhari jaankari", "apne bare",
-            "kaun ho", "tumhi kon", "tujhya baddal", "tumchya baddal", "tumcha baddal",
+            "tum kaun", "tum kon", "aap kaun", "tumhare bare", "tumhare baare", "tumhari jaankari",
+            "apne bare", "apne baare", "khud ke bare", "khud ke baare", "tum kya ho", "tum kya hai",
+            "tumhara naam", "tera naam", "apna parichay", "kaun ho", "tumhi kon",
+            "tujhya baddal", "tumchya baddal", "tumcha baddal",
         )
         if (latin.any { m.contains(it) }) return true
         val native = listOf(
