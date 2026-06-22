@@ -83,16 +83,28 @@ class ConversationContextTest {
     }
 
     @Test
-    fun `roomy LARGE (high-end window) keeps more turns than default LARGE`() {
+    fun `roomy LARGE deepens recap on grounded (document) turns`() {
         val turns = (1..6).map { turn("q$it", "a$it") }
-        val roomy = formatConversationContext(turns, isLarge = true, grounded = false, roomy = true)
-        // High-end deepens to up to 6 turns — older turns the default drops survive.
-        assertTrue("Turn 1 should be kept on a roomy device. Got:\n$roomy", roomy.contains("q1"))
+        // Deep recap is reserved for DOCUMENT (grounded) turns on a high-end
+        // window — there the document anchors the model and "explain more"
+        // follow-ups need continuity.
+        val roomy = formatConversationContext(turns, isLarge = true, grounded = true, roomy = true)
+        assertTrue("Turn 1 should be kept on a roomy grounded turn. Got:\n$roomy", roomy.contains("q1"))
         assertTrue(roomy.contains("q6"))
         // …and it carries strictly more than the tighter mid-range default.
-        val default = formatConversationContext(turns, isLarge = true, grounded = false, roomy = false)
+        val default = formatConversationContext(turns, isLarge = true, grounded = true, roomy = false)
         assertTrue("roomy must carry at least as much as default", roomy.length >= default.length)
         assertFalse("default LARGE must still drop turn 1", default.contains("q1"))
+    }
+
+    @Test
+    fun `roomy does NOT deepen plain (non-grounded) chat — small-model loop guard`() {
+        val turns = (1..6).map { turn("q$it", "a$it") }
+        // Plain chat keeps the tight isLarge caps even on a roomy device: feeding
+        // a 2B its own long prior answers back triggered repetition loops, so
+        // non-grounded chat must stay at the 3-turn window (turn 1 dropped).
+        val roomy = formatConversationContext(turns, isLarge = true, grounded = false, roomy = true)
+        assertFalse("Plain roomy chat must not deepen to turn 1. Got:\n$roomy", roomy.contains("q1"))
     }
 
     @Test
