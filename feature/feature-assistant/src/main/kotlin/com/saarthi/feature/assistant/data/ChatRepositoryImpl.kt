@@ -1164,6 +1164,16 @@ class ChatRepositoryImpl @Inject constructor(
         if (key.isBlank() || v.isBlank()) return
         val target =
             if (MemoryRepository.isUserScopedKey(key)) MemoryRepository.USER_SCOPE else sessionId
+        // NAME guard: small models emit [SAARTHI_MEMORY] markers with truncated /
+        // garbled names (e.g. the 2-char Devanagari "अर" for "अर्जुन") that would
+        // clobber the high-precision implicit-extracted name via set()'s upsert —
+        // and that wrong value then drives the home greeting. Keep whichever value
+        // is MORE COMPLETE: never replace an existing name with a shorter one.
+        val isNameKey = key == "name" || key.endsWith("_name") || key == "naam"
+        if (isNameKey) {
+            val existing = memoryRepository.get(sessionId = target, key = key)?.value?.trim()
+            if (!existing.isNullOrBlank() && existing.length >= v.length) return
+        }
         memoryRepository.set(sessionId = target, key = key, value = v, packSource = "USER")
     }
 
