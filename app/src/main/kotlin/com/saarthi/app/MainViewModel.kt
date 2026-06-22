@@ -50,7 +50,21 @@ class MainViewModel @Inject constructor(
      */
     val userName: StateFlow<String?> = memoryRepository
         .observeBySession(com.saarthi.core.memory.domain.MemoryRepository.USER_SCOPE)
-        .map { entries -> entries.firstOrNull { it.key == "name" }?.value?.takeIf { it.isNotBlank() } }
+        .map { entries ->
+            // Resolve the greeting name robustly. A model [SAARTHI_MEMORY] marker
+            // sometimes persists a garbled/truncated name (e.g. the 2-char
+            // Devanagari "अर" for "अर्जुन") under "name", and a cleaner value can
+            // sit under a sibling key ("user_name", "first_name", "naam"). So scan
+            // every name-stem key, take the FIRST name of each, drop 1–2 char
+            // fragments, and prefer the MOST COMPLETE candidate. Falling back to a
+            // generic greeting beats showing garbage.
+            entries
+                .filter { it.key == "name" || it.key.endsWith("_name") || it.key == "naam" }
+                .mapNotNull { e ->
+                    e.value.trim().split(Regex("\\s+")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }
+                }
+                .maxByOrNull { it.length }
+        }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun setLanguage(language: com.saarthi.core.i18n.SupportedLanguage) = viewModelScope.launch {
