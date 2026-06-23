@@ -84,5 +84,45 @@ interface MemoryRepository {
             val k = key.trim().lowercase().removePrefix("user_").removePrefix("my_")
             return IDENTITY_KEY_STEMS.any { stem -> k == stem || k.startsWith("${stem}_") || k.contains(stem) }
         }
+
+        /**
+         * Keys that hold MANY values that should ACCUMULATE rather than overwrite
+         * (e.g. "I like apples" then "I like oranges" → both kept). Single-value
+         * identity facts (name, age, city, diet…) are deliberately NOT here — for
+         * those, a new value correctly replaces the old one.
+         */
+        private val LIST_KEY_STEMS = setOf(
+            "likes", "dislikes", "hobby", "hobbies",
+            "allergy", "allergies", "family", "children", "kids",
+            "favourite", "favorite",
+        )
+
+        /** True when [key] should accumulate multiple values (see [LIST_KEY_STEMS]). */
+        fun isListKey(key: String): Boolean {
+            val k = key.trim().lowercase().removePrefix("user_").removePrefix("my_")
+            return LIST_KEY_STEMS.any { stem -> k == stem || k.startsWith("${stem}_") || k.contains(stem) }
+        }
+
+        /** Separator used to store accumulated list values in the single value column. */
+        const val LIST_SEP = ", "
+        /** Max items kept per list key — newest win; oldest drop (anti-bloat). */
+        const val LIST_MAX_ITEMS = 8
+        /** Session-scoped facts older than this are not injected into the prompt. */
+        const val SESSION_FACT_TTL_MS = 30L * 24 * 60 * 60 * 1000   // 30 days
+        /** Hard cap on the assembled memory summary so it can't bloat the prompt. */
+        const val SUMMARY_MAX_CHARS = 700
+
+        /**
+         * Merge [newValue] into an existing accumulated list value: dedup
+         * case-insensitively, keep insertion order, cap to [LIST_MAX_ITEMS]
+         * (drop oldest). Pure + testable.
+         */
+        fun mergeListValue(existing: String?, newValue: String): String {
+            val items = existing?.split(LIST_SEP)?.map { it.trim() }?.filter { it.isNotBlank() }?.toMutableList()
+                ?: mutableListOf()
+            val v = newValue.trim()
+            if (v.isNotBlank() && items.none { it.equals(v, ignoreCase = true) }) items += v
+            return items.takeLast(LIST_MAX_ITEMS).joinToString(LIST_SEP)
+        }
     }
 }

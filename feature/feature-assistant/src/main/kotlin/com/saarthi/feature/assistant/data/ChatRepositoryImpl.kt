@@ -1174,6 +1174,15 @@ class ChatRepositoryImpl @Inject constructor(
             val existing = memoryRepository.get(sessionId = target, key = key)?.value?.trim()
             if (!existing.isNullOrBlank() && existing.length >= v.length) return
         }
+        // List-type facts ACCUMULATE instead of overwrite: "I like apples" then
+        // "I like oranges" → both kept (dedup, capped, oldest dropped). Single
+        // identity facts (name, age, city, diet…) still override, as before.
+        if (!isNameKey && MemoryRepository.isListKey(key)) {
+            val existing = memoryRepository.get(sessionId = target, key = key)?.value
+            val merged = MemoryRepository.mergeListValue(existing, v)
+            memoryRepository.set(sessionId = target, key = key, value = merged, packSource = "USER")
+            return
+        }
         memoryRepository.set(sessionId = target, key = key, value = v, packSource = "USER")
     }
 

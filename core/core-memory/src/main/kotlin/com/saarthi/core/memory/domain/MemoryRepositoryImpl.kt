@@ -43,9 +43,13 @@ class MemoryRepositoryImpl @Inject constructor(
         // (the user may have corrected it inside this chat). USER_SCOPE itself
         // never reads a second tier.
         val userEntries = dao.getBySession(MemoryRepository.USER_SCOPE)
+        // Session-scoped conversational facts go stale; drop ones not touched in
+        // SESSION_FACT_TTL_MS so the prompt isn't bloated by months-old context.
+        // USER_SCOPE identity facts are durable and never aged out here.
+        val staleCutoff = System.currentTimeMillis() - MemoryRepository.SESSION_FACT_TTL_MS
         val sessionEntries =
             if (sessionId == MemoryRepository.USER_SCOPE) emptyList()
-            else dao.getBySession(sessionId)
+            else dao.getBySession(sessionId).filter { it.updatedAt >= staleCutoff }
 
         // Merge preserving insertion order: global identity first, then
         // session facts; same-key session fact replaces the global one in place.
@@ -101,11 +105,16 @@ class MemoryRepositoryImpl @Inject constructor(
         // Returns bullets only — the chat-scope header lives in
         // SystemPromptProvider so there's a single source of truth for
         // that wording and no duplicate headers in the final prompt.
+        // Assemble lines up to SUMMARY_MAX_CHARS — USER_SCOPE identity is first
+        // (see merge order above) so it survives; lower-priority/overflow lines
+        // are dropped rather than truncated mid-fact. Caps prompt bloat over time.
         return buildString {
-            entries.forEach { e ->
+            for (e in entries) {
                 val label = labelMap[e.key]
                     ?: "User's " + e.key.replace("_", " ").replaceFirstChar { it.uppercase() }
-                appendLine("- $label: ${e.value}")
+                val line = "- $label: ${e.value}"
+                if (length + line.length + 1 > MemoryRepository.SUMMARY_MAX_CHARS) break
+                appendLine(line)
             }
         }.trimEnd()
     }
