@@ -819,7 +819,7 @@ private fun buildPreviewReply(style: com.saarthi.core.i18n.ResponseStyle): Strin
     val warmth = when (style.languageMix) {
         "pure" -> when (style.tone) { "warm" -> "ज़रूर — "; "formal" -> "जी ज़रूर। "; else -> "" }
         "eng"  -> when (style.tone) { "warm" -> "Sure thing — "; "formal" -> "Certainly. "; else -> "" }
-        else   -> when (style.tone) { "warm" -> "Zaroor — "; "formal" -> "Ji zaroor. "; else -> "" }
+        else   -> when (style.tone) { "warm" -> "ज़रूर — "; "formal" -> "जी ज़रूर। "; else -> "" }
     }
     val body = when (style.languageMix) {
         "pure" -> when (style.length) {
@@ -833,20 +833,20 @@ private fun buildPreviewReply(style: com.saarthi.core.i18n.ResponseStyle): Strin
             else    -> "Simmer ginger in water for 5 minutes, strain, then mix in honey. Drink twice daily."
         }
         else -> when (style.length) {
-            "short" -> "Adrak boil karke shahad mila kar piyo — gale ko relief milega."
-            "long"  -> "Ek cup paani mein 5 patli adrak slices daal kar 5 minute simmer karein. Strain karke ek chamach shahad aur chutki haldi mix karein. Din mein 2 baar, 3–4 din ke liye lein."
-            else    -> "Adrak ko paani mein 5 minute boil karein, strain karke shahad mila lein. Din mein 2 baar lein."
+            "short" -> "अदरक को पानी में boil करके शहद मिलाएँ — गले को relief मिलेगा।"
+            "long"  -> "एक कप पानी में अदरक की 5 पतली slices डाल कर 5 मिनट simmer करें। छान कर एक चम्मच शहद और चुटकी भर हल्दी mix करें। दिन में 2 बार, 3–4 दिन तक लें।"
+            else    -> "अदरक को पानी में 5 मिनट boil करें, छान कर शहद मिला लें। दिन में 2 बार लें।"
         }
     }
     val example = if (style.includeExamples && style.length != "short") when (style.languageMix) {
         "pure" -> " उदाहरण के लिए: गर्म तरल पदार्थ गले की बलगम ढीली करते हैं, और शहद सूजन वाली परत को राहत देता है।"
         "eng"  -> " For example: warm liquids loosen throat mucus, and honey coats the inflamed tissue."
-        else   -> " For example: garam liquids gale ki mucus loosen karte hain, aur honey inflamed tissue ko coat karta hai."
+        else   -> " उदाहरण के लिए: गरम liquids गले की बलगम loosen करते हैं और शहद tissue को coat करता है।"
     } else ""
     val disclaimer = if (style.showDisclaimers && style.length != "short") when (style.languageMix) {
         "pure" -> " अगर तकलीफ़ 3 दिन से ज़्यादा रहे, तो कृपया डॉक्टर को दिखाएँ।"
         "eng"  -> " If symptoms last more than 3 days, please see a doctor."
-        else   -> " Agar takleef 3 din se zyada rahe, to please doctor ko dikhaayein."
+        else   -> " अगर तकलीफ़ 3 दिन से ज़्यादा रहे, तो please doctor को दिखाएँ।"
     } else ""
     return warmth + body + example + disclaimer
 }

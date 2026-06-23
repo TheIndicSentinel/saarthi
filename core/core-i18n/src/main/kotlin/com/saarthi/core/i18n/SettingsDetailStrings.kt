@@ -113,7 +113,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
             optCreative = "रचनात्मक", hintCreative = "विविध और रचनात्मक",
             rsTemperature = "रचनात्मकता स्तर", rsAuto = "ऑटो",
             rsCreativityHelp = "कम रखने पर जवाब केंद्रित और एक जैसे रहते हैं; ज़्यादा रखने पर ज़्यादा विविध और रचनात्मक। यह सामान्य चैट पर लागू होता है — दस्तावेज़ और किसान जवाब सटीक ही रहते हैं।",
-            rsPreview = "झलक",
+            rsPreview = "उदाहरण",
             rsShowDisclaimers = "सुरक्षा सूचनाएँ दिखाएँ", rsShowDisclaimersSub = "कानूनी और चिकित्सा विषयों पर सुरक्षा सूचनाएँ जोड़ें",
             rsIncludeExamples = "उदाहरण शामिल करें", rsIncludeExamplesSub = "समझाने के लिए असल ज़िंदगी के उदाहरण दें",
             rsAppliedNote = "ये पसंद हर लोड किए गए मॉडल पर लागू होती हैं।",

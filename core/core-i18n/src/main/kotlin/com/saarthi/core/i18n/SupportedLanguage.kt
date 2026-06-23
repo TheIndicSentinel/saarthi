@@ -421,6 +421,17 @@ enum class SupportedLanguage(
     val unlockBeta: String get() = when (this) { HINDI -> "अनलॉक करें (बीटा)"; else -> "Unlock (beta)" }
     val restorePurchase: String get() = when (this) { HINDI -> "खरीद बहाल करें"; else -> "Restore purchase" }
 
+    // ── Attachment bottom sheet ─────────────────────────────────────────────
+    val attachTitle: String get() = when (this) { HINDI -> "जोड़ें"; else -> "Attach" }
+    val attachPrivacyNote: String get() = when (this) { HINDI -> "फ़ाइलें आपके फ़ोन में ही रहती हैं — कभी अपलोड नहीं होतीं"; else -> "Files stay on your device — never uploaded" }
+    val attachCamera: String get() = when (this) { HINDI -> "कैमरा"; else -> "Camera" }
+    val attachCameraSub: String get() = when (this) { HINDI -> "फ़ोटो लें"; else -> "Take a photo" }
+    val attachPhoto: String get() = when (this) { HINDI -> "फ़ोटो"; else -> "Photo" }
+    val attachPhotoSub: String get() = when (this) { HINDI -> "गैलरी से"; else -> "From gallery" }
+    val attachDocument: String get() = when (this) { HINDI -> "दस्तावेज़"; else -> "Document" }
+    val attachVoice: String get() = when (this) { HINDI -> "आवाज़ मेमो"; else -> "Voice memo" }
+    val attachVoiceSub: String get() = when (this) { HINDI -> "ऑडियो रिकॉर्ड करें"; else -> "Record audio" }
+
     /** Chat top-bar subtitle while generating. */
     val thinkingText: String get() = when (this) {
         ENGLISH  -> "Thinking…"

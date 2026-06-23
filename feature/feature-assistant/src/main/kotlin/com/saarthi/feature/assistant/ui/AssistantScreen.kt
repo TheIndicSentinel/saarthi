@@ -515,6 +515,7 @@ fun AssistantScreen(
             dragHandle = { BottomSheetDefaults.DragHandle(color = SaarthiColors.BorderHi) },
         ) {
             AttachmentBottomSheet(
+                language = currentLanguage,
                 onPickFiles = { filePicker.launch("*/*") },
                 onPickImages = { filePicker.launch("image/*") },
                 onDismiss = { scope.launch { attachmentSheetState.hide() } },

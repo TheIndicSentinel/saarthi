@@ -38,6 +38,7 @@ import com.saarthi.core.ui.theme.SaarthiColors
  */
 @Composable
 fun AttachmentBottomSheet(
+    language: com.saarthi.core.i18n.SupportedLanguage,
     onPickFiles: () -> Unit,
     onPickImages: () -> Unit,
     onDismiss: () -> Unit,
@@ -49,7 +50,7 @@ fun AttachmentBottomSheet(
             .padding(bottom = 28.dp, top = 4.dp),
     ) {
         Text(
-            "Attach",
+            language.attachTitle,
             style = MaterialTheme.typography.titleMedium.copy(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
@@ -58,7 +59,7 @@ fun AttachmentBottomSheet(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "Files stay on your device — never uploaded",
+            language.attachPrivacyNote,
             style = MaterialTheme.typography.bodySmall.copy(
                 color = SaarthiColors.Text3,
                 fontSize = 12.sp,
@@ -69,8 +70,8 @@ fun AttachmentBottomSheet(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             AttachTile(
                 icon = Icons.Default.CameraAlt,
-                label = "Camera",
-                sub = "Take a photo",
+                label = language.attachCamera,
+                sub = language.attachCameraSub,
                 tone = SaarthiColors.Marigold,
                 toneBg = SaarthiColors.MarigoldSoft,
                 onClick = { onPickImages(); onDismiss() },
@@ -78,8 +79,8 @@ fun AttachmentBottomSheet(
             )
             AttachTile(
                 icon = Icons.Default.Image,
-                label = "Photo",
-                sub = "From gallery",
+                label = language.attachPhoto,
+                sub = language.attachPhotoSub,
                 tone = SaarthiColors.Terracotta,
                 toneBg = SaarthiColors.TerracottaSoft,
                 onClick = { onPickImages(); onDismiss() },
@@ -90,7 +91,7 @@ fun AttachmentBottomSheet(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             AttachTile(
                 icon = Icons.Default.Description,
-                label = "Document",
+                label = language.attachDocument,
                 sub = "PDF · DOC · TXT",
                 tone = SaarthiColors.Indigo,
                 toneBg = SaarthiColors.IndigoSoft,
@@ -99,8 +100,8 @@ fun AttachmentBottomSheet(
             )
             AttachTile(
                 icon = Icons.Default.Mic,
-                label = "Voice memo",
-                sub = "Record audio",
+                label = language.attachVoice,
+                sub = language.attachVoiceSub,
                 tone = SaarthiColors.Rose,
                 toneBg = SaarthiColors.RoseSoft,
                 onClick = { onPickFiles(); onDismiss() },
