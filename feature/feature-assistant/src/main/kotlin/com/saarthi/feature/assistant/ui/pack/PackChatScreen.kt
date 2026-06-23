@@ -155,6 +155,7 @@ fun PackChatScreen(
                     items(items = messages, key = { it.id }) { msg ->
                         MessageBubble(
                             message = msg,
+                            language = language,
                             onDelete = {},
                             onRetry = { viewModel.retry(msg.id) },
                             onListen = { viewModel.toggleSpeak(msg.id, msg.content) },

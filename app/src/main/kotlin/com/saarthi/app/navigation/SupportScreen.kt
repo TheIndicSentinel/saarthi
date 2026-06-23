@@ -48,7 +48,7 @@ private const val SUPPORT_EMAIL = "inerd1412@gmail.com"
  * user attaches the debug log from Downloads, whose location is shown here).
  */
 @Composable
-fun SupportScreen(onBack: () -> Unit) {
+fun SupportScreen(onBack: () -> Unit, language: com.saarthi.core.i18n.SupportedLanguage) {
     val context = LocalContext.current
 
     fun emailSupport(subject: String) {
@@ -102,7 +102,7 @@ fun SupportScreen(onBack: () -> Unit) {
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = SaarthiColors.Surface),
                 ) {
-                    Text("Report an issue", color = SaarthiColors.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text(language.reportIssue, color = SaarthiColors.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
 

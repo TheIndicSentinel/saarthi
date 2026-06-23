@@ -396,6 +396,31 @@ enum class SupportedLanguage(
         ODIA     -> "ଓଡ଼ିଆ · English · କିମ୍ବା ମିଶ୍ରଣ"
     }
 
+    // ── Misc UI labels (Hindi done; other languages fall back to English until
+    //     their language pass — see language-by-language rollout). ──────────────
+    /** Message long-press menu: copy. */
+    val copyLabel: String get() = when (this) { HINDI -> "कॉपी करें"; else -> "Copy" }
+    /** Message long-press menu / delete actions. */
+    val deleteLabel: String get() = when (this) { HINDI -> "हटाएँ"; else -> "Delete" }
+    /** Search box placeholder. */
+    val searchHint: String get() = when (this) { HINDI -> "खोजें…"; else -> "Search…" }
+    /** Notification-permission dialog: title. */
+    val notifPermTitle: String get() = when (this) { HINDI -> "जवाब और रिमाइंडर समय पर पाएँ?"; else -> "Keep replies & reminders on time?" }
+    /** Generic allow / not-now actions. */
+    val allowLabel: String get() = when (this) { HINDI -> "अनुमति दें"; else -> "Allow" }
+    val notNowLabel: String get() = when (this) { HINDI -> "अभी नहीं"; else -> "Not now" }
+    /** Saarthi Knowledge feature title (brand "Saarthi" kept). */
+    val knowledgeTitle: String get() = when (this) { HINDI -> "सारथी ज्ञान"; else -> "Saarthi Knowledge" }
+    val knowledgeEmpty: String get() = when (this) { HINDI -> "अभी कोई निजी जानकारी सहेजी नहीं गई।"; else -> "No personal knowledge stored yet." }
+    /** Re-select model action (onboarding gate). */
+    val reselectModel: String get() = when (this) { HINDI -> "मॉडल फिर चुनें"; else -> "Re-select Model" }
+    /** Support screen: report an issue. */
+    val reportIssue: String get() = when (this) { HINDI -> "समस्या बताएँ"; else -> "Report an issue" }
+    /** Paywall labels (product name "Saarthi Pro" kept). */
+    val proActive: String get() = when (this) { HINDI -> "Saarthi Pro सक्रिय है"; else -> "Saarthi Pro is active" }
+    val unlockBeta: String get() = when (this) { HINDI -> "अनलॉक करें (बीटा)"; else -> "Unlock (beta)" }
+    val restorePurchase: String get() = when (this) { HINDI -> "खरीद बहाल करें"; else -> "Restore purchase" }
+
     /** Chat top-bar subtitle while generating. */
     val thinkingText: String get() = when (this) {
         ENGLISH  -> "Thinking…"

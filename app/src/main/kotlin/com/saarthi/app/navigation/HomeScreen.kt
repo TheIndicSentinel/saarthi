@@ -649,7 +649,7 @@ private fun LanguagePickerDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = SaarthiColors.Text2)
+                Text(currentLanguage.cancelLabel, color = SaarthiColors.Text2)
             }
         },
     )

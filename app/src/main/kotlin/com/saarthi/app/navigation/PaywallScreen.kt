@@ -53,6 +53,7 @@ import com.saarthi.core.ui.theme.SaarthiColors
 @Composable
 fun PaywallScreen(
     onBack: () -> Unit,
+    language: com.saarthi.core.i18n.SupportedLanguage,
     viewModel: PaywallViewModel = hiltViewModel(),
 ) {
     val isPro by viewModel.isPro.collectAsStateWithLifecycle()
@@ -165,7 +166,7 @@ fun PaywallScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Check, null, tint = SaarthiColors.Jade, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Saarthi Pro is active", color = SaarthiColors.Text, fontWeight = FontWeight.SemiBold)
+                        Text(language.proActive, color = SaarthiColors.Text, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 TextButton(onClick = { viewModel.lock() }, modifier = Modifier.fillMaxWidth()) {
@@ -178,10 +179,10 @@ fun PaywallScreen(
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = SaarthiColors.Marigold),
                 ) {
-                    Text("Unlock (beta)", color = SaarthiColors.OnMarigold, fontWeight = FontWeight.Bold)
+                    Text(language.unlockBeta, color = SaarthiColors.OnMarigold, fontWeight = FontWeight.Bold)
                 }
                 TextButton(onClick = { viewModel.restore() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Restore purchase", color = SaarthiColors.Text3)
+                    Text(language.restorePurchase, color = SaarthiColors.Text3)
                 }
             }
         }

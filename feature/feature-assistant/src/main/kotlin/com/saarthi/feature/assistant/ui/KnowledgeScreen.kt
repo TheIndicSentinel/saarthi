@@ -25,6 +25,7 @@ import com.saarthi.feature.assistant.viewmodel.AssistantViewModel
 @Composable
 fun KnowledgeScreen(
     onBack: () -> Unit,
+    language: com.saarthi.core.i18n.SupportedLanguage,
     viewModel: AssistantViewModel = hiltViewModel()
 ) {
     val memories by viewModel.allMemories.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -32,7 +33,7 @@ fun KnowledgeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Saarthi Knowledge", color = SaarthiColors.Gold) },
+                title = { Text(language.knowledgeTitle, color = SaarthiColors.Gold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = SaarthiColors.TextSecondary)
@@ -48,7 +49,7 @@ fun KnowledgeScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(64.dp), tint = SaarthiColors.TextMuted)
                     Spacer(Modifier.height(16.dp))
-                    Text("No personal knowledge stored yet.", color = SaarthiColors.TextMuted)
+                    Text(language.knowledgeEmpty, color = SaarthiColors.TextMuted)
                 }
             }
         } else {

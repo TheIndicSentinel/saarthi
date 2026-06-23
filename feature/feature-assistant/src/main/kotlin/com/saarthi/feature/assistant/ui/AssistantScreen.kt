@@ -365,6 +365,7 @@ fun AssistantScreen(
                                 val speakingId by viewModel.speakingMessageId.collectAsStateWithLifecycle()
                                 MessageBubble(
                                     message = msg,
+                                    language = currentLanguage,
                                     onDelete = { viewModel.deleteMessage(msg.id) },
                                     onRetry = { viewModel.retryResponse(msg.id) },
                                     onListen = { viewModel.toggleSpeak(msg.id, msg.content) },
@@ -576,7 +577,7 @@ fun AssistantScreen(
                 com.saarthi.core.common.BatteryOptimizationPrompt.markPrompted(activity)
             },
             containerColor = SaarthiColors.NavyMid,
-            title = { Text("Keep replies & reminders on time?", color = SaarthiColors.TextPrimary) },
+            title = { Text(currentLanguage.notifPermTitle, color = SaarthiColors.TextPrimary) },
             text = {
                 Text(
                     "Android may pause Saarthi to save battery. Letting the app skip battery " +
@@ -593,13 +594,13 @@ fun AssistantScreen(
                         showBatteryOptDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SaarthiColors.Marigold),
-                ) { Text("Allow", color = SaarthiColors.OnMarigold) }
+                ) { Text(currentLanguage.allowLabel, color = SaarthiColors.OnMarigold) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     com.saarthi.core.common.BatteryOptimizationPrompt.markPrompted(activity)
                     showBatteryOptDialog = false
-                }) { Text("Not now", color = SaarthiColors.Text2) }
+                }) { Text(currentLanguage.notNowLabel, color = SaarthiColors.Text2) }
             },
         )
     }
@@ -695,7 +696,7 @@ private fun ConversationsDrawer(
             )
 
             NavigationDrawerItem(
-                label = { Text("Saarthi Knowledge", color = SaarthiColors.TextPrimary) },
+                label = { Text(language.knowledgeTitle, color = SaarthiColors.TextPrimary) },
                 selected = false,
                 onClick = onNavigateToKnowledge,
                 icon = { Icon(Icons.Default.AutoAwesome, null, tint = SaarthiColors.Gold) },
@@ -841,7 +842,7 @@ private fun ChatTopBar(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Search…", color = SaarthiColors.Text3) },
+                placeholder = { Text(language.searchHint, color = SaarthiColors.Text3) },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,

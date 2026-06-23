@@ -66,6 +66,7 @@ import com.saarthi.feature.assistant.domain.MessageRole
 @Composable
 fun MessageBubble(
     message: ChatMessage,
+    language: com.saarthi.core.i18n.SupportedLanguage,
     onDelete: () -> Unit,
     onRetry: () -> Unit = {},
     onListen: () -> Unit = {},
@@ -169,7 +170,7 @@ fun MessageBubble(
                     onDismissRequest = { showMenu = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Copy", color = SaarthiColors.TextPrimary) },
+                        text = { Text(language.copyLabel, color = SaarthiColors.TextPrimary) },
                         leadingIcon = {
                             Icon(
                                 Icons.Default.ContentCopy,
@@ -184,7 +185,7 @@ fun MessageBubble(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Delete", color = SaarthiColors.Error) },
+                        text = { Text(language.deleteLabel, color = SaarthiColors.Error) },
                         leadingIcon = {
                             Icon(
                                 Icons.Default.Delete,

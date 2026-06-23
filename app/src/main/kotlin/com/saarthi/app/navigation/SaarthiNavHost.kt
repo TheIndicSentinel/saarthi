@@ -114,7 +114,7 @@ fun SaarthiNavHost(
                 )
                 Spacer(Modifier.height(24.dp))
                 TextButton(onClick = { mainViewModel.retryWithNewModel() }) {
-                    Text("Re-select Model", color = SaarthiColors.Gold)
+                    Text(currentLanguage.reselectModel, color = SaarthiColors.Gold)
                 }
             }
         }
@@ -218,7 +218,7 @@ fun SaarthiNavHost(
         }
 
         composable(Route.Pro.path) {
-            PaywallScreen(onBack = { navController.popBackStack() })
+            PaywallScreen(onBack = { navController.popBackStack() }, language = currentLanguage)
         }
 
         composable(Route.Privacy.path) {
@@ -228,7 +228,7 @@ fun SaarthiNavHost(
             AboutScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)
         }
         composable(Route.Support.path) {
-            SupportScreen(onBack = { navController.popBackStack() })
+            SupportScreen(onBack = { navController.popBackStack() }, language = currentLanguage)
         }
         composable(Route.ResponseStyle.path) {
             ResponseStyleScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)
@@ -294,7 +294,7 @@ fun SaarthiNavHost(
         }
 
         composable(Route.Knowledge.path) {
-            com.saarthi.feature.assistant.ui.KnowledgeScreen(onBack = { navController.popBackStack() })
+            com.saarthi.feature.assistant.ui.KnowledgeScreen(onBack = { navController.popBackStack() }, language = currentLanguage)
         }
 
         composable(Route.FieldExpert.path) {
