@@ -1130,7 +1130,7 @@ enum class SupportedLanguage(
      * standard pattern for multilingual production prompts.
      */
     val systemPromptInstruction: String get() = when (this) {
-        ENGLISH  -> "Reply in English. If the user wrote earlier in another language, do not switch unless they switch now."
+        ENGLISH  -> "Reply ONLY in English. You MUST reply entirely in English. Do not reply in Hindi, Marathi, or any other language or script under any circumstance."
         HINDI    -> "हिन्दी में जवाब दें। You MUST reply entirely in Hindi (हिन्दी), in Devanagari script. Do not write the reply in English under any circumstance."
         TAMIL    -> "தமிழில் பதிலளிக்கவும். You MUST reply entirely in Tamil (தமிழ்), in Tamil script. Do not write the reply in English under any circumstance."
         TELUGU   -> "తెలుగులో సమాధానం ఇవ్వండి. You MUST reply entirely in Telugu (తెలుగు), in Telugu script. Do not write the reply in English under any circumstance."

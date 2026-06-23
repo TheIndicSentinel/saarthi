@@ -1276,6 +1276,28 @@ class ChatRepositoryImpl @Inject constructor(
                 if (city.length in 2..40) out += "city" to city
             }
 
+        // ── Marathi / Devanagari ─────────────────────────────────────────────
+        // name: "माझे नाव X आहे" / "माझं नाव X"
+        Regex("(?:माझे|माझं|माझ)\\s+नाव\\s+([\\p{L}][\\p{L}\\s.'-]{0,38})\\s*(?:आहे)?")
+            .find(msg)?.groupValues?.get(1)?.let { n ->
+                val name = nameHead(n)
+                if (name.length in 2..40) out += "name" to name
+            }
+        // city: "मी X मध्ये राहतो/राहते" — "I live in X"
+        Regex("मी\\s+([\\p{L}][\\p{L}\\s,'-]{1,38})\\s+मध्ये\\s+(?:राहतो|राहते)")
+            .find(msg)?.groupValues?.get(1)?.let { c ->
+                val city = clean(c.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
+                if (city.length in 2..40) out += "city" to city
+            }
+
+        // ── Transliterated Marathi (Latin script) ────────────────────────────
+        // name: "majhe naav X (aahe)" / "maza nav X"
+        Regex("(?i)\\b(?:majhe|majha|maza|mazha)\\s+naa?v\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})(?:\\s+aahe|\\s+ahe)?\\b")
+            .find(msg)?.groupValues?.get(1)?.let { n ->
+                val name = nameHead(n)
+                if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
+            }
+
         // ── Transliterated Hindi (Latin script) ─────────────────────────────
         // Very common on mobile — users type Hindi words in Roman script.
         // name: "mera naam X hai" / "mera naam X"
@@ -1315,6 +1337,15 @@ class ChatRepositoryImpl @Inject constructor(
                 .map { it.groupValues[1].lowercase() }
                 .firstOrNull { it in DIET_TERMS }
                 ?.let { out += "diet" to it }
+        }
+        // Devanagari diet (Hindi + Marathi): "मी/मैं ... शाकाहारी/मांसाहारी". Require a
+        // first-person word near the term so "शाकाहारी हॉटेल" (veg restaurant) is ignored.
+        if (out.none { it.first == "diet" }) {
+            val firstPerson = Regex("(?:मी|मैं|माझा|माझे|मेरा|मला|मुझे|मी)")
+            when {
+                Regex("शाकाहारी").containsMatchIn(msg) && firstPerson.containsMatchIn(msg) -> out += "diet" to "vegetarian"
+                Regex("मांसाहारी").containsMatchIn(msg) && firstPerson.containsMatchIn(msg) -> out += "diet" to "non-vegetarian"
+            }
         }
 
         // ── Name (generic first-person) ──────────────────────────────────────
