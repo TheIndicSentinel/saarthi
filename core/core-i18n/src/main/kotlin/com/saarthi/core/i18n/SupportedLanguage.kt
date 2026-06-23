@@ -311,6 +311,91 @@ enum class SupportedLanguage(
         ODIA     -> "ଆପଣଙ୍କ ସାରଥୀ · Offline"
     }
 
+    // ── Voice mode overlay ──────────────────────────────────────────────────
+    /** Empty-state prompt before the user speaks. */
+    val voicePrompt: String get() = when (this) {
+        ENGLISH  -> "Speak now — your words will appear here"
+        HINDI    -> "अब बोलिए — आपके शब्द यहाँ दिखेंगे"
+        TAMIL    -> "இப்போது பேசுங்கள் — உங்கள் வார்த்தைகள் இங்கே தோன்றும்"
+        TELUGU   -> "ఇప్పుడు మాట్లాడండి — మీ మాటలు ఇక్కడ కనిపిస్తాయి"
+        BENGALI  -> "এখন বলুন — আপনার কথা এখানে দেখা যাবে"
+        MARATHI  -> "आता बोला — तुमचे शब्द इथे दिसतील"
+        KANNADA  -> "ಈಗ ಮಾತನಾಡಿ — ನಿಮ್ಮ ಮಾತುಗಳು ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತವೆ"
+        GUJARATI -> "હવે બોલો — તમારા શબ્દો અહીં દેખાશે"
+        PUNJABI  -> "ਹੁਣ ਬੋਲੋ — ਤੁਹਾਡੇ ਸ਼ਬਦ ਇੱਥੇ ਦਿਖਣਗੇ"
+        ODIA     -> "ବର୍ତ୍ତମାନ କୁହନ୍ତୁ — ଆପଣଙ୍କ ଶବ୍ଦ ଏଠାରେ ଦେଖାଯିବ"
+    }
+
+    /** Status line while actively listening. */
+    val voiceStatusListening: String get() = when (this) {
+        ENGLISH  -> "Listening…"
+        HINDI    -> "सुन रहा हूँ…"
+        TAMIL    -> "கேட்கிறேன்…"
+        TELUGU   -> "వింటున్నాను…"
+        BENGALI  -> "শুনছি…"
+        MARATHI  -> "ऐकत आहे…"
+        KANNADA  -> "ಕೇಳುತ್ತಿದ್ದೇನೆ…"
+        GUJARATI -> "સાંભળું છું…"
+        PUNJABI  -> "ਸੁਣ ਰਿਹਾ ਹਾਂ…"
+        ODIA     -> "ଶୁଣୁଛି…"
+    }
+
+    /** Status line once words are captured. */
+    val voiceStatusHeard: String get() = when (this) {
+        ENGLISH  -> "I hear you saying…"
+        HINDI    -> "आप कह रहे हैं…"
+        TAMIL    -> "நீங்கள் சொல்வது…"
+        TELUGU   -> "మీరు చెబుతున్నది…"
+        BENGALI  -> "আপনি বলছেন…"
+        MARATHI  -> "तुम्ही म्हणत आहात…"
+        KANNADA  -> "ನೀವು ಹೇಳುತ್ತಿರುವುದು…"
+        GUJARATI -> "તમે કહો છો…"
+        PUNJABI  -> "ਤੁਸੀਂ ਕਹਿ ਰਹੇ ਹੋ…"
+        ODIA     -> "ଆପଣ କହୁଛନ୍ତି…"
+    }
+
+    /** Small badge: actively listening. */
+    val voiceBadgeListening: String get() = when (this) {
+        ENGLISH  -> "LISTENING"
+        HINDI    -> "सुन रहे हैं"
+        TAMIL    -> "கேட்கிறது"
+        TELUGU   -> "వింటోంది"
+        BENGALI  -> "শুনছে"
+        MARATHI  -> "ऐकत आहे"
+        KANNADA  -> "ಕೇಳುತ್ತಿದೆ"
+        GUJARATI -> "સાંભળે છે"
+        PUNJABI  -> "ਸੁਣ ਰਿਹਾ"
+        ODIA     -> "ଶୁଣୁଛି"
+    }
+
+    /** Small badge: capture finished. */
+    val voiceBadgeCaptured: String get() = when (this) {
+        ENGLISH  -> "CAPTURED"
+        HINDI    -> "मिल गया"
+        TAMIL    -> "பதிவானது"
+        TELUGU   -> "నమోదైంది"
+        BENGALI  -> "ধরা হয়েছে"
+        MARATHI  -> "मिळाले"
+        KANNADA  -> "ಸೆರೆಯಾಗಿದೆ"
+        GUJARATI -> "મળ્યું"
+        PUNJABI  -> "ਮਿਲ ਗਿਆ"
+        ODIA     -> "ଧରାଗଲା"
+    }
+
+    /** Hint listing the languages the user may speak in. */
+    val voiceLangHint: String get() = when (this) {
+        ENGLISH  -> "English · or any Indian language"
+        HINDI    -> "हिन्दी · English · या कोई भी मिश्रण"
+        TAMIL    -> "தமிழ் · English · அல்லது கலவை"
+        TELUGU   -> "తెలుగు · English · లేదా మిశ్రమం"
+        BENGALI  -> "বাংলা · English · বা মিশ্রণ"
+        MARATHI  -> "मराठी · English · किंवा मिश्रण"
+        KANNADA  -> "ಕನ್ನಡ · English · ಅಥವಾ ಮಿಶ್ರಣ"
+        GUJARATI -> "ગુજરાતી · English · અથવા મિશ્રણ"
+        PUNJABI  -> "ਪੰਜਾਬੀ · English · ਜਾਂ ਮਿਸ਼ਰਣ"
+        ODIA     -> "ଓଡ଼ିଆ · English · କିମ୍ବା ମିଶ୍ରଣ"
+    }
+
     /** Chat top-bar subtitle while generating. */
     val thinkingText: String get() = when (this) {
         ENGLISH  -> "Thinking…"

@@ -1,5 +1,6 @@
 package com.saarthi.feature.assistant.ui.components
 
+import com.saarthi.core.i18n.SupportedLanguage
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -55,6 +56,7 @@ import com.saarthi.core.ui.theme.SaarthiColors
 fun VoiceModeOverlay(
     transcribedText: String,
     isListening: Boolean,
+    language: SupportedLanguage,
     onClose: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
@@ -126,7 +128,7 @@ fun VoiceModeOverlay(
                             .background(if (isListening) SaarthiColors.Rose else SaarthiColors.Jade),
                     )
                     Text(
-                        if (isListening) "LISTENING" else "CAPTURED",
+                        if (isListening) language.voiceBadgeListening else language.voiceBadgeCaptured,
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = SaarthiColors.Text2,
                             letterSpacing = 1.4.sp,
@@ -142,8 +144,8 @@ fun VoiceModeOverlay(
             // Transcribed text
             Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    if (transcribedText.isBlank() && isListening) "Listening…"
-                    else "I hear you saying…",
+                    if (transcribedText.isBlank() && isListening) language.voiceStatusListening
+                    else language.voiceStatusHeard,
                     style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3),
                 )
                 Spacer(Modifier.height(10.dp))
@@ -159,7 +161,7 @@ fun VoiceModeOverlay(
                     )
                 } else {
                     Text(
-                        "Speak now — your words will appear here",
+                        language.voicePrompt,
                         style = MaterialTheme.typography.bodyLarge.copy(
                             color = SaarthiColors.Text3,
                             fontSize = 14.sp,
@@ -169,7 +171,7 @@ fun VoiceModeOverlay(
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "हिन्दी · English · or any mix",
+                    language.voiceLangHint,
                     style = DisplayAccent.copy(fontSize = 14.sp, color = SaarthiColors.Marigold.copy(alpha = 0.7f)),
                 )
             }

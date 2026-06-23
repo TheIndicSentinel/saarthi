@@ -814,10 +814,12 @@ private fun ResponseStylePreview(style: com.saarthi.core.i18n.ResponseStyle, pre
 private fun buildPreviewReply(style: com.saarthi.core.i18n.ResponseStyle): String {
     // Short replies for each axis combo. Constructed deterministically so a
     // preference change instantly shows a different result.
-    val warmth = when (style.tone) {
-        "warm"   -> "Sure thing — "
-        "formal" -> "Certainly. "
-        else     -> ""
+    // Warmth/example/disclaimer follow the SAME languageMix as the body, so a
+    // Hindi/Hinglish preview never gets an English "Sure thing"/"For example".
+    val warmth = when (style.languageMix) {
+        "pure" -> when (style.tone) { "warm" -> "ज़रूर — "; "formal" -> "जी ज़रूर। "; else -> "" }
+        "eng"  -> when (style.tone) { "warm" -> "Sure thing — "; "formal" -> "Certainly. "; else -> "" }
+        else   -> when (style.tone) { "warm" -> "Zaroor — "; "formal" -> "Ji zaroor. "; else -> "" }
     }
     val body = when (style.languageMix) {
         "pure" -> when (style.length) {
@@ -836,12 +838,16 @@ private fun buildPreviewReply(style: com.saarthi.core.i18n.ResponseStyle): Strin
             else    -> "Adrak ko paani mein 5 minute boil karein, strain karke shahad mila lein. Din mein 2 baar lein."
         }
     }
-    val example = if (style.includeExamples && style.length != "short")
-        " For example: warm liquids loosen throat mucus, and honey coats the inflamed tissue."
-    else ""
-    val disclaimer = if (style.showDisclaimers && style.length != "short")
-        " If symptoms last more than 3 days, please see a doctor."
-    else ""
+    val example = if (style.includeExamples && style.length != "short") when (style.languageMix) {
+        "pure" -> " उदाहरण के लिए: गर्म तरल पदार्थ गले की बलगम ढीली करते हैं, और शहद सूजन वाली परत को राहत देता है।"
+        "eng"  -> " For example: warm liquids loosen throat mucus, and honey coats the inflamed tissue."
+        else   -> " For example: garam liquids gale ki mucus loosen karte hain, aur honey inflamed tissue ko coat karta hai."
+    } else ""
+    val disclaimer = if (style.showDisclaimers && style.length != "short") when (style.languageMix) {
+        "pure" -> " अगर तकलीफ़ 3 दिन से ज़्यादा रहे, तो कृपया डॉक्टर को दिखाएँ।"
+        "eng"  -> " If symptoms last more than 3 days, please see a doctor."
+        else   -> " Agar takleef 3 din se zyada rahe, to please doctor ko dikhaayein."
+    } else ""
     return warmth + body + example + disclaimer
 }
 

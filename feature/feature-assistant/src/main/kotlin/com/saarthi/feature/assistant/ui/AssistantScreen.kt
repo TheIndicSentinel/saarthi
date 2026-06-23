@@ -550,6 +550,7 @@ fun AssistantScreen(
         com.saarthi.feature.assistant.ui.components.VoiceModeOverlay(
             transcribedText = uiState.inputText,
             isListening = uiState.isListening,
+            language = currentLanguage,
             onClose = { viewModel.closeVoiceMode(clearText = true) },
             onSend = {
                 viewModel.closeVoiceMode(clearText = false)
