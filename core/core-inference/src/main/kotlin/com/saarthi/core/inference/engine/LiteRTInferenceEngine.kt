@@ -439,15 +439,27 @@ class LiteRTInferenceEngine @Inject constructor(
     /** Google's recommended temperature per Gemma family — the AUTO baseline. */
     private fun baseTemperatureFor(modelNameLower: String): Float = when {
         modelNameLower.contains("gemma3") || modelNameLower.contains("gemma-3") || modelNameLower.contains("gemma 3") -> 1.0f
+        // Gemma 4 E4B ONLY: a tighter default than E2B gives the bigger model
+        // crisper, more authoritative, instruction-following answers (at temp 1.0
+        // it tends to ramble). E2B's quality is already good → it stays at 1.0.
+        // Matches on the model FILE path (…gemma-4-E4B-it…); the display name has
+        // no "e4b", so callers must pass the path (see samplerForActiveModel).
+        (modelNameLower.contains("gemma4") || modelNameLower.contains("gemma-4") || modelNameLower.contains("gemma 4")) &&
+            modelNameLower.contains("e4b") -> 0.7f
         modelNameLower.contains("gemma4") || modelNameLower.contains("gemma-4") || modelNameLower.contains("gemma 4") -> 1.0f
         else -> 0.8f
     }
 
     override val activeModelDefaultTemperature: Float
-        get() = baseTemperatureFor((activeModelName ?: loadedModelPath ?: "").lowercase())
+        // Prefer the file path: it carries the E2B/E4B variant ("…E4B-it…"); the
+        // display name ("Gemma 4 · Best Quality") does not, so per-variant tuning
+        // (e.g. E4B's tighter temperature) would be invisible from the name alone.
+        get() = baseTemperatureFor((loadedModelPath ?: activeModelName ?: "").lowercase())
 
     private fun samplerForActiveModel(): SamplerConfig? =
-        samplerFor(activeModelName ?: loadedModelPath ?: "")
+        // File path first — see activeModelDefaultTemperature: needed so the
+        // per-turn sampler can distinguish E4B from E2B (display name can't).
+        samplerFor(loadedModelPath ?: activeModelName ?: "")
 
     /**
      * Tighter sampler for RAG-grounded turns. Used when the incoming
