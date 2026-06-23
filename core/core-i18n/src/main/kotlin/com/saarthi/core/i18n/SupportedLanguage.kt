@@ -300,7 +300,7 @@ enum class SupportedLanguage(
     /** Chat top-bar subtitle when idle. */
     val chatOfflineSubtitle: String get() = when (this) {
         ENGLISH  -> "Your Companion · Offline"
-        HINDI    -> "आपका सारथी · Offline"
+        HINDI    -> "आपका सारथी · ऑफ़लाइन"
         TAMIL    -> "உங்கள் சாரதி · Offline"
         TELUGU   -> "మీ సారథి · Offline"
         BENGALI  -> "আপনার সারথি · Offline"
@@ -857,7 +857,7 @@ enum class SupportedLanguage(
     /** Model produced nothing (usually memory pressure) — actionable next step. */
     val emptyReply: String get() = when (this) {
         ENGLISH  -> "I couldn't generate a reply just now. Please try again — if it keeps happening, switch to a lighter model in Settings."
-        HINDI    -> "मैं अभी जवाब नहीं बना सका। कृपया फिर से कोशिश करें — अगर बार-बार हो, तो Settings में हल्का मॉडल चुनें।"
+        HINDI    -> "मैं अभी जवाब नहीं बना सका। कृपया फिर से कोशिश करें — अगर बार-बार हो, तो सेटिंग्स में हल्का मॉडल चुनें।"
         TAMIL    -> "என்னால் இப்போது பதில் உருவாக்க முடியவில்லை. மீண்டும் முயற்சிக்கவும் — தொடர்ந்தால், Settings-ல் இலகுவான மாடலுக்கு மாறவும்."
         TELUGU   -> "నేను ఇప్పుడే సమాధానం ఇవ్వలేకపోయాను. మళ్లీ ప్రయత్నించండి — పదే పదే జరిగితే, Settings లో తేలికైన మోడల్‌కు మారండి."
         BENGALI  -> "আমি এখনই উত্তর তৈরি করতে পারিনি। আবার চেষ্টা করুন — বারবার হলে, Settings-এ হালকা মডেলে যান।"
@@ -885,7 +885,7 @@ enum class SupportedLanguage(
     /** Kisan chat: model too small for reliable pack answers. */
     val packModelTooSmall: String get() = when (this) {
         ENGLISH  -> "The compact model on this phone is too small for reliable pack answers. You can still read the pack topics offline. For chat, switch to Gemma 4 or Gemma 3n in Settings → Models."
-        HINDI    -> "इस फ़ोन का कॉम्पैक्ट मॉडल भरोसेमंद पैक जवाबों के लिए बहुत छोटा है। आप पैक विषय फिर भी ऑफ़लाइन पढ़ सकते हैं। चैट के लिए Settings → Models में Gemma 4 या Gemma 3n चुनें।"
+        HINDI    -> "इस फ़ोन का कॉम्पैक्ट मॉडल भरोसेमंद पैक जवाबों के लिए बहुत छोटा है। आप पैक विषय फिर भी ऑफ़लाइन पढ़ सकते हैं। चैट के लिए सेटिंग्स → मॉडल में Gemma 4 या Gemma 3n चुनें।"
         TAMIL    -> "இந்தத் தொலைபேசியின் காம்பாக்ட் மாடல் நம்பகமான தொகுப்பு பதில்களுக்கு மிகச் சிறியது. தொகுப்பு தலைப்புகளை ஆஃப்லைனில் படிக்கலாம். அரட்டைக்கு Settings → Models-ல் Gemma 4 அல்லது Gemma 3n-க்கு மாறவும்."
         TELUGU   -> "ఈ ఫోన్‌లోని కాంపాక్ట్ మోడల్ నమ్మదగిన ప్యాక్ సమాధానాలకు చాలా చిన్నది. ప్యాక్ అంశాలను ఆఫ్‌లైన్‌లో చదవవచ్చు. చాట్ కోసం Settings → Models లో Gemma 4 లేదా Gemma 3n కు మారండి."
         BENGALI  -> "এই ফোনের কমপ্যাক্ট মডেল নির্ভরযোগ্য প্যাক উত্তরের জন্য খুব ছোট। আপনি প্যাকের বিষয় অফলাইনে পড়তে পারেন। চ্যাটের জন্য Settings → Models-এ Gemma 4 বা Gemma 3n বেছে নিন।"
