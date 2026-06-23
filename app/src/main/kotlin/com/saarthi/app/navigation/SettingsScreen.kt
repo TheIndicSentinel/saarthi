@@ -168,12 +168,6 @@ fun SettingsScreen(
                 onClick = { showLangPicker = true },
             )
             SaarthiListRow(
-                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) },
-                title = s.chatHistory,
-                trailing = { ChevronRight() },
-                onClick = { onNavigate("history") },
-            )
-            SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Notifications, null) },
                 title = s.dailyWisdom,
                 subtitle = if (notifOn) s.wisdomOn else s.wisdomOff,
@@ -1256,28 +1250,6 @@ private fun InstalledModelRow(
                 "Delete",
                 tint = if (model.active) SaarthiColors.Text4 else SaarthiColors.Rose,
                 modifier = Modifier.size(16.dp),
-            )
-        }
-    }
-}
-
-// ── History (placeholder — current chat session list lives in the assistant drawer) ──
-
-@Composable
-fun HistoryScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = SupportedLanguage.HINDI) {
-    val d = currentLanguage.settingsDetail
-    Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
-        SaarthiTopBar(title = d.histTitle, subtitle = d.histTopSub, onBack = onBack)
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                d.histBody,
-                style = MaterialTheme.typography.bodyLarge.copy(color = SaarthiColors.Text2),
             )
         }
     }
