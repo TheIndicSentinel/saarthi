@@ -727,7 +727,7 @@ fun ResponseStyleScreen(
             Spacer(Modifier.height(20.dp))
             // Live preview — shows the user what a Saarthi reply will look
             // like under their current preferences. Pure UI, no model call.
-            ResponseStylePreview(style, d.rsPreview)
+            ResponseStylePreview(style, d.rsPreview, currentLanguage)
             Spacer(Modifier.height(8.dp))
             Text(
                 d.rsAppliedNote,
@@ -739,9 +739,17 @@ fun ResponseStyleScreen(
 }
 
 @Composable
-private fun ResponseStylePreview(style: com.saarthi.core.i18n.ResponseStyle, previewLabel: String) {
-    val examplePrompt = "How do I make ginger tea for a sore throat?"
-    val exampleReply = remember(style) { buildPreviewReply(style) }
+private fun ResponseStylePreview(
+    style: com.saarthi.core.i18n.ResponseStyle,
+    previewLabel: String,
+    language: SupportedLanguage,
+) {
+    val examplePrompt = when (language) {
+        SupportedLanguage.HINDI   -> "गले की खराश के लिए अदरक की चाय कैसे बनाएँ?"
+        SupportedLanguage.MARATHI -> "घसा खवखवल्यास आल्याचा चहा कसा बनवायचा?"
+        else -> "How do I make ginger tea for a sore throat?"
+    }
+    val exampleReply = remember(style, language) { buildPreviewReply(style, language) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -805,26 +813,46 @@ private fun ResponseStylePreview(style: com.saarthi.core.i18n.ResponseStyle, pre
     }
 }
 
-private fun buildPreviewReply(style: com.saarthi.core.i18n.ResponseStyle): String {
-    // Short replies for each axis combo. Constructed deterministically so a
-    // preference change instantly shows a different result.
-    // Warmth/example/disclaimer follow the SAME languageMix as the body, so a
-    // Hindi/Hinglish preview never gets an English "Sure thing"/"For example".
-    val warmth = when (style.languageMix) {
-        "pure" -> when (style.tone) { "warm" -> "ज़रूर — "; "formal" -> "जी ज़रूर। "; else -> "" }
-        "eng"  -> when (style.tone) { "warm" -> "Sure thing — "; "formal" -> "Certainly. "; else -> "" }
+private fun buildPreviewReply(
+    style: com.saarthi.core.i18n.ResponseStyle,
+    language: SupportedLanguage,
+): String {
+    // Deterministic sample so a preference change instantly shows a new result.
+    // Rendered in the UI language: languageMix "eng" → English; "pure" → native
+    // (no English words); else (हिंग्लिश/mix) → native script with light English
+    // loanwords. Only Hindi & Marathi have native sample text — other languages
+    // fall back to English (avoids showing Hindi to e.g. a Tamil user) until
+    // their language pass adds samples.
+    val mr = language == SupportedLanguage.MARATHI
+    val native = language == SupportedLanguage.HINDI || mr
+    val useEng = style.languageMix == "eng" || !native
+    val pure = style.languageMix == "pure"
+
+    val warmth = when {
+        useEng -> when (style.tone) { "warm" -> "Sure thing — "; "formal" -> "Certainly. "; else -> "" }
+        mr     -> when (style.tone) { "warm" -> "नक्कीच — "; "formal" -> "नक्कीच. "; else -> "" }
         else   -> when (style.tone) { "warm" -> "ज़रूर — "; "formal" -> "जी ज़रूर। "; else -> "" }
     }
-    val body = when (style.languageMix) {
-        "pure" -> when (style.length) {
+    val body = when {
+        useEng -> when (style.length) {
+            "short" -> "Boil ginger, add honey, sip warm."
+            "long"  -> "Add 5 thin ginger slices to a cup of water. Simmer for 5 minutes, strain, stir in a teaspoon of honey and a pinch of turmeric. Sip twice a day for about four days."
+            else    -> "Simmer ginger in water for 5 minutes, strain, then mix in honey. Drink twice daily."
+        }
+        pure && mr -> when (style.length) {
+            "short" -> "आले उकळून मध मिसळा, कोमट प्या."
+            "long"  -> "एक कप पाण्यात आल्याचे पाच पातळ काप घालून पाच मिनिटे उकळा. गाळून घ्या, चवीसाठी मध आणि चिमूटभर हळद घाला. दिवसातून दोनदा, चार दिवस."
+            else    -> "एक कप पाण्यात आले उकळून मध मिसळा — दिवसातून दोनदा घ्या."
+        }
+        pure -> when (style.length) {
             "short" -> "अदरक उबाल कर शहद मिलाइए, गर्म पीजिए।"
             "long"  -> "एक कप पानी में अदरक की पाँच पतली स्लाइस डाल कर पाँच मिनट उबालें। थोड़ा छान लीजिए, स्वाद के लिए शहद और चुटकी भर हल्दी डालें। दिन में दो बार, चार दिन तक।"
             else    -> "एक कप पानी में अदरक उबाल कर शहद मिलाइए — दिन में दो बार लीजिए।"
         }
-        "eng" -> when (style.length) {
-            "short" -> "Boil ginger, add honey, sip warm."
-            "long"  -> "Add 5 thin ginger slices to a cup of water. Simmer for 5 minutes, strain, stir in a teaspoon of honey and a pinch of turmeric. Sip twice a day for about four days."
-            else    -> "Simmer ginger in water for 5 minutes, strain, then mix in honey. Drink twice daily."
+        mr -> when (style.length) {
+            "short" -> "आले पाण्यात boil करून मध मिसळा — घशाला relief मिळेल."
+            "long"  -> "एक कप पाण्यात आल्याचे 5 पातळ slices घालून 5 मिनिटे simmer करा. गाळून एक चमचा मध आणि चिमूटभर हळद mix करा. दिवसातून 2 वेळा, 3–4 दिवस घ्या."
+            else    -> "आले पाण्यात 5 मिनिटे boil करा, गाळून मध मिसळा. दिवसातून 2 वेळा घ्या."
         }
         else -> when (style.length) {
             "short" -> "अदरक को पानी में boil करके शहद मिलाएँ — गले को relief मिलेगा।"
@@ -832,15 +860,17 @@ private fun buildPreviewReply(style: com.saarthi.core.i18n.ResponseStyle): Strin
             else    -> "अदरक को पानी में 5 मिनट boil करें, छान कर शहद मिला लें। दिन में 2 बार लें।"
         }
     }
-    val example = if (style.includeExamples && style.length != "short") when (style.languageMix) {
-        "pure" -> " उदाहरण के लिए: गर्म तरल पदार्थ गले की बलगम ढीली करते हैं, और शहद सूजन वाली परत को राहत देता है।"
-        "eng"  -> " For example: warm liquids loosen throat mucus, and honey coats the inflamed tissue."
-        else   -> " उदाहरण के लिए: गरम liquids गले की बलगम loosen करते हैं और शहद tissue को coat करता है।"
+    val example = if (style.includeExamples && style.length != "short") when {
+        useEng -> " For example: warm liquids loosen throat mucus, and honey coats the inflamed tissue."
+        pure && mr -> " उदाहरणार्थ: कोमट द्रव घशातील कफ सैल करतात आणि मध सूज कमी करतो."
+        pure -> " उदाहरण के लिए: गर्म तरल पदार्थ गले की बलगम ढीली करते हैं, और शहद सूजन वाली परत को राहत देता है।"
+        mr -> " उदाहरणार्थ: गरम liquids घशातील कफ loosen करतात आणि मध tissue ला आराम देतो."
+        else -> " उदाहरण के लिए: गरम liquids गले की बलगम loosen करते हैं और शहद tissue को coat करता है।"
     } else ""
-    val disclaimer = if (style.showDisclaimers && style.length != "short") when (style.languageMix) {
-        "pure" -> " अगर तकलीफ़ 3 दिन से ज़्यादा रहे, तो कृपया डॉक्टर को दिखाएँ।"
-        "eng"  -> " If symptoms last more than 3 days, please see a doctor."
-        else   -> " अगर तकलीफ़ 3 दिन से ज़्यादा रहे, तो please doctor को दिखाएँ।"
+    val disclaimer = if (style.showDisclaimers && style.length != "short") when {
+        useEng -> " If symptoms last more than 3 days, please see a doctor."
+        mr     -> " त्रास 3 दिवसांपेक्षा जास्त राहिल्यास, कृपया डॉक्टरांना दाखवा."
+        else   -> " अगर तकलीफ़ 3 दिन से ज़्यादा रहे, तो कृपया डॉक्टर को दिखाएँ।"
     } else ""
     return warmth + body + example + disclaimer
 }

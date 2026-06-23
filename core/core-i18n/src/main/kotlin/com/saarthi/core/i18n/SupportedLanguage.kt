@@ -399,38 +399,38 @@ enum class SupportedLanguage(
     // ── Misc UI labels (Hindi done; other languages fall back to English until
     //     their language pass — see language-by-language rollout). ──────────────
     /** Message long-press menu: copy. */
-    val copyLabel: String get() = when (this) { HINDI -> "कॉपी करें"; else -> "Copy" }
+    val copyLabel: String get() = when (this) { HINDI -> "कॉपी करें"; MARATHI -> "कॉपी करा"; else -> "Copy" }
     /** Message long-press menu / delete actions. */
-    val deleteLabel: String get() = when (this) { HINDI -> "हटाएँ"; else -> "Delete" }
+    val deleteLabel: String get() = when (this) { HINDI -> "हटाएँ"; MARATHI -> "हटवा"; else -> "Delete" }
     /** Search box placeholder. */
-    val searchHint: String get() = when (this) { HINDI -> "खोजें…"; else -> "Search…" }
+    val searchHint: String get() = when (this) { HINDI -> "खोजें…"; MARATHI -> "शोधा…"; else -> "Search…" }
     /** Notification-permission dialog: title. */
-    val notifPermTitle: String get() = when (this) { HINDI -> "जवाब और रिमाइंडर समय पर पाएँ?"; else -> "Keep replies & reminders on time?" }
+    val notifPermTitle: String get() = when (this) { HINDI -> "जवाब और रिमाइंडर समय पर पाएँ?"; MARATHI -> "उत्तरे आणि स्मरणपत्रे वेळेवर मिळवायची?"; else -> "Keep replies & reminders on time?" }
     /** Generic allow / not-now actions. */
-    val allowLabel: String get() = when (this) { HINDI -> "अनुमति दें"; else -> "Allow" }
-    val notNowLabel: String get() = when (this) { HINDI -> "अभी नहीं"; else -> "Not now" }
+    val allowLabel: String get() = when (this) { HINDI -> "अनुमति दें"; MARATHI -> "परवानगी द्या"; else -> "Allow" }
+    val notNowLabel: String get() = when (this) { HINDI -> "अभी नहीं"; MARATHI -> "आत्ता नको"; else -> "Not now" }
     /** Saarthi Knowledge feature title (brand "Saarthi" kept). */
-    val knowledgeTitle: String get() = when (this) { HINDI -> "सारथी ज्ञान"; else -> "Saarthi Knowledge" }
-    val knowledgeEmpty: String get() = when (this) { HINDI -> "अभी कोई निजी जानकारी सहेजी नहीं गई।"; else -> "No personal knowledge stored yet." }
+    val knowledgeTitle: String get() = when (this) { HINDI -> "सारथी ज्ञान"; MARATHI -> "सारथी ज्ञान"; else -> "Saarthi Knowledge" }
+    val knowledgeEmpty: String get() = when (this) { HINDI -> "अभी कोई निजी जानकारी सहेजी नहीं गई।"; MARATHI -> "अजून कोणतीही वैयक्तिक माहिती साठवलेली नाही."; else -> "No personal knowledge stored yet." }
     /** Re-select model action (onboarding gate). */
-    val reselectModel: String get() = when (this) { HINDI -> "मॉडल फिर चुनें"; else -> "Re-select Model" }
+    val reselectModel: String get() = when (this) { HINDI -> "मॉडल फिर चुनें"; MARATHI -> "मॉडेल पुन्हा निवडा"; else -> "Re-select Model" }
     /** Support screen: report an issue. */
-    val reportIssue: String get() = when (this) { HINDI -> "समस्या बताएँ"; else -> "Report an issue" }
+    val reportIssue: String get() = when (this) { HINDI -> "समस्या बताएँ"; MARATHI -> "समस्या कळवा"; else -> "Report an issue" }
     /** Paywall labels (product name "Saarthi Pro" kept). */
-    val proActive: String get() = when (this) { HINDI -> "Saarthi Pro सक्रिय है"; else -> "Saarthi Pro is active" }
-    val unlockBeta: String get() = when (this) { HINDI -> "अनलॉक करें (बीटा)"; else -> "Unlock (beta)" }
-    val restorePurchase: String get() = when (this) { HINDI -> "खरीद बहाल करें"; else -> "Restore purchase" }
+    val proActive: String get() = when (this) { HINDI -> "Saarthi Pro सक्रिय है"; MARATHI -> "Saarthi Pro सक्रिय आहे"; else -> "Saarthi Pro is active" }
+    val unlockBeta: String get() = when (this) { HINDI -> "अनलॉक करें (बीटा)"; MARATHI -> "अनलॉक करा (बीटा)"; else -> "Unlock (beta)" }
+    val restorePurchase: String get() = when (this) { HINDI -> "खरीद बहाल करें"; MARATHI -> "खरेदी पुनर्संचयित करा"; else -> "Restore purchase" }
 
     // ── Attachment bottom sheet ─────────────────────────────────────────────
-    val attachTitle: String get() = when (this) { HINDI -> "जोड़ें"; else -> "Attach" }
-    val attachPrivacyNote: String get() = when (this) { HINDI -> "फ़ाइलें आपके फ़ोन में ही रहती हैं — कभी अपलोड नहीं होतीं"; else -> "Files stay on your device — never uploaded" }
-    val attachCamera: String get() = when (this) { HINDI -> "कैमरा"; else -> "Camera" }
-    val attachCameraSub: String get() = when (this) { HINDI -> "फ़ोटो लें"; else -> "Take a photo" }
-    val attachPhoto: String get() = when (this) { HINDI -> "फ़ोटो"; else -> "Photo" }
-    val attachPhotoSub: String get() = when (this) { HINDI -> "गैलरी से"; else -> "From gallery" }
-    val attachDocument: String get() = when (this) { HINDI -> "दस्तावेज़"; else -> "Document" }
-    val attachVoice: String get() = when (this) { HINDI -> "आवाज़ मेमो"; else -> "Voice memo" }
-    val attachVoiceSub: String get() = when (this) { HINDI -> "ऑडियो रिकॉर्ड करें"; else -> "Record audio" }
+    val attachTitle: String get() = when (this) { HINDI -> "जोड़ें"; MARATHI -> "जोडा"; else -> "Attach" }
+    val attachPrivacyNote: String get() = when (this) { HINDI -> "फ़ाइलें आपके फ़ोन में ही रहती हैं — कभी अपलोड नहीं होतीं"; MARATHI -> "फायली तुमच्या फोनमध्येच राहतात — कधीही अपलोड होत नाहीत"; else -> "Files stay on your device — never uploaded" }
+    val attachCamera: String get() = when (this) { HINDI -> "कैमरा"; MARATHI -> "कॅमेरा"; else -> "Camera" }
+    val attachCameraSub: String get() = when (this) { HINDI -> "फ़ोटो लें"; MARATHI -> "फोटो काढा"; else -> "Take a photo" }
+    val attachPhoto: String get() = when (this) { HINDI -> "फ़ोटो"; MARATHI -> "फोटो"; else -> "Photo" }
+    val attachPhotoSub: String get() = when (this) { HINDI -> "गैलरी से"; MARATHI -> "गॅलरीमधून"; else -> "From gallery" }
+    val attachDocument: String get() = when (this) { HINDI -> "दस्तावेज़"; MARATHI -> "दस्तऐवज"; else -> "Document" }
+    val attachVoice: String get() = when (this) { HINDI -> "आवाज़ मेमो"; MARATHI -> "व्हॉइस मेमो"; else -> "Voice memo" }
+    val attachVoiceSub: String get() = when (this) { HINDI -> "ऑडियो रिकॉर्ड करें"; MARATHI -> "ऑडिओ रेकॉर्ड करा"; else -> "Record audio" }
 
     /** Chat top-bar subtitle while generating. */
     val thinkingText: String get() = when (this) {
