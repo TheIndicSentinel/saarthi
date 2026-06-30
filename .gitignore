@@ -15,6 +15,11 @@
 .externalNativeBuild
 .cxx
 local.properties
+# Signing keys / keystores — NEVER commit, anywhere in the tree. The upload
+# keystore lives only on your machine + CI secrets (KEYSTORE_BASE64). Losing it
+# is recoverable (reset upload key in Play Console); leaking it is not.
+*.jks
+*.keystore
 keystore/*.jks
 keystore/*.keystore
 
