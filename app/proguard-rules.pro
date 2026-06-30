@@ -100,3 +100,12 @@
 -keepattributes *Annotation*
 -keep class com.google.firebase.** { *; }
 -dontwarn com.google.firebase.**
+
+# ── Room (defensive) ───────────────────────────────────────────────────────
+# Room ships consumer-rules.pro that keeps its generated *_Impl + entities, so
+# this is belt-and-suspenders: a release-only Room failure (obfuscated @Entity
+# column or @Dao) corrupts memory/conversations silently. Keeping our db schema
+# package costs a few bytes and removes that whole class of prod-only bug.
+-keep class com.saarthi.core.memory.db.** { *; }
+-keep @androidx.room.Entity class * { *; }
+-keepclassmembers @androidx.room.Entity class * { <fields>; }

@@ -109,15 +109,20 @@ fun SettingsScreen(
         ) {
             ProfileCard()
 
-            // Saarthi Pro upsell — prominent, top of the list.
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.AutoAwesome, null) },
-                title = "Saarthi Pro",
-                subtitle = "Unlock documents, voice & memory · Founder ₹199",
-                tone = ChipTone.Marigold,
-                trailing = { ChevronRight() },
-                onClick = { onNavigate("pro") },
-            )
+            // Saarthi Pro upsell — prominent, top of the list. Hidden in v1:
+            // Pro ships off until Google Play Billing is wired (showing a
+            // purchase flow with no real billing is a Play rejection). Flip
+            // FeatureFlags.PRO_ENABLED when billing is integrated.
+            if (com.saarthi.core.i18n.FeatureFlags.PRO_ENABLED) {
+                SaarthiListRow(
+                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, null) },
+                    title = "Saarthi Pro",
+                    subtitle = "Unlock documents, voice & memory · Founder ₹199",
+                    tone = ChipTone.Marigold,
+                    trailing = { ChevronRight() },
+                    onClick = { onNavigate("pro") },
+                )
+            }
 
             SectionLabel(s.sectionAiModels)
             SaarthiListRow(

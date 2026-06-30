@@ -35,10 +35,18 @@ class EntitlementManager @Inject constructor(
     private val key = booleanPreferencesKey("pro_unlocked")
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    /** True when Saarthi Pro is unlocked on this device. Defaults to false. */
+    /**
+     * True when Saarthi Pro is unlocked on this device.
+     *
+     * While Pro is disabled for v1 (no Play Billing yet — see
+     * [FeatureFlags.PRO_ENABLED]) this reports `true` for everyone, so every
+     * feature gate reads "unlocked" and nothing is locked behind a missing
+     * purchase flow. When billing ships and the flag flips to `true`, this falls
+     * back to the persisted purchase state (default false until a verified unlock).
+     */
     val isPro: StateFlow<Boolean> = context.dataStore.data
-        .map { prefs -> prefs[key] ?: false }
-        .stateIn(scope, SharingStarted.Eagerly, false)
+        .map { prefs -> if (!FeatureFlags.PRO_ENABLED) true else (prefs[key] ?: false) }
+        .stateIn(scope, SharingStarted.Eagerly, !FeatureFlags.PRO_ENABLED)
 
     /**
      * Unlock or revoke Pro. Called by the local unlock now; by the Play
