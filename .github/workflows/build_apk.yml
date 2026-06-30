@@ -49,10 +49,14 @@ jobs:
       - name: Upload test report (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
+        # Never let a full artifact-storage quota abort the build/release job —
+        # the APK is also published as a Release asset below, which is the real
+        # deliverable. (Free the quota in repo → Actions → Storage when it fills.)
+        continue-on-error: true
         with:
           name: test-report
           path: "**/build/reports/tests/"
-          retention-days: 7
+          retention-days: 2
 
       # Android Lint — informational, NON-blocking. Surfaces correctness /
       # security / a11y / performance issues without failing the release
@@ -65,10 +69,14 @@ jobs:
       - name: Upload lint report
         if: always()
         uses: actions/upload-artifact@v4
+        # Never let a full artifact-storage quota abort the build/release job —
+        # the APK is also published as a Release asset below, which is the real
+        # deliverable. (Free the quota in repo → Actions → Storage when it fills.)
+        continue-on-error: true
         with:
           name: lint-report
           path: app/build/reports/lint-results-*.html
-          retention-days: 7
+          retention-days: 2
 
       - name: Decode keystore
         run: |
@@ -98,10 +106,14 @@ jobs:
       - name: Upload build log (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
+        # Never let a full artifact-storage quota abort the build/release job —
+        # the APK is also published as a Release asset below, which is the real
+        # deliverable. (Free the quota in repo → Actions → Storage when it fills.)
+        continue-on-error: true
         with:
           name: build-log
           path: /tmp/build.log
-          retention-days: 7
+          retention-days: 2
 
       # Short retention so APKs don't pile up and exhaust the account's
       # Actions storage quota (which silently blocks NEW runs from being
@@ -109,10 +121,14 @@ jobs:
       # the APK soon after the build; older ones auto-expire.
       - name: Upload APK
         uses: actions/upload-artifact@v4
+        # Never let a full artifact-storage quota abort the build/release job —
+        # the APK is also published as a Release asset below, which is the real
+        # deliverable. (Free the quota in repo → Actions → Storage when it fills.)
+        continue-on-error: true
         with:
           name: saarthi-release-apk
           path: app/build/outputs/apk/release/app-release.apk
-          retention-days: 7
+          retention-days: 2
 
       # ── Direct-download release (no unzip needed) ───────────────────────
       # GitHub *artifacts* are always wrapped in a .zip, which is awkward to

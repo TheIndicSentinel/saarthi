@@ -79,10 +79,14 @@ jobs:
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
+        # A full artifact-storage quota must never fail the release build itself
+        # (the .aab is on disk in the run regardless). Clear storage in
+        # repo → Actions → Storage if uploads start failing.
+        continue-on-error: true
         with:
           name: saarthi-release-aab
           path: app/build/outputs/bundle/release/*.aab
-          retention-days: 30
+          retention-days: 7
 
       # ── OPTIONAL: hands-off store publish ────────────────────────────────────
       # Uncomment once PLAY_SERVICE_ACCOUNT_JSON is set. Publishes to the
