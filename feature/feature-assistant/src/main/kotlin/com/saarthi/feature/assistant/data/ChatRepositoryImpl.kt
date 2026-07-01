@@ -1299,6 +1299,37 @@ class ChatRepositoryImpl @Inject constructor(
                 if (city.length in 2..40) out += "city" to city
             }
 
+        // ── Other Indian scripts — name only ─────────────────────────────────
+        // Name drives the home greeting, and it previously only worked for
+        // English/Hindi/Marathi — so a name stated in Telugu/Tamil/Bengali/
+        // Kannada/Gujarati/Punjabi/Malayalam/Odia was lost unless the model
+        // happened to emit a [SAARTHI_MEMORY] marker (small models often don't).
+        // These mirror the multilingual coverage already used for identity
+        // questions. High-precision: anchored on each language's "my name (is)"
+        // phrase; nameHead() trims trailing clause junk; length-capped.
+        if (out.none { it.first == "name" }) {
+            Regex(
+                "(?:నా\\s*పేరు|என்\\s*பெயர்|எனது\\s*பெயர்|আমার\\s*নাম|ನನ್ನ\\s*ಹೆಸರು|" +
+                    "મારુ?ં?\\s*નામ|ਮੇਰਾ\\s*ਨਾਮ|ਮੇਰਾ\\s*ਨਾਂ|എന്റെ\\s*പേര്|ମୋ\\s*ନାମ|ମୋର\\s*ନାମ)" +
+                    "\\s+([\\p{L}][\\p{L}\\s.'-]{0,38})",
+            ).find(msg)?.groupValues?.get(1)?.let { n ->
+                val name = nameHead(n)
+                if (name.length in 2..40) out += "name" to name
+            }
+        }
+        // Romanised equivalents of the same phrases — users frequently type
+        // their language in Latin script on a mobile keyboard.
+        if (out.none { it.first == "name" }) {
+            Regex(
+                "(?i)\\b(?:naa? peru|en(?:na|adhu)? peyar|amar naam|nanna hesaru|" +
+                    "nimma hesaru|maaru? naam|maru nam|mo(?:ra|r)? naam|ente peru?)" +
+                    "\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})",
+            ).find(msg)?.groupValues?.get(1)?.let { n ->
+                val name = nameHead(n)
+                if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
+            }
+        }
+
         // ── Transliterated Marathi (Latin script) ────────────────────────────
         // name: "majhe naav X (aahe)" / "maza nav X"
         Regex("(?i)\\b(?:majhe|majha|maza|mazha)\\s+naa?v\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})(?:\\s+aahe|\\s+ahe)?\\b")

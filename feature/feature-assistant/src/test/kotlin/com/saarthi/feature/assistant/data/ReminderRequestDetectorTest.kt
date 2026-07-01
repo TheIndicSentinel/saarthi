@@ -48,6 +48,23 @@ class ReminderRequestDetectorTest {
     }
 
     @Test
+    fun `accepts native-script reminder phrases across supported languages`() {
+        val real = listOf(
+            "నాకు 5 నిమిషాల్లో గుర్తు చేయి",     // Telugu
+            "எனக்கு நினைவூட்டு",                  // Tamil
+            "আমাকে মনে করিয়ে দাও",                // Bengali
+            "मला संध्याकाळी आठवण कर",             // Marathi
+            "ನನಗೆ ನೆನಪಿಸು",                       // Kannada
+            "મને યાદ કરાવ",                        // Gujarati
+            "ਮੈਨੂੰ ਯਾਦ ਕਰਾ ਦਿਓ",                  // Punjabi
+            "ମୋତେ ମନେ ପକାଅ",                       // Odia
+        )
+        real.forEach { msg ->
+            assertTrue("Should detect: \"$msg\"", ReminderRequestDetector.wasRequested(msg))
+        }
+    }
+
+    @Test
     fun `rejects casual messages with no reminder intent`() {
         // These must NOT schedule even if the model over-emits a marker.
         val casual = listOf(

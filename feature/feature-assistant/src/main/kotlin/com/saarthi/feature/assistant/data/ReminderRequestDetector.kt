@@ -49,7 +49,19 @@ object ReminderRequestDetector {
         "mujhe yaad kara",
         "याद दिला", "याद रख", "रिमाइंडर", "अलार्म",
         // Tamil / Telugu / Bengali / Marathi / Kannada / Gujarati / Punjabi / Odia
+        // — romanised
         "ninaivu padut", "gnabakam unchu", "mone koriye dao",
         "athavan karun", "nenapu ittuko", "yaad rakhjo",
+        "gurthu chey", "gurtu chey", "gnyapakam", "gnabhagam",
+        // native-script reminder / alarm verbs (parity with identity-question
+        // language coverage — a native-script reminder ask must also schedule)
+        "గుర్తు చేయ", "గుర్తు చేయి", "గుర్తుంచు",      // Telugu
+        "நினைவூட்டு", "நினைவுபடுத்து",                  // Tamil
+        "মনে করিয়ে", "মনে করাবে", "রিমাইন্ডার",         // Bengali
+        "आठवण कर", "आठवण ठेव", "स्मरण",                 // Marathi
+        "ನೆನಪಿಸು", "ನೆನಪು ಮಾಡು",                        // Kannada
+        "યાદ કરાવ", "યાદ અપાવ",                          // Gujarati
+        "ਯਾਦ ਕਰਾ", "ਚੇਤੇ ਕਰਾ",                          // Punjabi
+        "ମନେ ପକାଅ", "ମନେ ପକାଇ",                          // Odia
     )
 }
