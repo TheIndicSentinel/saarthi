@@ -1,26 +1,36 @@
 name: Build Saarthi APK
 
-# Builds and signs the release APK. The native llama.cpp bridge was
-# removed in v1.0.19 — no NDK / CMake / Vulkan / SVE-patch steps any
-# more, so this workflow is now ~3 minutes instead of ~12.
+# Builds an installable DEBUG APK for on-device testing on every push to main.
+#
+# Why debug (not release) here:
+#  • The release R8/minify step is memory-hungry — with the litertlm native
+#    libs + ML Kit + PdfBox it OOM-kills the 2-core runner mid-`minifyRelease`
+#    (exit 143), and it's the ~16-min long pole. A debug build skips R8 entirely
+#    → ~3–4 min, no OOM, rock-solid.
+#  • A debug APK is exactly what you want for TESTING: installable via adb, and
+#    it writes the public Downloads/saarthi_debug.log (PUBLIC_DEBUG_LOG) so you
+#    can read TTFT / backend / decodeTps off the device.
+#  • The SIGNED release .aab for the Play Store is built separately by
+#    release_aab.yml, triggered on a version tag (v*). Store builds don't run on
+#    every push — only when you cut a release.
 
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
 
+# Cancel an in-flight run when a newer commit is pushed — avoids two builds
+# racing for runners and the confusing "which run failed" situation.
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    # R8 minification of this app (litertlm native libs + ML Kit + PdfBox +
-    # Compose) is the long pole — ~16 min on a 2-core runner — on top of unit
-    # tests + lint + packaging. 25 min was too tight once PdfBox was added and
-    # the job hit the wall mid-assemble. 45 gives comfortable headroom.
-    timeout-minutes: 45
-    # Needed so the build can publish APKs as Release assets (raw, directly
-    # installable downloads — no artifact .zip wrapper to unpack on a phone).
+    timeout-minutes: 25
     permissions:
-      contents: write
+      contents: write   # publish the APK as a Release asset (raw download)
     steps:
       - uses: actions/checkout@v4
 
@@ -38,10 +48,10 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME"                       > local.properties
           echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}"   >> local.properties
 
+      # testDebugUnitTest only — `test` also builds+runs the RELEASE unit-test
+      # variant (a second full compile of all 8 modules) for zero extra
+      # coverage: our tests are variant-agnostic.
       - name: Run unit tests
-        # testDebugUnitTest only — `test` also builds+runs the RELEASE unit-test
-        # variant (a second full compile of all 8 modules) for zero extra
-        # coverage: our tests are variant-agnostic. Halves the test-phase time.
         run: |
           chmod +x gradlew
           ./gradlew testDebugUnitTest 2>&1 | tee /tmp/test.log
@@ -56,49 +66,17 @@ jobs:
       - name: Upload test report (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
-        # Never let a full artifact-storage quota abort the build/release job —
-        # the APK is also published as a Release asset below, which is the real
-        # deliverable. (Free the quota in repo → Actions → Storage when it fills.)
         continue-on-error: true
         with:
           name: test-report
           path: "**/build/reports/tests/"
           retention-days: 2
 
-      # Android Lint — informational, NON-blocking. Surfaces correctness /
-      # security / a11y / performance issues without failing the release
-      # pipeline on pre-existing findings. Review the uploaded HTML report and
-      # tighten over time; flip continue-on-error to false once it is clean.
-      - name: Run Android Lint (non-blocking)
-        continue-on-error: true
-        run: ./gradlew :app:lintRelease
-
-      - name: Upload lint report
-        if: always()
-        uses: actions/upload-artifact@v4
-        # Never let a full artifact-storage quota abort the build/release job —
-        # the APK is also published as a Release asset below, which is the real
-        # deliverable. (Free the quota in repo → Actions → Storage when it fills.)
-        continue-on-error: true
-        with:
-          name: lint-report
-          path: app/build/reports/lint-results-*.html
-          retention-days: 2
-
-      - name: Decode keystore
-        run: |
-          mkdir -p keystore
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore/saarthi-release.jks
-
-      - name: Build Release APK
-        env:
-          KEYSTORE_PATH: ${{ github.workspace }}/keystore/saarthi-release.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      # Debug APK — no R8, no keystore, no OOM. The artifact you install to test.
+      - name: Build Debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease --stacktrace 2>&1 | tee /tmp/build.log
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::group::Build failure summary (last 150 lines)"
@@ -109,49 +87,36 @@ jobs:
           fi
           exit $EXIT_CODE
 
-      # Build log only when something fails — keeps artifact storage small.
       - name: Upload build log (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
-        # Never let a full artifact-storage quota abort the build/release job —
-        # the APK is also published as a Release asset below, which is the real
-        # deliverable. (Free the quota in repo → Actions → Storage when it fills.)
         continue-on-error: true
         with:
           name: build-log
           path: /tmp/build.log
           retention-days: 2
 
-      # Short retention so APKs don't pile up and exhaust the account's
-      # Actions storage quota (which silently blocks NEW runs from being
-      # created on push — the symptom that prompted this change). Download
-      # the APK soon after the build; older ones auto-expire.
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
-        # Never let a full artifact-storage quota abort the build/release job —
-        # the APK is also published as a Release asset below, which is the real
-        # deliverable. (Free the quota in repo → Actions → Storage when it fills.)
         continue-on-error: true
         with:
-          name: saarthi-release-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          name: saarthi-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 2
 
       # ── Direct-download release (no unzip needed) ───────────────────────
-      # GitHub *artifacts* are always wrapped in a .zip, which is awkward to
-      # unpack on a phone. Publishing as a Release *asset* gives a raw APK
-      # URL you can open directly in a browser on your phone and install.
-      # Published to a single rolling "latest" pre-release so the newest build
-      # is always at <repo>/releases/latest — old assets are replaced each run.
+      # Publishes to a single rolling "latest" pre-release so the newest build
+      # is always at <repo>/releases/latest as raw Saarthi.apk — open it in the
+      # phone browser to install, or `adb install` it.
       - name: Publish APK to rolling "latest" release (raw download)
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp app/build/outputs/apk/release/app-release.apk Saarthi.apk
+          cp app/build/outputs/apk/debug/app-debug.apk Saarthi.apk
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest \
-            --title "Latest Saarthi build" \
-            --notes "Auto-built from ${{ github.sha }}. Download **Saarthi.apk** and open it on your phone to install." \
+            --title "Latest Saarthi build (debug/testable)" \
+            --notes "Auto-built from ${{ github.sha }}. Download **Saarthi.apk** and install it on your phone (adb install, or open in the phone browser). Debug build — writes Downloads/saarthi_debug.log for TTFT/perf inspection." \
             --prerelease \
             Saarthi.apk
