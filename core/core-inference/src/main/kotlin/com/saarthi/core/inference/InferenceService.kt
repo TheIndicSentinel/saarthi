@@ -202,10 +202,27 @@ class InferenceService : Service() {
         private fun startWithState(context: Context, state: NotificationState) {
             val intent = Intent(context, InferenceService::class.java)
                 .putExtra(EXTRA_STATE, state.name)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            // BEST-EFFORT. On Android 12+ startForegroundService() throws
+            // ForegroundServiceStartNotAllowedException when the app is in the
+            // background — e.g. the user left the app during a long (2.5 GB)
+            // model download and init fires on completion with the screen off.
+            // This service is ONLY a keep-alive + status notification; the model
+            // load and inference run on their own coroutines regardless. A
+            // blocked start must therefore NOT fail the load (it previously
+            // surfaced as "Model load failed: startForegroundService() not
+            // allowed due to mAllowStartForeground false"). Swallow it and go on.
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                DebugLogger.log(
+                    "SERVICE",
+                    "FGS start skipped (${e.javaClass.simpleName}: ${e.message}) — " +
+                        "continuing without keep-alive service",
+                )
             }
         }
 
