@@ -1053,6 +1053,44 @@ enum class SupportedLanguage(
         ODIA     -> "ସାରଥୀ ସ୍ମାରକ"
     }
 
+    /**
+     * Fallback reminder body, in THIS language. Used when the model-supplied
+     * reminder text is in a different script than the selected language (e.g.
+     * the model emitted a Hindi label during an English chat) — rather than
+     * show a jarring wrong-language notification, we show this clean localized
+     * line so the reminder always reads in the user's chosen language.
+     */
+    val reminderGenericBody: String get() = when (this) {
+        ENGLISH  -> "It's time for your reminder."
+        HINDI    -> "आपके रिमाइंडर का समय हो गया है।"
+        TAMIL    -> "உங்கள் நினைவூட்டலுக்கான நேரம் வந்துவிட்டது."
+        TELUGU   -> "మీ రిమైండర్ సమయం వచ్చింది."
+        BENGALI  -> "আপনার রিমাইন্ডারের সময় হয়েছে।"
+        MARATHI  -> "तुमच्या स्मरणपत्राची वेळ झाली आहे."
+        KANNADA  -> "ನಿಮ್ಮ ಜ್ಞಾಪನೆಯ ಸಮಯ ಬಂದಿದೆ."
+        GUJARATI -> "તમારા રિમાઇન્ડરનો સમય થઈ ગયો છે."
+        PUNJABI  -> "ਤੁਹਾਡੇ ਰਿਮਾਈਂਡਰ ਦਾ ਸਮਾਂ ਹੋ ਗਿਆ ਹੈ।"
+        ODIA     -> "ଆପଣଙ୍କ ସ୍ମାରକର ସମୟ ହୋଇଗଲା।"
+    }
+
+    /**
+     * True when [text]'s script matches this language — so a reminder body is
+     * only shown verbatim when it reads correctly for the selected language.
+     * English matches text with NO Indic-script characters (i.e. Latin);
+     * each Indic language matches its own Unicode block.
+     */
+    fun reminderTextMatchesLanguage(text: String): Boolean = when (this) {
+        ENGLISH  -> !Regex("[\\u0900-\\u0D7F]").containsMatchIn(text)
+        HINDI, MARATHI -> Regex("[\\u0900-\\u097F]").containsMatchIn(text)
+        BENGALI  -> Regex("[\\u0980-\\u09FF]").containsMatchIn(text)
+        PUNJABI  -> Regex("[\\u0A00-\\u0A7F]").containsMatchIn(text)
+        GUJARATI -> Regex("[\\u0A80-\\u0AFF]").containsMatchIn(text)
+        ODIA     -> Regex("[\\u0B00-\\u0B7F]").containsMatchIn(text)
+        TAMIL    -> Regex("[\\u0B80-\\u0BFF]").containsMatchIn(text)
+        TELUGU   -> Regex("[\\u0C00-\\u0C7F]").containsMatchIn(text)
+        KANNADA  -> Regex("[\\u0C80-\\u0CFF]").containsMatchIn(text)
+    }
+
     // ── Exact-alarm ("Alarms & reminders") rationale ─────────────────────────
     // Shown in-app BEFORE the Android system permission screen, which by itself
     // ("Allow setting alarms and reminders") reads as misleading — users don't

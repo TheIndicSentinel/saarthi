@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.util.Locale
@@ -36,6 +37,20 @@ class LanguageManager @Inject constructor(
     val selectedLanguage: StateFlow<SupportedLanguage> = context.dataStore.data
         .map { prefs -> SupportedLanguage.fromCode(prefs[LANGUAGE_KEY] ?: SupportedLanguage.HINDI.code) }
         .stateIn(scope, SharingStarted.Eagerly, SupportedLanguage.HINDI)
+
+    /**
+     * Read the selected language DIRECTLY from DataStore, awaiting the real
+     * stored value. [selectedLanguage] is a hot StateFlow seeded with a HINDI
+     * default, so `.value` returns HINDI in a COLD process (e.g. a
+     * BroadcastReceiver woken by an alarm) before the async DataStore read
+     * lands — which made reminder notifications appear in Hindi regardless of
+     * the user's actual selection. Callers that must be correct on first read
+     * in a fresh process (ReminderReceiver) use this instead.
+     */
+    suspend fun awaitLanguage(): SupportedLanguage =
+        SupportedLanguage.fromCode(
+            context.dataStore.data.first()[LANGUAGE_KEY] ?: SupportedLanguage.HINDI.code,
+        )
 
     suspend fun setLanguage(language: SupportedLanguage) {
         context.dataStore.edit { it[LANGUAGE_KEY] = language.code }

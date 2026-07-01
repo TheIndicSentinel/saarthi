@@ -16,6 +16,9 @@ import com.saarthi.core.i18n.DailyWisdomCatalog
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.feature.assistant.data.ReminderManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -48,11 +51,55 @@ class ReminderReceiver : BroadcastReceiver() {
     // ── Per-action handlers ──────────────────────────────────────────────
 
     private fun handleReminder(context: Context, intent: Intent) {
-        val lang = languageManager.selectedLanguage.value
-        val title = intent.getStringExtra(ReminderManager.EXTRA_TITLE) ?: lang.reminderNotificationTitle
-        val text  = intent.getStringExtra(ReminderManager.EXTRA_TEXT)  ?: return
-        val id    = intent.getIntExtra(ReminderManager.EXTRA_ID, System.currentTimeMillis().toInt())
-        post(context, id = id, title = title, text = text)
+        val raw = intent.getStringExtra(ReminderManager.EXTRA_TEXT)?.trim().orEmpty()
+        if (raw.isBlank()) return
+        val emoji = intent.getStringExtra(ReminderManager.EXTRA_EMOJI) ?: "🔔"
+        val id = intent.getIntExtra(ReminderManager.EXTRA_ID, System.currentTimeMillis().toInt())
+
+        // goAsync so we can read the REAL selected language from DataStore before
+        // posting. selectedLanguage.value would return the HINDI default in a
+        // cold receiver process — the cause of reminders showing Hindi text
+        // regardless of the user's selection.
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val lang = languageManager.awaitLanguage()
+                val title = "$emoji ${lang.reminderNotificationTitle}"
+                // Only show the model's text verbatim when its script matches the
+                // selected language; otherwise (e.g. a Hindi label from an English
+                // chat) show a clean localized line so the popup is always
+                // consistent with the chosen language.
+                val cleaned = cleanSubject(raw)
+                val body = if (cleaned.isNotBlank() && lang.reminderTextMatchesLanguage(cleaned)) {
+                    cleaned
+                } else {
+                    lang.reminderGenericBody
+                }
+                post(context, id = id, title = title, text = body)
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+
+    /**
+     * Strip trailing "reminder"/"alarm" framing the model tends to append so the
+     * body reads as a clean subject: "रात के खाने के लिए रिमाइंडर सेट है" →
+     * "रात के खाने के लिए"; "yoga practice reminder" → "yoga practice". Falls
+     * back to the original if stripping would leave it empty.
+     */
+    private fun cleanSubject(raw: String): String {
+        val stripped = raw.trim().trim('।', '.', ',', '!', '"', '\'')
+            .replace(
+                Regex(
+                    "(?i)\\s*(का|के लिए|एक मिनट का|for|to)?\\s*" +
+                        "(रिमाइंडर|reminder|अलार्म|alarm|स्मरणपत्र)\\s*" +
+                        "(सेट|set)?\\s*(है|से|hai)?\\s*[।.]?\\s*$",
+                ),
+                "",
+            )
+            .trim().trim('।', '.', ',').trim()
+        return stripped.ifBlank { raw.trim() }
     }
 
     private fun handleDailyWisdom(context: Context) {

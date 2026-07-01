@@ -23,7 +23,8 @@ class ReminderManager @Inject constructor(
     companion object {
         const val CHANNEL_ID = "saarthi_reminders"
         const val CHANNEL_NAME = "Saarthi Reminders"
-        const val EXTRA_TITLE = "reminder_title"
+        const val EXTRA_TITLE = "reminder_title"   // legacy; title is now built at fire time
+        const val EXTRA_EMOJI = "reminder_emoji"   // language-independent category emoji
         const val EXTRA_TEXT  = "reminder_text"
         const val EXTRA_ID    = "reminder_id"
         const val ACTION_REMINDER = "com.saarthi.app.REMINDER"
@@ -74,7 +75,13 @@ class ReminderManager @Inject constructor(
 
         val intent = Intent(ACTION_REMINDER).apply {
             setPackage(context.packageName)
-            putExtra(EXTRA_TITLE, emojiTitleFor(text))
+            // Store only the language-INDEPENDENT emoji + the raw text. The
+            // localized title and the script-checked body are assembled at fire
+            // time from the CURRENT selected language (see ReminderReceiver), so
+            // the notification always matches the user's language even if they
+            // switched it after scheduling, or the receiver runs in a cold
+            // process where a StateFlow would still read the HINDI default.
+            putExtra(EXTRA_EMOJI, emojiFor(text))
             putExtra(EXTRA_TEXT, text)
             putExtra(EXTRA_ID, id)
         }
@@ -127,7 +134,10 @@ class ReminderManager @Inject constructor(
     private fun canScheduleExact(am: AlarmManager): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
 
-    private fun emojiTitleFor(text: String): String {
+    /** Category emoji for a reminder subject — language-independent (matches
+     *  native keywords across all 10 Indian languages). The localized "Saarthi
+     *  Reminder" title is appended at fire time in the current language. */
+    private fun emojiFor(text: String): String {
         // text may be in any of the 10 supported Indian languages — match native keywords
         val t = text.lowercase()
         val emoji = when {
@@ -247,7 +257,7 @@ class ReminderManager @Inject constructor(
 
             else -> "🔔"
         }
-        return "$emoji ${languageManager.selectedLanguage.value.reminderNotificationTitle}"
+        return emoji
     }
 
     private fun String.containsAny(vararg keywords: String) = keywords.any { this.contains(it) }
