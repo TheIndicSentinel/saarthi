@@ -12,7 +12,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # R8 minification of this app (litertlm native libs + ML Kit + PdfBox +
+    # Compose) is the long pole — ~16 min on a 2-core runner — on top of unit
+    # tests + lint + packaging. 25 min was too tight once PdfBox was added and
+    # the job hit the wall mid-assemble. 45 gives comfortable headroom.
+    timeout-minutes: 45
     # Needed so the build can publish APKs as Release assets (raw, directly
     # installable downloads — no artifact .zip wrapper to unpack on a phone).
     permissions:
@@ -35,9 +39,12 @@ jobs:
           echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}"   >> local.properties
 
       - name: Run unit tests
+        # testDebugUnitTest only — `test` also builds+runs the RELEASE unit-test
+        # variant (a second full compile of all 8 modules) for zero extra
+        # coverage: our tests are variant-agnostic. Halves the test-phase time.
         run: |
           chmod +x gradlew
-          ./gradlew test 2>&1 | tee /tmp/test.log
+          ./gradlew testDebugUnitTest 2>&1 | tee /tmp/test.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::group::Test failure summary (last 80 lines)"

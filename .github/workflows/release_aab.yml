@@ -30,7 +30,9 @@ on:
 jobs:
   bundle:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # bundleRelease runs R8 (~16 min here) after tests — 30 min was too tight
+    # once PdfBox joined the dependency set. Match build_apk.yml's 45.
+    timeout-minutes: 45
     permissions:
       contents: write   # so the .aab can be attached to a GitHub Release too
     steps:
@@ -51,10 +53,12 @@ jobs:
           echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}" >> local.properties
 
       # Tests gate the release — never ship a red build to the store.
+      # testDebugUnitTest only: the release unit-test variant is a redundant
+      # full recompile for identical (variant-agnostic) tests.
       - name: Run unit tests
         run: |
           chmod +x gradlew
-          ./gradlew test --stacktrace
+          ./gradlew testDebugUnitTest --stacktrace
 
       - name: Decode upload keystore
         run: |
