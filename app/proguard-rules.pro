@@ -101,6 +101,18 @@
 -keep class com.google.firebase.** { *; }
 -dontwarn com.google.firebase.**
 
+# ── PdfBox-Android (PDF text-layer extraction) ─────────────────────────────
+# The TomRoush Android port references a handful of java.awt / java.beans /
+# javax.imageio desktop classes that don't exist on Android; they sit on code
+# paths we never hit (text extraction only). Silence the warnings so release
+# R8 doesn't abort, and keep the library's own classes (reflective font/parser
+# loading) intact.
+-keep class com.tom_roush.** { *; }
+-dontwarn com.tom_roush.**
+-dontwarn java.awt.**
+-dontwarn java.beans.**
+-dontwarn javax.imageio.**
+
 # ── Room (defensive) ───────────────────────────────────────────────────────
 # Room ships consumer-rules.pro that keeps its generated *_Impl + entities, so
 # this is belt-and-suspenders: a release-only Room failure (obfuscated @Entity
