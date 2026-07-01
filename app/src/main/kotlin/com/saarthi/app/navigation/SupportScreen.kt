@@ -79,7 +79,7 @@ fun SupportScreen(onBack: () -> Unit, language: com.saarthi.core.i18n.SupportedL
             SupportCard(
                 icon = { Icon(Icons.Outlined.Email, null, tint = SaarthiColors.Gold, modifier = Modifier.size(22.dp)) },
                 title = "Contact support",
-                body = "Questions about Saarthi Pro, refunds, or anything else. Your device details are added automatically so we can help faster.",
+                body = "Questions, feedback, or anything else. Your device details are added automatically so we can help faster.",
             ) {
                 Button(
                     onClick = { emailSupport("Saarthi — support") },
@@ -106,19 +106,24 @@ fun SupportScreen(onBack: () -> Unit, language: com.saarthi.core.i18n.SupportedL
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(SaarthiColors.Surface)
-                    .border(1.dp, SaarthiColors.Border, RoundedCornerShape(14.dp))
-                    .padding(14.dp),
-            ) {
-                Text(
-                    "Refunds: not happy with Saarthi Pro? Email us within 7 days of purchase and we'll sort it out. " +
-                        "Google Play purchases also follow Play's standard refund policy.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3, fontSize = 12.sp),
-                )
+            // Refund/purchase copy is shown ONLY when Saarthi Pro is live. In v1
+            // there is no billing (see FeatureFlags.PRO_ENABLED), so a refund
+            // policy would be misleading — hide it until Pro ships.
+            if (com.saarthi.core.i18n.FeatureFlags.PRO_ENABLED) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(SaarthiColors.Surface)
+                        .border(1.dp, SaarthiColors.Border, RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Text(
+                        "Refunds: not happy with Saarthi Pro? Email us within 7 days of purchase and we'll sort it out. " +
+                            "Google Play purchases also follow Play's standard refund policy.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3, fontSize = 12.sp),
+                    )
+                }
             }
         }
     }

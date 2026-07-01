@@ -84,6 +84,7 @@ fun SettingsScreen(
     themeViewModel: com.saarthi.app.ThemeViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val s = currentLanguage.settings
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showLangPicker by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
@@ -254,11 +255,46 @@ fun SettingsScreen(
                 subtitle = s.rateSaarthiSub,
                 tone = ChipTone.Rose,
                 trailing = { ChevronRight() },
+                // Open the Play Store listing (in-app Play if installed, else web).
+                onClick = {
+                    val pkg = context.packageName
+                    val market = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("market://details?id=$pkg"),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { context.startActivity(market) }.onFailure {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://play.google.com/store/apps/details?id=$pkg"),
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    }
+                },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Share, null) },
                 title = s.shareFriends,
                 trailing = { ChevronRight() },
+                // System share sheet with the Play Store link.
+                onClick = {
+                    val pkg = context.packageName
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(
+                            android.content.Intent.EXTRA_TEXT,
+                            "${currentLanguage.shareAppMessage}\nhttps://play.google.com/store/apps/details?id=$pkg",
+                        )
+                    }
+                    runCatching {
+                        context.startActivity(
+                            android.content.Intent.createChooser(send, null)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                },
             )
 
             Spacer(Modifier.height(20.dp))

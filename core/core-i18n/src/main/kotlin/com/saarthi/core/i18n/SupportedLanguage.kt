@@ -420,6 +420,12 @@ enum class SupportedLanguage(
     val proActive: String get() = when (this) { HINDI -> "Saarthi Pro सक्रिय है"; MARATHI -> "Saarthi Pro सक्रिय आहे"; else -> "Saarthi Pro is active" }
     val unlockBeta: String get() = when (this) { HINDI -> "अनलॉक करें (बीटा)"; MARATHI -> "अनलॉक करा (बीटा)"; else -> "Unlock (beta)" }
     val restorePurchase: String get() = when (this) { HINDI -> "खरीद बहाल करें"; MARATHI -> "खरेदी पुनर्संचयित करा"; else -> "Restore purchase" }
+    /** Share-sheet message when the user shares the app (Play link is appended in code). */
+    val shareAppMessage: String get() = when (this) {
+        HINDI   -> "सारथी — भारत के लिए बना 100% ऑफ़लाइन AI असिस्टेंट। मुफ़्त इस्तेमाल करें:"
+        MARATHI -> "सारथी — भारतासाठी बनवलेला 100% ऑफलाइन AI सहाय्यक. मोफत वापरा:"
+        else    -> "Saarthi — a free, 100% offline AI assistant for India. Try it:"
+    }
 
     // ── Attachment bottom sheet ─────────────────────────────────────────────
     val attachTitle: String get() = when (this) { HINDI -> "जोड़ें"; MARATHI -> "जोडा"; else -> "Attach" }
