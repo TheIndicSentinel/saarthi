@@ -1193,11 +1193,26 @@ class LiteRTInferenceEngine @Inject constructor(
                 // was already emitted stays visible, the loop is cut short.
                 val accumulated = StringBuilder()
                 var repetitionStopFired = false
+                // TTFT (time-to-first-token) ≈ prompt PREFILL cost + first decode
+                // step — the dominant "why does it feel slow" number, and the one
+                // that grows with prompt length every turn on the recycled-
+                // conversation architecture. Isolated here so field logs show
+                // prefill separately from decode throughput (tps), per device/
+                // backend. −1 until the first token arrives.
+                var ttftMs = -1L
 
                 conversation.sendMessageAsync(prompt, object : MessageCallback {
                     override fun onMessage(message: Message) {
                         val cleaned = message.toString().filterSpecialTokens()
                         if (cleaned.isNotEmpty()) {
+                            if (ttftMs < 0L) {
+                                ttftMs = System.currentTimeMillis() - genStartTimeMs
+                                DebugLogger.log(
+                                    "LITERT",
+                                    "[GEN] first token — ttft=${ttftMs}ms (prefill+1st decode)  " +
+                                        "promptChars=${prompt.length}  backend=${backendLabel()}",
+                                )
+                            }
                             accumulated.append(cleaned)
                             trySend(cleaned)
                             tokenCount++
@@ -1245,7 +1260,17 @@ class LiteRTInferenceEngine @Inject constructor(
                         markGenerationEnded()
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                         val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
-                        DebugLogger.log("LITERT", "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}  conv=recycled")
+                        // Decode-only tps excludes the prefill wait, so it reflects
+                        // the raw generation speed of the backend (GPU vs CPU) — the
+                        // number to compare across devices once TTFT is separated out.
+                        val decodeMs = if (ttftMs >= 0) elapsedMs - ttftMs else elapsedMs
+                        val decodeTps = if (decodeMs > 0 && tokenCount > 1) (tokenCount - 1) * 1000f / decodeMs else tps
+                        DebugLogger.log(
+                            "LITERT",
+                            "Stream done  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  ttft=${ttftMs}ms  " +
+                                "tps=${"%.1f".format(tps)}  decodeTps=${"%.1f".format(decodeTps)}  " +
+                                "backend=${backendLabel()}  conv=recycled",
+                        )
                         // Drain BOTH deferred-close handles. Previously only
                         // closingEngine was closed here, so a closingConversation
                         // saved during a memory-pressure deferred close leaked until
