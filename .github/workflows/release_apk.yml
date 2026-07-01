@@ -82,6 +82,16 @@ jobs:
           path: /tmp/build.log
           retention-days: 2
 
+      # Downloadable Actions artifact — appears in the run's "Artifacts" section
+      # (same as the debug build), in addition to the Releases-page publish below.
+      - name: Upload release APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saarthi-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 5
+
       - name: Publish release APK to rolling "latest-release"
         if: success()
         env:
