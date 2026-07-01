@@ -12,8 +12,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
@@ -21,6 +26,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.saarthi.app.navigation.SaarthiNavHost
+import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.ui.theme.SaarthiTheme
 import com.saarthi.core.ui.theme.ThemeMode
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
@@ -33,6 +39,14 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var onboardingRepository: OnboardingRepository
+    @Inject lateinit var languageManager: LanguageManager
+
+    /**
+     * Drives the in-app exact-alarm rationale dialog. Set true (once, after
+     * onboarding, only if the permission is missing) so we can explain WHY
+     * before Android's bare "Alarms & reminders" system screen appears.
+     */
+    private var showExactAlarmRationale by mutableStateOf(false)
 
     /**
      * Android 13+ (API 33+) requires runtime grant of POST_NOTIFICATIONS
@@ -88,6 +102,26 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 SaarthiNavHost()
+
+                if (showExactAlarmRationale) {
+                    val lang by languageManager.selectedLanguage.collectAsStateWithLifecycle()
+                    AlertDialog(
+                        onDismissRequest = { showExactAlarmRationale = false },
+                        title = { Text(lang.remindersPermTitle) },
+                        text = { Text(lang.remindersPermBody) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showExactAlarmRationale = false
+                                launchExactAlarmSettings()
+                            }) { Text(lang.remindersPermContinue) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showExactAlarmRationale = false }) {
+                                Text(lang.remindersPermLater)
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -115,17 +149,25 @@ class MainActivity : ComponentActivity() {
             if (prefs.getBoolean(KEY_EXACT_ALARM_ASKED, false)) return@launch
             val am = getSystemService(AlarmManager::class.java) ?: return@launch
             if (am.canScheduleExactAlarms()) return@launch
-            // Mark asked first — we only ever send the user here once, even if
-            // the launch below fails or they back out without granting.
+            // Mark asked first — we only ever prompt here once, even if the user
+            // dismisses the rationale or backs out without granting.
             prefs.edit().putBoolean(KEY_EXACT_ALARM_ASKED, true).apply()
-            runCatching {
-                exactAlarmLauncher.launch(
-                    Intent(
-                        Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                        Uri.fromParts("package", packageName, null),
-                    ),
-                )
-            }
+            // Show the in-app rationale; the system screen is launched only if
+            // the user taps "Continue" (see the dialog in onCreate).
+            showExactAlarmRationale = true
+        }
+    }
+
+    /** Open Android's "Alarms & reminders" system screen for this app. */
+    private fun launchExactAlarmSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        runCatching {
+            exactAlarmLauncher.launch(
+                Intent(
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.fromParts("package", packageName, null),
+                ),
+            )
         }
     }
 
