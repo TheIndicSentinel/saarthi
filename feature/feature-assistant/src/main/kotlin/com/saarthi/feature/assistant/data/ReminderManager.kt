@@ -25,6 +25,7 @@ class ReminderManager @Inject constructor(
         const val CHANNEL_NAME = "Saarthi Reminders"
         const val EXTRA_TITLE = "reminder_title"   // legacy; title is now built at fire time
         const val EXTRA_EMOJI = "reminder_emoji"   // language-independent category emoji
+        const val EXTRA_LANG  = "reminder_lang"    // language CODE selected when the reminder was created
         const val EXTRA_TEXT  = "reminder_text"
         const val EXTRA_ID    = "reminder_id"
         const val ACTION_REMINDER = "com.saarthi.app.REMINDER"
@@ -75,12 +76,12 @@ class ReminderManager @Inject constructor(
 
         val intent = Intent(ACTION_REMINDER).apply {
             setPackage(context.packageName)
-            // Store only the language-INDEPENDENT emoji + the raw text. The
-            // localized title and the script-checked body are assembled at fire
-            // time from the CURRENT selected language (see ReminderReceiver), so
-            // the notification always matches the user's language even if they
-            // switched it after scheduling, or the receiver runs in a cold
-            // process where a StateFlow would still read the HINDI default.
+            // Capture the language the user had selected WHEN they created the
+            // reminder (the app is in the foreground here, so this read is
+            // reliable — unlike a cold BroadcastReceiver at fire time). The
+            // notification title is localized to THIS language at fire time so
+            // it matches the reminder text the model produced in that language.
+            putExtra(EXTRA_LANG, languageManager.selectedLanguage.value.code)
             putExtra(EXTRA_EMOJI, emojiFor(text))
             putExtra(EXTRA_TEXT, text)
             putExtra(EXTRA_ID, id)
