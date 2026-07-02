@@ -249,7 +249,8 @@ fun AssistantScreen(
     }
     val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
 
-    // Request notification permission on Android 13+ so reminders can fire
+    // Request notification permission on Android 13+ for the daily-wisdom card
+    // and model-download progress notifications.
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
         val notifPermission = rememberPermissionState(Manifest.permission.POST_NOTIFICATIONS)
         LaunchedEffect(Unit) {
@@ -417,45 +418,6 @@ fun AssistantScreen(
                     }
                 }
 
-                // Reminder confirmation chip — slides in when a reminder is
-                // scheduled, auto-dismisses after 5 s via the ViewModel.
-                AnimatedVisibility(
-                    visible = uiState.scheduledReminder != null,
-                    enter = fadeIn() + androidx.compose.animation.slideInVertically { it },
-                    exit = fadeOut() + androidx.compose.animation.slideOutVertically { it },
-                ) {
-                    uiState.scheduledReminder?.let { reminder ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = androidx.compose.ui.Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(SaarthiColors.Surface)
-                                .border(1.dp, SaarthiColors.MarigoldBd, RoundedCornerShape(20.dp))
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                        ) {
-                            Text("⏰", fontSize = 16.sp)
-                            Spacer(androidx.compose.ui.Modifier.width(8.dp))
-                            Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
-                                Text(
-                                    text = reminder.text,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = SaarthiColors.TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text = "Reminder set ${reminder.timeLabel}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = SaarthiColors.TextSecondary,
-                                )
-                            }
-                        }
-                    }
-                }
-
                 ChatInputBar(
                     inputText = uiState.inputText,
                     onInputChange = viewModel::onInputChange,
@@ -582,8 +544,7 @@ fun AssistantScreen(
             text = {
                 Text(
                     "Android may pause Saarthi to save battery. Letting the app skip battery " +
-                        "optimization keeps long answers from being cut off mid-reply, and makes " +
-                        "your reminders fire on time instead of being delayed.",
+                        "optimization keeps long answers from being cut off mid-reply.",
                     color = SaarthiColors.TextSecondary,
                 )
             },

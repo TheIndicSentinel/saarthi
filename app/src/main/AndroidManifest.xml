@@ -12,18 +12,12 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- File attachments — legacy (Android ≤ 12) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <!-- Push notifications (Android 13+) -->
+    <!-- Push notifications (Android 13+) — used by the daily-wisdom card and
+         the model-download progress notification. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Exact alarms for user-set reminders (Android 12+). Justification:
-         Saarthi schedules reminders the USER explicitly asks for ("remind me at
-         6pm") and the 8 AM daily-wisdom alarm; these must fire at the exact
-         requested minute, not be batched by Doze. Required for the Play Store
-         "Alarms & reminders" policy declaration form (use-exact-alarm category:
-         scheduled user reminder). The runtime path degrades gracefully to an
-         inexact alarm when the user has not granted the permission
-         (see ReminderManager.scheduleAt → canScheduleExactAlarms). -->
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- Keep alarms alive through Doze mode -->
+    <!-- Keep the daily-wisdom alarm alive through Doze mode. (No exact-alarm
+         permission: the reminder feature was removed; the daily 8 AM wisdom
+         alarm uses an inexact Doze-friendly alarm.) -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Re-arm the daily wisdom alarm after device reboot (cleared by the OS). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -104,7 +98,6 @@
             android:name=".ReminderReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.saarthi.app.REMINDER" />
                 <action android:name="com.saarthi.app.DAILY_WISDOM" />
             </intent-filter>
         </receiver>

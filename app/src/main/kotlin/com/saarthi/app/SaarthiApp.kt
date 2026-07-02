@@ -42,7 +42,9 @@ class SaarthiApp : Application() {
         // Samsung OneUI even though the process is gone).
         InferenceService.cancelStaleNotification(this)
         installCrashLogger()
-        // Ensures the notification channel exists before any reminder fires
+        // Ensure the notification channel exists before the daily-wisdom card
+        // posts to it. (The reminder feature was removed; this channel now
+        // carries only the daily wisdom + general app notifications.)
         reminderManager.createNotificationChannel()
         // Re-arm the daily wisdom alarm if the user has it on. Idempotent:
         // setExactAndAllowWhileIdle with the same request code just replaces

@@ -12,7 +12,6 @@ import com.saarthi.feature.assistant.data.FileContentExtractor
 import com.saarthi.feature.assistant.data.TtsManager
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.ChatRepository
-import com.saarthi.feature.assistant.domain.ScheduledReminderInfo
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -69,7 +68,6 @@ class AssistantViewModelTest {
     // Mutable flows controlled by individual tests
     private val isReadyFlow = MutableStateFlow(false)
     private val activeModelNameFlow = MutableStateFlow<String?>(null)
-    private val reminderFlow = MutableSharedFlow<ScheduledReminderInfo?>()
 
     @Before
     fun setUp() {
@@ -78,7 +76,6 @@ class AssistantViewModelTest {
         every { mockChatRepository.getTokensPerSecond() } returns flowOf(0f)
         every { mockChatRepository.getSessions() } returns flowOf(emptyList())
         every { mockChatRepository.getCurrentSessionId() } returns flowOf("default")
-        every { mockChatRepository.getLastReminder() } returns reminderFlow
         every { mockInferenceEngine.isReady } returns false
         every { mockInferenceEngine.isReadyFlow } returns isReadyFlow
         every { mockInferenceEngine.activeModelNameFlow } returns activeModelNameFlow

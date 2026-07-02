@@ -21,8 +21,8 @@ class ReminderManager @Inject constructor(
     private val languageManager: LanguageManager,
 ) {
     companion object {
-        const val CHANNEL_ID = "saarthi_reminders"
-        const val CHANNEL_NAME = "Saarthi Reminders"
+        const val CHANNEL_ID = "saarthi_reminders"   // id kept stable to avoid orphaning
+        const val CHANNEL_NAME = "Saarthi"           // carries daily wisdom now (reminders removed)
         const val EXTRA_TITLE = "reminder_title"   // legacy; title is now built at fire time
         const val EXTRA_EMOJI = "reminder_emoji"   // language-independent category emoji
         const val EXTRA_LANG  = "reminder_lang"    // language CODE selected when the reminder was created
@@ -42,7 +42,7 @@ class ReminderManager @Inject constructor(
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "Scheduled reminders from Saarthi"
+                description = "Daily wisdom and notifications from Saarthi"
                 enableVibration(true)
             }
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

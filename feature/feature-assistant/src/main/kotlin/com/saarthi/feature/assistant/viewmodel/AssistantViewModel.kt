@@ -65,8 +65,6 @@ data class AssistantUiState(
     val showDrawer: Boolean = false,
     val isSearchMode: Boolean = false,
     val searchQuery: String = "",
-    /** Non-null while the reminder confirmation chip is visible. */
-    val scheduledReminder: com.saarthi.feature.assistant.domain.ScheduledReminderInfo? = null,
 )
 
 @HiltViewModel
@@ -142,18 +140,6 @@ class AssistantViewModel @Inject constructor(
     init {
         chatRepository.getTokensPerSecond()
             .onEach { tps -> _uiState.update { it.copy(tokensPerSecond = tps) } }
-            .launchIn(viewModelScope)
-
-        // Show a confirmation chip for 5 seconds whenever a reminder is set,
-        // then auto-dismiss. The chip is the only in-app feedback the user
-        // gets — without it the scheduling is completely silent.
-        chatRepository.getLastReminder()
-            .filterNotNull()
-            .onEach { reminder ->
-                _uiState.update { it.copy(scheduledReminder = reminder) }
-                kotlinx.coroutines.delay(5_000)
-                _uiState.update { if (it.scheduledReminder == reminder) it.copy(scheduledReminder = null) else it }
-            }
             .launchIn(viewModelScope)
 
         // Push-based isReady observation via StateFlow — no polling, no wakeup cost.

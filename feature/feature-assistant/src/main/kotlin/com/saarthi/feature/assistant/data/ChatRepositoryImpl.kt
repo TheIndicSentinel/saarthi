@@ -95,7 +95,6 @@ class ChatRepositoryImpl @Inject constructor(
     private val memoryRepository: MemoryRepository,
     private val languageManager: LanguageManager,
     private val inferenceEngine: InferenceEngine,
-    private val reminderManager: ReminderManager,
     private val deviceProfiler: DeviceProfiler,
     private val systemPromptProvider: SystemPromptProvider,
     private val responseStyleManager: com.saarthi.core.i18n.ResponseStyleManager,
@@ -108,12 +107,6 @@ class ChatRepositoryImpl @Inject constructor(
     private val _tokensPerSecond = MutableStateFlow(0f)
     private val _currentSessionId = MutableStateFlow("default")
 
-    // ── Reminder confirmation ────────────────────────────────────────────────
-    // Exposed to the UI so a confirmation chip can appear immediately after
-    // the model schedules a reminder — currently the scheduling is silent and
-    // the user has no in-app feedback that a notification was set.
-    private val _lastReminder = kotlinx.coroutines.flow.MutableStateFlow<com.saarthi.feature.assistant.domain.ScheduledReminderInfo?>(null)
-    override fun getLastReminder(): kotlinx.coroutines.flow.Flow<com.saarthi.feature.assistant.domain.ScheduledReminderInfo?> = _lastReminder
 
     // ── RAG persistence ──────────────────────────────────────────────────────
     // Document chunks now live in Room (`rag_chunks`) via [RagDocumentRepository].
@@ -401,48 +394,10 @@ class ChatRepositoryImpl @Inject constructor(
                         scope.launch { persistMemoryFact(sessionId, k, v) }
                     }
 
-                    // Defensive reminder gate. The system prompt tells the model to
-                    // emit reminder markers ONLY when the user explicitly asked, but
-                    // Gemma 4 at temperature=1.0 still over-emits — it has fired
-                    // markers on ordinary chat with no reminder intent. We refuse to
-                    // schedule unless the user's most recent message actually shows
-                    // reminder intent (see ReminderRequestDetector).
-                    if (parsed.reminders.isNotEmpty()) {
-                        if (userAskedForReminder(userMessage)) {
-                            parsed.reminders.forEach { marker ->
-                                val text = marker.text.trim()
-                                when {
-                                    marker.delayMinutes != null -> {
-                                        reminderManager.scheduleByDelay(text, marker.delayMinutes)
-                                        val label = when {
-                                            marker.delayMinutes < 60 -> "in ${marker.delayMinutes} min"
-                                            marker.delayMinutes % 60 == 0 -> "in ${marker.delayMinutes / 60}h"
-                                            else -> "in ${marker.delayMinutes / 60}h ${marker.delayMinutes % 60}min"
-                                        }
-                                        _lastReminder.value = com.saarthi.feature.assistant.domain.ScheduledReminderInfo(text, label)
-                                    }
-                                    marker.time != null -> {
-                                        val t = marker.time.trim()
-                                        reminderManager.scheduleReminder(text, t)
-                                        // Convert "HH:MM" → "at H:MM AM/PM" for display
-                                        val label = runCatching {
-                                            val parts = t.split(":")
-                                            val h = parts[0].toInt(); val m = parts[1].toInt()
-                                            val amPm = if (h < 12) "AM" else "PM"
-                                            val h12 = when { h == 0 -> 12; h > 12 -> h - 12; else -> h }
-                                            "at $h12:${m.toString().padStart(2,'0')} $amPm"
-                                        }.getOrDefault("at $t")
-                                        _lastReminder.value = com.saarthi.feature.assistant.domain.ScheduledReminderInfo(text, label)
-                                    }
-                                }
-                            }
-                        } else {
-                            DebugLogger.log(
-                                "REMINDER",
-                                "Dropping ${parsed.reminders.size} reminder marker(s) — user did not request one (msg=\"${userMessage.take(60)}\")"
-                            )
-                        }
-                    }
+                    // Reminder feature REMOVED. Any [SAARTHI_REMINDER] the model
+                    // still emits is parsed only so it can be stripped from the
+                    // visible reply (see ResponseMarkerParser) — it is never
+                    // scheduled. Nothing is done with parsed.reminders here.
                 }
                 .collect {}
         }
@@ -1460,16 +1415,6 @@ class ChatRepositoryImpl @Inject constructor(
 
         return out
     }
-
-    /**
-     * True when the user's message contains an explicit ask for a reminder /
-     * alert / alarm. Runtime gate before scheduling, so an over-eager model
-     * can't fire a notification for a casual topic. Delegates to the pure,
-     * unit-tested [ReminderRequestDetector] (see it for the detection rule and
-     * why it was broadened — the old narrow list dropped real requests).
-     */
-    private fun userAskedForReminder(userMessage: String): Boolean =
-        ReminderRequestDetector.wasRequested(userMessage)
 
     /**
      * True when the user is asking who/what Saarthi is ("who are you",

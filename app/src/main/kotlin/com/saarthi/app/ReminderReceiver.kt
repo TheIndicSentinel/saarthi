@@ -14,7 +14,6 @@ import androidx.core.app.NotificationManagerCompat
 import com.saarthi.app.wisdom.WisdomNotificationScheduler
 import com.saarthi.core.i18n.DailyWisdomCatalog
 import com.saarthi.core.i18n.LanguageManager
-import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.feature.assistant.data.ReminderManager
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -41,30 +40,12 @@ class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            ReminderManager.ACTION_REMINDER -> handleReminder(context, intent)
+            // Reminder feature removed — only the daily-wisdom card remains.
             WisdomNotificationScheduler.ACTION_DAILY_WISDOM -> handleDailyWisdom(context)
         }
     }
 
     // ── Per-action handlers ──────────────────────────────────────────────
-
-    private fun handleReminder(context: Context, intent: Intent) {
-        val text = intent.getStringExtra(ReminderManager.EXTRA_TEXT)?.trim().orEmpty()
-        if (text.isBlank()) return
-        val emoji = intent.getStringExtra(ReminderManager.EXTRA_EMOJI) ?: "🔔"
-        val id = intent.getIntExtra(ReminderManager.EXTRA_ID, System.currentTimeMillis().toInt())
-
-        // Localize the title to the language the reminder was CREATED in
-        // (stored in the alarm intent — reliable even in a cold receiver
-        // process, unlike selectedLanguage.value which defaults to HINDI before
-        // DataStore loads). The BODY is the specific subject the user asked for,
-        // shown verbatim — never a generic "it's time" placeholder.
-        val lang = intent.getStringExtra(ReminderManager.EXTRA_LANG)
-            ?.let { SupportedLanguage.fromCode(it) }
-            ?: languageManager.selectedLanguage.value
-        val title = "$emoji ${lang.reminderNotificationTitle}"
-        post(context, id = id, title = title, text = text)
-    }
 
     private fun handleDailyWisdom(context: Context) {
         val lang = languageManager.selectedLanguage.value

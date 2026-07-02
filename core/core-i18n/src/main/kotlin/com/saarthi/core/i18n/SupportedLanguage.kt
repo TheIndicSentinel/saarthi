@@ -1053,46 +1053,6 @@ enum class SupportedLanguage(
         ODIA     -> "ସାରଥୀ ସ୍ମାରକ"
     }
 
-    // ── Exact-alarm ("Alarms & reminders") rationale ─────────────────────────
-    // Shown in-app BEFORE the Android system permission screen, which by itself
-    // ("Allow setting alarms and reminders") reads as misleading — users don't
-    // know why a chat assistant wants it. This explains it's for delivering
-    // their reminders on time. The system screen's own copy cannot be reworded.
-    val remindersPermTitle: String get() = when (this) {
-        ENGLISH  -> "Deliver reminders on time"
-        HINDI    -> "समय पर रिमाइंडर पाएँ"
-        TAMIL    -> "நினைவூட்டல்களை சரியான நேரத்தில் பெறுங்கள்"
-        TELUGU   -> "సమయానికి రిమైండర్‌లు పొందండి"
-        BENGALI  -> "সময়মতো রিমাইন্ডার পান"
-        MARATHI  -> "वेळेवर स्मरणपत्रे मिळवा"
-        KANNADA  -> "ಸಮಯಕ್ಕೆ ಸರಿಯಾಗಿ ಜ್ಞಾಪನೆಗಳನ್ನು ಪಡೆಯಿರಿ"
-        GUJARATI -> "સમયસર રિમાઇન્ડર મેળવો"
-        PUNJABI  -> "ਸਮੇਂ ਸਿਰ ਰਿਮਾਈਂਡਰ ਪ੍ਰਾਪਤ ਕਰੋ"
-        ODIA     -> "ସମୟରେ ସ୍ମାରକ ପାଆନ୍ତୁ"
-    }
-    val remindersPermBody: String get() = when (this) {
-        ENGLISH  -> "For reminders to alert you at the exact time, Saarthi needs the “Alarms & reminders” permission. Turn it on for Saarthi on the next screen. You can also do this later."
-        HINDI    -> "रिमाइंडर ठीक समय पर मिलें, इसके लिए सारथी को “अलार्म और रिमाइंडर” अनुमति चाहिए। अगली स्क्रीन पर इसे सारथी के लिए चालू करें। आप इसे बाद में भी कर सकते हैं।"
-        TAMIL    -> "நினைவூட்டல்கள் சரியான நேரத்தில் வர, சாரதிக்கு “அலாரம்கள் & நினைவூட்டல்கள்” அனுமதி தேவை. அடுத்த திரையில் அதை சாரதிக்கு இயக்கவும். இதைப் பின்னரும் செய்யலாம்."
-        TELUGU   -> "రిమైండర్‌లు సరిగ్గా సమయానికి రావాలంటే సారథికి “అలారంలు & రిమైండర్‌లు” అనుమతి కావాలి. తదుపరి స్క్రీన్‌లో దాన్ని సారథి కోసం ఆన్ చేయండి. దీన్ని తర్వాత కూడా చేయవచ్చు."
-        BENGALI  -> "রিমাইন্ডার ঠিক সময়ে পেতে সারথির “অ্যালার্ম ও রিমাইন্ডার” অনুমতি প্রয়োজন। পরের স্ক্রিনে এটি সারথির জন্য চালু করুন। আপনি এটি পরেও করতে পারেন।"
-        MARATHI  -> "स्मरणपत्रे अचूक वेळी मिळण्यासाठी सारथीला “अलार्म आणि स्मरणपत्रे” परवानगी हवी आहे. पुढील स्क्रीनवर ती सारथीसाठी चालू करा. तुम्ही हे नंतरही करू शकता."
-        KANNADA  -> "ಜ್ಞಾಪನೆಗಳು ಸರಿಯಾದ ಸಮಯಕ್ಕೆ ಬರಲು ಸಾರಥಿಗೆ “ಅಲಾರಂಗಳು ಮತ್ತು ಜ್ಞಾಪನೆಗಳು” ಅನುಮತಿ ಬೇಕು. ಮುಂದಿನ ಪರದೆಯಲ್ಲಿ ಅದನ್ನು ಸಾರಥಿಗಾಗಿ ಆನ್ ಮಾಡಿ. ಇದನ್ನು ನಂತರವೂ ಮಾಡಬಹುದು."
-        GUJARATI -> "રિમાઇન્ડર બરાબર સમયે મળે તે માટે સારથીને “અલાર્મ અને રિમાઇન્ડર” પરવાનગી જોઈએ. આગલી સ્ક્રીન પર તેને સારથી માટે ચાલુ કરો. તમે આ પછીથી પણ કરી શકો છો."
-        PUNJABI  -> "ਰਿਮਾਈਂਡਰ ਸਹੀ ਸਮੇਂ 'ਤੇ ਮਿਲਣ ਲਈ ਸਾਰਥੀ ਨੂੰ “ਅਲਾਰਮ ਅਤੇ ਰਿਮਾਈਂਡਰ” ਇਜਾਜ਼ਤ ਚਾਹੀਦੀ ਹੈ। ਅਗਲੀ ਸਕ੍ਰੀਨ 'ਤੇ ਇਸਨੂੰ ਸਾਰਥੀ ਲਈ ਚਾਲੂ ਕਰੋ। ਤੁਸੀਂ ਇਹ ਬਾਅਦ ਵਿੱਚ ਵੀ ਕਰ ਸਕਦੇ ਹੋ।"
-        ODIA     -> "ସ୍ମାରକ ଠିକ୍ ସମୟରେ ପାଇବା ପାଇଁ ସାରଥୀକୁ “ଆଲାର୍ମ ଓ ସ୍ମାରକ” ଅନୁମତି ଦରକାର। ପରବର୍ତ୍ତୀ ସ୍କ୍ରିନ୍‌ରେ ଏହାକୁ ସାରଥୀ ପାଇଁ ଚାଲୁ କରନ୍ତୁ। ଆପଣ ଏହା ପରେ ମଧ୍ୟ କରିପାରିବେ।"
-    }
-    val remindersPermContinue: String get() = when (this) {
-        ENGLISH  -> "Continue"; HINDI -> "आगे बढ़ें"; TAMIL -> "தொடரவும்"; TELUGU -> "కొనసాగించు"
-        BENGALI  -> "এগিয়ে যান"; MARATHI -> "पुढे जा"; KANNADA -> "ಮುಂದುವರಿಸಿ"; GUJARATI -> "આગળ વધો"
-        PUNJABI  -> "ਅੱਗੇ ਵਧੋ"; ODIA -> "ଆଗକୁ ବଢ଼ନ୍ତୁ"
-    }
-    val remindersPermLater: String get() = when (this) {
-        ENGLISH  -> "Not now"; HINDI -> "अभी नहीं"; TAMIL -> "இப்போது வேண்டாம்"; TELUGU -> "ఇప్పుడు వద్దు"
-        BENGALI  -> "এখন নয়"; MARATHI -> "आता नको"; KANNADA -> "ಈಗ ಬೇಡ"; GUJARATI -> "હમણાં નહીં"
-        PUNJABI  -> "ਹੁਣੇ ਨਹੀਂ"; ODIA -> "ବର୍ତ୍ତମାନ ନୁହେଁ"
-    }
-
     /** Title of the daily wisdom notification (a lamp emoji is prefixed in code). */
     val wisdomNotificationTitle: String get() = when (this) {
         ENGLISH  -> "Thought of the day"
