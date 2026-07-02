@@ -14,6 +14,7 @@ import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.ConversationEntity
 import com.saarthi.feature.assistant.data.RagDocumentRepository
+import com.saarthi.feature.assistant.data.ResponseMarkerParser
 import com.saarthi.feature.assistant.data.RetrievedChunk
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.MessageRole
@@ -222,25 +223,15 @@ class PackChatViewModel @Inject constructor(
                 val searchQuery = if (userState.isNotBlank()) "$question $userState" else question
                 val rawChunks = runCatching { ragRepository.search(packSessionId, searchQuery, topK = 5) }
                     .getOrDefault(emptyList())
-                rawChunks
-                    // Drop STRUCTURAL PADDING. search() pads to topK with score=0.0
-                    // structural samples (arbitrary chunks) when BM25 under-covers —
-                    // useful for reasoning over a user's OWN document, but for the
-                    // curated Kisan pack it means an off-topic question still gets
-                    // "reference notes" and the model hallucinates a scheme answer.
-                    // Only REAL lexical matches (score > 0) count as pack grounding;
-                    // if none remain, chunks is empty ⇒ the clean general fallback
-                    // below runs (deterministic "not in pack", not model-guessed).
-                    .filter { it.score > MIN_PACK_RELEVANCE }
-                    // Keep every central chunk; keep a STATE-OVERLAY chunk only when
-                    // it matches the user's state.
-                    .filter { c ->
-                        val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
-                        cs == null ||
-                            cs.equals(userState, ignoreCase = true) ||
-                            (cs == com.saarthi.core.i18n.IndianStates.NORTH_EAST &&
-                                com.saarthi.core.i18n.IndianStates.isNorthEast(userState))
-                    }
+                // Keep every central chunk; keep a STATE-OVERLAY chunk only when
+                // it matches the user's state.
+                rawChunks.filter { c ->
+                    val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
+                    cs == null ||
+                        cs.equals(userState, ignoreCase = true) ||
+                        (cs == com.saarthi.core.i18n.IndianStates.NORTH_EAST &&
+                            com.saarthi.core.i18n.IndianStates.isNorthEast(userState))
+                }
             }
 
             // No pack match → still answer, but as clearly-labelled general
@@ -256,8 +247,7 @@ class PackChatViewModel @Inject constructor(
             // topics (or "General" on no match) — never authored by the model,
             // so it's always a real pack scheme name, not the prompt header.
             val sourceLabel = sourceLabelFor(chunks)
-            val topScore = chunks.maxOfOrNull { it.score } ?: 0.0
-            DebugLogger.log("PACK", "Kisan Q&A — packV=$packVersion asOf=${freshnessDate().ifBlank { "?" }} chunks=${chunks.size} topScore=${"%.2f".format(topScore)} grounded=${chunks.isNotEmpty()} lang=${lang.code} state=${userState.ifBlank { "-" }} source=$sourceLabel promptChars=${prompt.length}")
+            DebugLogger.log("PACK", "Kisan Q&A — packV=$packVersion asOf=${freshnessDate().ifBlank { "?" }} chunks=${chunks.size} lang=${lang.code} state=${userState.ifBlank { "-" }} source=$sourceLabel promptChars=${prompt.length}")
 
             InferenceService.startGenerating(context)
             val acc = StringBuilder()
@@ -271,18 +261,21 @@ class PackChatViewModel @Inject constructor(
                 }
                 .onEach { token ->
                     acc.append(token)
-                    updateStreaming(streamingId, acc.toString())
+                    // Strip control tags LIVE so [GENERAL] / [SAARTHI_*] never
+                    // flash in the bubble while streaming (streaming=true also
+                    // holds back a partial marker still mid-stream).
+                    updateStreaming(streamingId, ResponseMarkerParser.stripForDisplay(acc.toString(), streaming = true))
                 }
                 .onCompletion { throwable ->
                     if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
                     if (throwable == null) {
-                        var body = acc.toString().trim()
+                        val raw = acc.toString().trim()
                         // The model prefixes [GENERAL] when it answered from
-                        // general knowledge rather than the pack — strip the
-                        // marker and label the source "General" so it never
-                        // shows a pack scheme for a non-pack answer.
-                        val fellBackToGeneral = body.startsWith("[GENERAL]")
-                        if (fellBackToGeneral) body = body.removePrefix("[GENERAL]").trimStart()
+                        // general knowledge rather than the pack — detect from the
+                        // RAW text to label the source "General"; the tag itself is
+                        // stripped for display by stripForDisplay.
+                        val fellBackToGeneral = raw.trimStart().uppercase().startsWith("[GENERAL")
+                        val body = ResponseMarkerParser.stripForDisplay(raw, streaming = false).trim()
                         val label = if (fellBackToGeneral) "General" else sourceLabel
                         // Freshness footer: which pack snapshot + as-of date this
                         // answer came from, so the user can judge how current it is.
@@ -424,7 +417,6 @@ class PackChatViewModel @Inject constructor(
             append("You are Saarthi's Kisan Saathi — a warm, practical farming advisor for Indian farmers. ")
             append("Answer ONLY from the reference notes below (official government sources). If they don't cover the question, follow the fallback rule.\n")
             append("- Lead with a one-line answer, then the key practical steps; briefly explain any technical term.\n")
-            append("- Keep it SHORT and field-usable — at most ~120 words (about 6 short lines): the direct answer plus the key steps only, no long preamble or background the farmer didn't ask for. Answer for the SPECIFIC crop/scheme asked, not every item in the notes. Go longer ONLY if the user explicitly asks to \"list all\" or for a full table.\n")
             append("- Use ONLY notes matching the question's topic — if the notes are about a different topic, treat it as NOT covered; never answer with an unrelated scheme.\n")
             append("- Use the EXACT official scheme name from the notes (PM-KISAN, PMFBY, PMKSY, Namo Shetkari…) and say whether it is CENTRAL, STATE, or district-level.\n")
             append("- AMOUNTS & ELIGIBILITY: quote ONLY what the notes state, exactly as written. If not in the notes (or possibly dated), say to verify on the official government portal — never guess or round.\n")
@@ -536,16 +528,5 @@ class PackChatViewModel @Inject constructor(
          * chat's history list.
          */
         private const val PACK_CHAT_SESSION = "pack_chat_kisan"
-
-        /**
-         * Minimum BM25 score for a retrieved chunk to count as real pack
-         * grounding. search() emits score=0.0 structural padding when BM25
-         * under-covers; anything at or below this is NOT evidence and is
-         * dropped so the answer falls back to clearly-labelled general info
-         * instead of hallucinating from unrelated pack chunks. Raise with
-         * field data (the [PACK] log now records topScore) if weak single-term
-         * matches still slip through.
-         */
-        private const val MIN_PACK_RELEVANCE = 0.0
     }
 }

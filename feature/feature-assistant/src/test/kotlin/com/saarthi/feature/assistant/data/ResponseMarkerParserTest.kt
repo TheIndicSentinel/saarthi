@@ -194,6 +194,19 @@ class ResponseMarkerParserTest {
     }
 
     @Test
+    fun stripForDisplay_holds_back_partial_streaming_marker() {
+        // Mid-stream, before the closing ']' arrives, a partial control marker
+        // must NOT flash in the bubble.
+        assertEquals("Answer.", ResponseMarkerParser.stripForDisplay("Answer. [SAARTHI_MEMORY key=\"na", streaming = true))
+        assertEquals("Hi", ResponseMarkerParser.stripForDisplay("Hi [GENE", streaming = true))
+    }
+
+    @Test
+    fun stripForDisplay_removes_general_tag() {
+        assertEquals("Not in the pack.", ResponseMarkerParser.stripForDisplay("[GENERAL] Not in the pack.", streaming = false))
+    }
+
+    @Test
     fun parse_rejects_placeholder_text_value() {
         val raw = "[SAARTHI_REMINDER text=\"...\" delay_minutes=\"5\"]"
         val result = ResponseMarkerParser.parse(raw)

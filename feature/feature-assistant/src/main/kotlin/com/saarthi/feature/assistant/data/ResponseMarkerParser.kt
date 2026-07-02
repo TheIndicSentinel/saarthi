@@ -81,6 +81,12 @@ object ResponseMarkerParser {
         RegexOption.IGNORE_CASE,
     )
 
+    // The Kisan pack tells the model to prefix a general-knowledge fallback
+    // answer with [GENERAL] (the ViewModel reads it to set the source label);
+    // it must NEVER render in the bubble. Match it anywhere, with or without a
+    // trailing space, so it's stripped from the visible reply.
+    private val GENERAL_TAG_REGEX = Regex("""\[\s*GENERAL\s*\]\s*""", RegexOption.IGNORE_CASE)
+
     // Orphan attribute lines. When the marker spans two lines and the strict
     // regexes don't match (or when the model emits only a fragment), a stray
     // line like:
@@ -184,6 +190,21 @@ object ResponseMarkerParser {
      */
     private fun holdBackPartialLeaks(text: String): String {
         if (text.isEmpty()) return text
+        // Hold back a trailing INCOMPLETE control marker that is still being
+        // streamed — "[", "[GENE", "[SAARTHI_MEMORY key=" with no closing ']'
+        // yet. Without this the partial tag flashes in the bubble for a frame
+        // until stripAll removes the completed marker on the next token tick.
+        run {
+            val lastOpen = text.lastIndexOf('[')
+            if (lastOpen >= 0 && text.indexOf(']', lastOpen) < 0) {
+                val tailUpper = text.substring(lastOpen).uppercase()
+                val looksLikeMarker = "[GENERAL]".startsWith(tailUpper) ||
+                    tailUpper.startsWith("[GENERAL") ||
+                    "[SAARTHI_".startsWith(tailUpper) ||
+                    tailUpper.startsWith("[SAARTHI")
+                if (looksLikeMarker) return text.substring(0, lastOpen).trimEnd()
+            }
+        }
         // Anchor at the very end of the visible text. Each prefix here is the
         // *start* of a phrase that rewriteIdentity will catch in full — but
         // only after a few more chars arrive.
@@ -364,6 +385,7 @@ object ResponseMarkerParser {
             .replace(MEMORY_REGEX, "")
             .replace(REMINDER_ABS_REGEX, "")
             .replace(REMINDER_REL_REGEX, "")
+            .replace(GENERAL_TAG_REGEX, "")
             // Defensive net — any SAARTHI_* block of any shape must NOT
             // reach the rendered bubble. Catches malformed markers the strict
             // regexes above miss (empty values, wrong spacing, partial fields,
