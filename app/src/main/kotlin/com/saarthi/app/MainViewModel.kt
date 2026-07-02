@@ -27,6 +27,17 @@ sealed class AppStartState {
     data class ModelError(val message: String) : AppStartState()
 }
 
+/**
+ * Pronoun / copula / label tokens that must never be shown as the greeting
+ * name — they slip into model-stored name values from Hinglish self-intros
+ * ("mae arjun", "mera naam Arjun hai"). Lowercased for comparison.
+ */
+private val NAME_FILLERS = setOf(
+    "mae", "main", "mai", "mera", "meri", "mere", "mujhe", "naam", "nam",
+    "hoon", "hu", "hun", "hain", "hai", "my", "name", "is", "am", "the",
+    "call", "me", "myself", "this",
+)
+
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val onboardingRepository: OnboardingRepository,
@@ -52,16 +63,19 @@ class MainViewModel @Inject constructor(
         .observeBySession(com.saarthi.core.memory.domain.MemoryRepository.USER_SCOPE)
         .map { entries ->
             // Resolve the greeting name robustly. A model [SAARTHI_MEMORY] marker
-            // sometimes persists a garbled/truncated name (e.g. the 2-char
-            // Devanagari "अर" for "अर्जुन") under "name", and a cleaner value can
-            // sit under a sibling key ("user_name", "first_name", "naam"). So scan
-            // every name-stem key, take the FIRST name of each, drop 1–2 char
-            // fragments, and prefer the MOST COMPLETE candidate. Falling back to a
-            // generic greeting beats showing garbage.
+            // sometimes persists a garbled name like "Arjun.mae" (the user typed
+            // Hinglish "mae arjun" = "I am Arjun" and the model kept the pronoun),
+            // or a 2-char Devanagari truncation "अर" for "अर्जुन". So for each
+            // name-stem key: split on ANY non-letter (space, dot, comma…), drop
+            // pronoun/copula filler tokens (mae/main/hai/naam…), take the first
+            // real name token (≥3 letters), and prefer the MOST COMPLETE one.
             entries
                 .filter { it.key == "name" || it.key.endsWith("_name") || it.key == "naam" }
                 .mapNotNull { e ->
-                    e.value.trim().split(Regex("\\s+")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }
+                    e.value.trim()
+                        .split(Regex("[^\\p{L}]+"))
+                        .firstOrNull { it.length >= 3 && it.lowercase() !in NAME_FILLERS }
+                        ?.replaceFirstChar { c -> c.uppercase() }
                 }
                 .maxByOrNull { it.length }
         }
