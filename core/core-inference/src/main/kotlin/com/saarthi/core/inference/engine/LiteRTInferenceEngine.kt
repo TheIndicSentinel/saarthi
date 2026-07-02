@@ -707,7 +707,28 @@ class LiteRTInferenceEngine @Inject constructor(
                 // which made Gemma 4 fail to load with INTERNAL on every device
                 // below 20 % battery — see v1.0.20.)
                 val effectiveMaxTokens: Int = run {
-                    val headroomMb = profile.availableRamMb - sizeMb
+                    // mmap-aware headroom. LiteRT demand-pages weights from
+                    // flash, so loading does NOT consume the full file size in
+                    // RAM — field logs on SM8550/11GB: loading E4B (3490MB)
+                    // moved availRam 4401→2712MB (~48% resident incl. GPU
+                    // buffers); E2B (2468MB) ~55-58%. The old formula
+                    // (avail − FULL file size) over-charged E4B by ~1.4GB, so
+                    // the "Best Quality" model almost always landed on the
+                    // 1536 floor — which also swaps in the lean ~1.2k-char
+                    // system prompt and starves recap + RAG (the reported
+                    // "E4B worse than E2B" bug). 0.6 sits above every observed
+                    // resident fraction, so the estimate stays conservative;
+                    // the crash-recovery ladder above remains the hard safety
+                    // net, and mid-range (6-8GB) devices still land on the
+                    // same 1536/2048 windows as before — only devices with
+                    // genuinely spare RAM are upgraded.
+                    val residentEstimateMb = (sizeMb * 6) / 10
+                    val headroomMb = profile.availableRamMb - residentEstimateMb
+                    // KV-cache at 4096 scales with model size (~300MB for E2B,
+                    // roughly 2× for E4B) — the scaled-context gate must be
+                    // stricter for files ≥3000MB so E4B only gets 4096 with
+                    // real room to spare.
+                    val scaled4096ThresholdMb = if (sizeMb >= 3000) 3400 else 2400
                     val nameForTier = (config.modelName ?: config.modelPath).lowercase()
                     val isLargeTier = nameForTier.contains("gemma 4") ||
                         nameForTier.contains("gemma4") ||
@@ -747,7 +768,7 @@ class LiteRTInferenceEngine @Inject constructor(
                             DebugLogger.log("LITERT", "[TOKENS] maxTokens=${config.maxTokens} (caller override)")
                             config.maxTokens
                         }
-                        isLargeTier && headroomMb >= 2400 -> {
+                        isLargeTier && headroomMb >= scaled4096ThresholdMb -> {
                             // High-end scaling: when the device has ample RAM
                             // headroom, double the window so long multi-turn
                             // chats keep more history before the recap has to
@@ -757,11 +778,11 @@ class LiteRTInferenceEngine @Inject constructor(
                             // back to 2048/1536 if any device proves unstable.
                             // Mid-range stays at 2048 (next branch); low-RAM at
                             // 1536. No effect on the mid-range primary audience.
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=4096 (LARGE tier, high RAM headroom=${headroomMb}MB — scaled context)  model=${sizeMb}MB")
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=4096 (LARGE tier, high RAM headroom=${headroomMb}MB ≥ ${scaled4096ThresholdMb}MB — scaled context)  model=${sizeMb}MB  residentEst=${residentEstimateMb}MB")
                             4096
                         }
                         isLargeTier && headroomMb >= 1500 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (LARGE tier — Gemma 4 needs room for system+recap+reply)  headroom=${headroomMb}MB  model=${sizeMb}MB")
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (LARGE tier — Gemma 4 needs room for system+recap+reply)  headroom=${headroomMb}MB  model=${sizeMb}MB  residentEst=${residentEstimateMb}MB")
                             2048
                         }
                         isLargeTier -> {
@@ -772,7 +793,7 @@ class LiteRTInferenceEngine @Inject constructor(
                             // restarted (see crash logs). 1536 holds the prompt while
                             // keeping the KV-cache ~25% smaller than 2048 for the
                             // tight-RAM load. Never drop a LARGE model below this.
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1536 (LARGE tier, low RAM headroom=${headroomMb}MB — must fit its own prompt)")
+                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1536 (LARGE tier, low RAM headroom=${headroomMb}MB — must fit its own prompt)  residentEst=${residentEstimateMb}MB")
                             1536
                         }
                         isCompactTier -> {
