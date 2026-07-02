@@ -29,13 +29,24 @@ sealed class AppStartState {
 
 /**
  * Pronoun / copula / label tokens that must never be shown as the greeting
- * name — they slip into model-stored name values from Hinglish self-intros
- * ("mae arjun", "mera naam Arjun hai"). Lowercased for comparison.
+ * name — they slip into model-stored name values from self-intros in ANY
+ * language ("mae arjun", "mera naam Arjun hai", "उपयोगकर्ता का नाम अर्जुन").
+ * Covers Latin/romanised + the native scripts of all supported languages, so
+ * the greeting stays accurate regardless of which language captured the name.
+ * Lowercased for comparison (a no-op for Indic scripts, which have no case).
  */
 private val NAME_FILLERS = setOf(
+    // English + romanised Hindi/Marathi
     "mae", "main", "mai", "mera", "meri", "mere", "mujhe", "naam", "nam",
+    "naav", "nav", "majhe", "majha", "aahe", "ahe",
     "hoon", "hu", "hun", "hain", "hai", "my", "name", "is", "am", "the",
-    "call", "me", "myself", "this",
+    "call", "me", "myself", "this", "user", "users",
+    // Devanagari (Hindi/Marathi)
+    "उपयोगकर्ता", "यूज़र", "नाम", "मेरा", "मेरी", "मेरे", "मुझे", "है", "हैं", "हूँ", "हूं",
+    "का", "की", "के", "मैं", "नाव", "माझे", "माझं", "आहे", "मी",
+    // Telugu / Tamil / Bengali / Kannada / Gujarati / Punjabi / Odia
+    "పేరు", "నా", "பெயர்", "என்", "எனது", "নাম", "আমার",
+    "ಹೆಸರು", "ನನ್ನ", "નામ", "મારું", "મારુ", "ਨਾਮ", "ਮੇਰਾ", "ନାମ", "ମୋର", "ମୋ",
 )
 
 @HiltViewModel

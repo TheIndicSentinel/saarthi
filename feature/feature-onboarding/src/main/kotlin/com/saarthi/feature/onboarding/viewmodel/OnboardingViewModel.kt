@@ -135,21 +135,24 @@ class OnboardingViewModel @Inject constructor(
         // Funnel: a genuine first-run onboarding started (not a model-change re-entry).
         if (!isModelChangeMode) funnel.track(com.saarthi.core.inference.FunnelEvent.ONBOARDING_STARTED)
 
-        // PRE-POPULATE handledCompletions with all already-downloaded models BEFORE
-        // the allProgress collector starts.  restoreCompletedStates() will emit
-        // Completed for every file on disk — without this guard those events would
-        // look like "new" completions and trigger auto-select, causing a second model
-        // to be loaded into RAM while another is already active (OOM kill).
-        viewModelScope.launch(Dispatchers.IO) {
-            modelCatalog.allModels.forEach { model ->
-                if (downloadManager.isDownloaded(model)) {
-                    handledCompletions += model.id
-                }
-            }
-        }
-
         // Mirror app-lifetime download progress into UI state.
         viewModelScope.launch {
+            // PRE-POPULATE handledCompletions with all already-downloaded models
+            // BEFORE collecting allProgress — sequenced in THIS coroutine, not a
+            // parallel launch. restoreCompletedStates() re-emits Completed for
+            // every file on disk; when the pre-population raced the collector
+            // (the old parallel-launch layout), restored events slipped through
+            // as "new" completions on every screen open — re-firing the
+            // MODEL_DOWNLOAD_COMPLETED funnel event (inflated metrics, seen 6×
+            // in one device log) and re-triggering auto-select, which could load
+            // a second model into RAM while one is active (OOM kill).
+            withContext(Dispatchers.IO) {
+                modelCatalog.allModels.forEach { model ->
+                    if (downloadManager.isDownloaded(model)) {
+                        handledCompletions += model.id
+                    }
+                }
+            }
             downloadManager.allProgress.collect { progressMap ->
                 _uiState.update { it.copy(downloadProgress = progressMap) }
                 // Only react to NEWLY completed downloads (not restored-from-disk ones).

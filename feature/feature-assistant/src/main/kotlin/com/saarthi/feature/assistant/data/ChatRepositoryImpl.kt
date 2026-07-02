@@ -1120,12 +1120,20 @@ class ChatRepositoryImpl @Inject constructor(
         val target =
             if (MemoryRepository.isUserScopedKey(key)) MemoryRepository.USER_SCOPE else sessionId
         // NAME guard: small models emit [SAARTHI_MEMORY] markers with truncated /
-        // garbled names (e.g. the 2-char Devanagari "अर" for "अर्जुन") that would
-        // clobber the high-precision implicit-extracted name via set()'s upsert —
-        // and that wrong value then drives the home greeting. Keep whichever value
-        // is MORE COMPLETE: never replace an existing name with a shorter one.
+        // garbled names (e.g. the 2-char Devanagari "अर" for "अर्जुन") OR whole
+        // sentences ("उपयोगकर्ता का नाम अर्जुन है" = "the user's name is Arjun")
+        // that would clobber the high-precision implicit-extracted name via
+        // set()'s upsert — and that wrong value then drives the home greeting.
+        // Two-layer defence:
+        //  1. SHAPE gate: a plausible name value is 1–3 tokens with no
+        //     sentence punctuation. Sentence-shaped values never enter a name
+        //     key at all (the earlier length-only rule let a LONGER garbled
+        //     sentence overwrite a clean short name).
+        //  2. COMPLETENESS gate: among plausible values, never replace an
+        //     existing name with a shorter one.
         val isNameKey = key == "name" || key.endsWith("_name") || key == "naam"
         if (isNameKey) {
+            if (!isPlausibleNameValue(v)) return
             val existing = memoryRepository.get(sessionId = target, key = key)?.value?.trim()
             if (!existing.isNullOrBlank() && existing.length >= v.length) return
         }
@@ -1139,6 +1147,23 @@ class ChatRepositoryImpl @Inject constructor(
             return
         }
         memoryRepository.set(sessionId = target, key = key, value = v, packSource = "USER")
+    }
+
+    /**
+     * True when [v] is shaped like an actual person name: 1–3 letter tokens
+     * (apostrophe/hyphen ok), no digits, no sentence punctuation, and no
+     * pronoun/copula/label filler in any supported script. Model markers
+     * sometimes wrap the name in a sentence ("उपयोगकर्ता का नाम अर्जुन है")
+     * or glue on a pronoun ("Arjun.mae") — those must never enter a name key,
+     * because the home greeting renders the stored value.
+     */
+    private fun isPlausibleNameValue(v: String): Boolean {
+        if (v.length !in 2..40) return false
+        if (v.any { it.isDigit() }) return false
+        if (Regex("[.,!?;:।/\"()\\[\\]{}]").containsMatchIn(v)) return false
+        val tokens = v.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.isEmpty() || tokens.size > 3) return false
+        return tokens.none { it.lowercase().trim('\'', '-') in NAME_VALUE_FILLERS }
     }
 
     /**
@@ -1491,6 +1516,23 @@ class ChatRepositoryImpl @Inject constructor(
         "busy", "glad", "sure", "just", "also", "really", "from", "not", "still",
         "always", "now", "interested", "thinking", "feeling", "hoping", "wondering",
         "hoon", "hun", "hu", "main", "hello", "hi",
+    )
+
+    // Pronoun / copula / label tokens (any script) that mark a stored name
+    // VALUE as sentence-shaped model output rather than an actual name — used
+    // by isPlausibleNameValue to keep garbage out of name keys entirely.
+    private val NAME_VALUE_FILLERS = setOf(
+        // English + romanised Hindi/Marathi
+        "user", "users", "name", "is", "my", "the", "a", "an",
+        "mera", "meri", "mere", "naam", "nam", "naav", "nav",
+        "hai", "hain", "hoon", "hun", "hu", "main", "mai", "mae",
+        "ka", "ki", "ke", "majhe", "majha", "aahe", "ahe",
+        // Devanagari (Hindi/Marathi)
+        "उपयोगकर्ता", "यूज़र", "नाम", "मेरा", "मेरी", "मेरे", "है", "हैं", "हूँ", "हूं",
+        "का", "की", "के", "मैं", "नाव", "माझे", "माझं", "आहे", "मी",
+        // Telugu / Tamil / Bengali / Kannada / Gujarati / Punjabi / Odia
+        "పేరు", "నా", "పెయరు", "பெயர்", "என்", "எனது", "নাম", "আমার",
+        "ಹೆಸರು", "ನನ್ನ", "નામ", "મારું", "મારુ", "ਨਾਮ", "ਮੇਰਾ", "ନାମ", "ମୋର", "ମୋ",
     )
 
     // Words that follow "I am a/an …" but are NOT a profession — guards the
