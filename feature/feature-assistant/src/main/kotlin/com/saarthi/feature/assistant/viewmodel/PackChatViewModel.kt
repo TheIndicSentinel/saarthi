@@ -222,15 +222,25 @@ class PackChatViewModel @Inject constructor(
                 val searchQuery = if (userState.isNotBlank()) "$question $userState" else question
                 val rawChunks = runCatching { ragRepository.search(packSessionId, searchQuery, topK = 5) }
                     .getOrDefault(emptyList())
-                // Keep every central chunk; keep a STATE-OVERLAY chunk only when
-                // it matches the user's state.
-                rawChunks.filter { c ->
-                    val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
-                    cs == null ||
-                        cs.equals(userState, ignoreCase = true) ||
-                        (cs == com.saarthi.core.i18n.IndianStates.NORTH_EAST &&
-                            com.saarthi.core.i18n.IndianStates.isNorthEast(userState))
-                }
+                rawChunks
+                    // Drop STRUCTURAL PADDING. search() pads to topK with score=0.0
+                    // structural samples (arbitrary chunks) when BM25 under-covers —
+                    // useful for reasoning over a user's OWN document, but for the
+                    // curated Kisan pack it means an off-topic question still gets
+                    // "reference notes" and the model hallucinates a scheme answer.
+                    // Only REAL lexical matches (score > 0) count as pack grounding;
+                    // if none remain, chunks is empty ⇒ the clean general fallback
+                    // below runs (deterministic "not in pack", not model-guessed).
+                    .filter { it.score > MIN_PACK_RELEVANCE }
+                    // Keep every central chunk; keep a STATE-OVERLAY chunk only when
+                    // it matches the user's state.
+                    .filter { c ->
+                        val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
+                        cs == null ||
+                            cs.equals(userState, ignoreCase = true) ||
+                            (cs == com.saarthi.core.i18n.IndianStates.NORTH_EAST &&
+                                com.saarthi.core.i18n.IndianStates.isNorthEast(userState))
+                    }
             }
 
             // No pack match → still answer, but as clearly-labelled general
@@ -246,7 +256,8 @@ class PackChatViewModel @Inject constructor(
             // topics (or "General" on no match) — never authored by the model,
             // so it's always a real pack scheme name, not the prompt header.
             val sourceLabel = sourceLabelFor(chunks)
-            DebugLogger.log("PACK", "Kisan Q&A — packV=$packVersion asOf=${freshnessDate().ifBlank { "?" }} chunks=${chunks.size} lang=${lang.code} state=${userState.ifBlank { "-" }} source=$sourceLabel promptChars=${prompt.length}")
+            val topScore = chunks.maxOfOrNull { it.score } ?: 0.0
+            DebugLogger.log("PACK", "Kisan Q&A — packV=$packVersion asOf=${freshnessDate().ifBlank { "?" }} chunks=${chunks.size} topScore=${"%.2f".format(topScore)} grounded=${chunks.isNotEmpty()} lang=${lang.code} state=${userState.ifBlank { "-" }} source=$sourceLabel promptChars=${prompt.length}")
 
             InferenceService.startGenerating(context)
             val acc = StringBuilder()
@@ -524,5 +535,16 @@ class PackChatViewModel @Inject constructor(
          * chat's history list.
          */
         private const val PACK_CHAT_SESSION = "pack_chat_kisan"
+
+        /**
+         * Minimum BM25 score for a retrieved chunk to count as real pack
+         * grounding. search() emits score=0.0 structural padding when BM25
+         * under-covers; anything at or below this is NOT evidence and is
+         * dropped so the answer falls back to clearly-labelled general info
+         * instead of hallucinating from unrelated pack chunks. Raise with
+         * field data (the [PACK] log now records topScore) if weak single-term
+         * matches still slip through.
+         */
+        private const val MIN_PACK_RELEVANCE = 0.0
     }
 }
