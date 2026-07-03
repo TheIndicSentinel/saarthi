@@ -61,7 +61,16 @@ class SystemPromptProvider @Inject constructor() {
             // STANDARD, which gave Gemma 4 a too-small token budget and a
             // mid-tier system prompt.
             n.contains("gemma 4") || n.contains("gemma4") || n.contains("gemma-4") -> ModelTier.LARGE
-            // Default — Gemma 3n, Gemma 2, etc.
+            // Gemma 3n E2B/E4B — multi-billion-param MatFormer models (3.6-4.4GB
+            // files, BIGGER than Gemma 4 E2B which already runs the LARGE prompt
+            // well). They sat on STANDARD for historical context-size reasons,
+            // which denied them the battle-tested LARGE prompt (no-reintro,
+            // first-person guard, conversational rules) — the reported "other
+            // bigger models' response quality not up to the mark". The engine
+            // token ladder already treats them as large (by file size), so the
+            // ≤1536-window lean fallback still protects tight-RAM loads.
+            n.contains("3n") -> ModelTier.LARGE
+            // Default — Gemma 2, unknown mid models.
             else -> ModelTier.STANDARD
         }
     }

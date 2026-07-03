@@ -434,9 +434,14 @@ class ChatRepositoryImpl @Inject constructor(
             val baseBudget = when {
                 modelName.contains("Gemma 4", ignoreCase = true) -> MAX_PROMPT_CHARS_LARGE
                 modelName.contains("Gemma 2", ignoreCase = true) -> MAX_PROMPT_CHARS_2048
-                // 3n must be matched BEFORE generic "Gemma 3" — its E2B/E4B
-                // variants have a 2048-token context, much larger than the 1B.
-                modelName.contains("3n", ignoreCase = true)      -> MAX_PROMPT_CHARS_STANDARD
+                // 3n must be matched BEFORE generic "Gemma 3" (the 1B). Gemma 3n
+                // E2B/E4B are LARGE-tier models (see SystemPromptProvider.tierFor)
+                // — same char budget as Gemma 4. The token-ceiling clamp below is
+                // the hard safety net: at a 2048-token window this still resolves
+                // to ~5328c; only when the engine grants 4096 does the roomy
+                // 8000c path (extended recap + reasoning rules) open up — exactly
+                // the treatment that fixed Gemma 4's quality.
+                modelName.contains("3n", ignoreCase = true)      -> MAX_PROMPT_CHARS_LARGE
                 // Everything else (Gemma 3 1B / Compact / unknown small
                 // models) gets the tight 1.5 k budget — safe for a 512-tok
                 // engine and prevents a future "Gemma 3 ???" model from

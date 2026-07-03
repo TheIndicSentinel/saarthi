@@ -26,8 +26,15 @@ class SystemPromptProviderTest {
     }
 
     @Test
+    fun tierFor_classifies_Gemma_3n_as_LARGE() {
+        // 3n E2B/E4B are multi-billion-param models bigger than Gemma 4 E2B —
+        // they get the battle-tested LARGE prompt (see tierFor for rationale).
+        assertEquals(SystemPromptProvider.ModelTier.LARGE, provider.tierFor("Gemma 3n"))
+        assertEquals(SystemPromptProvider.ModelTier.LARGE, provider.tierFor("gemma-3n-E2B-it-int4.litertlm"))
+    }
+
+    @Test
     fun tierFor_classifies_unknown_models_as_STANDARD() {
-        assertEquals(SystemPromptProvider.ModelTier.STANDARD, provider.tierFor("Gemma 3n"))
         assertEquals(SystemPromptProvider.ModelTier.STANDARD, provider.tierFor("Some other model"))
     }
 
