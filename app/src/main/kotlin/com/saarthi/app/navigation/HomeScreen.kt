@@ -241,8 +241,11 @@ private fun GreetingBlock(lang: SupportedLanguage, userName: String?) {
     val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
     val greeting = lang.timeGreeting(h)
     Column {
-        Text(
-            buildAnnotatedString {
+        // Auto-fit single line: with the name personalisation ("शुभ संध्या,
+        // अर्जुन") the greeting can exceed the width the bare greeting was
+        // designed for — shrink to fit instead of wrapping the second word.
+        com.saarthi.core.ui.components.SingleLineAutoFitText(
+            text = buildAnnotatedString {
                 // Personalise with the user's name when we know it ("Good
                 // evening, Arjun"); otherwise show just the time-of-day greeting.
                 if (!userName.isNullOrBlank()) {

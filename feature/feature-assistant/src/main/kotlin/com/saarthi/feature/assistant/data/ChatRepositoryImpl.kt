@@ -1431,6 +1431,19 @@ class ChatRepositoryImpl @Inject constructor(
                     ?.takeIf(::nameOk)
                     ?.let { out += "name" to it }
             }
+            // Native-script whole-message self-intro — "मैं अर्जुन" (hi),
+            // "मी अर्जुन" (mr), "నేను అర్జున్" (te), "நான் அர்ஜுன்" (ta),
+            // "আমি অর্জুন" (bn), "ನಾನು ಅರ್ಜುನ್" (kn), "હું અર્જુન" (gu),
+            // "ਮੈਂ ਅਰਜੁਨ" (pa), "ମୁଁ ଅର୍ଜୁନ" (or). The "मेरा नाम X" patterns
+            // above need the word "naam"; this catches the bare-pronoun intro.
+            // Whole-message (pronoun + exactly one word) keeps precision;
+            // NATIVE_STATE_WORDS rejects "मैं ठीक"-style states.
+            if (out.none { it.first == "name" }) {
+                Regex("^(?:मैं|मै|मी|నేను|நான்|আমি|ನಾನು|હું|ਮੈਂ|ମୁଁ)\\s+([\\p{L}][\\p{L}·'-]{1,24})\\s*[.!।]?$")
+                    .find(msg.trim())?.groupValues?.get(1)?.trim()
+                    ?.takeIf { it !in NATIVE_STATE_WORDS && nameOk(it) }
+                    ?.let { out += "name" to it }
+            }
         }
 
         // ── Likes / dislikes ─────────────────────────────────────────────────
@@ -1561,6 +1574,21 @@ class ChatRepositoryImpl @Inject constructor(
         "theek", "thik", "thak", "accha", "acha", "achha", "badhiya", "mast",
         "ghar", "bahar", "pareshan", "khush", "udaas", "bimar", "vyast",
         "stress", "stressed", "bore", "so", "raha", "rahi", "gaya", "gayi",
+    )
+
+    // Native-script state-of-being words that follow a bare first-person
+    // pronoun ("मैं ठीक", "मी घरी") — must never be captured as a name by the
+    // whole-message native self-intro pattern.
+    private val NATIVE_STATE_WORDS = setOf(
+        // Hindi
+        "ठीक", "अच्छा", "अच्छी", "खुश", "उदास", "बीमार", "व्यस्त", "परेशान",
+        "घर", "तैयार", "थका", "थकी", "यहाँ", "वहाँ", "हूँ", "हूं", "भूखा", "भूखी",
+        // Marathi
+        "आनंदी", "आजारी", "थकलो", "थकले", "घरी", "बरा", "बरी", "इथे", "आहे",
+        // Telugu / Tamil / Bengali / Kannada / Gujarati / Punjabi / Odia (common states)
+        "బాగున్నాను", "అలసిపోయాను", "ఇంట్లో", "நலம்", "சோர்வாக", "வீட்டில்",
+        "ভালো", "ক্লান্ত", "বাড়িতে", "ಚೆನ್ನಾಗಿದ್ದೇನೆ", "ಮನೆಯಲ್ಲಿ",
+        "સારું", "થાકેલો", "ઘરે", "ਠੀਕ", "ਥੱਕਿਆ", "ਘਰ", "ଭଲ", "ଘରେ",
     )
 
     // Pronoun / copula / label tokens (any script) that mark a stored name

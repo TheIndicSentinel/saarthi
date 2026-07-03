@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,6 +84,50 @@ fun SaarthiChip(
         )
     }
 }
+
+/**
+ * Single-line headline that SHRINKS its font to fit the available width
+ * instead of wrapping. Page titles and the home greeting are one visual line
+ * by design; localized text (Hindi "अपना AI मॉडल चुनें") or a personalised
+ * suffix ("शुभ संध्या, अर्जुन") can exceed the width the English text was
+ * designed for — especially at larger system font scales — and a wrapped
+ * headline breaks the layout (field report). Standard auto-fit pattern:
+ * measure, and step the scale down until nothing overflows (floor at
+ * [minScale], then ellipsize as the last resort).
+ */
+@Composable
+fun SingleLineAutoFitText(
+    text: androidx.compose.ui.text.AnnotatedString,
+    style: androidx.compose.ui.text.TextStyle,
+    modifier: Modifier = Modifier,
+    minScale: Float = 0.62f,
+) {
+    var scale by androidx.compose.runtime.remember(text) {
+        androidx.compose.runtime.mutableFloatStateOf(1f)
+    }
+    Text(
+        text,
+        modifier = modifier,
+        style = style.copy(fontSize = style.fontSize * scale),
+        maxLines = 1,
+        softWrap = false,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow && scale > minScale) {
+                scale = (scale - 0.05f).coerceAtLeast(minScale)
+            }
+        },
+    )
+}
+
+/** [SingleLineAutoFitText] for a plain string. */
+@Composable
+fun SingleLineAutoFitText(
+    text: String,
+    style: androidx.compose.ui.text.TextStyle,
+    modifier: Modifier = Modifier,
+    minScale: Float = 0.62f,
+) = SingleLineAutoFitText(androidx.compose.ui.text.AnnotatedString(text), style, modifier, minScale)
 
 @Composable
 fun SaarthiPrimaryButton(

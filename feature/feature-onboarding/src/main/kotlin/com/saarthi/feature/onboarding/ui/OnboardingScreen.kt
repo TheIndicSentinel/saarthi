@@ -698,8 +698,11 @@ private fun Onb4ModelPick(
         Column(
             modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),
         ) {
-            Text(
-                o.pickBrain,
+            // Auto-fit single line: localized titles (Hindi "अपना AI मॉडल
+            // चुनें") run longer than the English design width — shrink to fit
+            // instead of wrapping the last word (field report).
+            com.saarthi.core.ui.components.SingleLineAutoFitText(
+                text = o.pickBrain,
                 style = MaterialTheme.typography.headlineLarge.copy(
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
