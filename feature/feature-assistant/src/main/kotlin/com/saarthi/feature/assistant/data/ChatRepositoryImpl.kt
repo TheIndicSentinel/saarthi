@@ -1415,6 +1415,22 @@ class ChatRepositoryImpl @Inject constructor(
                     ?.takeIf(::nameOk)
                     ?.let { out += "name" to it }
             }
+            // Whole-message self-intro with a LOWERCASE name — phone keyboards
+            // auto-capitalise only the FIRST word, so "Mae arjun" / "i'm arjun"
+            // is how this actually arrives (field report: the name was never
+            // captured, so the home greeting stayed generic). Dropping the
+            // proper-noun requirement is safe ONLY because the match is the
+            // ENTIRE message (pronoun + exactly one word): that shape is
+            // unambiguously a self-intro, and nameOk + the expanded
+            // NON_NAME_WORDS list (theek/busy/hungry/ghar…) rejects
+            // state-of-being words.
+            if (out.none { it.first == "name" }) {
+                Regex("(?i)^(?:i'?m|i am|mae|main|mai|mein)\\s+([\\p{L}][\\p{L}'-]{1,20})\\s*[.!।]?$")
+                    .find(msg.trim())?.groupValues?.get(1)
+                    ?.let { it.trim().replaceFirstChar { c -> c.uppercase() } }
+                    ?.takeIf(::nameOk)
+                    ?.let { out += "name" to it }
+            }
         }
 
         // ── Likes / dislikes ─────────────────────────────────────────────────
@@ -1436,6 +1452,18 @@ class ChatRepositoryImpl @Inject constructor(
                 val neg = m.groupValues[2].isNotBlank()
                 if (v.length in 3..40 && firstWordOk(v)) out += (if (neg) "dislikes" else "likes") to v
             }
+        // Devanagari likes/dislikes — the romanised pattern above missed native
+        // script. Hindi "मुझे X पसंद है / पसंद नहीं", Marathi "मला X आवडते /
+        // आवडत नाही". Bare pronoun captures ("मुझे यह पसंद…") are rejected.
+        if (out.none { it.first == "likes" || it.first == "dislikes" }) {
+            Regex("(?:मुझे|मला)\\s+([\\p{L}][\\p{L}\\s'-]{1,40}?)\\s+(?:पसंद|आवडत[ेो]?|आवडते)\\s*(नहीं|नाही)?")
+                .find(msg)?.let { m ->
+                    val v = clean(m.groupValues[1])
+                    val neg = m.groupValues[2].isNotBlank()
+                    val pronounOnly = v in setOf("यह", "वह", "ये", "वो", "इस", "उस", "हे", "ते")
+                    if (v.length in 2..40 && !pronounOnly) out += (if (neg) "dislikes" else "likes") to v
+                }
+        }
 
         // ── Employer ─────────────────────────────────────────────────────────
         // "I work at Infosys", "I'm working for TCS" — distinct from profession
@@ -1524,6 +1552,15 @@ class ChatRepositoryImpl @Inject constructor(
         "busy", "glad", "sure", "just", "also", "really", "from", "not", "still",
         "always", "now", "interested", "thinking", "feeling", "hoping", "wondering",
         "hoon", "hun", "hu", "main", "hello", "hi",
+        // More English states — needed now that the whole-message self-intro
+        // pattern accepts lowercase captures ("i'm hungry" must never be a name).
+        "hungry", "bored", "angry", "upset", "sick", "ill", "lost", "late",
+        "home", "free", "cold", "hot", "well", "great", "alone", "scared",
+        // Romanised Hindi/Marathi state-of-being words — "main theek hoon" /
+        // "Mae busy" style messages must never store a name.
+        "theek", "thik", "thak", "accha", "acha", "achha", "badhiya", "mast",
+        "ghar", "bahar", "pareshan", "khush", "udaas", "bimar", "vyast",
+        "stress", "stressed", "bore", "so", "raha", "rahi", "gaya", "gayi",
     )
 
     // Pronoun / copula / label tokens (any script) that mark a stored name

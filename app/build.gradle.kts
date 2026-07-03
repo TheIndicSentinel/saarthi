@@ -64,10 +64,8 @@ android {
         // previous one ("app doesn't install", forcing an uninstall that loses
         // the 2.5GB downloaded model). Pointing debug signing at the committed
         // ci/debug.keystore (standard debug credentials — not a secret, cannot
-        // publish to Play) makes every debug/test build signature-identical:
-        // updates install in place, and the uninstall dialog's "keep app data"
-        // option (hasFragileUserData) actually preserves downloaded models
-        // across reinstalls.
+        // publish to Play) makes every debug/test build signature-identical,
+        // so updates install in place over the previous build.
         getByName("debug") {
             storeFile = rootProject.file("ci/debug.keystore")
             storePassword = "android"

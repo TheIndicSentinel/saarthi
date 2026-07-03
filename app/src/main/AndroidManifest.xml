@@ -45,12 +45,11 @@
         </intent>
     </queries>
 
-    <!-- hasFragileUserData adds the "keep app data" checkbox to the uninstall
-         dialog so the 2.5-3.5GB downloaded model can survive a reinstall
-         (industry standard for apps with large downloads). FUNCTIONAL only when
-         the reinstalled APK has the SAME signature — guaranteed since debug
-         builds sign with the committed ci/debug.keystore and release with the
-         fixed upload key. Do not remove. -->
+    <!-- NOTE: android:hasFragileUserData is deliberately ABSENT. It added a
+         "keep app data" checkbox to the uninstall dialog; product decision
+         (2026-07-03): uninstall must be a clean wipe — models and all data are
+         deleted with the app. Kept data also blocked reinstalls whenever the
+         APK signature differed, which confused sideload testers. -->
     <application
         android:name=".SaarthiApp"
         android:allowBackup="false"
@@ -62,7 +61,6 @@
         android:theme="@style/Theme.Saarthi.SplashScreen"
         android:enableOnBackInvokedCallback="true"
         android:largeHeap="true"
-        android:hasFragileUserData="true"
         android:allowNativeHeapPointerTagging="false"
         android:memtagMode="off"
         android:networkSecurityConfig="@xml/network_security_config">
