@@ -1125,6 +1125,14 @@ class ChatRepositoryImpl @Inject constructor(
         val key = rawKey.trim().lowercase().replace(" ", "_")
         val v = value.trim()
         if (key.isBlank() || v.isBlank()) return
+        // Reject model-authored AGGREGATE keys ("user_facts" with a value like
+        // "नाम: अर्जुन, राशि: धनु") — they duplicate facts that already have
+        // proper keys, bloat prompt injection, and read as junk in the
+        // Knowledge screen (field log 2026-07-03).
+        if (key in JUNK_AGGREGATE_KEYS) {
+            DebugLogger.log("MEMORY", "write REJECTED (aggregate key) key=$key")
+            return
+        }
         val target =
             if (MemoryRepository.isUserScopedKey(key)) MemoryRepository.USER_SCOPE else sessionId
         // NAME guard: small models emit [SAARTHI_MEMORY] markers with truncated /
@@ -1243,9 +1251,16 @@ class ChatRepositoryImpl @Inject constructor(
         // profession: "I am a teacher", "I work as an electrician", "I'm an engineer"
         Regex("(?i)\\b(?:i am|i'm|i work as)\\s+(?:a|an)\\s+([\\p{L}][\\p{L}\\s-]{2,30})")
             .find(msg)?.groupValues?.get(1)?.let { p ->
-                val prof = clean(p)
-                // Guard against "I am a bit tired" style false positives.
-                if (prof.length in 3..30 && prof.lowercase() !in NON_PROFESSION_WORDS) out += "profession" to prof
+                // Cut at the first conjunction — "a vegetarian and Sagittarius"
+                // must not be swallowed whole (field log: profession stored as
+                // the truncated garbage "vegetarian and Sagittari").
+                val prof = clean(p).split(Regex("(?i)\\s+(?:and|aur|or|but)\\s+|,")).first().trim()
+                // Guard against "I am a bit tired" false positives AND diet
+                // statements ("I am a vegetarian" is diet, not profession).
+                if (prof.length in 3..30 &&
+                    prof.lowercase() !in NON_PROFESSION_WORDS &&
+                    prof.lowercase() !in DIET_TERMS
+                ) out += "profession" to prof
             }
         // location: "I live in X", "I am from X", "I'm based in X"
         Regex("(?i)\\b(?:i live in|i am from|i'm from|i am based in|i'm based in)\\s+([\\p{L}][\\p{L}\\s,'-]{1,40})")
@@ -1586,6 +1601,15 @@ class ChatRepositoryImpl @Inject constructor(
         "theek", "thik", "thak", "accha", "acha", "achha", "badhiya", "mast",
         "ghar", "bahar", "pareshan", "khush", "udaas", "bimar", "vyast",
         "stress", "stressed", "bore", "so", "raha", "rahi", "gaya", "gayi",
+    )
+
+    // Model-authored aggregate keys that bundle several facts into one value.
+    // Every real fact already lands under its own key, so these are pure
+    // duplication/noise. Rejected at write time.
+    private val JUNK_AGGREGATE_KEYS = setOf(
+        "user_facts", "facts", "user_info", "info", "user_details", "details",
+        "about", "about_user", "about_me", "profile", "user_profile",
+        "summary", "notes", "user_data", "data",
     )
 
     // Native-script state-of-being words that follow a bare first-person

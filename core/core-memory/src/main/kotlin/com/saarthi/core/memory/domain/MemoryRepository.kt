@@ -77,6 +77,10 @@ interface MemoryRepository {
             "favourite", "favorite", "likes", "dislikes",
             "diet", "food",
             "education", "degree", "student", "school", "college",
+            // Zodiac is a stable profile fact users share about themselves
+            // ("I'm Sagittarius") — field log showed it landing session-scoped
+            // under key "astrology" and dying with the chat.
+            "zodiac", "astrology", "rashi", "राशि",
             // Native/romanised "name" keys. Small models sometimes emit the
             // marker KEY in the chat language despite instructions — without
             // these stems such a name routed to SESSION scope, so the home
