@@ -87,13 +87,13 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
     get() = when (this) {
         SupportedLanguage.ENGLISH -> SettingsDetailStrings()
         SupportedLanguage.HINDI -> SettingsDetailStrings(
-            privacyTitle = "गोपनीयता", privacyTopSub = "आपके डिवाइस पर क्या रहता है",
+            privacyTitle = "गोपनीयता", privacyTopSub = "आपके फ़ोन पर क्या रहता है",
             privacyHeroTitle = "कुछ भी फ़ोन से बाहर नहीं जाता",
             privacyHeroBody = "सारथी का कोई सर्वर नहीं है। AI आपके फ़ोन में ही रहता है — सवाल यहीं हल होते हैं और कभी इंटरनेट पर नहीं जाते।",
-            privacyStoredHere = "सिर्फ़ इसी डिवाइस पर सहेजा गया",
+            privacyStoredHere = "सिर्फ़ इसी फ़ोन पर सहेजा गया",
             privacyChatHistory = "आपका चैट इतिहास", privacyModelWeights = "AI मॉडल फ़ाइलें", privacyLocal = "फ़ोन में ही",
             privacyHowWorks = "सारथी कैसे काम करता है",
-            privacyRunsHardware = "आपके हार्डवेयर पर चलता है",
+            privacyRunsHardware = "सीधे आपके फ़ोन पर चलता है",
             privacyRunsHardwareSub = "Gemma मॉडल · Vulkan / CPU पर",
             privacyNoAccounts = "कोई अकाउंट नहीं, कोई ट्रैकिंग नहीं", privacyNoAccountsSub = "इंटरनेट के बिना काम करता है",
             aboutTitle = "सारथी के बारे में",
@@ -101,7 +101,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
             statLanguages = "भाषाएँ", statModels = "AI मॉडल", statOffline = "ऑफ़लाइन",
             aboutBuiltWith = "किससे बना है",
             aboutGemmaSub = "फ़ोन में चलने वाला भाषा मॉडल",
-            aboutLiteRtSub = "मोबाइल पर AI चलाने का इंजन",
+            aboutLiteRtSub = "फ़ोन पर AI चलाने का इंजन",
             aboutBlessing = "\"सबका मंगल हो\" · भारत में स्नेह से बना",
             rsTitle = "जवाब की शैली", rsTopSub = "सारथी आपसे कैसे बात करता है",
             rsAnswerLength = "जवाब की लंबाई", optShort = "छोटा", optMedium = "मध्यम", optLong = "लंबा",
@@ -120,7 +120,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
             mdTitle = "डाउनलोड प्रबंधित करें", mdPhoneStorage = "फ़ोन स्टोरेज",
             mdSaarthiModels = "सारथी मॉडल", mdOther = "अन्य", mdInstalledModels = "इंस्टॉल किए मॉडल",
             mdNoModels = "अभी कोई मॉडल डाउनलोड नहीं हुआ।", mdDownloadMore = "और मॉडल डाउनलोड करें", mdActive = "सक्रिय",
-            histTitle = "बातचीत", histTopSub = "सब आपके डिवाइस पर सहेजा गया",
+            histTitle = "बातचीत", histTopSub = "सब आपके फ़ोन पर सहेजा गया",
             histBody = "पुरानी बातचीत चैट ड्रॉअर (☰) में दिखती हैं। यह सूची-व्यू आगे के किसी अपडेट में आएगा।",
         )
         SupportedLanguage.TAMIL -> SettingsDetailStrings(
