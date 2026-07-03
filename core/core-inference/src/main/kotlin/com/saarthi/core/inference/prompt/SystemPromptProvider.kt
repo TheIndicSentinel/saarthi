@@ -249,6 +249,11 @@ class SystemPromptProvider @Inject constructor() {
                 // name).
                 append("Facts the USER shared in THIS chat (about the user, not about you):\n")
                 append(memoryContext)
+                // Anti-overuse: once the model knows the name it tends to open
+                // EVERY reply with it ("अर्जुन, …"), which reads robotic
+                // (field report). One restraint line at the point of injection
+                // covers every tier/model in one place.
+                append("\nUse these facts only when relevant. Address the user by name RARELY — at most once in a while, never in every reply.")
             }
             if (priorTurnsContext.isNotEmpty()) {
                 append("\n\n")

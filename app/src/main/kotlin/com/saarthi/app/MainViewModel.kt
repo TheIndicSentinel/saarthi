@@ -80,8 +80,8 @@ class MainViewModel @Inject constructor(
             // name-stem key: split on ANY non-letter (space, dot, comma…), drop
             // pronoun/copula filler tokens (mae/main/hai/naam…), take the first
             // real name token (≥3 letters), and prefer the MOST COMPLETE one.
-            entries
-                .filter { it.key == "name" || it.key.endsWith("_name") || it.key == "naam" }
+            val resolved = entries
+                .filter { com.saarthi.core.memory.domain.MemoryRepository.isNameKey(it.key) }
                 .mapNotNull { e ->
                     e.value.trim()
                         .split(Regex("[^\\p{L}]+"))
@@ -89,6 +89,14 @@ class MainViewModel @Inject constructor(
                         ?.replaceFirstChar { c -> c.uppercase() }
                 }
                 .maxByOrNull { it.length }
+            // File-visible so a "greeting lost the name" report is diagnosable:
+            // shows what the resolver saw and what it picked, alongside the
+            // [MEMORY] write trail.
+            com.saarthi.core.inference.DebugLogger.log(
+                "MEMORY",
+                "greeting name resolved=${resolved ?: "(none)"} from ${entries.size} USER-scope fact(s)",
+            )
+            resolved
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 

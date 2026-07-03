@@ -1139,12 +1139,24 @@ class ChatRepositoryImpl @Inject constructor(
         //     sentence overwrite a clean short name).
         //  2. COMPLETENESS gate: among plausible values, never replace an
         //     existing name with a shorter one.
-        val isNameKey = key == "name" || key.endsWith("_name") || key == "naam"
+        val isNameKey = MemoryRepository.isNameKey(key)
         if (isNameKey) {
-            if (!isPlausibleNameValue(v)) return
+            if (!isPlausibleNameValue(v)) {
+                DebugLogger.log("MEMORY", "name write REJECTED (shape) key=$key value=\"${v.take(24)}\"")
+                return
+            }
             val existing = memoryRepository.get(sessionId = target, key = key)?.value?.trim()
-            if (!existing.isNullOrBlank() && existing.length >= v.length) return
+            if (!existing.isNullOrBlank() && existing.length >= v.length) {
+                DebugLogger.log("MEMORY", "name write SKIPPED (existing more complete) key=$key")
+                return
+            }
         }
+        // File-visible write trail — the forensic record for any "memory feels
+        // wrong" report: what key was written, to which scope, with what value.
+        DebugLogger.log(
+            "MEMORY",
+            "write key=$key scope=${if (target == MemoryRepository.USER_SCOPE) "USER" else "session"} value=\"${v.take(24)}\"",
+        )
         // List-type facts ACCUMULATE instead of overwrite: "I like apples" then
         // "I like oranges" → both kept (dedup, capped, oldest dropped). Single
         // identity facts (name, age, city, diet…) still override, as before.

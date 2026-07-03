@@ -255,11 +255,14 @@ private fun GreetingBlock(lang: SupportedLanguage, userName: String?) {
             // SAME 30sp in every language — never auto-shrink (a smaller Hindi
             // greeting than English reads as broken). One line by design: an
             // extremely long name ellipsizes rather than wrapping or shrinking.
+            // NO negative letterSpacing here: negative tracking miscounts
+            // Devanagari conjunct/matra widths, so even a short "शुभ संध्या"
+            // measured as overflowing and rendered with a phantom "…"
+            // (field report). Latin is visually unaffected by dropping it.
             style = MaterialTheme.typography.displayLarge.copy(
                 fontSize = 30.sp,
                 fontWeight = FontWeight.Bold,
                 color = SaarthiColors.Text,
-                letterSpacing = (-0.6).sp,
             ),
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,

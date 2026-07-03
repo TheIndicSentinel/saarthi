@@ -77,12 +77,36 @@ interface MemoryRepository {
             "favourite", "favorite", "likes", "dislikes",
             "diet", "food",
             "education", "degree", "student", "school", "college",
+            // Native/romanised "name" keys. Small models sometimes emit the
+            // marker KEY in the chat language despite instructions — without
+            // these stems such a name routed to SESSION scope, so the home
+            // greeting (USER_SCOPE-only) never saw it and it died with that
+            // chat ("name shown initially, gone later" reports).
+            "naam", "naav", "नाम", "नाव", "పేరు", "பெயர்", "নাম",
+            "ಹೆಸರು", "નામ", "ਨਾਮ", "ନାମ",
         )
 
         /** True when [key] is a durable identity fact that belongs in [USER_SCOPE]. */
         fun isUserScopedKey(key: String): Boolean {
             val k = key.trim().lowercase().removePrefix("user_").removePrefix("my_")
             return IDENTITY_KEY_STEMS.any { stem -> k == stem || k.startsWith("${stem}_") || k.contains(stem) }
+        }
+
+        /**
+         * NAME keys in any supported language/script — the single source of
+         * truth shared by the write-side quality guard (persistMemoryFact) and
+         * the home-greeting resolver (MainViewModel), so a name stored under a
+         * native-script key behaves identically to "name" everywhere.
+         */
+        private val NAME_KEY_STEMS = setOf(
+            "name", "naam", "naav", "नाम", "नाव", "పేరు", "பெயர்", "নাম",
+            "ಹೆಸರು", "નામ", "ਨਾਮ", "ନାମ",
+        )
+
+        /** True when [key] is a name key (any script, prefix/suffix tolerant). */
+        fun isNameKey(key: String): Boolean {
+            val k = key.trim().lowercase().removePrefix("user_").removePrefix("my_")
+            return NAME_KEY_STEMS.any { stem -> k == stem || k.endsWith("_$stem") || k.startsWith("${stem}_") }
         }
 
         /**
