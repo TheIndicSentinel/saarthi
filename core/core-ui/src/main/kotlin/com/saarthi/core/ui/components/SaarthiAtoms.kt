@@ -75,6 +75,11 @@ fun SaarthiChip(
                 fontSize = if (small) 10.5.sp else 11.5.sp,
                 color = p.fg,
             ),
+            // A chip is a pill-shaped LABEL — its text must never wrap to a
+            // second line inside the pill (that balloons the pill and every
+            // row containing it). Ellipsize instead on extreme squeeze.
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
     }
 }

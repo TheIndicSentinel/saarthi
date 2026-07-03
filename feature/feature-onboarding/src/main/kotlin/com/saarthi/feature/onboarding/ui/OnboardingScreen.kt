@@ -849,16 +849,21 @@ private fun ModelOption(
                 ) {
                     Text(
                         model.displayName,
-                        // weight(fill=false) lets the name take the space left by
-                        // the chip and wrap on narrow screens, instead of starving
-                        // the chip into a squeezed vertical sliver (which also blew
-                        // up the row height on small devices).
+                        // weight(fill=false): the chip (unweighted) measures
+                        // first at its natural width; the title takes the rest.
+                        // maxLines=1: the title row must NEVER wrap — a wrapped
+                        // "· Recommended" made that card taller than its
+                        // siblings and broke the picker's uniform card height
+                        // (field report). On an extremely narrow screen the
+                        // title ellipsizes; the chip + description below still
+                        // carry the model's qualifier, so no information is
+                        // lost.
                         modifier = Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = SaarthiColors.Text,
                         ),
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     SaarthiChip(text = tag, tone = tone, small = true)
