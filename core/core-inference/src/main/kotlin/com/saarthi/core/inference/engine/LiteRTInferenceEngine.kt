@@ -706,23 +706,27 @@ class LiteRTInferenceEngine @Inject constructor(
                 // BATTERY_SAFE_MODE forced maxTokens=256 + 1 thread + GPU ban,
                 // which made Gemma 4 fail to load with INTERNAL on every device
                 // below 20 % battery — see v1.0.20.)
+                // mmap-aware resident estimate. LiteRT demand-pages weights
+                // from flash, so loading does NOT consume the full file size
+                // in RAM — field logs on SM8550/11GB: loading E4B (3490MB)
+                // moved availRam 4401→2712MB (~48% resident incl. GPU
+                // buffers); E2B (2468MB) ~55-58%. 0.6 sits above every
+                // observed resident fraction, so it stays conservative.
+                // Shared by the token ladder AND the GPU memory gate below —
+                // both previously charged the FULL file size and crippled E4B
+                // (1536-token floor + forced CPU backend on fresh installs).
+                val residentEstimateMb = (sizeMb * 6) / 10
+
                 val effectiveMaxTokens: Int = run {
-                    // mmap-aware headroom. LiteRT demand-pages weights from
-                    // flash, so loading does NOT consume the full file size in
-                    // RAM — field logs on SM8550/11GB: loading E4B (3490MB)
-                    // moved availRam 4401→2712MB (~48% resident incl. GPU
-                    // buffers); E2B (2468MB) ~55-58%. The old formula
-                    // (avail − FULL file size) over-charged E4B by ~1.4GB, so
-                    // the "Best Quality" model almost always landed on the
-                    // 1536 floor — which also swaps in the lean ~1.2k-char
+                    // headroom from the resident estimate, not the file size —
+                    // the old (avail − FULL size) formula over-charged E4B by
+                    // ~1.4GB, so the "Best Quality" model almost always landed
+                    // on the 1536 floor — which also swaps in the lean ~1.2k
                     // system prompt and starves recap + RAG (the reported
-                    // "E4B worse than E2B" bug). 0.6 sits above every observed
-                    // resident fraction, so the estimate stays conservative;
-                    // the crash-recovery ladder above remains the hard safety
-                    // net, and mid-range (6-8GB) devices still land on the
-                    // same 1536/2048 windows as before — only devices with
-                    // genuinely spare RAM are upgraded.
-                    val residentEstimateMb = (sizeMb * 6) / 10
+                    // "E4B worse than E2B" bug). The crash-recovery ladder
+                    // above remains the hard safety net, and mid-range (6-8GB)
+                    // devices still land on the same 1536/2048 windows —
+                    // only devices with genuinely spare RAM are upgraded.
                     val headroomMb = profile.availableRamMb - residentEstimateMb
                     // KV-cache at 4096 scales with model size (~300MB for E2B,
                     // roughly 2× for E4B) — the scaled-context gate must be
@@ -835,23 +839,28 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 val xnnpackBanned = cpuCrashCount >= 2
 
-                // GPU VRAM safety for large models. Tier-aware because the
-                // 60 % multiplier was unfairly banning Gemma 4 E4B (3490 MB)
-                // from GPU on Galaxy S23+ class devices (12 GB total RAM,
-                // ~5.3 GB free) — the model fits comfortably but the gate
-                // forced the CPU/XNNPACK path, which dropped throughput
-                // from ~17 tps to ~3 tps and gave the "stops responding"
-                // impression. Flagship phones hold the rest of total RAM
-                // in reclaimable system caches, so we can stretch
-                // availableRamMb further without OOM risk.
-                val gpuMemMultiplier = when (profile.tier) {
-                    com.saarthi.core.inference.model.DeviceTier.FLAGSHIP -> 0.85
-                    com.saarthi.core.inference.model.DeviceTier.MID      -> 0.80
-                    else                                                 -> 0.60
+                // GPU VRAM safety for large models — mmap-aware, like the
+                // token ladder above. The old gate compared the FULL file size
+                // against availRam × tier-multiplier, which banned E4B from
+                // GPU whenever avail < ~4.1GB — on a fresh install (avail
+                // ~3.9GB) E4B silently ran on CPU: 15-26s TTFT, 1.5-4.6 tps,
+                // the reported "E4B chat not production ready". GPU load
+                // actually consumes ~residentEstimate (observed ~1.6-1.8GB for
+                // E4B on SM8550), so gate on resident + a tier-aware safety
+                // margin for KV-cache/activations/OS instead. On the same
+                // fresh-install snapshot the new gate allows GPU (3866 ≥
+                // 2094+1200) → ~4s TTFT. Mid/low tiers keep bigger margins.
+                // A wrong call here degrades safely: a GPU OOM crash is caught
+                // by the crash-recovery ban and the next load goes CPU.
+                val gpuSafetyMarginMb = when (profile.tier) {
+                    com.saarthi.core.inference.model.DeviceTier.FLAGSHIP -> 1200
+                    com.saarthi.core.inference.model.DeviceTier.MID      -> 1400
+                    else                                                 -> 1800
                 }
-                val memoryPressureBannedGpu = sizeMb > (profile.availableRamMb * gpuMemMultiplier)
+                val memoryPressureBannedGpu =
+                    profile.availableRamMb < residentEstimateMb + gpuSafetyMarginMb
                 if (memoryPressureBannedGpu && sizeMb > 2000) {
-                    DebugLogger.log("LITERT", "[GPU] BANNED: Model size (${sizeMb}MB) > availRam (${profile.availableRamMb}MB) × ${gpuMemMultiplier} on tier=${profile.tier}. Falling back to CPU.")
+                    DebugLogger.log("LITERT", "[GPU] BANNED by RAM pressure: availRam (${profile.availableRamMb}MB) < residentEst (${residentEstimateMb}MB) + margin (${gpuSafetyMarginMb}MB) on tier=${profile.tier}. Falling back to CPU.")
                 }
 
                 // Pre-load memory trim — large models (>1.5 GB) benefit from
@@ -1024,7 +1033,9 @@ class LiteRTInferenceEngine @Inject constructor(
             }
         } else {
             val reason = when {
-                gpuBanned        -> "prior GPU/NPU crash ban active for ${modelKey(modelPath)}"
+                // gpuBanned here is (crash ban || RAM-pressure gate) merged by the
+                // caller — the specific cause was already logged above.
+                gpuBanned        -> "GPU banned for this load (crash ban or RAM pressure — see earlier [GPU] line) for ${modelKey(modelPath)}"
                 !profile.gpuSafe -> "gpuSafe=false — SoC=${profile.socModel} API=${profile.apiLevel}"
                 else             -> "model too large for GPU memory budget"
             }

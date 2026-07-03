@@ -223,14 +223,6 @@ fun SettingsScreen(
                 onClick = { onNavigate("privacy") },
             )
             SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.Person, null) },
-                title = s.memoryTitle,
-                subtitle = s.memoryTitleSub,
-                tone = ChipTone.Jade,
-                trailing = { ChevronRight() },
-                onClick = { onNavigate("memory") },
-            )
-            SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Delete, null) },
                 title = s.clearHistory,
                 subtitle = s.clearHistorySub,

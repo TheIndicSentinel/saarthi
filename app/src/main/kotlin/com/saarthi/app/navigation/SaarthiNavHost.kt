@@ -59,8 +59,6 @@ sealed class Route(val path: String) {
     data object About        : Route("about")
     /** Help & support — contact + problem report. */
     data object Support      : Route("support")
-    /** "What Saarthi knows about me" — view/delete cross-chat memory facts. */
-    data object Memory       : Route("memory")
     data object ResponseStyle: Route("response-style")
     data object Downloads    : Route("downloads")
     // Model change is onboarding re-entry — same composable, modelChange flag
@@ -204,7 +202,6 @@ fun SaarthiNavHost(
                         "privacy" -> navController.navigate(Route.Privacy.path)
                         "about" -> navController.navigate(Route.About.path)
                         "support" -> navController.navigate(Route.Support.path)
-                        "memory" -> navController.navigate(Route.Memory.path)
                         "response-style" -> navController.navigate(Route.ResponseStyle.path)
                         "downloads" -> navController.navigate(Route.Downloads.path)
                         "assistant" -> navController.navigate(Route.Assistant.path)
@@ -230,9 +227,6 @@ fun SaarthiNavHost(
         }
         composable(Route.Support.path) {
             SupportScreen(onBack = { navController.popBackStack() }, language = currentLanguage)
-        }
-        composable(Route.Memory.path) {
-            MemoryScreen(onBack = { navController.popBackStack() }, language = currentLanguage)
         }
         composable(Route.ResponseStyle.path) {
             ResponseStyleScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)

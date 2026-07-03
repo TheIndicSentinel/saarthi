@@ -923,7 +923,10 @@ class ChatRepositoryImpl @Inject constructor(
             // ~360c — keeps chunks from being crowded out while giving the
             // model a clear citation pattern to mirror (worked example) AND
             // a smart fallback so "not found" turns are still helpful.
-            "ATTACHED EXCERPTS — answer from these.\n" +
+            "ATTACHED EXCERPTS — answer from these WHEN the user's message is about the document.\n" +
+                "• If the user's message is NOT about the document (a greeting, something personal like " +
+                "\"I'm stressed\", feelings, small talk), IGNORE these excerpts entirely and reply " +
+                "normally to the user — do not mention the document at all.\n" +
                 "• Cite each claim as (Name, p.X) using the document name from the [N] header below; " +
                 "include the page only when shown. Example: 'Consent is required (DPDP Act, p.3).'\n" +
                 "• If the answer is not in the excerpts, say so in one sentence, then give a brief " +
