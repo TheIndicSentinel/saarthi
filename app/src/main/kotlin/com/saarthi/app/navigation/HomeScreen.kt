@@ -241,11 +241,8 @@ private fun GreetingBlock(lang: SupportedLanguage, userName: String?) {
     val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
     val greeting = lang.timeGreeting(h)
     Column {
-        // Auto-fit single line: with the name personalisation ("शुभ संध्या,
-        // अर्जुन") the greeting can exceed the width the bare greeting was
-        // designed for — shrink to fit instead of wrapping the second word.
-        com.saarthi.core.ui.components.SingleLineAutoFitText(
-            text = buildAnnotatedString {
+        Text(
+            buildAnnotatedString {
                 // Personalise with the user's name when we know it ("Good
                 // evening, Arjun"); otherwise show just the time-of-day greeting.
                 if (!userName.isNullOrBlank()) {
@@ -255,12 +252,17 @@ private fun GreetingBlock(lang: SupportedLanguage, userName: String?) {
                     append(greeting)
                 }
             },
+            // SAME 30sp in every language — never auto-shrink (a smaller Hindi
+            // greeting than English reads as broken). One line by design: an
+            // extremely long name ellipsizes rather than wrapping or shrinking.
             style = MaterialTheme.typography.displayLarge.copy(
                 fontSize = 30.sp,
                 fontWeight = FontWeight.Bold,
                 color = SaarthiColors.Text,
                 letterSpacing = (-0.6).sp,
             ),
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(4.dp))
         Text(
