@@ -73,7 +73,11 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:bundleRelease --stacktrace 2>&1 | tee /tmp/bundle.log
+          # -Psaarthi.publicLog=false: the store build must NOT write the debug
+          # log (prompts, attachment filenames) to public Downloads — it falls
+          # back to app-private storage. Beta/test builds keep it public so
+          # testers can share logs.
+          ./gradlew :app:bundleRelease -Psaarthi.publicLog=false --stacktrace 2>&1 | tee /tmp/bundle.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::group::Bundle failure (last 150 lines)"; tail -150 /tmp/bundle.log; echo "::endgroup::"

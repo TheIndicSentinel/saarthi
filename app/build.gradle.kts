@@ -14,8 +14,8 @@ android {
     }
     defaultConfig {
         applicationId = "com.saarthi.app"
-        versionCode = 30
-        versionName = "1.0.29"
+        versionCode = 31
+        versionName = "1.0.30"
         // Instrumentation runner for the androidTest APK (Firebase Test Lab /
         // `connectedAndroidTest`). The app convention plugin doesn't set this
         // — only the library one did — so the generated test APK referenced a
@@ -57,6 +57,23 @@ android {
     }
 
     signingConfigs {
+        // STABLE debug signature. By default Gradle signs debug builds with an
+        // auto-generated ~/.android/debug.keystore — on ephemeral CI runners
+        // that key is REGENERATED every run, so each CI-built Saarthi.apk had a
+        // different signature and Android refused to install it over the
+        // previous one ("app doesn't install", forcing an uninstall that loses
+        // the 2.5GB downloaded model). Pointing debug signing at the committed
+        // ci/debug.keystore (standard debug credentials — not a secret, cannot
+        // publish to Play) makes every debug/test build signature-identical:
+        // updates install in place, and the uninstall dialog's "keep app data"
+        // option (hasFragileUserData) actually preserves downloaded models
+        // across reinstalls.
+        getByName("debug") {
+            storeFile = rootProject.file("ci/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         create("release") {
             val keystorePath = System.getenv("KEYSTORE_PATH")
             val keystorePassword = System.getenv("KEYSTORE_PASSWORD")

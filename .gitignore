@@ -22,6 +22,15 @@ local.properties
 *.keystore
 keystore/*.jks
 keystore/*.keystore
+# EXCEPTION: the shared DEBUG keystore is deliberately committed. It is NOT a
+# secret — it signs debug/test builds only (standard android/android debug
+# credentials, the same convention as Android's own auto-generated debug key)
+# and cannot publish to Play. Committing it gives every CI run the SAME debug
+# signature, so a new Saarthi.apk installs OVER the previous one instead of
+# failing with a signature mismatch, and the uninstall dialog's "keep app
+# data" option (hasFragileUserData) actually works across reinstalls. The
+# RELEASE upload key stays uncommitted (CI secret only).
+!ci/debug.keystore
 
 # Secrets — never commit. Pack signing private key lives in .keys/ (offline);
 # Firebase config is intentionally absent (no telemetry).

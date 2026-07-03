@@ -45,6 +45,12 @@
         </intent>
     </queries>
 
+    <!-- hasFragileUserData adds the "keep app data" checkbox to the uninstall
+         dialog so the 2.5-3.5GB downloaded model can survive a reinstall
+         (industry standard for apps with large downloads). FUNCTIONAL only when
+         the reinstalled APK has the SAME signature — guaranteed since debug
+         builds sign with the committed ci/debug.keystore and release with the
+         fixed upload key. Do not remove. -->
     <application
         android:name=".SaarthiApp"
         android:allowBackup="false"
