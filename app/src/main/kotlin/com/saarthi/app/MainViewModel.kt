@@ -84,7 +84,13 @@ class MainViewModel @Inject constructor(
                 .filter { com.saarthi.core.memory.domain.MemoryRepository.isNameKey(it.key) }
                 .mapNotNull { e ->
                     e.value.trim()
-                        .split(Regex("[^\\p{L}]+"))
+                        // Split on non-letters BUT keep combining marks (\p{M}):
+                        // Devanagari halant/matras (अर्जुन's ् and ु) are Mn,
+                        // not L — splitting on [^\p{L}] shredded "अर्जुन" into
+                        // "अर/ज/न" fragments and the greeting showed no name
+                        // even though the fact was stored (field log:
+                        // write value="अर्जुन" → resolved=(none)).
+                        .split(Regex("[^\\p{L}\\p{M}]+"))
                         .firstOrNull { it.length >= 3 && it.lowercase() !in NAME_FILLERS }
                         ?.replaceFirstChar { c -> c.uppercase() }
                 }

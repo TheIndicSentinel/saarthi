@@ -1251,7 +1251,7 @@ class ChatRepositoryImpl @Inject constructor(
 
         // ── English ──────────────────────────────────────────────────────────
         // name: "my name is X", "I am called X", "call me X"
-        Regex("(?i)\\b(?:my name is|i am called|call me|i'm called)\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})")
+        Regex("(?i)\\b(?:my name is|i am called|call me|i'm called)\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{1,40})")
             .find(msg)?.groupValues?.get(1)?.let { n ->
                 val name = nameHead(n)
                 if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
@@ -1290,19 +1290,19 @@ class ChatRepositoryImpl @Inject constructor(
         //
         // name: "मेरा नाम X है" / "मेरा नाम X" — highest-precision Hindi pattern.
         // \\p{L} matches all Unicode letters including Devanagari correctly.
-        Regex("मेरा नाम\\s+([\\p{L}][\\p{L}\\s.'-]{0,38})\\s*(?:है|हैं)?")
+        Regex("मेरा नाम\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{0,38})\\s*(?:है|हैं)?")
             .find(msg)?.groupValues?.get(1)?.let { n ->
                 val name = nameHead(n)
                 if (name.length in 2..40) out += "name" to name
             }
         // city: "मैं X से हूँ" / "मैं X से हूं" — "I am from X"
-        Regex("मैं\\s+([\\p{L}][\\p{L}\\s,'-]{1,38})\\s+से\\s+(?:हूँ|हूं)")
+        Regex("मैं\\s+([\\p{L}][\\p{L}\\p{M}\\s,'-]{1,38})\\s+से\\s+(?:हूँ|हूं)")
             .find(msg)?.groupValues?.get(1)?.let { c ->
                 val city = clean(c.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
                 if (city.length in 2..40) out += "city" to city
             }
         // city: "मैं X में रहता/रहती हूँ" — "I live in X"
-        Regex("मैं\\s+([\\p{L}][\\p{L}\\s,'-]{1,38})\\s+में\\s+(?:रहता|रहती)\\s+(?:हूँ|हूं)")
+        Regex("मैं\\s+([\\p{L}][\\p{L}\\p{M}\\s,'-]{1,38})\\s+में\\s+(?:रहता|रहती)\\s+(?:हूँ|हूं)")
             .find(msg)?.groupValues?.get(1)?.let { c ->
                 val city = clean(c.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
                 if (city.length in 2..40) out += "city" to city
@@ -1310,13 +1310,13 @@ class ChatRepositoryImpl @Inject constructor(
 
         // ── Marathi / Devanagari ─────────────────────────────────────────────
         // name: "माझे नाव X आहे" / "माझं नाव X"
-        Regex("(?:माझे|माझं|माझ)\\s+नाव\\s+([\\p{L}][\\p{L}\\s.'-]{0,38})\\s*(?:आहे)?")
+        Regex("(?:माझे|माझं|माझ)\\s+नाव\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{0,38})\\s*(?:आहे)?")
             .find(msg)?.groupValues?.get(1)?.let { n ->
                 val name = nameHead(n)
                 if (name.length in 2..40) out += "name" to name
             }
         // city: "मी X मध्ये राहतो/राहते" — "I live in X"
-        Regex("मी\\s+([\\p{L}][\\p{L}\\s,'-]{1,38})\\s+मध्ये\\s+(?:राहतो|राहते)")
+        Regex("मी\\s+([\\p{L}][\\p{L}\\p{M}\\s,'-]{1,38})\\s+मध्ये\\s+(?:राहतो|राहते)")
             .find(msg)?.groupValues?.get(1)?.let { c ->
                 val city = clean(c.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
                 if (city.length in 2..40) out += "city" to city
@@ -1334,7 +1334,7 @@ class ChatRepositoryImpl @Inject constructor(
             Regex(
                 "(?:నా\\s*పేరు|என்\\s*பெயர்|எனது\\s*பெயர்|আমার\\s*নাম|ನನ್ನ\\s*ಹೆಸರು|" +
                     "મારુ?ં?\\s*નામ|ਮੇਰਾ\\s*ਨਾਮ|ਮੇਰਾ\\s*ਨਾਂ|എന്റെ\\s*പേര്|ମୋ\\s*ନାମ|ମୋର\\s*ନାମ)" +
-                    "\\s+([\\p{L}][\\p{L}\\s.'-]{0,38})",
+                    "\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{0,38})",
             ).find(msg)?.groupValues?.get(1)?.let { n ->
                 val name = nameHead(n)
                 if (name.length in 2..40) out += "name" to name
@@ -1346,7 +1346,7 @@ class ChatRepositoryImpl @Inject constructor(
             Regex(
                 "(?i)\\b(?:naa? peru|en(?:na|adhu)? peyar|amar naam|nanna hesaru|" +
                     "nimma hesaru|maaru? naam|maru nam|mo(?:ra|r)? naam|ente peru?)" +
-                    "\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})",
+                    "\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{1,40})",
             ).find(msg)?.groupValues?.get(1)?.let { n ->
                 val name = nameHead(n)
                 if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
@@ -1355,7 +1355,7 @@ class ChatRepositoryImpl @Inject constructor(
 
         // ── Transliterated Marathi (Latin script) ────────────────────────────
         // name: "majhe naav X (aahe)" / "maza nav X"
-        Regex("(?i)\\b(?:majhe|majha|maza|mazha)\\s+naa?v\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})(?:\\s+aahe|\\s+ahe)?\\b")
+        Regex("(?i)\\b(?:majhe|majha|maza|mazha)\\s+naa?v\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{1,40})(?:\\s+aahe|\\s+ahe)?\\b")
             .find(msg)?.groupValues?.get(1)?.let { n ->
                 val name = nameHead(n)
                 if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
@@ -1364,7 +1364,7 @@ class ChatRepositoryImpl @Inject constructor(
         // ── Transliterated Hindi (Latin script) ─────────────────────────────
         // Very common on mobile — users type Hindi words in Roman script.
         // name: "mera naam X hai" / "mera naam X"
-        Regex("(?i)\\bmera\\s+naam\\s+([\\p{L}][\\p{L}\\s.'-]{1,40})(?:\\s+hai)?\\b")
+        Regex("(?i)\\bmera\\s+naam\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{1,40})(?:\\s+hai)?\\b")
             .find(msg)?.groupValues?.get(1)?.let { n ->
                 val name = nameHead(n)
                 if (name.length in 2..40 && firstWordOk(name)) out += "name" to name
@@ -1434,7 +1434,7 @@ class ChatRepositoryImpl @Inject constructor(
             // Romanised Hindi "main Arjun hoon/hu/hun" — the trailing copula makes
             // this high-precision even without a capitalisation signal.
             if (out.none { it.first == "name" }) {
-                Regex("(?i)\\bmain\\s+([\\p{L}][\\p{L}'-]{1,20})\\s+(?:hoon|hun|hu)\\b")
+                Regex("(?i)\\bmain\\s+([\\p{L}][\\p{L}\\p{M}'-]{1,20})\\s+(?:hoon|hun|hu)\\b")
                     .find(msg)?.groupValues?.get(1)
                     ?.let { it.trim().replaceFirstChar { c -> c.uppercase() } }
                     ?.takeIf(::nameOk)
@@ -1460,7 +1460,7 @@ class ChatRepositoryImpl @Inject constructor(
             // NON_NAME_WORDS list (theek/busy/hungry/ghar…) rejects
             // state-of-being words.
             if (out.none { it.first == "name" }) {
-                Regex("(?i)^(?:i'?m|i am|mae|main|mai|mein)\\s+([\\p{L}][\\p{L}'-]{1,20})\\s*[.!।]?$")
+                Regex("(?i)^(?:i'?m|i am|mae|main|mai|mein)\\s+([\\p{L}][\\p{L}\\p{M}'-]{1,20})\\s*[.!।]?$")
                     .find(msg.trim())?.groupValues?.get(1)
                     ?.let { it.trim().replaceFirstChar { c -> c.uppercase() } }
                     ?.takeIf(::nameOk)
@@ -1474,7 +1474,7 @@ class ChatRepositoryImpl @Inject constructor(
             // Whole-message (pronoun + exactly one word) keeps precision;
             // NATIVE_STATE_WORDS rejects "मैं ठीक"-style states.
             if (out.none { it.first == "name" }) {
-                Regex("^(?:मैं|मै|मी|నేను|நான்|আমি|ನಾನು|હું|ਮੈਂ|ମୁଁ)\\s+([\\p{L}][\\p{L}·'-]{1,24})\\s*[.!।]?$")
+                Regex("^(?:मैं|मै|मी|నేను|நான்|আমি|ನಾನು|હું|ਮੈਂ|ମୁଁ)\\s+([\\p{L}][\\p{L}\\p{M}·'-]{1,24})\\s*[.!।]?$")
                     .find(msg.trim())?.groupValues?.get(1)?.trim()
                     ?.takeIf { it !in NATIVE_STATE_WORDS && nameOk(it) }
                     ?.let { out += "name" to it }
@@ -1504,7 +1504,7 @@ class ChatRepositoryImpl @Inject constructor(
         // script. Hindi "मुझे X पसंद है / पसंद नहीं", Marathi "मला X आवडते /
         // आवडत नाही". Bare pronoun captures ("मुझे यह पसंद…") are rejected.
         if (out.none { it.first == "likes" || it.first == "dislikes" }) {
-            Regex("(?:मुझे|मला)\\s+([\\p{L}][\\p{L}\\s'-]{1,40}?)\\s+(?:पसंद|आवडत[ेो]?|आवडते)\\s*(नहीं|नाही)?")
+            Regex("(?:मुझे|मला)\\s+([\\p{L}][\\p{L}\\p{M}\\s'-]{1,40}?)\\s+(?:पसंद|आवडत[ेो]?|आवडते)\\s*(नहीं|नाही)?")
                 .find(msg)?.let { m ->
                     val v = clean(m.groupValues[1])
                     val neg = m.groupValues[2].isNotBlank()

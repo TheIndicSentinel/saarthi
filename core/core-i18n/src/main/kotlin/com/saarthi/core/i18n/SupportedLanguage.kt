@@ -91,11 +91,15 @@ enum class SupportedLanguage(
         }
         return when (this) {
             ENGLISH  -> listOf("Good morning", "Good afternoon", "Good evening", "Good night")
-            HINDI    -> listOf("सुप्रभात", "शुभ दोपहर", "शुभ संध्या", "शुभ रात्रि")
+            // NBSP ( ) joins the two words: Compose mis-measures Devanagari
+            // widths and wrapped "शुभ संध्या" onto two lines on the home
+            // greeting even though it fits — a no-break space makes the split
+            // impossible while keeping the full font size (field report, hi+mr).
+            HINDI    -> listOf("सुप्रभात", "शुभ दोपहर", "शुभ संध्या", "शुभ रात्रि")
             TAMIL    -> listOf("காலை வணக்கம்", "மதிய வணக்கம்", "மாலை வணக்கம்", "இனிய இரவு")
             TELUGU   -> listOf("శుభోదయం", "శుభ మధ్యాహ్నం", "శుభ సాయంత్రం", "శుభ రాత్రి")
             BENGALI  -> listOf("সুপ্রভাত", "শুভ অপরাহ্ন", "শুভ সন্ধ্যা", "শুভ রাত্রি")
-            MARATHI  -> listOf("सुप्रभात", "शुभ दुपार", "शुभ संध्याकाळ", "शुभ रात्री")
+            MARATHI  -> listOf("सुप्रभात", "शुभ दुपार", "शुभ संध्याकाळ", "शुभ रात्री")
             KANNADA  -> listOf("ಶುಭೋದಯ", "ಶುಭ ಮಧ್ಯಾಹ್ನ", "ಶುಭ ಸಂಜೆ", "ಶುಭ ರಾತ್ರಿ")
             GUJARATI -> listOf("સુપ્રભાત", "શુભ બપોર", "શુભ સાંજ", "શુભ રાત્રિ")
             PUNJABI  -> listOf("ਸ਼ੁਭ ਸਵੇਰ", "ਸ਼ੁਭ ਦੁਪਹਿਰ", "ਸ਼ੁਭ ਸ਼ਾਮ", "ਸ਼ੁਭ ਰਾਤ")
