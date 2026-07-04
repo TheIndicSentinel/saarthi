@@ -390,9 +390,17 @@ class ChatRepositoryImpl @Inject constructor(
                     // Gemini do — scan the user's own message for high-confidence
                     // identity facts and persist them too. Conservative patterns
                     // only (see extractImplicitFacts) to avoid false positives.
-                    extractImplicitFacts(userMessage).forEach { (k, v) ->
-                        scope.launch { persistMemoryFact(sessionId, k, v) }
-                    }
+                    // Defensive: a single bad regex/input must NEVER silently
+                    // kill implicit capture for every message — fail loud in
+                    // the log, keep the chat flow alive.
+                    runCatching { extractImplicitFacts(userMessage) }
+                        .onFailure { e ->
+                            DebugLogger.log("MEMORY", "implicit extraction FAILED: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
+                        }
+                        .getOrDefault(emptyList())
+                        .forEach { (k, v) ->
+                            scope.launch { persistMemoryFact(sessionId, k, v) }
+                        }
 
                     // Reminder feature REMOVED. Any [SAARTHI_REMINDER] the model
                     // still emits is parsed only so it can be stripped from the
