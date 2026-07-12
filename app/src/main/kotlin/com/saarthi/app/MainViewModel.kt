@@ -84,13 +84,18 @@ class MainViewModel @Inject constructor(
                 .filter { com.saarthi.core.memory.domain.MemoryRepository.isNameKey(it.key) }
                 .mapNotNull { e ->
                     e.value.trim()
-                        // Split on non-letters BUT keep combining marks (\p{M}):
+                        // Split on non-letters BUT keep combining marks (\p{M})
+                        // AND zero-width joiner/non-joiner (U+200D/U+200C):
                         // Devanagari halant/matras (अर्जुन's ् and ु) are Mn,
                         // not L — splitting on [^\p{L}] shredded "अर्जुन" into
                         // "अर/ज/न" fragments and the greeting showed no name
                         // even though the fact was stored (field log:
-                        // write value="अर्जुन" → resolved=(none)).
-                        .split(Regex("[^\\p{L}\\p{M}]+"))
+                        // write value="अर्जुन" → resolved=(none)). ZWJ/ZWNJ are
+                        // Cf (format), not L or M, but several Indic-script
+                        // keyboards (Devanagari, Bengali, Malayalam conjuncts)
+                        // insert them mid-word, which would still fracture the
+                        // name without this — keep them attached too.
+                        .split(Regex("[^\\p{L}\\p{M}\\u200C\\u200D]+"))
                         .firstOrNull { it.length >= 3 && it.lowercase() !in NAME_FILLERS }
                         ?.replaceFirstChar { c -> c.uppercase() }
                 }
