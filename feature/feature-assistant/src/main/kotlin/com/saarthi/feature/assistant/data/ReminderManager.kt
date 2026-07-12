@@ -120,7 +120,7 @@ class ReminderManager @Inject constructor(
             // reaches logcat, which is why earlier logs had zero reminder data.
             DebugLogger.log(
                 "REMINDER",
-                "scheduled id=$id exact=$exact in=${"%.1f".format(mins)}min at=${java.util.Date(triggerMs)} text=\"${text.take(40)}\"",
+                "scheduled id=$id exact=$exact in=${"%.1f".format(mins)}min at=${java.util.Date(triggerMs)} textLen=${text.length}",
             )
             Timber.d("ReminderManager: scheduled id=$id text='$text' at ${java.util.Date(triggerMs)} exact=$exact")
             true

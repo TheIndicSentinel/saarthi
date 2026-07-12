@@ -459,7 +459,7 @@ class RagDocumentRepository @Inject constructor(
             if (pos >= 0) {
                 val section = sorted.subList(pos, minOf(pos + HEADING_ANCHOR_MAX, sorted.size)).toList()
                 com.saarthi.core.inference.DebugLogger.log(
-                    "RAG", "heading-anchored on \"$heading\" → ${section.size} chunk(s)"
+                    "RAG", "heading-anchored (headingLen=${heading.length}) → ${section.size} chunk(s)"
                 )
                 return section
             }
