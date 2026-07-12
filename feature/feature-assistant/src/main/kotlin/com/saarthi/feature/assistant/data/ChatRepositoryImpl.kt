@@ -1192,6 +1192,14 @@ class ChatRepositoryImpl @Inject constructor(
      * sometimes wrap the name in a sentence ("उपयोगकर्ता का नाम अर्जुन है")
      * or glue on a pronoun ("Arjun.mae") — those must never enter a name key,
      * because the home greeting renders the stored value.
+     *
+     * Also rejects known ZODIAC_SIGNS: a small on-device model sometimes
+     * mislabels a zodiac fact as the "name" key when a message states
+     * several facts at once ("I am vegetarian and Sagittarius") — field log
+     * showed write key=name value="Sagittarius" clobbering the real stored
+     * name "अर्जुन" because "Sagittarius" is single-token, punctuation-free,
+     * and longer, so the completeness guard let it win. Fillers catch
+     * sentence-shaped junk; this catches a real word in the wrong category.
      */
     private fun isPlausibleNameValue(v: String): Boolean {
         if (v.length !in 2..40) return false
@@ -1199,7 +1207,10 @@ class ChatRepositoryImpl @Inject constructor(
         if (Regex("[.,!?;:।/\"()\\[\\]{}]").containsMatchIn(v)) return false
         val tokens = v.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (tokens.isEmpty() || tokens.size > 3) return false
-        return tokens.none { it.lowercase().trim('\'', '-') in NAME_VALUE_FILLERS }
+        return tokens.none {
+            val low = it.lowercase().trim('\'', '-')
+            low in NAME_VALUE_FILLERS || low in ZODIAC_SIGNS
+        }
     }
 
     /**
@@ -1658,6 +1669,14 @@ class ChatRepositoryImpl @Inject constructor(
         "bit", "little", "lot", "fan", "big", "huge", "small", "good", "bad",
         "great", "happy", "sad", "tired", "fine", "beginner", "expert", "newbie",
         "student",  // handled as education, not profession
+    )
+
+    // Zodiac signs — see isPlausibleNameValue's use of this set: a real word,
+    // not sentence-shaped junk, so it needs its own explicit rejection rather
+    // than relying on NAME_VALUE_FILLERS.
+    private val ZODIAC_SIGNS = setOf(
+        "aries", "taurus", "gemini", "cancer", "leo", "virgo",
+        "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces",
     )
 
     /**

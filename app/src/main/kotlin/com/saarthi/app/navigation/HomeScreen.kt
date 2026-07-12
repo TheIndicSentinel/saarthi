@@ -240,9 +240,10 @@ private fun GreetingBlock(lang: SupportedLanguage, userName: String?) {
     // cached "Good morning" from the morning and never refreshed it).
     val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
     val greeting = lang.timeGreeting(h)
-    Column {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            buildAnnotatedString {
+            modifier = Modifier.fillMaxWidth(),
+            text = buildAnnotatedString {
                 // Personalise with the user's name when we know it ("Good
                 // evening, Arjun"); otherwise show just the time-of-day greeting.
                 if (!userName.isNullOrBlank()) {
