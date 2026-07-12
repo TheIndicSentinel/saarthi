@@ -76,7 +76,7 @@ jobs:
       - name: Build Debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
+          ./gradlew :app:assembleDebug -Psaarthi.publicLog=true --stacktrace 2>&1 | tee /tmp/build.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::group::Build failure summary (last 150 lines)"

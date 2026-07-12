@@ -66,7 +66,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease --no-parallel --max-workers=2 --stacktrace 2>&1 | tee /tmp/build.log
+          ./gradlew :app:assembleRelease -Psaarthi.publicLog=false --no-parallel --max-workers=2 --stacktrace 2>&1 | tee /tmp/build.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::group::Build failure summary (last 150 lines)"; tail -150 /tmp/build.log; echo "::endgroup::"

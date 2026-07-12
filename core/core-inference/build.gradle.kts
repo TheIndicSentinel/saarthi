@@ -36,10 +36,10 @@ android {
         // Debug log → public Downloads gate. The append-only saarthi_debug.log
         // contains prompts, attachment filenames, model names, errors and device
         // info — fine for beta (where the user shares it for support) but a
-        // privacy leak in a public Play release. Keep TRUE for beta builds; set
-        // FALSE for a Play-Store production build (or pass -Psaarthi.publicLog=false)
-        // and the log falls back to app-private storage instead of public Downloads.
-        val publicLog = (project.findProperty("saarthi.publicLog") as String?)?.toBoolean() ?: true
+        // privacy leak in a public release. Defaults FALSE (app-private storage);
+        // pass -Psaarthi.publicLog=true only for an explicit beta build where the
+        // user is meant to share the log for support.
+        val publicLog = (project.findProperty("saarthi.publicLog") as String?)?.toBoolean() ?: false
         buildConfigField("boolean", "PUBLIC_DEBUG_LOG", "$publicLog")
     }
 }

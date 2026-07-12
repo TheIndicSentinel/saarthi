@@ -661,17 +661,16 @@ class ChatRepositoryImpl @Inject constructor(
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
 
         // Per-chunk retrieval log — names + chunk index + BM25 score +
-        // page range + a short text preview. Lets us diagnose "model
-        // cited wrong source" complaints without having to rerun the
-        // session: the log shows exactly which chunks the model was
-        // given on each turn.
+        // page range. Metadata only (no query/chunk text — that's user
+        // content). Lets us diagnose "model cited wrong source" complaints
+        // without having to rerun the session: the log shows exactly which
+        // chunks the model was given on each turn.
         if (retrieved.isNotEmpty()) {
-            DebugLogger.log("RAG", "retrieved ${retrieved.size} chunk(s) for query=\"${userMessage.take(80)}\"")
+            DebugLogger.log("RAG", "retrieved ${retrieved.size} chunk(s) for queryLen=${userMessage.length}")
             retrieved.forEachIndexed { i, c ->
                 val ref = if (c.chunkIndex < 0) "outline" else "part ${c.chunkIndex + 1}"
                 val pages = extractPageRange(c.text)?.let { " · $it" } ?: ""
-                val preview = c.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)?.trim() ?: ""
-                DebugLogger.log("RAG", "  [${i + 1}] ${c.docName} · $ref$pages  score=${"%.2f".format(c.score)}  preview=\"$preview…\"")
+                DebugLogger.log("RAG", "  [${i + 1}] ${c.docName} · $ref$pages  score=${"%.2f".format(c.score)}")
             }
         }
 
@@ -1158,7 +1157,7 @@ class ChatRepositoryImpl @Inject constructor(
         val isNameKey = MemoryRepository.isNameKey(key)
         if (isNameKey) {
             if (!isPlausibleNameValue(v)) {
-                DebugLogger.log("MEMORY", "name write REJECTED (shape) key=$key value=\"${v.take(24)}\"")
+                DebugLogger.log("MEMORY", "name write REJECTED (shape) key=$key valueLen=${v.length}")
                 return
             }
             val existing = memoryRepository.get(sessionId = target, key = key)?.value?.trim()
@@ -1168,10 +1167,11 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
         // File-visible write trail — the forensic record for any "memory feels
-        // wrong" report: what key was written, to which scope, with what value.
+        // wrong" report: what key was written and to which scope. No value
+        // content (memory values can be PII, e.g. names) — length only.
         DebugLogger.log(
             "MEMORY",
-            "write key=$key scope=${if (target == MemoryRepository.USER_SCOPE) "USER" else "session"} value=\"${v.take(24)}\"",
+            "write key=$key scope=${if (target == MemoryRepository.USER_SCOPE) "USER" else "session"} valueLen=${v.length}",
         )
         // List-type facts ACCUMULATE instead of overwrite: "I like apples" then
         // "I like oranges" → both kept (dedup, capped, oldest dropped). Single
