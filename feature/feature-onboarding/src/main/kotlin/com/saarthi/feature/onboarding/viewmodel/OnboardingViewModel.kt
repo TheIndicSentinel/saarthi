@@ -529,23 +529,46 @@ class OnboardingViewModel @Inject constructor(
             }
             else -> {
                 val model = selectedEntry ?: s.catalogModels.firstOrNull() ?: return
-                _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING, error = null) }
-                downloadManager.startDownload(model)
-                // Once the download completes, allProgress collector sets
-                // selectedModelPath + downloadedModelIds. Wait for that.
-                viewModelScope.launch {
-                    uiState.first { st ->
-                        st.step != OnboardingStep.DOWNLOADING ||
-                            (st.selectedModelPath?.endsWith(model.fileName) == true &&
-                                model.id in st.downloadedModelIds)
-                    }
-                    val st = _uiState.value
-                    if (st.step == OnboardingStep.DOWNLOADING &&
-                        st.selectedModelPath?.endsWith(model.fileName) == true
-                    ) {
-                        confirmModelAndInit()
-                    }
-                }
+                startDownloadAndAutoInit(model)
+            }
+        }
+    }
+
+    /**
+     * First-run onboarding entry point that skips the model picker entirely:
+     * auto-selects the catalog's device-appropriate "Recommended" model and
+     * starts downloading it immediately. Falls back to the normal picker if
+     * no safe model exists for this device (e.g. MINIMAL tier) so the user
+     * is never stuck with nothing — and the picker (reached via "back" on
+     * the downloading screen, or Settings' "Change Model") still lets anyone
+     * override the auto-pick manually.
+     */
+    fun proceedWithAutoModel() {
+        val model = modelCatalog.autoPick(deviceProfiler.profile())
+        if (model == null) {
+            proceedToModelPick()
+            return
+        }
+        startDownloadAndAutoInit(model)
+    }
+
+    /** Shared by [proceedFromModelPick] and [proceedWithAutoModel]. */
+    private fun startDownloadAndAutoInit(model: ModelEntry) {
+        _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING, error = null) }
+        downloadManager.startDownload(model)
+        // Once the download completes, allProgress collector sets
+        // selectedModelPath + downloadedModelIds. Wait for that.
+        viewModelScope.launch {
+            uiState.first { st ->
+                st.step != OnboardingStep.DOWNLOADING ||
+                    (st.selectedModelPath?.endsWith(model.fileName) == true &&
+                        model.id in st.downloadedModelIds)
+            }
+            val st = _uiState.value
+            if (st.step == OnboardingStep.DOWNLOADING &&
+                st.selectedModelPath?.endsWith(model.fileName) == true
+            ) {
+                confirmModelAndInit()
             }
         }
     }

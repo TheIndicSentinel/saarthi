@@ -40,6 +40,17 @@ class ModelCatalog @Inject constructor() {
     }
 
     /**
+     * The single best model to auto-select when the user isn't asked to
+     * choose (first-run onboarding) — the "Recommended"-tagged entry from
+     * [recommendedFor], or the first safe entry if none carries that tag
+     * (defensive fallback; every current tier has a "Recommended" entry).
+     */
+    fun autoPick(profile: DeviceProfile): ModelEntry? {
+        val candidates = recommendedFor(profile)
+        return candidates.firstOrNull { "Recommended" in it.tags } ?: candidates.firstOrNull()
+    }
+
+    /**
      * Models one tier above the device's own tier that *might* still run
      * if the user has cleared background apps. Shown as an "advanced" option
      * where the UI supports it — never offered by default.

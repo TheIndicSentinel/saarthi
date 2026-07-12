@@ -130,7 +130,7 @@ fun OnboardingScreen(
                 )
                 OnboardingStep.PRIVACY -> Onb3Privacy(
                     lang = state.selectedLanguage,
-                    onNext = viewModel::proceedToModelPick,
+                    onNext = viewModel::proceedWithAutoModel,
                     onBack = viewModel::goToWelcome,
                 )
                 OnboardingStep.MODEL_PICK -> Onb4ModelPick(
