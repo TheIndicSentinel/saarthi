@@ -229,7 +229,7 @@ class AssistantViewModel @Inject constructor(
                     val friendly = when {
                         throwable == null -> null
                         throwable is kotlinx.coroutines.CancellationException -> null
-                        else -> "Couldn't finish that response. Please try again."
+                        else -> currentLanguage.value.streamFailedRetry
                     }
                     _uiState.update { it.copy(isStreaming = false, error = friendly) }
                 }
@@ -309,8 +309,11 @@ class AssistantViewModel @Inject constructor(
                 val acceptedDocs = docFiles.take(remaining)
                 if (acceptedDocs.size < docFiles.size) {
                     _uiState.update {
-                        it.copy(error = "Free includes ${com.saarthi.core.i18n.Entitlements.FREE_MAX_DOCUMENTS} document per chat. " +
-                            "Unlock Saarthi Pro (Settings → Saarthi Pro) for unlimited documents.")
+                        it.copy(
+                            error = currentLanguage.value.freeDocumentLimitReached(
+                                com.saarthi.core.i18n.Entitlements.FREE_MAX_DOCUMENTS,
+                            ),
+                        )
                     }
                 }
                 accepted = files.filter { it.isImage } + acceptedDocs
@@ -391,21 +394,22 @@ class AssistantViewModel @Inject constructor(
             // that's the user closing voice mode or us restarting it, not a
             // failure, so stay silent. Others map to plain language; raw
             // "Voice error: 5" must never reach the user.
+            val lang = currentLanguage.value
             val msg = when (error) {
                 SpeechRecognizer.ERROR_CLIENT -> null
                 SpeechRecognizer.ERROR_NO_MATCH,
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                    "Didn't catch that — tap the mic and try again."
+                    lang.voiceNoMatch
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-                    "Microphone permission is needed for voice input."
+                    lang.voiceMicPermissionNeeded
                 SpeechRecognizer.ERROR_NETWORK,
                 SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
                 SpeechRecognizer.ERROR_SERVER ->
-                    "The device speech service isn't responding right now. Please type instead."
+                    lang.voiceServiceUnavailable
                 SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
-                    "Voice input is busy — try again in a moment."
+                    lang.voiceBusy
                 else ->
-                    "Couldn't process voice input. Please try again or type instead."
+                    lang.voiceGenericError
             }
             _uiState.update { it.copy(isListening = false, error = msg) }
         }
@@ -426,7 +430,7 @@ class AssistantViewModel @Inject constructor(
 
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            _uiState.update { it.copy(error = "Voice recognition not available on this device") }
+            _uiState.update { it.copy(error = currentLanguage.value.voiceNotAvailable) }
             return
         }
         // Reuse a SINGLE recognizer instance across turns. cancel() clears any
@@ -446,7 +450,7 @@ class AssistantViewModel @Inject constructor(
             recognizer.cancel()
             recognizer.startListening(intent)
         }.onFailure {
-            _uiState.update { it.copy(isListening = false, error = "Couldn't start voice input. Please try again.") }
+            _uiState.update { it.copy(isListening = false, error = currentLanguage.value.voiceStartFailed) }
         }
         _uiState.update { it.copy(isListening = true) }
     }

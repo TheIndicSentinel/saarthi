@@ -88,6 +88,10 @@ fun HomeScreen(
     /** The user's name, learned from chat (USER_SCOPE memory). When present the
      *  greeting personalises to "Good evening, {name}"; otherwise it's generic. */
     userName: String? = null,
+    /** True when the active model is the Compact (1B) tier — swaps the quick-action
+     *  chips to [SupportedLanguage.homeQuickActionsCompact] (no PDF summarize, no
+     *  Kisan pack; Compact can't handle either well). */
+    isCompactModel: Boolean = false,
 ) {
     var showLanguagePicker by remember { mutableStateOf(false) }
 
@@ -124,6 +128,7 @@ fun HomeScreen(
                     lang = currentLanguage,
                     onClick = { onNavigate(Route.Assistant) },
                     onSuggestionChip = onSuggestionChip,
+                    isCompactModel = isCompactModel,
                 )
                 Spacer(Modifier.height(20.dp))
 
@@ -282,7 +287,12 @@ private fun GreetingBlock(lang: SupportedLanguage, userName: String?) {
 }
 
 @Composable
-private fun HeroComposer(lang: SupportedLanguage, onClick: () -> Unit, onSuggestionChip: (String) -> Unit = {}) {
+private fun HeroComposer(
+    lang: SupportedLanguage,
+    onClick: () -> Unit,
+    onSuggestionChip: (String) -> Unit = {},
+    isCompactModel: Boolean = false,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -334,7 +344,10 @@ private fun HeroComposer(lang: SupportedLanguage, onClick: () -> Unit, onSuggest
             Spacer(Modifier.height(14.dp))
             // Three highest-frequency quick actions, localized. The chip text is
             // also the prompt sent on tap, so it stays a full natural phrase.
-            val chips = lang.homeQuickActions
+            // Compact swaps to its own list — it can't attach a PDF (no
+            // attachment support at that tier) or answer well from the Kisan
+            // pack (too little context budget for grounded RAG).
+            val chips = if (isCompactModel) lang.homeQuickActionsCompact else lang.homeQuickActions
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 chips.getOrNull(0)?.let { SuggestionPill(it, onClick = { onSuggestionChip(it) }) }
                 chips.getOrNull(1)?.let { SuggestionPill(it, onClick = { onSuggestionChip(it) }) }

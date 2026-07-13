@@ -125,7 +125,10 @@ class PackUpdateWorker(
         // just after onboarding. A brand-new user shouldn't get a "pack updated"
         // notification before they've even used the app.
         if (installedVersion > 0) {
-            notifyPackUpdated(deps.languageManager().selectedLanguage.value)
+            // Awaited, not .value — doWork() can run in a cold process where
+            // the LanguageManager StateFlow hasn't finished its first
+            // DataStore read yet (see LanguageManager.awaitSelectedLanguage).
+            notifyPackUpdated(deps.languageManager().awaitSelectedLanguage())
         } else {
             DebugLogger.log("PACK", "First pack install (seed) — suppressing update notification")
         }

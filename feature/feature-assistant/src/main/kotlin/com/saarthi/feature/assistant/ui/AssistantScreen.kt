@@ -165,9 +165,16 @@ fun AssistantScreen(
     var showPersonalitySheet by remember { mutableStateOf(false) }
     val personalitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Pre-fill input from a home-screen suggestion chip (fires once on entry).
+    // A home-screen quick-action chip sends immediately on entry — tapping a
+    // "quick option" and then having to tap Send again reads as broken, not
+    // quick. (Unrelated to the empty-chat suggestion pills further down,
+    // which intentionally only pre-fill — the user is already on this screen
+    // and reviewing before sending there.)
     LaunchedEffect(initialMessage) {
-        if (initialMessage.isNotBlank()) viewModel.onInputChange(initialMessage)
+        if (initialMessage.isNotBlank()) {
+            viewModel.onInputChange(initialMessage)
+            viewModel.sendMessage()
+        }
     }
 
     // Sync drawer open/close with VM state
@@ -430,16 +437,16 @@ fun AssistantScreen(
                         // sheet and tell the user how to fix it.
                         if (!uiState.attachmentsEnabled) {
                             scope.launch {
-                                snackbarHost.showSnackbar(
-                                    "Attachments need a larger model — switch to Gemma 4 from Settings → Models.",
-                                )
+                                snackbarHost.showSnackbar(currentLanguage.attachmentsNeedLargerModel)
                             }
                         } else if (!viewModel.canAttachDocument()) {
                             // Free tier: the per-chat document allowance is used.
                             // Show the Pro upsell instead of the picker.
                             scope.launch {
                                 snackbarHost.showSnackbar(
-                                    "Free includes 1 document per chat. Unlock Saarthi Pro in Settings for unlimited documents.",
+                                    currentLanguage.freeDocumentLimitReached(
+                                        com.saarthi.core.i18n.Entitlements.FREE_MAX_DOCUMENTS,
+                                    ),
                                 )
                             }
                         } else {
@@ -543,8 +550,7 @@ fun AssistantScreen(
             title = { Text(currentLanguage.notifPermTitle, color = SaarthiColors.TextPrimary) },
             text = {
                 Text(
-                    "Android may pause Saarthi to save battery. Letting the app skip battery " +
-                        "optimization keeps long answers from being cut off mid-reply.",
+                    currentLanguage.batteryOptExplanation,
                     color = SaarthiColors.TextSecondary,
                 )
             },

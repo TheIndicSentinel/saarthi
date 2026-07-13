@@ -408,11 +408,57 @@ enum class SupportedLanguage(
     val deleteLabel: String get() = when (this) { HINDI -> "हटाएँ"; MARATHI -> "हटवा"; else -> "Delete" }
     /** Search box placeholder. */
     val searchHint: String get() = when (this) { HINDI -> "खोजें…"; MARATHI -> "शोधा…"; else -> "Search…" }
-    /** Notification-permission dialog: title. */
-    val notifPermTitle: String get() = when (this) { HINDI -> "जवाब और रिमाइंडर समय पर पाएँ?"; MARATHI -> "उत्तरे आणि स्मरणपत्रे वेळेवर मिळवायची?"; else -> "Keep replies & reminders on time?" }
+    /** Battery-optimization dialog: title (asks to skip battery optimization so long replies aren't cut off). */
+    val notifPermTitle: String get() = when (this) {
+        ENGLISH  -> "Keep replies & reminders on time?"
+        HINDI    -> "जवाब और रिमाइंडर समय पर पाएँ?"
+        TAMIL    -> "பதில்களும் நினைவூட்டல்களும் சரியான நேரத்தில் வேண்டுமா?"
+        TELUGU   -> "సమాధానాలు, రిమైండర్‌లు సమయానికి కావాలా?"
+        BENGALI  -> "উত্তর ও রিমাইন্ডার সময়মতো পেতে চান?"
+        MARATHI  -> "उत्तरे आणि स्मरणपत्रे वेळेवर मिळवायची?"
+        KANNADA  -> "ಉತ್ತರಗಳು ಮತ್ತು ರಿಮೈಂಡರ್‌ಗಳು ಸಮಯಕ್ಕೆ ಬೇಕೇ?"
+        GUJARATI -> "જવાબો અને રિમાઇન્ડર સમયસર જોઈએ છે?"
+        PUNJABI  -> "ਜਵਾਬ ਅਤੇ ਰਿਮਾਈਂਡਰ ਸਮੇਂ ਸਿਰ ਚਾਹੀਦੇ ਹਨ?"
+        ODIA     -> "ଉତ୍ତର ଓ ରିମାଇଣ୍ଡର ସମୟରେ ପାଇବେ କି?"
+    }
+    /** Battery-optimization dialog: body explaining why the exemption is needed. */
+    val batteryOptExplanation: String get() = when (this) {
+        ENGLISH  -> "Android may pause Saarthi to save battery. Letting the app skip battery optimization keeps long answers from being cut off mid-reply."
+        HINDI    -> "बैटरी बचाने के लिए Android सारथी को रोक सकता है। बैटरी ऑप्टिमाइज़ेशन छोड़ने की अनुमति देने से लंबे जवाब बीच में कटने से बचते हैं।"
+        TAMIL    -> "பேட்டரியைச் சேமிக்க Android சாரதியை இடைநிறுத்தலாம். பேட்டரி மேம்படுத்தலைத் தவிர்க்க அனுமதித்தால், நீண்ட பதில்கள் பாதியில் நிற்காது."
+        TELUGU   -> "బ్యాటరీ ఆదా చేయడానికి Android సారథిని ఆపవచ్చు. బ్యాటరీ ఆప్టిమైజేషన్‌ను దాటవేయడానికి అనుమతిస్తే, పొడవైన సమాధానాలు మధ్యలో ఆగవు."
+        BENGALI  -> "ব্যাটারি বাঁচাতে Android সারথিকে থামিয়ে দিতে পারে। ব্যাটারি অপ্টিমাইজেশন এড়াতে দিলে দীর্ঘ উত্তর মাঝপথে থেমে যাবে না।"
+        MARATHI  -> "बॅटरी वाचवण्यासाठी Android सारथी थांबवू शकते. बॅटरी ऑप्टिमायझेशन वगळण्याची परवानगी दिल्यास लांब उत्तरे मध्येच थांबणार नाहीत."
+        KANNADA  -> "ಬ್ಯಾಟರಿ ಉಳಿಸಲು Android ಸಾರಥಿಯನ್ನು ನಿಲ್ಲಿಸಬಹುದು. ಬ್ಯಾಟರಿ ಆಪ್ಟಿಮೈಸೇಶನ್ ಬಿಟ್ಟುಬಿಡಲು ಅನುಮತಿಸಿದರೆ ದೀರ್ಘ ಉತ್ತರಗಳು ಮಧ್ಯದಲ್ಲಿ ನಿಲ್ಲುವುದಿಲ್ಲ."
+        GUJARATI -> "બેટરી બચાવવા Android સારથીને અટકાવી શકે છે. બેટરી ઑપ્ટિમાઇઝેશન છોડવાની મંજૂરી આપવાથી લાંબા જવાબો વચ્ચે અટકશે નહીં."
+        PUNJABI  -> "ਬੈਟਰੀ ਬਚਾਉਣ ਲਈ Android ਸਾਰਥੀ ਨੂੰ ਰੋਕ ਸਕਦਾ ਹੈ। ਬੈਟਰੀ ਓਪਟੀਮਾਈਜ਼ੇਸ਼ਨ ਛੱਡਣ ਦੀ ਇਜਾਜ਼ਤ ਦੇਣ ਨਾਲ ਲੰਬੇ ਜਵਾਬ ਵਿਚਾਲੇ ਨਹੀਂ ਰੁਕਣਗੇ।"
+        ODIA     -> "ବ୍ୟାଟେରୀ ବଞ୍ଚାଇବାକୁ Android ସାରଥୀକୁ ବନ୍ଦ କରିପାରେ। ବ୍ୟାଟେରୀ ଅପ୍ଟିମାଇଜେସନ୍ ଏଡ଼ାଇବାକୁ ଅନୁମତି ଦେଲେ ଲମ୍ବା ଉତ୍ତର ମଝିରେ ଅଟକିବ ନାହିଁ।"
+    }
     /** Generic allow / not-now actions. */
-    val allowLabel: String get() = when (this) { HINDI -> "अनुमति दें"; MARATHI -> "परवानगी द्या"; else -> "Allow" }
-    val notNowLabel: String get() = when (this) { HINDI -> "अभी नहीं"; MARATHI -> "आत्ता नको"; else -> "Not now" }
+    val allowLabel: String get() = when (this) {
+        ENGLISH  -> "Allow"
+        HINDI    -> "अनुमति दें"
+        TAMIL    -> "அனுமதி"
+        TELUGU   -> "అనుమతించు"
+        BENGALI  -> "অনুমতি দিন"
+        MARATHI  -> "परवानगी द्या"
+        KANNADA  -> "ಅನುಮತಿಸಿ"
+        GUJARATI -> "મંજૂરી આપો"
+        PUNJABI  -> "ਇਜਾਜ਼ਤ ਦਿਓ"
+        ODIA     -> "ଅନୁମତି ଦିଅନ୍ତୁ"
+    }
+    val notNowLabel: String get() = when (this) {
+        ENGLISH  -> "Not now"
+        HINDI    -> "अभी नहीं"
+        TAMIL    -> "இப்போது வேண்டாம்"
+        TELUGU   -> "ఇప్పుడు వద్దు"
+        BENGALI  -> "এখন না"
+        MARATHI  -> "आत्ता नको"
+        KANNADA  -> "ಈಗ ಬೇಡ"
+        GUJARATI -> "હમણાં નહીં"
+        PUNJABI  -> "ਹੁਣ ਨਹੀਂ"
+        ODIA     -> "ବର୍ତ୍ତମାନ ନୁହେଁ"
+    }
     /** Saarthi Knowledge feature title (brand "Saarthi" kept). */
     val knowledgeTitle: String get() = when (this) { HINDI -> "सारथी ज्ञान"; MARATHI -> "सारथी ज्ञान"; else -> "Saarthi Knowledge" }
     val knowledgeEmpty: String get() = when (this) { HINDI -> "अभी कोई निजी जानकारी सहेजी नहीं गई।"; MARATHI -> "अजून कोणतीही वैयक्तिक माहिती साठवलेली नाही."; else -> "No personal knowledge stored yet." }
@@ -441,6 +487,139 @@ enum class SupportedLanguage(
     val attachDocument: String get() = when (this) { HINDI -> "दस्तावेज़"; MARATHI -> "दस्तऐवज"; else -> "Document" }
     val attachVoice: String get() = when (this) { HINDI -> "आवाज़ मेमो"; MARATHI -> "व्हॉइस मेमो"; else -> "Voice memo" }
     val attachVoiceSub: String get() = when (this) { HINDI -> "ऑडियो रिकॉर्ड करें"; MARATHI -> "ऑडिओ रेकॉर्ड करा"; else -> "Record audio" }
+
+    // ── Snackbar messages (chat errors, attachment/voice feedback) ───────────
+
+    /** Snackbar: attach button tapped while the Compact (1B) model is active. */
+    val attachmentsNeedLargerModel: String get() = when (this) {
+        ENGLISH  -> "Attachments need a larger model — switch to Gemma 4 from Settings → Models."
+        HINDI    -> "अटैचमेंट के लिए बड़ा मॉडल चाहिए — Settings → Models से Gemma 4 चुनें।"
+        TAMIL    -> "இணைப்புகளுக்கு பெரிய மாடல் தேவை — Settings → Models இல் Gemma 4-க்கு மாறவும்."
+        TELUGU   -> "అటాచ్‌మెంట్‌లకు పెద్ద మోడల్ కావాలి — Settings → Models నుండి Gemma 4కి మారండి."
+        BENGALI  -> "অ্যাটাচমেন্টের জন্য বড় মডেল দরকার — Settings → Models থেকে Gemma 4-এ পাল্টান।"
+        MARATHI  -> "अटॅचमेंटसाठी मोठे मॉडेल हवे — Settings → Models मधून Gemma 4 निवडा."
+        KANNADA  -> "ಲಗತ್ತುಗಳಿಗೆ ದೊಡ್ಡ ಮಾಡೆಲ್ ಬೇಕು — Settings → Models ನಿಂದ Gemma 4 ಗೆ ಬದಲಿಸಿ."
+        GUJARATI -> "એટેચમેન્ટ માટે મોટું મોડેલ જોઈએ — Settings → Models માંથી Gemma 4 પસંદ કરો."
+        PUNJABI  -> "ਅਟੈਚਮੈਂਟ ਲਈ ਵੱਡਾ ਮਾਡਲ ਚਾਹੀਦਾ ਹੈ — Settings → Models ਤੋਂ Gemma 4 ਚੁਣੋ।"
+        ODIA     -> "ସଂଲଗ୍ନ ପାଇଁ ବଡ଼ ମଡେଲ ଦରକାର — Settings → Models ରୁ Gemma 4 ବାଛନ୍ତୁ।"
+    }
+    /** Snackbar: free-tier per-chat document limit reached ([maxDocs] documents). */
+    fun freeDocumentLimitReached(maxDocs: Int): String = when (this) {
+        ENGLISH  -> "Free includes $maxDocs document per chat. Unlock Saarthi Pro in Settings for unlimited documents."
+        HINDI    -> "फ्री में प्रति चैट $maxDocs दस्तावेज़ शामिल है। असीमित दस्तावेज़ों के लिए Settings में Saarthi Pro अनलॉक करें।"
+        TAMIL    -> "இலவசத்தில் ஒரு அரட்டைக்கு $maxDocs ஆவணம் அடங்கும். வரம்பற்ற ஆவணங்களுக்கு Settings இல் Saarthi Pro ஐ அன்லாக் செய்யவும்."
+        TELUGU   -> "ఫ్రీలో ఒక్కో చాట్‌కు $maxDocs డాక్యుమెంట్ ఉంటుంది. అపరిమిత డాక్యుమెంట్ల కోసం Settings లో Saarthi Pro అన్‌లాక్ చేయండి."
+        BENGALI  -> "ফ্রি-তে প্রতি চ্যাটে $maxDocs নথি অন্তর্ভুক্ত। সীমাহীন নথির জন্য Settings-এ Saarthi Pro আনলক করুন।"
+        MARATHI  -> "फ्री मध्ये प्रति चॅट $maxDocs दस्तऐवज समाविष्ट आहे. अमर्यादित दस्तऐवजांसाठी Settings मध्ये Saarthi Pro अनलॉक करा."
+        KANNADA  -> "ಉಚಿತದಲ್ಲಿ ಪ್ರತಿ ಚಾಟ್‌ಗೆ $maxDocs ದಾಖಲೆ ಸೇರಿದೆ. ಅಪರಿಮಿತ ದಾಖಲೆಗಳಿಗೆ Settings ನಲ್ಲಿ Saarthi Pro ಅನ್‌ಲಾಕ್ ಮಾಡಿ."
+        GUJARATI -> "ફ્રીમાં દરેક ચેટ દીઠ $maxDocs દસ્તાવેજ સામેલ છે. અમર્યાદિત દસ્તાવેજો માટે Settings માં Saarthi Pro અનલૉક કરો."
+        PUNJABI  -> "ਫ੍ਰੀ ਵਿੱਚ ਹਰ ਚੈਟ ਲਈ $maxDocs ਦਸਤਾਵੇਜ਼ ਸ਼ਾਮਲ ਹੈ। ਅਸੀਮਤ ਦਸਤਾਵੇਜ਼ਾਂ ਲਈ Settings ਵਿੱਚ Saarthi Pro ਅਨਲੌਕ ਕਰੋ।"
+        ODIA     -> "ଫ୍ରୀରେ ପ୍ରତି ଚାଟ୍‌କୁ $maxDocs ଡକ୍ୟୁମେଣ୍ଟ ଅନ୍ତର୍ଭୁକ୍ତ। ଅସୀମିତ ଡକ୍ୟୁମେଣ୍ଟ ପାଇଁ Settings ରେ Saarthi Pro ଅନଲକ୍ କରନ୍ତୁ।"
+    }
+    /** Snackbar: streaming a response failed (non-cancellation error). */
+    val streamFailedRetry: String get() = when (this) {
+        ENGLISH  -> "Couldn't finish that response. Please try again."
+        HINDI    -> "जवाब पूरा नहीं हो सका। कृपया फिर से कोशिश करें।"
+        TAMIL    -> "அந்த பதிலை முடிக்க முடியவில்லை. மீண்டும் முயற்சிக்கவும்."
+        TELUGU   -> "ఆ సమాధానం పూర్తి కాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి."
+        BENGALI  -> "উত্তরটি শেষ করা যায়নি। আবার চেষ্টা করুন।"
+        MARATHI  -> "ते उत्तर पूर्ण होऊ शकले नाही. कृपया पुन्हा प्रयत्न करा."
+        KANNADA  -> "ಆ ಉತ್ತರವನ್ನು ಪೂರ್ಣಗೊಳಿಸಲಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+        GUJARATI -> "તે જવાબ પૂરો થઈ શક્યો નહીં. કૃપા કરી ફરી પ્રયાસ કરો."
+        PUNJABI  -> "ਉਹ ਜਵਾਬ ਪੂਰਾ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
+        ODIA     -> "ସେହି ଉତ୍ତର ସମାପ୍ତ ହୋଇପାରିଲା ନାହିଁ। ଦୟାକରି ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।"
+    }
+    /** Voice error: no speech detected / timed out. */
+    val voiceNoMatch: String get() = when (this) {
+        ENGLISH  -> "Didn't catch that — tap the mic and try again."
+        HINDI    -> "समझ नहीं आया — माइक दबाकर फिर से कोशिश करें।"
+        TAMIL    -> "புரியவில்லை — மைக்கை தட்டி மீண்டும் முயற்சிக்கவும்."
+        TELUGU   -> "అర్థం కాలేదు — మైక్ నొక్కి మళ్ళీ ప్రయత్నించండి."
+        BENGALI  -> "বোঝা যায়নি — মাইক চেপে আবার চেষ্টা করুন।"
+        MARATHI  -> "समजले नाही — माइक दाबून पुन्हा प्रयत्न करा."
+        KANNADA  -> "ಅರ್ಥವಾಗಲಿಲ್ಲ — ಮೈಕ್ ಒತ್ತಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+        GUJARATI -> "સમજાયું નહીં — માઇક દબાવીને ફરી પ્રયાસ કરો."
+        PUNJABI  -> "ਸਮਝ ਨਹੀਂ ਆਇਆ — ਮਾਈਕ ਦਬਾ ਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
+        ODIA     -> "ବୁଝି ହେଲା ନାହିଁ — ମାଇକ୍ ଦବାଇ ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।"
+    }
+    /** Voice error: RECORD_AUDIO permission missing. */
+    val voiceMicPermissionNeeded: String get() = when (this) {
+        ENGLISH  -> "Microphone permission is needed for voice input."
+        HINDI    -> "आवाज़ इनपुट के लिए माइक्रोफ़ोन की अनुमति चाहिए।"
+        TAMIL    -> "குரல் உள்ளீட்டிற்கு மைக்ரோஃபோன் அனுமதி தேவை."
+        TELUGU   -> "వాయిస్ ఇన్‌పుట్ కోసం మైక్రోఫోన్ అనుమతి అవసరం."
+        BENGALI  -> "ভয়েস ইনপুটের জন্য মাইক্রোফোন অনুমতি প্রয়োজন।"
+        MARATHI  -> "आवाज इनपुटसाठी मायक्रोफोन परवानगी आवश्यक आहे."
+        KANNADA  -> "ಧ್ವನಿ ಇನ್‌ಪುಟ್‌ಗೆ ಮೈಕ್ರೋಫೋನ್ ಅನುಮತಿ ಅಗತ್ಯ."
+        GUJARATI -> "વૉઇસ ઇનપુટ માટે માઇક્રોફોન પરવાનગી જરૂરી છે."
+        PUNJABI  -> "ਵੌਇਸ ਇਨਪੁੱਟ ਲਈ ਮਾਈਕ੍ਰੋਫ਼ੋਨ ਇਜਾਜ਼ਤ ਲੋੜੀਂਦੀ ਹੈ।"
+        ODIA     -> "ଭଏସ୍ ଇନପୁଟ୍ ପାଇଁ ମାଇକ୍ରୋଫୋନ୍ ଅନୁମତି ଆବଶ୍ୟକ।"
+    }
+    /** Voice error: on-device speech service network/server failure. */
+    val voiceServiceUnavailable: String get() = when (this) {
+        ENGLISH  -> "The device speech service isn't responding right now. Please type instead."
+        HINDI    -> "डिवाइस की स्पीच सेवा अभी जवाब नहीं दे रही। कृपया टाइप करें।"
+        TAMIL    -> "சாதனத்தின் பேச்சு சேவை இப்போது பதிலளிக்கவில்லை. தட்டச்சு செய்யவும்."
+        TELUGU   -> "పరికరం స్పీచ్ సేవ ప్రస్తుతం స్పందించడం లేదు. దయచేసి టైప్ చేయండి."
+        BENGALI  -> "ডিভাইসের স্পিচ সার্ভিস এখন সাড়া দিচ্ছে না। অনুগ্রহ করে টাইপ করুন।"
+        MARATHI  -> "डिव्हाइसची स्पीच सेवा सध्या प्रतिसाद देत नाही. कृपया टाइप करा."
+        KANNADA  -> "ಸಾಧನದ ಸ್ಪೀಚ್ ಸೇವೆ ಈಗ ಪ್ರತಿಕ್ರಿಯಿಸುತ್ತಿಲ್ಲ. ದಯವಿಟ್ಟು ಟೈಪ್ ಮಾಡಿ."
+        GUJARATI -> "ડિવાઇસની સ્પીચ સેવા હમણાં જવાબ આપી રહી નથી. કૃપા કરી ટાઇપ કરો."
+        PUNJABI  -> "ਡਿਵਾਈਸ ਦੀ ਸਪੀਚ ਸੇਵਾ ਹੁਣੇ ਜਵਾਬ ਨਹੀਂ ਦੇ ਰਹੀ। ਕਿਰਪਾ ਕਰਕੇ ਟਾਈਪ ਕਰੋ।"
+        ODIA     -> "ଡିଭାଇସର ସ୍ପିଚ୍ ସେବା ବର୍ତ୍ତମାନ ଉତ୍ତର ଦେଉନାହିଁ। ଦୟାକରି ଟାଇପ୍ କରନ୍ତୁ।"
+    }
+    /** Voice error: recognizer busy (rapid re-trigger). */
+    val voiceBusy: String get() = when (this) {
+        ENGLISH  -> "Voice input is busy — try again in a moment."
+        HINDI    -> "आवाज़ इनपुट व्यस्त है — थोड़ी देर में फिर कोशिश करें।"
+        TAMIL    -> "குரல் உள்ளீடு பிஸியாக உள்ளது — சிறிது நேரம் கழித்து முயற்சிக்கவும்."
+        TELUGU   -> "వాయిస్ ఇన్‌పుట్ బిజీగా ఉంది — కొద్దిసేపు తర్వాత మళ్ళీ ప్రయత్నించండి."
+        BENGALI  -> "ভয়েস ইনপুট ব্যস্ত — কিছুক্ষণ পরে আবার চেষ্টা করুন।"
+        MARATHI  -> "आवाज इनपुट व्यस्त आहे — थोड्या वेळाने पुन्हा प्रयत्न करा."
+        KANNADA  -> "ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಬ್ಯುಸಿಯಾಗಿದೆ — ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+        GUJARATI -> "વૉઇસ ઇનપુટ વ્યસ્ત છે — થોડી વારમાં ફરી પ્રયાસ કરો."
+        PUNJABI  -> "ਵੌਇਸ ਇਨਪੁੱਟ ਰੁੱਝਿਆ ਹੋਇਆ ਹੈ — ਥੋੜ੍ਹੀ ਦੇਰ ਬਾਅਦ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
+        ODIA     -> "ଭଏସ୍ ଇନପୁଟ୍ ବ୍ୟସ୍ତ ଅଛି — କିଛି ସମୟ ପରେ ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।"
+    }
+    /** Voice error: fallback for any other recognizer error code. */
+    val voiceGenericError: String get() = when (this) {
+        ENGLISH  -> "Couldn't process voice input. Please try again or type instead."
+        HINDI    -> "आवाज़ इनपुट प्रोसेस नहीं हो सका। फिर कोशिश करें या टाइप करें।"
+        TAMIL    -> "குரல் உள்ளீட்டை செயலாக்க முடியவில்லை. மீண்டும் முயற்சிக்கவும் அல்லது தட்டச்சு செய்யவும்."
+        TELUGU   -> "వాయిస్ ఇన్‌పుట్ ప్రాసెస్ చేయలేకపోయాము. మళ్ళీ ప్రయత్నించండి లేదా టైప్ చేయండి."
+        BENGALI  -> "ভয়েস ইনপুট প্রসেস করা যায়নি। আবার চেষ্টা করুন বা টাইপ করুন।"
+        MARATHI  -> "आवाज इनपुट प्रक्रिया करता आली नाही. पुन्हा प्रयत्न करा किंवा टाइप करा."
+        KANNADA  -> "ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಪ್ರಕ್ರಿಯೆಗೊಳಿಸಲಾಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ ಅಥವಾ ಟೈಪ್ ಮಾಡಿ."
+        GUJARATI -> "વૉઇસ ઇનપુટ પ્રોસેસ કરી શકાયું નહીં. ફરી પ્રયાસ કરો અથવા ટાઇપ કરો."
+        PUNJABI  -> "ਵੌਇਸ ਇਨਪੁੱਟ ਪ੍ਰੋਸੈਸ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ ਜਾਂ ਟਾਈਪ ਕਰੋ।"
+        ODIA     -> "ଭଏସ୍ ଇନପୁଟ୍ ପ୍ରକ୍ରିୟାକରଣ ହୋଇପାରିଲା ନାହିଁ। ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ କିମ୍ବା ଟାଇପ୍ କରନ୍ତୁ।"
+    }
+    /** Voice error: SpeechRecognizer unavailable on this device at all. */
+    val voiceNotAvailable: String get() = when (this) {
+        ENGLISH  -> "Voice recognition not available on this device"
+        HINDI    -> "इस डिवाइस पर आवाज़ पहचान उपलब्ध नहीं है"
+        TAMIL    -> "இந்த சாதனத்தில் குரல் அடையாளம் இல்லை"
+        TELUGU   -> "ఈ పరికరంలో వాయిస్ రికగ్నిషన్ అందుబాటులో లేదు"
+        BENGALI  -> "এই ডিভাইসে ভয়েস শনাক্তকরণ উপলব্ধ নেই"
+        MARATHI  -> "या डिव्हाइसवर आवाज ओळख उपलब्ध नाही"
+        KANNADA  -> "ಈ ಸಾಧನದಲ್ಲಿ ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆ ಲಭ್ಯವಿಲ್ಲ"
+        GUJARATI -> "આ ડિવાઇસ પર વૉઇસ ઓળખ ઉપલબ્ધ નથી"
+        PUNJABI  -> "ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਵੌਇਸ ਪਛਾਣ ਉਪਲਬਧ ਨਹੀਂ ਹੈ"
+        ODIA     -> "ଏହି ଡିଭାଇସ୍‌ରେ ଭଏସ୍ ଚିହ୍ନଟ ଉପଲବ୍ଧ ନାହିଁ"
+    }
+    /** Voice error: SpeechRecognizer.startListening() itself threw. */
+    val voiceStartFailed: String get() = when (this) {
+        ENGLISH  -> "Couldn't start voice input. Please try again."
+        HINDI    -> "आवाज़ इनपुट शुरू नहीं हो सका। कृपया फिर से कोशिश करें।"
+        TAMIL    -> "குரல் உள்ளீட்டைத் தொடங்க முடியவில்லை. மீண்டும் முயற்சிக்கவும்."
+        TELUGU   -> "వాయిస్ ఇన్‌పుట్ ప్రారంభం కాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి."
+        BENGALI  -> "ভয়েস ইনপুট শুরু করা যায়নি। আবার চেষ্টা করুন।"
+        MARATHI  -> "आवाज इनपुट सुरू होऊ शकले नाही. कृपया पुन्हा प्रयत्न करा."
+        KANNADA  -> "ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಪ್ರಾರಂಭಿಸಲಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+        GUJARATI -> "વૉઇસ ઇનપુટ શરૂ થઈ શક્યું નહીં. કૃપા કરી ફરી પ્રયાસ કરો."
+        PUNJABI  -> "ਵੌਇਸ ਇਨਪੁੱਟ ਸ਼ੁਰੂ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
+        ODIA     -> "ଭଏସ୍ ଇନପୁଟ୍ ଆରମ୍ଭ ହୋଇପାରିଲା ନାହିଁ। ଦୟାକରି ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।"
+    }
 
     /** Chat top-bar subtitle while generating. */
     val thinkingText: String get() = when (this) {
@@ -838,6 +1017,28 @@ enum class SupportedLanguage(
         ODIA     -> listOf("PDF ସାରାଂଶ ଦିଅନ୍ତୁ", "PM-Kisan ଯୋଗ୍ୟତା ଯାଞ୍ଚ", "ଅନୁବାଦ କରନ୍ତୁ")
     }
 
+    /**
+     * Home quick-action chips for the Compact (1B) model — swapped in for
+     * [homeQuickActions] when it's the active model. Compact can't handle a
+     * user-attached PDF (no attachment support at that tier) or the Kisan
+     * knowledge pack (its own catalog description: "not for knowledge packs
+     * like Kisan" — too little context budget for grounded RAG answers), so
+     * both are replaced with general-chat prompts Compact handles well.
+     * "Translate" is unchanged — plain translation needs no RAG/attachments.
+     */
+    val homeQuickActionsCompact: List<String> get() = when (this) {
+        ENGLISH  -> listOf("Write a letter for me", "Explain something simply", "Translate")
+        HINDI    -> listOf("मेरे लिए पत्र लिखें", "आसान भाषा में समझाएँ", "अनुवाद करें")
+        TAMIL    -> listOf("எனக்கு கடிதம் எழுது", "எளிமையாக விளக்கு", "மொழிபெயர்")
+        TELUGU   -> listOf("నాకు లేఖ రాయండి", "సులభంగా వివరించండి", "అనువదించు")
+        BENGALI  -> listOf("আমার জন্য চিঠি লেখো", "সহজভাবে বুঝিয়ে দাও", "অনুবাদ করো")
+        MARATHI  -> listOf("माझ्यासाठी पत्र लिहा", "सोप्या भाषेत समजावा", "भाषांतर करा")
+        KANNADA  -> listOf("ನನಗೆ ಪತ್ರ ಬರೆಯಿರಿ", "ಸರಳವಾಗಿ ವಿವರಿಸಿ", "ಅನುವಾದಿಸಿ")
+        GUJARATI -> listOf("મારા માટે પત્ર લખો", "સરળ ભાષામાં સમજાવો", "અનુવાદ કરો")
+        PUNJABI  -> listOf("ਮੇਰੇ ਲਈ ਚਿੱਠੀ ਲਿਖੋ", "ਸੌਖੇ ਸ਼ਬਦਾਂ ਵਿੱਚ ਸਮਝਾਓ", "ਅਨੁਵਾਦ ਕਰੋ")
+        ODIA     -> listOf("ମୋ ପାଇଁ ଚିଠି ଲେଖ", "ସହଜରେ ବୁଝାନ୍ତୁ", "ଅନୁବାଦ କରନ୍ତୁ")
+    }
+
     /** "SPECIALIST MODES" section label. */
     val specialistModesLabel: String get() = when (this) {
         ENGLISH  -> "SPECIALIST MODES"
@@ -1069,6 +1270,57 @@ enum class SupportedLanguage(
         GUJARATI -> "આજનો વિચાર"
         PUNJABI  -> "ਅੱਜ ਦਾ ਵਿਚਾਰ"
         ODIA     -> "ଆଜିର ଚିନ୍ତା"
+    }
+
+    /** Inference foreground-service notification: shown while the model is loading from disk. */
+    val loadingModelTitle: String get() = when (this) {
+        ENGLISH  -> "Saarthi is loading a model…"
+        HINDI    -> "सारथी मॉडल लोड कर रहा है…"
+        TAMIL    -> "சாரதி மாடலை ஏற்றுகிறது…"
+        TELUGU   -> "సారథి మోడల్‌ను లోడ్ చేస్తోంది…"
+        BENGALI  -> "সারথি মডেল লোড করছে…"
+        MARATHI  -> "सारथी मॉडेल लोड करत आहे…"
+        KANNADA  -> "ಸಾರಥಿ ಮಾಡೆಲ್ ಲೋಡ್ ಮಾಡುತ್ತಿದೆ…"
+        GUJARATI -> "સારથી મોડેલ લોડ કરી રહ્યું છે…"
+        PUNJABI  -> "ਸਾਰਥੀ ਮਾਡਲ ਲੋਡ ਕਰ ਰਿਹਾ ਹੈ…"
+        ODIA     -> "ସାରଥୀ ମଡେଲ ଲୋଡ କରୁଛି…"
+    }
+    val loadingModelBody: String get() = when (this) {
+        ENGLISH  -> "Preparing the AI model. This takes a few seconds."
+        HINDI    -> "AI मॉडल तैयार किया जा रहा है। इसमें कुछ सेकंड लगते हैं।"
+        TAMIL    -> "AI மாடல் தயார் செய்யப்படுகிறது. இதற்கு சில வினாடிகள் ஆகும்."
+        TELUGU   -> "AI మోడల్ సిద్ధమవుతోంది. దీనికి కొన్ని సెకన్లు పడుతుంది."
+        BENGALI  -> "AI মডেল প্রস্তুত করা হচ্ছে। এতে কয়েক সেকেন্ড সময় লাগে।"
+        MARATHI  -> "AI मॉडेल तयार केले जात आहे. यासाठी काही सेकंद लागतात."
+        KANNADA  -> "AI ಮಾಡೆಲ್ ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ. ಇದಕ್ಕೆ ಕೆಲವು ಸೆಕೆಂಡುಗಳು ಬೇಕಾಗುತ್ತವೆ."
+        GUJARATI -> "AI મોડેલ તૈયાર કરવામાં આવી રહ્યું છે. આમાં થોડી સેકંડ લાગે છે."
+        PUNJABI  -> "AI ਮਾਡਲ ਤਿਆਰ ਕੀਤਾ ਜਾ ਰਿਹਾ ਹੈ। ਇਸ ਵਿੱਚ ਕੁਝ ਸਕਿੰਟ ਲੱਗਦੇ ਹਨ।"
+        ODIA     -> "AI ମଡେଲ ପ୍ରସ୍ତୁତ ହେଉଛି। ଏଥିରେ କିଛି ସେକେଣ୍ଡ ଲାଗେ।"
+    }
+    /** Inference foreground-service notification: shown while a response is streaming. */
+    val generatingResponseTitle: String get() = when (this) {
+        ENGLISH  -> "Saarthi is generating a response…"
+        HINDI    -> "सारथी जवाब तैयार कर रहा है…"
+        TAMIL    -> "சாரதி பதிலை உருவாக்குகிறது…"
+        TELUGU   -> "సారథి సమాధానం తయారు చేస్తోంది…"
+        BENGALI  -> "সারথি উত্তর তৈরি করছে…"
+        MARATHI  -> "सारथी उत्तर तयार करत आहे…"
+        KANNADA  -> "ಸಾರಥಿ ಉತ್ತರ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…"
+        GUJARATI -> "સારથી જવાબ તૈયાર કરી રહ્યું છે…"
+        PUNJABI  -> "ਸਾਰਥੀ ਜਵਾਬ ਤਿਆਰ ਕਰ ਰਿਹਾ ਹੈ…"
+        ODIA     -> "ସାରଥୀ ଉତ୍ତର ପ୍ରସ୍ତୁତ କରୁଛି…"
+    }
+    val generatingResponseBody: String get() = when (this) {
+        ENGLISH  -> "Processing your message offline."
+        HINDI    -> "आपके संदेश को ऑफ़लाइन प्रोसेस किया जा रहा है।"
+        TAMIL    -> "உங்கள் செய்தி ஆஃப்லைனில் செயலாக்கப்படுகிறது."
+        TELUGU   -> "మీ సందేశం ఆఫ్‌లైన్‌లో ప్రాసెస్ అవుతోంది."
+        BENGALI  -> "আপনার বার্তা অফলাইনে প্রসেস করা হচ্ছে।"
+        MARATHI  -> "तुमचा संदेश ऑफलाइन प्रक्रिया केला जात आहे."
+        KANNADA  -> "ನಿಮ್ಮ ಸಂದೇಶವನ್ನು ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿ ಪ್ರಕ್ರಿಯೆಗೊಳಿಸಲಾಗುತ್ತಿದೆ."
+        GUJARATI -> "તમારો સંદેશ ઑફલાઇન પ્રોસેસ કરવામાં આવી રહ્યો છે."
+        PUNJABI  -> "ਤੁਹਾਡਾ ਸੁਨੇਹਾ ਆਫਲਾਈਨ ਪ੍ਰੋਸੈਸ ਕੀਤਾ ਜਾ ਰਿਹਾ ਹੈ।"
+        ODIA     -> "ଆପଣଙ୍କ ସନ୍ଦେଶ ଅଫଲାଇନ୍‌ରେ ପ୍ରକ୍ରିୟାକରଣ ହେଉଛି।"
     }
 
     /** Model-download notification: title prefix before the model name ("Downloading Gemma 4"). */

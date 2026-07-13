@@ -16,6 +16,9 @@ import com.saarthi.core.i18n.DailyWisdomCatalog
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.feature.assistant.data.ReminderManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -41,14 +44,27 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             // Reminder feature removed — only the daily-wisdom card remains.
-            WisdomNotificationScheduler.ACTION_DAILY_WISDOM -> handleDailyWisdom(context)
+            // goAsync() + a coroutine: the alarm almost always fires into a
+            // cold process, and reading the selected language needs a real
+            // (awaited) DataStore read rather than the StateFlow's HINDI
+            // seed — see LanguageManager.awaitSelectedLanguage().
+            WisdomNotificationScheduler.ACTION_DAILY_WISDOM -> {
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        handleDailyWisdom(context)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            }
         }
     }
 
     // ── Per-action handlers ──────────────────────────────────────────────
 
-    private fun handleDailyWisdom(context: Context) {
-        val lang = languageManager.selectedLanguage.value
+    private suspend fun handleDailyWisdom(context: Context) {
+        val lang = languageManager.awaitSelectedLanguage()
         val wisdom = DailyWisdomCatalog.forDate()
         post(
             context = context,

@@ -382,7 +382,7 @@ class ModelDownloadService : Service() {
         }
         return builder
             .setContentTitle(title)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .apply {

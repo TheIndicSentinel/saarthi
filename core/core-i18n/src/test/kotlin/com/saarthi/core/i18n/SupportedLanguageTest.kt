@@ -145,4 +145,108 @@ class SupportedLanguageTest {
         val names = SupportedLanguage.entries.map { it.nativeName }
         assertEquals("Native names must be unique", names.size, names.toSet().size)
     }
+
+    // ── Notifications, permission dialog, snackbars ──────────────────────
+    //
+    // Regression guard for the field report that started this block: Telugu
+    // selected, but the battery-optimization dialog and several notifications
+    // showed Hindi or English. Two distinct bugs caused it — (1) notifPermTitle
+    // /allowLabel/notNowLabel had an `else -> English` fallback that silently
+    // covered every language except Hindi/Marathi, and (2) InferenceService's
+    // notification text was hardcoded English with no per-language branches at
+    // all. Every property below uses an exhaustive `when` (no `else`), so the
+    // Kotlin compiler itself now rejects a missing language — but nothing
+    // stopped a future edit from reintroducing an `else -> "..."` catch-all,
+    // which is exactly what these tests lock down.
+
+    private fun assertNonBlankForEveryLanguage(label: String, value: SupportedLanguage.() -> String) {
+        for (lang in SupportedLanguage.entries) {
+            assertFalse("${lang.englishName} $label must be non-blank", lang.value().isBlank())
+        }
+    }
+
+    @Test
+    fun every_language_has_non_blank_battery_dialog_strings() {
+        assertNonBlankForEveryLanguage("notifPermTitle") { notifPermTitle }
+        assertNonBlankForEveryLanguage("batteryOptExplanation") { batteryOptExplanation }
+        assertNonBlankForEveryLanguage("allowLabel") { allowLabel }
+        assertNonBlankForEveryLanguage("notNowLabel") { notNowLabel }
+    }
+
+    @Test
+    fun every_language_has_non_blank_inference_notification_strings() {
+        assertNonBlankForEveryLanguage("loadingModelTitle") { loadingModelTitle }
+        assertNonBlankForEveryLanguage("loadingModelBody") { loadingModelBody }
+        assertNonBlankForEveryLanguage("generatingResponseTitle") { generatingResponseTitle }
+        assertNonBlankForEveryLanguage("generatingResponseBody") { generatingResponseBody }
+    }
+
+    @Test
+    fun every_language_has_non_blank_snackbar_strings() {
+        assertNonBlankForEveryLanguage("attachmentsNeedLargerModel") { attachmentsNeedLargerModel }
+        assertNonBlankForEveryLanguage("streamFailedRetry") { streamFailedRetry }
+        assertNonBlankForEveryLanguage("voiceNoMatch") { voiceNoMatch }
+        assertNonBlankForEveryLanguage("voiceMicPermissionNeeded") { voiceMicPermissionNeeded }
+        assertNonBlankForEveryLanguage("voiceServiceUnavailable") { voiceServiceUnavailable }
+        assertNonBlankForEveryLanguage("voiceBusy") { voiceBusy }
+        assertNonBlankForEveryLanguage("voiceGenericError") { voiceGenericError }
+        assertNonBlankForEveryLanguage("voiceNotAvailable") { voiceNotAvailable }
+        assertNonBlankForEveryLanguage("voiceStartFailed") { voiceStartFailed }
+        for (lang in SupportedLanguage.entries) {
+            assertFalse(
+                "${lang.englishName} freeDocumentLimitReached(1) must be non-blank",
+                lang.freeDocumentLimitReached(1).isBlank(),
+            )
+            assertTrue(
+                "${lang.englishName} freeDocumentLimitReached(3) must mention the count",
+                lang.freeDocumentLimitReached(3).contains("3"),
+            )
+        }
+    }
+
+    @Test
+    fun non_Hindi_non_Marathi_languages_do_not_silently_fall_back_to_English() {
+        // The exact bug: Telugu (and every language except Hindi/Marathi) was
+        // getting the English string via a hidden `else` branch. Assert a
+        // representative non-Hindi/Marathi language actually differs from
+        // English for each property that was affected.
+        val affected = listOf(SupportedLanguage.TELUGU, SupportedLanguage.TAMIL, SupportedLanguage.BENGALI)
+        for (lang in affected) {
+            assertNotEquals("${lang.englishName} notifPermTitle", SupportedLanguage.ENGLISH.notifPermTitle, lang.notifPermTitle)
+            assertNotEquals("${lang.englishName} batteryOptExplanation", SupportedLanguage.ENGLISH.batteryOptExplanation, lang.batteryOptExplanation)
+            assertNotEquals("${lang.englishName} allowLabel", SupportedLanguage.ENGLISH.allowLabel, lang.allowLabel)
+            assertNotEquals("${lang.englishName} notNowLabel", SupportedLanguage.ENGLISH.notNowLabel, lang.notNowLabel)
+        }
+    }
+
+    // ── Home quick-action chips ───────────────────────────────────────────
+
+    @Test
+    fun every_language_has_exactly_three_home_quick_actions_for_both_tiers() {
+        for (lang in SupportedLanguage.entries) {
+            assertEquals("${lang.englishName} homeQuickActions", 3, lang.homeQuickActions.size)
+            assertEquals("${lang.englishName} homeQuickActionsCompact", 3, lang.homeQuickActionsCompact.size)
+            for (chip in lang.homeQuickActions + lang.homeQuickActionsCompact) {
+                assertFalse("${lang.englishName} has a blank quick-action chip", chip.isBlank())
+            }
+        }
+    }
+
+    @Test
+    fun compact_quick_actions_never_offer_PDF_summarize_or_Kisan() {
+        // Compact (1B) can't attach documents and its own catalog description
+        // disclaims Kisan-pack support ("not for knowledge packs like Kisan") —
+        // the Compact chip set must never reintroduce either.
+        for (lang in SupportedLanguage.entries) {
+            val chips = lang.homeQuickActionsCompact.joinToString(" ")
+            assertFalse(
+                "${lang.englishName} Compact quick actions must not mention PDF",
+                chips.contains("PDF", ignoreCase = true),
+            )
+            assertFalse(
+                "${lang.englishName} Compact quick actions must not mention Kisan",
+                chips.contains("Kisan", ignoreCase = true),
+            )
+        }
+    }
 }

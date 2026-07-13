@@ -162,6 +162,10 @@ fun SaarthiNavHost(
             // Pulled in inside the composable scope so the Hilt graph for
             // PersonalityViewModel is correctly tied to this nav entry.
             val personalityVm: com.saarthi.feature.assistant.viewmodel.PersonalityViewModel = hiltViewModel()
+            // Already computed by PersonalityViewModel (false only for the
+            // Compact/1B model) — reused here to gate the home quick-action
+            // chips instead of duplicating the tier check.
+            val modelSupportsFullFeatures by personalityVm.supportedForCurrentModel.collectAsStateWithLifecycle()
             HomeScreen(
                 onNavigate = { route -> navController.navigate(route.path) },
                 onChangeModel = {
@@ -190,6 +194,7 @@ fun SaarthiNavHost(
                 greeting = currentLanguage.greeting,
                 exploreSubtitle = currentLanguage.exploreSubtitle,
                 userName = userName,
+                isCompactModel = !modelSupportsFullFeatures,
             )
         }
 

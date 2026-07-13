@@ -11,6 +11,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.inference.engine.InferenceEngine
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -45,6 +46,7 @@ class InferenceService : Service() {
     enum class NotificationState { LOADING, GENERATING }
 
     @Inject lateinit var inferenceEngine: InferenceEngine
+    @Inject lateinit var languageManager: LanguageManager
 
     private val binder = LocalBinder()
     private var wakeLock: PowerManager.WakeLock? = null
@@ -164,9 +166,10 @@ class InferenceService : Service() {
     }
 
     private fun buildNotification(state: NotificationState): Notification {
+        val lang = languageManager.selectedLanguage.value
         val (title, text) = when (state) {
-            NotificationState.LOADING   -> "Saarthi is loading a model…" to "Preparing the AI model. This takes a few seconds."
-            NotificationState.GENERATING -> "Saarthi is generating a response…" to "Processing your message offline."
+            NotificationState.LOADING    -> lang.loadingModelTitle to lang.loadingModelBody
+            NotificationState.GENERATING -> lang.generatingResponseTitle to lang.generatingResponseBody
         }
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
@@ -177,7 +180,7 @@ class InferenceService : Service() {
         return builder
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC)

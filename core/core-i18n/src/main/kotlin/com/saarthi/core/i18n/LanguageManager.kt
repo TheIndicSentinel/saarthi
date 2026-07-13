@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.util.Locale
@@ -36,6 +37,21 @@ class LanguageManager @Inject constructor(
     val selectedLanguage: StateFlow<SupportedLanguage> = context.dataStore.data
         .map { prefs -> SupportedLanguage.fromCode(prefs[LANGUAGE_KEY] ?: SupportedLanguage.HINDI.code) }
         .stateIn(scope, SharingStarted.Eagerly, SupportedLanguage.HINDI)
+
+    /**
+     * One-shot, directly-awaited read of the persisted language. Unlike
+     * [selectedLanguage].value, this never returns the HINDI seed on a cold
+     * process — a BroadcastReceiver or Worker started fresh by AlarmManager /
+     * WorkManager can read [selectedLanguage].value microseconds after Hilt
+     * constructs this singleton, before the DataStore's first emission has
+     * landed, silently showing the wrong language in a notification even
+     * though the correct one is on disk. This suspends until the real value
+     * is available instead of racing the cached StateFlow.
+     */
+    suspend fun awaitSelectedLanguage(): SupportedLanguage =
+        context.dataStore.data
+            .map { prefs -> SupportedLanguage.fromCode(prefs[LANGUAGE_KEY] ?: SupportedLanguage.HINDI.code) }
+            .first()
 
     suspend fun setLanguage(language: SupportedLanguage) {
         context.dataStore.edit { it[LANGUAGE_KEY] = language.code }
