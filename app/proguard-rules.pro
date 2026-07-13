@@ -113,6 +113,19 @@
 -dontwarn java.beans.**
 -dontwarn javax.imageio.**
 
+# ── WorkManager Worker subclasses (reflection-instantiated) ────────────────
+# WorkManager's default WorkerFactory finds a Worker's (Context, WorkerParameters)
+# constructor via reflection at runtime — no visible call site invokes it
+# directly, so R8's default reachability analysis has no reason to keep it and
+# can strip it as dead code. That's silent in a debug build (no shrinking) and
+# only surfaces as "could not instantiate worker" the first time WorkManager
+# tries to run PackUpdateWorker in a release build — exactly the kind of R8-only
+# failure a device smoke test might not catch either, since it fires on a 24h
+# schedule rather than at launch.
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+
 # ── Room (defensive) ───────────────────────────────────────────────────────
 # Room ships consumer-rules.pro that keeps its generated *_Impl + entities, so
 # this is belt-and-suspenders: a release-only Room failure (obfuscated @Entity

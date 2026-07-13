@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Scopes FileProvider to exactly where DebugLogger's fileSink candidates
+    live (core-inference/DebugLogger.kt): app-private filesDir/externalFilesDir
+    (the production default), plus the legacy public Downloads fallback used
+    pre-Android-10 when public logging is explicitly enabled for a beta build.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="internal_files" path="." />
+    <external-files-path name="external_files" path="." />
+    <external-path name="downloads" path="Download/" />
+</paths>

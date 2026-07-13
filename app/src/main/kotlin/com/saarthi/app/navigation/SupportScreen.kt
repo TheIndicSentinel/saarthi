@@ -1,7 +1,6 @@
 package com.saarthi.app.navigation
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,9 +42,16 @@ private const val SUPPORT_EMAIL = "inerd1412@gmail.com"
 
 /**
  * Help & support screen (P0 #6). Gives users a real, low-friction way to reach
- * support and report problems — required for trust and Play submission. Opens a
- * pre-filled email with device/app diagnostics; no FileProvider needed (the
- * user attaches the debug log from Downloads, whose location is shown here).
+ * support and report problems — required for trust and Play submission, and
+ * the app's only diagnostic channel: Saarthi ships with no automatic crash
+ * reporting (Firebase Crashlytics stays uninstalled — see docs/RELEASE_CHECKLIST.md
+ * "Crash reporting" entry) because that would silently contradict the
+ * 100%-offline pitch. This is the deliberate opt-in substitute: the debug log
+ * is attached automatically via [DebugLogger.shareableUri] (a FileProvider
+ * wrap when it lives in app-private storage — the production default —
+ * or the MediaStore Uri directly in the beta/public-Downloads channel), so
+ * the user always sees and explicitly sends it, nothing leaves the device
+ * on its own.
  */
 @Composable
 fun SupportScreen(onBack: () -> Unit, language: com.saarthi.core.i18n.SupportedLanguage) {
@@ -56,13 +62,19 @@ fun SupportScreen(onBack: () -> Unit, language: com.saarthi.core.i18n.SupportedL
             append("\n\n———\nApp: Saarthi ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n")
             append("Device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
             append("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n")
-            append("(Tip: attach Downloads/saarthi_debug.log if you can.)")
         }
-        val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("mailto:")
+        // ACTION_SEND + "message/rfc822" (not ACTION_SENDTO's mailto:) because
+        // mailto: intents don't reliably honor EXTRA_STREAM across email
+        // clients — this is the standard "email with attachment" shape.
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "message/rfc822"
             putExtra(Intent.EXTRA_EMAIL, arrayOf(SUPPORT_EMAIL))
             putExtra(Intent.EXTRA_SUBJECT, subject)
             putExtra(Intent.EXTRA_TEXT, diagnostics)
+            com.saarthi.core.inference.DebugLogger.shareableUri(context)?.let { uri ->
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
         }
         runCatching { context.startActivity(Intent.createChooser(intent, "Email support")) }
     }
@@ -94,7 +106,7 @@ fun SupportScreen(onBack: () -> Unit, language: com.saarthi.core.i18n.SupportedL
             SupportCard(
                 icon = { Icon(Icons.Outlined.BugReport, null, tint = SaarthiColors.Gold, modifier = Modifier.size(22.dp)) },
                 title = "Report a problem",
-                body = "If a reply came out wrong or the app misbehaved, tell us what happened. Attaching Downloads/saarthi_debug.log helps us trace it.",
+                body = "If a reply came out wrong or the app misbehaved, tell us what happened. Your on-device debug log is attached automatically to help us trace it — review it in the email before sending if you'd like.",
             ) {
                 Button(
                     onClick = { emailSupport("Saarthi — problem report") },

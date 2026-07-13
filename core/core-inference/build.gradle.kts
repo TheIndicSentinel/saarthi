@@ -59,6 +59,10 @@ dependencies {
     implementation(project(":core:core-common"))
     implementation(project(":core:core-i18n"))
     implementation(libs.timber)
+    // FileProvider — DebugLogger.shareableUri() wraps the app-private log
+    // file (production builds, and the Android-9 fallback) so it can be
+    // attached to the Support screen's "email us" intent.
+    implementation(libs.androidx.core.ktx)
 
     // LiteRT-LM: Google AI Edge inference library (same runtime as AI Edge Gallery)
     implementation(libs.litertlm)

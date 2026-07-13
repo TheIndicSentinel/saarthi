@@ -17,25 +17,36 @@ Your conversations, attached files, and remembered facts (name, preferences, etc
 - **Chats & messages** — stored locally; deletable any time (Settings → Clear chat history).
 - **Remembered facts** (name, city, diet, likes, …) — local only; used to personalise replies.
 - **Attached documents / photos** — processed on-device for your question; not uploaded.
-- **Voice input** — speech is transcribed for your message; audio is not collected by us.
+- **Voice input** — Saarthi asks your device to transcribe speech to text and prefers
+  on-device transcription where your phone supports it. On devices without an on-device
+  speech model, Android's standard speech service is used instead, which may send the
+  audio to that service's provider (typically Google) for transcription — this is a
+  device/platform behavior, not something Saarthi's own servers ever see (Saarthi has
+  no servers). Nothing is collected by us either way.
 
 ## Network connections the app makes
-Saarthi is offline for AI, but it does connect to the internet for two things:
+Saarthi is offline for AI — there is no server-side chat processing, and Saarthi has
+no backend to send your data to. It does connect to the internet for:
 1. **Downloading the AI model** (one time) and **Kisan knowledge-pack updates**, fetched
    from public hosts (Hugging Face / GitHub). These are downloads to your device — no
    personal data is sent.
-2. **Crash & basic usage diagnostics** via **Google Firebase Crashlytics and Analytics**
-   *(only when enabled in this build)*. This collects standard technical data — app
-   version, device model, OS version, crash stack traces, and anonymous usage events —
-   to keep the app stable. It does **not** include your chats, files, or remembered facts.
-   _If your build ships without `google-services.json`, this collection is disabled._
+2. **Voice input**, if your device doesn't have an on-device speech model — see above.
+3. **Crash & support reports you choose to send.** Saarthi has no automatic crash
+   reporting or analytics of any kind — no Firebase, no telemetry. If something goes
+   wrong, the on-device debug log (technical: timings, error codes, device model —
+   never your message content) is written to your phone only. The Support screen's
+   "Report a problem" lets you email it to us, with the log attached automatically so
+   you can review exactly what's being sent before you send it — nothing leaves your
+   device unless you choose to send that email.
 
 ## Permissions and why
-- **Microphone** — voice input (on-device transcription).
+- **Microphone** — voice input (see above: on-device where supported, otherwise your
+  device's standard speech service).
 - **Photos/Media & files** — only files you attach to a chat.
-- **Notifications + exact alarm** — reminders you set.
-- **Foreground service** — keeps the large model download running reliably.
-- **Internet / network state** — model & pack downloads, diagnostics.
+- **Notifications** — the daily wisdom card and download-progress updates.
+- **Foreground service** — keeps the large model download and AI responses running reliably.
+- **Internet / network state** — model & pack downloads, and voice input when on-device
+  transcription isn't available.
 
 We do **not** request contacts, location, or SMS.
 

@@ -86,6 +86,28 @@ object DebugLogger {
 
     fun path(): String = pathLabel
 
+    /**
+     * A shareable `content://` Uri for the current log file, for the Support
+     * screen's "attach log" action — or null if logging never initialized.
+     *
+     * [mediaUri] (public-Downloads mode) is already a MediaStore `content://`
+     * Uri, directly shareable with no extra grant. [fileSink] (app-private
+     * mode — the default for a production build, or the Android-9 fallback)
+     * is a raw [File] outside any other app's reach; it's wrapped via
+     * [androidx.core.content.FileProvider] so `ACTION_SEND` can still attach
+     * it. Without this, "attach the log" only worked in the beta channel
+     * (public Downloads) and silently had nothing to attach in production.
+     */
+    fun shareableUri(context: Context): Uri? {
+        mediaUri?.let { return it }
+        val f = fileSink ?: return null
+        return runCatching {
+            androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.applicationContext.packageName}.fileprovider", f,
+            )
+        }.getOrNull()
+    }
+
     fun log(tag: String, msg: String) {
         val line = "${fmt.format(Date())} [$tag] $msg\n"
         Log.d("SaarthiDbg", line.trimEnd())

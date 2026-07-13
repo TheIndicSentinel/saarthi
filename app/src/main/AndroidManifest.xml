@@ -181,5 +181,24 @@
                 android:value="AI model file download (user-initiated, resumable via OkHttp)" />
         </service>
 
+        <!--
+            Lets the Support screen attach saarthi_debug.log to an email even
+            when it lives in app-private storage (the production default —
+            see DebugLogger.shareableUri()). Never exposes the whole app
+            sandbox: file_paths.xml scopes it to exactly the directories the
+            log can be written to, and android:exported=false + grantUriPermissions
+            mean access is only ever a temporary, per-Intent grant to whichever
+            app the user picks in the share sheet — nothing is world-readable.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 </manifest>

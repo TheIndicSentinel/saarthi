@@ -3,6 +3,7 @@ package com.saarthi.feature.assistant.viewmodel
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -437,14 +438,34 @@ class AssistantViewModel @Inject constructor(
         // prior (finished) session, then we start fresh — this is the reliable
         // pattern. The old destroy()+recreate raced the async teardown so the
         // 2nd voice turn silently did nothing until the user cancelled.
+        //
+        // Prefer on-device recognition: the default createSpeechRecognizer()
+        // routes through Google's cloud speech service on most devices with
+        // Play Services, which is a real (if narrow) exception to "100%
+        // offline, nothing leaves the phone." Where the platform can confirm
+        // an on-device model is actually installed (API 33+ via
+        // isOnDeviceRecognitionAvailable), use createOnDeviceSpeechRecognizer()
+        // instead. Below API 33, or when no on-device model is present, fall
+        // back to the standard recognizer with EXTRA_PREFER_OFFLINE set as a
+        // best-effort hint — some recognizer implementations honor it outside
+        // the dedicated on-device API too, and voice input must keep working
+        // (including for languages an on-device model may not cover) rather
+        // than fail outright when on-device isn't available.
+        val onDeviceAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(context) }.getOrDefault(false)
         val recognizer = speechRecognizer
-            ?: SpeechRecognizer.createSpeechRecognizer(context).also {
+            ?: (if (onDeviceAvailable) {
+                SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            } else {
+                SpeechRecognizer.createSpeechRecognizer(context)
+            }).also {
                 it.setRecognitionListener(recognitionListener)
                 speechRecognizer = it
             }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         }
         runCatching {
             recognizer.cancel()
