@@ -13,9 +13,20 @@ android {
         buildConfig = true
     }
     defaultConfig {
-        applicationId = "com.saarthi.app"
-        versionCode = 31
-        versionName = "1.0.30"
+        // applicationId changed from com.saarthi.app (2026-07-14): Play Console
+        // rejected it — already in use by another developer, independently
+        // confirmed by the androidx-startup content-provider authority
+        // (com.saarthi.app.androidx-startup) also being claimed. namespace is
+        // deliberately left as com.saarthi.app — it only controls the internal
+        // R/BuildConfig package, is invisible to Play/users, and renaming it
+        // would mean moving every Kotlin file's package declaration for zero
+        // functional benefit. FileProvider's ${applicationId} manifest
+        // placeholder and DebugLogger.shareableUri()'s context.packageName
+        // both resolve off applicationId automatically — no other code change
+        // needed for this rename.
+        applicationId = "com.indicsentinel.saarthi"
+        versionCode = 32
+        versionName = "1.0.31"
         // Instrumentation runner for the androidTest APK (Firebase Test Lab /
         // `connectedAndroidTest`). The app convention plugin doesn't set this
         // — only the library one did — so the generated test APK referenced a

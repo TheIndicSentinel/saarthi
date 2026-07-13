@@ -1,6 +1,6 @@
 # Saarthi — Privacy Policy
 
-_Last updated: 2026-07-01 • Applies to the Saarthi Android app (com.saarthi.app)_
+_Last updated: 2026-07-14 • Applies to the Saarthi Android app (com.indicsentinel.saarthi)_
 
 > **Host this file at a public URL** (e.g. GitHub Pages, your site) and paste that
 > URL into Play Console → App content → Privacy policy. Fill in the **Contact**

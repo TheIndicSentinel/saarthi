@@ -2,7 +2,7 @@ name: Release AAB (Play Store)
 
 # Builds the SIGNED Android App Bundle (.aab) that Google Play requires for new
 # apps (Play does not accept APKs for new apps). Triggered by pushing a version
-# tag like `v1.0.30`, or run manually from the Actions tab.
+# tag like `v1.0.31`, or run manually from the Actions tab.
 #
 # ── One-time setup (GitHub → Settings → Secrets and variables → Actions) ──────
 #   KEYSTORE_BASE64     base64 of your UPLOAD keystore .jks  (`base64 -i key.jks | pbcopy`)
@@ -16,7 +16,7 @@ name: Release AAB (Play Store)
 #
 # ── How to cut a release ──────────────────────────────────────────────────────
 #   1. Bump versionCode + versionName in app/build.gradle.kts.
-#   2. git tag v1.0.30 && git push origin v1.0.30
+#   2. git tag v1.0.31 && git push origin v1.0.31
 #   3. This workflow builds the signed .aab and attaches it as an artifact
 #      (and, if enabled, uploads it to the Play "internal" track).
 #   4. Download the .aab from the run and upload it in Play Console, OR enable
@@ -103,7 +103,7 @@ jobs:
       #   uses: r0adkll/upload-google-play@v1
       #   with:
       #     serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-      #     packageName: com.saarthi.app
+      #     packageName: com.indicsentinel.saarthi
       #     releaseFiles: app/build/outputs/bundle/release/*.aab
       #     track: internal
       #     status: draft
