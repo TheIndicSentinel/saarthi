@@ -4,6 +4,14 @@
 # ship consumer-rules.pro in their AARs — those keep rules apply automatically.
 # This file covers only the gaps R8's defaults can't infer.
 
+# ── Obfuscation quality (Play Console "App optimization" panel) ────────────
+# Flattens all obfuscated classes into a single package instead of leaving
+# them spread across their original package structure — improves the
+# obfuscation/compression score with no functional effect, since everything
+# reachable via reflection (litertlm JNI, Hilt factories, Room entities) is
+# already explicitly -keep'd above and below and is unaffected by repackaging.
+-repackageclasses
+
 # ── Annotation-processor shims (compile-time only, not in APK) ────────────
 -dontwarn javax.lang.model.**
 -dontwarn autovalue.shaded.**
