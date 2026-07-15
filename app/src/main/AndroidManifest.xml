@@ -6,12 +6,15 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Voice input (SpeechRecognizer / Whisper.cpp) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- File attachments — media (Android 13+) -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <!-- File attachments — legacy (Android ≤ 12) -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- File attachments (photos/videos/documents) go through
+         ActivityResultContracts.GetMultipleContents() — a system content
+         picker that grants a scoped, temporary read URI for only the file
+         the user selects. This never needed broad gallery-read permission;
+         READ_MEDIA_IMAGES/VIDEO/AUDIO and the legacy READ_EXTERNAL_STORAGE
+         were declared but unused (confirmed 2026-07-15: zero references
+         anywhere in the codebase) — removed rather than justified, since
+         Play's own "photo and video permissions" review explicitly prefers
+         picker-based access over declaring broad media permissions. -->
     <!-- Push notifications (Android 13+) — used by the daily-wisdom card and
          the model-download progress notification. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

@@ -15,10 +15,15 @@ every push to `main`; the items below are the human gates around it.
 - [ ] Model download + resume + cancel tested on a real device/network.
 - [ ] Debug log reviewed for anything sensitive that should not ship.
 - [ ] No unused restricted permissions in `AndroidManifest.xml`
-      (currently declared, verified 2026-07-13: INTERNET, ACCESS_NETWORK_STATE,
-      RECORD_AUDIO, READ_MEDIA_IMAGES/VIDEO/AUDIO, READ_EXTERNAL_STORAGE,
-      POST_NOTIFICATIONS, WAKE_LOCK, RECEIVE_BOOT_COMPLETED,
+      (currently declared, verified 2026-07-15: INTERNET, ACCESS_NETWORK_STATE,
+      RECORD_AUDIO, POST_NOTIFICATIONS, WAKE_LOCK, RECEIVE_BOOT_COMPLETED,
       FOREGROUND_SERVICE[_SPECIAL_USE]). READ_SMS / MANAGE_EXTERNAL_STORAGE were removed.
+      **READ_MEDIA_IMAGES/VIDEO/AUDIO and READ_EXTERNAL_STORAGE were also removed
+      2026-07-15** — Play flagged them as undeclared-use during store submission;
+      confirmed zero code references anywhere (file attachments go through
+      `ActivityResultContracts.GetMultipleContents()`, a scoped content picker that
+      never needed broad media-read permission). Don't re-add these without adding
+      the corresponding Play Console "Photo and video permissions" declaration.
       **SCHEDULE_EXACT_ALARM is NOT declared** — the reminder feature that needed it was
       removed; only the daily wisdom card remains, which uses an inexact Doze-friendly
       alarm. Don't add it back without also re-adding the "Alarms & reminders" Play
