@@ -3,6 +3,7 @@ package com.saarthi.core.inference
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -177,10 +178,17 @@ class InferenceService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
+        val tapIntent = packageManager.getLaunchIntentForPackage(packageName)
+            ?.apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }
+        val tapPi = PendingIntent.getActivity(
+            this, NOTIFICATION_ID, tapIntent ?: Intent(),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         return builder
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(tapPi)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC)

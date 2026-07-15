@@ -1318,6 +1318,16 @@ class ChatRepositoryImpl @Inject constructor(
                 val city = clean(c.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
                 if (city.length in 2..40) out += "city" to city
             }
+        // profession: "मेरा पेशा X है" — "my profession is X". Implicit
+        // extraction only ever had this for English ("I am a teacher") — a
+        // Hindi speaker saying "मैं एक किसान हूँ" got nothing captured unless
+        // the model happened to emit a marker. Mirrors the name pattern's
+        // proven possessive-noun structure exactly.
+        Regex("मेरा\\s+पेशा\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{2,30})\\s*(?:है|हैं)?")
+            .find(msg)?.groupValues?.get(1)?.let { p ->
+                val prof = nameHead(p)
+                if (prof.length in 3..30) out += "profession" to prof
+            }
 
         // ── Marathi / Devanagari ─────────────────────────────────────────────
         // name: "माझे नाव X आहे" / "माझं नाव X"
@@ -1331,6 +1341,12 @@ class ChatRepositoryImpl @Inject constructor(
             .find(msg)?.groupValues?.get(1)?.let { c ->
                 val city = clean(c.trim()).split(Regex("\\s+")).take(3).joinToString(" ")
                 if (city.length in 2..40) out += "city" to city
+            }
+        // profession: "माझा व्यवसाय X आहे" — "my profession is X"
+        Regex("माझा\\s+व्यवसाय\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{2,30})\\s*(?:आहे)?")
+            .find(msg)?.groupValues?.get(1)?.let { p ->
+                val prof = nameHead(p)
+                if (prof.length in 3..30) out += "profession" to prof
             }
 
         // ── Other Indian scripts — name only ─────────────────────────────────
@@ -1351,6 +1367,25 @@ class ChatRepositoryImpl @Inject constructor(
                 if (name.length in 2..40) out += "name" to name
             }
         }
+        // ── Other Indian scripts — profession ─────────────────────────────────
+        // Same gap as name had before it got this same multilingual pass:
+        // profession was English-only ("I am a teacher") plus Hindi/Marathi
+        // just added above — every other supported language got nothing.
+        // Mirrors each language's proven "my name is" possessive-noun
+        // structure exactly, swapping in that language's word for
+        // profession/occupation; nameHead() trims trailing clause junk the
+        // same way it already does for the name patterns above.
+        if (out.none { it.first == "profession" }) {
+            Regex(
+                "(?:నా\\s*వృత్తి|(?:என்|எனது)\\s*தொழில்|আমার\\s*পেশা|ನನ್ನ\\s*ವೃತ್ತಿ|" +
+                    "મારો?\\s*વ્યવસાય|ਮੇਰਾ\\s*ਕਿੱਤਾ|(?:ମୋ|ମୋର)\\s*ବୃତ୍ତି|എന്റെ\\s*തൊഴിൽ)" +
+                    "\\s+([\\p{L}][\\p{L}\\p{M}\\s.'-]{2,30})",
+            ).find(msg)?.groupValues?.get(1)?.let { p ->
+                val prof = nameHead(p)
+                if (prof.length in 3..30) out += "profession" to prof
+            }
+        }
+
         // Romanised equivalents of the same phrases — users frequently type
         // their language in Latin script on a mobile keyboard.
         if (out.none { it.first == "name" }) {

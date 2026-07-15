@@ -544,12 +544,21 @@ class OnboardingViewModel @Inject constructor(
      * override the auto-pick manually.
      */
     fun proceedWithAutoModel() {
-        val model = modelCatalog.autoPick(deviceProfiler.profile())
-        if (model == null) {
-            proceedToModelPick()
-            return
+        // Must persist the selected language BEFORE starting the download —
+        // proceedToModelPick() always did this, but this path skipped it
+        // entirely, so LanguageManager stayed on its HINDI seed for the
+        // whole download regardless of what the user picked, and the
+        // download notification (built from languageManager.selectedLanguage)
+        // showed Hindi no matter the selection (field report, 2026-07-16).
+        viewModelScope.launch {
+            languageManager.setLanguage(_uiState.value.selectedLanguage)
+            val model = modelCatalog.autoPick(deviceProfiler.profile())
+            if (model == null) {
+                proceedToModelPick()
+                return@launch
+            }
+            startDownloadAndAutoInit(model)
         }
-        startDownloadAndAutoInit(model)
     }
 
     /** Shared by [proceedFromModelPick] and [proceedWithAutoModel]. */
