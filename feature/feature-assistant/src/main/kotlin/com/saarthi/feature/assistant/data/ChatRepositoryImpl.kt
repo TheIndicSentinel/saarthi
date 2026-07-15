@@ -1328,6 +1328,12 @@ class ChatRepositoryImpl @Inject constructor(
                 val prof = nameHead(p)
                 if (prof.length in 3..30) out += "profession" to prof
             }
+        // age: "मैं 28 साल का/की हूँ" — "I am 28 years old". Age was English-only.
+        Regex("मैं\\s+(\\d{1,3})\\s*साल")
+            .find(msg)?.groupValues?.get(1)?.let { a ->
+                val age = a.toIntOrNull()
+                if (age != null && age in 1..120) out += "age" to age.toString()
+            }
 
         // ── Marathi / Devanagari ─────────────────────────────────────────────
         // name: "माझे नाव X आहे" / "माझं नाव X"
@@ -1347,6 +1353,12 @@ class ChatRepositoryImpl @Inject constructor(
             .find(msg)?.groupValues?.get(1)?.let { p ->
                 val prof = nameHead(p)
                 if (prof.length in 3..30) out += "profession" to prof
+            }
+        // age: "मी 28 वर्षांचा/वर्षांची आहे" — "I am 28 years old"
+        Regex("मी\\s+(\\d{1,3})\\s*वर्ष")
+            .find(msg)?.groupValues?.get(1)?.let { a ->
+                val age = a.toIntOrNull()
+                if (age != null && age in 1..120) out += "age" to age.toString()
             }
 
         // ── Other Indian scripts — name only ─────────────────────────────────
@@ -1383,6 +1395,27 @@ class ChatRepositoryImpl @Inject constructor(
             ).find(msg)?.groupValues?.get(1)?.let { p ->
                 val prof = nameHead(p)
                 if (prof.length in 3..30) out += "profession" to prof
+            }
+        }
+
+        // ── Other Indian scripts — age ─────────────────────────────────────────
+        // Telugu/Tamil state age with a dative "to me N years" construction
+        // (different word order from Hindi/Marathi's "I N years"); Bengali/
+        // Kannada/Gujarati/Punjabi/Odia use a possessive "my age N" construction
+        // instead, like the name/profession patterns above. Same 1..120 sanity
+        // range as the English pattern.
+        Regex("(?:నాకు|எனக்கு)\\s+(\\d{1,3})\\s*(?:సంవత్సరాలు|வயது)")
+            .find(msg)?.groupValues?.get(1)?.let { a ->
+                val age = a.toIntOrNull()
+                if (age != null && age in 1..120) out += "age" to age.toString()
+            }
+        if (out.none { it.first == "age" }) {
+            Regex(
+                "(?:আমার\\s*বয়স|ನನ್ನ\\s*ವಯಸ್ಸು|મારી\\s*ઉંમર|ਮੇਰੀ\\s*ਉਮਰ|(?:ମୋ|ମୋର)\\s*ବୟସ)" +
+                    "\\s+(\\d{1,3})",
+            ).find(msg)?.groupValues?.get(1)?.let { a ->
+                val age = a.toIntOrNull()
+                if (age != null && age in 1..120) out += "age" to age.toString()
             }
         }
 
@@ -1454,6 +1487,20 @@ class ChatRepositoryImpl @Inject constructor(
             when {
                 Regex("शाकाहारी").containsMatchIn(msg) && firstPerson.containsMatchIn(msg) -> out += "diet" to "vegetarian"
                 Regex("मांसाहारी").containsMatchIn(msg) && firstPerson.containsMatchIn(msg) -> out += "diet" to "non-vegetarian"
+            }
+        }
+        // Same pattern, remaining 7 supported languages — each language's
+        // vegetarian/non-vegetarian words are unambiguous enough on their own
+        // that a same-message first-person pronoun (any of the ones already
+        // established for these languages' name/age patterns) is sufficient
+        // to distinguish "I'm vegetarian" from a mention of a veg restaurant.
+        if (out.none { it.first == "diet" }) {
+            val firstPerson = Regex("(?:నేను|నాకు|நான்|எனக்கு|আমি|ನಾನು|ನನಗೆ|હું|ਮੈਂ|ମୁଁ)")
+            when {
+                Regex("శాకాహారి|சைவம்|নিরামিষ|ಸಸ್ಯಾಹಾರಿ|શાકાહારી|ਸ਼ਾਕਾਹਾਰੀ|ନିରାମିଷ").containsMatchIn(msg) &&
+                    firstPerson.containsMatchIn(msg) -> out += "diet" to "vegetarian"
+                Regex("మాంసాహారి|அசைவம்|আমিষ|ಮಾಂಸಾಹಾರಿ|માંસાહારી|ਮਾਸਾਹਾਰੀ|ଆମିଷ").containsMatchIn(msg) &&
+                    firstPerson.containsMatchIn(msg) -> out += "diet" to "non-vegetarian"
             }
         }
 
@@ -1557,6 +1604,35 @@ class ChatRepositoryImpl @Inject constructor(
                     val pronounOnly = v in setOf("यह", "वह", "ये", "वो", "इस", "उस", "हे", "ते")
                     if (v.length in 2..40 && !pronounOnly) out += (if (neg) "dislikes" else "likes") to v
                 }
+        }
+        // Remaining 7 supported languages — same dative/possessive "to-me/my
+        // X [is-liked]" shape as the Hindi/Marathi pattern above, just each
+        // language's own marker + verb. Negation particle only included where
+        // it's a simple appended word (Tamil and Gujarati negate the verb
+        // itself rather than appending a particle — skipped rather than risk
+        // an incorrect pattern; the positive "likes" case is still captured).
+        if (out.none { it.first == "likes" || it.first == "dislikes" }) {
+            data class LikePattern(val marker: String, val likeWord: String, val dislikeWord: String?)
+            val patterns = listOf(
+                LikePattern("నాకు", "ఇష్టం", "లేదు"),
+                LikePattern("எனக்கு", "பிடிக்கும்", null),
+                LikePattern("আমার", "পছন্দ", "না"),
+                LikePattern("ನನಗೆ", "ಇಷ್ಟ", "ಇಲ್ಲ"),
+                LikePattern("મને", "ગમે", null),
+                LikePattern("ਮੈਨੂੰ", "ਪਸੰਦ", "ਨਹੀਂ"),
+                LikePattern("ମୋତେ", "ପସନ୍ଦ", "ନାହିଁ"),
+            )
+            for (p in patterns) {
+                val negGroup = if (p.dislikeWord != null) "\\s*(${p.dislikeWord})?" else ""
+                val m = Regex("${p.marker}\\s+([\\p{L}][\\p{L}\\p{M}\\s'-]{1,40}?)\\s+${p.likeWord}$negGroup")
+                    .find(msg) ?: continue
+                val v = clean(m.groupValues[1])
+                val neg = p.dislikeWord != null && m.groupValues.getOrNull(2)?.isNotBlank() == true
+                if (v.length in 2..40) {
+                    out += (if (neg) "dislikes" else "likes") to v
+                    break
+                }
+            }
         }
 
         // ── Employer ─────────────────────────────────────────────────────────
