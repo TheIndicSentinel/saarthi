@@ -722,6 +722,12 @@ private fun Onb4ModelPick(
             state.catalogModels.forEachIndexed { i, model ->
                 val progress = state.downloadProgress[model.id]
                 val isDownloaded = model.id in state.downloadedModelIds
+                // Informational only — the authoritative check is
+                // ModelDownloadManager's StorageManager-based pre-flight gate
+                // right before a download actually starts. This is a static
+                // render-time read, not a live-updating ticker.
+                val insufficientStorage = !isDownloaded && state.deviceProfile != null &&
+                    model.fileSizeMb > state.deviceProfile.availableStorageMb
                 ModelOption(
                     model = model,
                     progress = progress,
@@ -733,6 +739,7 @@ private fun Onb4ModelPick(
                     onCancel = { onCancel(model) },
                     onDelete = { onDelete(model) },
                     toneIndex = i,
+                    insufficientStorage = insufficientStorage,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -754,11 +761,12 @@ private fun Onb4ModelPick(
 private fun DeviceTierBadge(profile: DeviceProfile?) {
     if (profile == null) return
     val ram = "${profile.totalRamMb / 1024}GB RAM"
+    val storage = "${profile.availableStorageMb / 1024}GB free"
     val label = when (profile.tier) {
-        DeviceTier.FLAGSHIP -> "Flagship · $ram · ${if (profile.hasVulkan) "Vulkan GPU" else "CPU"}"
-        DeviceTier.MID      -> "Mid-range · $ram"
-        DeviceTier.LOW      -> "Entry · $ram"
-        DeviceTier.MINIMAL  -> "Ultra-low · $ram"
+        DeviceTier.FLAGSHIP -> "Flagship · $ram · $storage · ${if (profile.hasVulkan) "Vulkan GPU" else "CPU"}"
+        DeviceTier.MID      -> "Mid-range · $ram · $storage"
+        DeviceTier.LOW      -> "Entry · $ram · $storage"
+        DeviceTier.MINIMAL  -> "Ultra-low · $ram · $storage"
     }
     // Honest, plain-language expectation for THIS phone. Setting it before the
     // download decision is what keeps a mid/low-RAM user from picking the
@@ -809,6 +817,7 @@ private fun ModelOption(
     onCancel: () -> Unit,
     onDelete: () -> Unit,
     toneIndex: Int,
+    insufficientStorage: Boolean = false,
 ) {
     val tone = when (toneIndex % 4) {
         0 -> ChipTone.Marigold
@@ -901,12 +910,14 @@ private fun ModelOption(
                         progress is DownloadProgress.Paused -> "· Paused"
                         progress is DownloadProgress.Failed -> "· Failed"
                         downloaded -> "· Ready to use"
+                        insufficientStorage -> "· Not enough space"
                         else -> "· Not downloaded"
                     }
                     val statusColor = when {
                         progress is DownloadProgress.Downloading -> SaarthiColors.Marigold
                         progress is DownloadProgress.Failed -> SaarthiColors.Rose
                         downloaded -> SaarthiColors.Jade
+                        insufficientStorage -> SaarthiColors.Rose
                         else -> SaarthiColors.Text3
                     }
                     Text(
@@ -1058,6 +1069,15 @@ private fun DownloadingScreen(
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp)),
                     color = SaarthiColors.Marigold,
                     trackColor = Color(0x0FF5EEE3),
+                )
+            }
+            if (state.lastFailureNote != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Last attempt didn't finish: ${state.lastFailureNote}",
+                    style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 )
             }
             Spacer(Modifier.weight(1f))

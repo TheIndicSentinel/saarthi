@@ -914,9 +914,16 @@ class LiteRTInferenceEngine @Inject constructor(
                         DebugLogger.log("LITERT", "[NATIVE] [JNI_EXIT] createConversation SUCCESS")
                     } catch (e: Exception) {
                         DebugLogger.log("LITERT", "[JNI_ERROR] createConversation threw: ${e.message}")
+                        // newEngine already holds a fully-loaded native model (mmap'd weights) at
+                        // this point — createConversation failing here must not leak it, since
+                        // `engine` is only assigned AFTER this block succeeds (line ~929).
+                        runCatching { newEngine.close() }
+                            .onFailure { Timber.w(it, "LiteRT newEngine close-on-failure warning") }
                         throw e
                     } catch (t: Throwable) {
                         DebugLogger.log("LITERT", "[JNI_FATAL] createConversation threw Throwable: ${t.javaClass.simpleName}")
+                        runCatching { newEngine.close() }
+                            .onFailure { Timber.w(it, "LiteRT newEngine close-on-failure warning") }
                         throw t
                     }
                     
@@ -953,12 +960,18 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                     setReady(true)
                     DebugLogger.log("LITERT", "Model ready & pre-warmed  $profile  backend=${backendLabel()}")
+                } catch (e: OutOfMemoryError) {
+                    markInitEnded()
+                    val rawMsg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                    val msg = "Not enough RAM to load this model. Close background apps and try again, or choose a smaller model."
+                    DebugLogger.log("LITERT", "Load failed: $rawMsg")
+                    Timber.e(e, "LiteRT model load failed")
+                    InferenceService.stop(context)
+                    throw RuntimeException("LiteRT failed to load model: $msg", e)
                 } catch (e: Throwable) {
                     markInitEnded()
                     val rawMsg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                     val msg = when {
-                        e is OutOfMemoryError ->
-                            "Not enough RAM to load this model. Close background apps and try again, or choose a smaller model."
                         rawMsg.contains("LiteRtLmJni", ignoreCase = true) ||
                         rawMsg.contains("JniException", ignoreCase = true) ->
                             "Your device could not load this model. " +
@@ -1060,7 +1073,15 @@ class LiteRTInferenceEngine @Inject constructor(
             cacheDir     = if (backend !is Backend.CPU) context.codeCacheDir.absolutePath else null,
         )
         val e = Engine(engineConfig)
-        e.initialize()  // blocking — must be called on background thread
+        try {
+            e.initialize()  // blocking — must be called on background thread
+        } catch (t: Throwable) {
+            // initialize() can partially allocate native state before throwing — every
+            // NPU→GPU→CPU fallback attempt in tryLoadWithFallback() calls this, so an
+            // unclosed failure here leaks on every fallback step, not just once.
+            runCatching { e.close() }
+            throw t
+        }
         return e
     }
 

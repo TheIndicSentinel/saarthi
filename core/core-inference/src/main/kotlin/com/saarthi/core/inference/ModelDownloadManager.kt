@@ -3,6 +3,7 @@ package com.saarthi.core.inference
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.storage.StorageManager
 import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.ModelEntry
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -55,6 +56,7 @@ class ModelDownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val hfTokenManager: HuggingFaceTokenManager,
     private val languageManager: com.saarthi.core.i18n.LanguageManager,
+    private val failureStore: DownloadFailureStore,
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -136,6 +138,24 @@ class ModelDownloadManager @Inject constructor(
             return
         }
 
+        // Authoritative storage check right before starting the transfer.
+        // ModelEntry.isSafeFor() only ran once, at picker-load time, against a
+        // StatFs snapshot — it can be stale by the time the user actually taps
+        // Download. remainingBytes accounts for a resumable partial tmp file
+        // rather than demanding the full file size again.
+        val remainingBytes = model.fileSizeBytes - (if (!replace) tmpPathFor(model).length() else 0L)
+        if (remainingBytes > 0 && !ensureStorageAvailable(remainingBytes)) {
+            val neededMb = remainingBytes / 1_048_576
+            val availableMb = context.filesDir.freeSpace / 1_048_576
+            DebugLogger.log("DOWNLOAD",
+                "Insufficient storage for ${model.id}: needs ~${neededMb}MB, only ${availableMb}MB available")
+            _allProgress.update {
+                it + (model.id to DownloadProgress.Failed(
+                    "Not enough storage: needs ~${neededMb}MB, only ${availableMb}MB available"))
+            }
+            return
+        }
+
         trackedModels[model.id] = model
 
         // Immediate UI feedback: flip the model into a Downloading state right
@@ -162,6 +182,7 @@ class ModelDownloadManager @Inject constructor(
             title = "${languageManager.selectedLanguage.value.downloadingTitlePrefix} ${model.displayName}",
             token = hfToken,
             replace = replace,
+            expectedSha256 = model.expectedSha256,
         )
     }
 
@@ -230,6 +251,28 @@ class ModelDownloadManager @Inject constructor(
                 startDownload(model)
             }
         }
+        sweepOrphanedTmpFiles(models)
+    }
+
+    /**
+     * Deletes tmp files belonging to a model no longer in the catalog (e.g. a
+     * future app update that drops an entry). A no-op today — the catalog has
+     * never shrunk yet — but nothing else scans [tmpModelsDir] independent of
+     * the current catalog, so an orphaned partial file would otherwise sit
+     * unreachable on disk forever. Runs after the resume pass above, so a
+     * legitimate in-progress download is never mistaken for an orphan.
+     */
+    private fun sweepOrphanedTmpFiles(models: List<ModelEntry>) {
+        val validNames = models.map { it.fileName }.toSet()
+        runCatching {
+            tmpModelsDir().listFiles()?.forEach { file ->
+                if (file.name !in validNames) {
+                    DebugLogger.log("DOWNLOAD",
+                        "Sweeping orphaned tmp file: ${file.name} (${file.length() / 1_048_576}MB)")
+                    file.delete()
+                }
+            }
+        }
     }
 
     /**
@@ -253,11 +296,16 @@ class ModelDownloadManager @Inject constructor(
     internal fun emitCompleted(modelId: String, path: String) {
         trackedModels.remove(modelId)
         _allProgress.update { it + (modelId to DownloadProgress.Completed(path)) }
+        scope.launch { failureStore.clear() }
     }
 
     internal fun emitFailed(modelId: String, reason: String) {
         trackedModels.remove(modelId)
         _allProgress.update { it + (modelId to DownloadProgress.Failed(reason)) }
+        // Persisted so the failure survives a process restart — the
+        // in-memory _allProgress entry above is lost if the app is
+        // backgrounded and killed before the user reopens it.
+        scope.launch { failureStore.recordFailure(modelId, reason) }
     }
 
     // ── File validation ───────────────────────────────────────────────────────
@@ -295,6 +343,28 @@ class ModelDownloadManager @Inject constructor(
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
+
+    /**
+     * Authoritative right-before-download storage check via [StorageManager]
+     * (API 26+, unconditional at this app's minSdk 28) — the platform's
+     * recommended mechanism for reserving space ahead of a large write. If
+     * the OS doesn't already report enough allocatable space, [allocateBytes]
+     * is attempted first (this can trigger eviction of other apps'
+     * reclaimable cache, the documented way to free room for exactly this
+     * scenario) before concluding there's genuinely not enough.
+     *
+     * Fails OPEN (returns true) if the check itself errors — a diagnostic API
+     * hiccup shouldn't block a download that might otherwise succeed; a
+     * genuine out-of-space condition is still caught by the write loop's own
+     * ENOSPC handling in [ModelDownloadService].
+     */
+    private fun ensureStorageAvailable(bytesNeeded: Long): Boolean = runCatching {
+        val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+        val uuid = storageManager.getUuidForPath(modelsDir())
+        if (storageManager.getAllocatableBytes(uuid) >= bytesNeeded) return@runCatching true
+        runCatching { storageManager.allocateBytes(uuid, bytesNeeded) }
+        storageManager.getAllocatableBytes(uuid) >= bytesNeeded
+    }.getOrDefault(true)
 
     /**
      * Lightweight network snapshot for the start-of-download log line. Helps

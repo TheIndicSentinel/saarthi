@@ -37,6 +37,16 @@ import javax.inject.Inject
 private class DownloadHttpException(val code: Int, message: String) : IOException(message)
 
 /**
+ * Thrown when the device is (or is about to be) out of storage — either
+ * proactively, from the write loop's periodic [File.usableSpace] check
+ * catching a device slowly filling up from another app running
+ * concurrently, or reactively, from the write itself failing with ENOSPC.
+ * Terminal — retrying a write against a full disk wastes battery on exactly
+ * the devices with the least of it to spare.
+ */
+private class InsufficientStorageException(message: String) : IOException(message)
+
+/**
  * Thrown when a Range-resume request gets HTTP 416 (Requested Range Not
  * Satisfiable). Per RFC 7233 §4.4, this means the requested start offset is
  * at or past the resource's current length — i.e. the local tmp file already
@@ -154,6 +164,7 @@ class ModelDownloadService : Service() {
                 val title   = intent.getStringExtra(EXTRA_TITLE) ?: DEFAULT_TITLE
                 val token   = intent.getStringExtra(EXTRA_HF_TOKEN) ?: ""
                 val replace = intent.getBooleanExtra(EXTRA_REPLACE, false)
+                val expectedSha256 = intent.getStringExtra(EXTRA_EXPECTED_SHA256)
 
                 if (modelId == null || url == null || tmp == null || dest == null) {
                     DebugLogger.log("DOWNLOAD_SVC", "START missing extras — ignored")
@@ -190,7 +201,7 @@ class ModelDownloadService : Service() {
                         // otherwise its final in-flight chunk could recreate the file
                         // and the new run would resume instead of starting over.
                         if (replace) File(tmp).delete()
-                        runDownload(modelId, url, File(tmp), File(dest), token, title)
+                        runDownload(modelId, url, File(tmp), File(dest), token, title, expectedSha256)
                     }
                 }
                 jobs[modelId] = job
@@ -226,6 +237,7 @@ class ModelDownloadService : Service() {
         destFile: File,
         token: String,
         title: String,
+        expectedSha256: String? = null,
     ) {
         tmpFile.parentFile?.mkdirs()
         destFile.parentFile?.mkdirs()
@@ -246,6 +258,28 @@ class ModelDownloadService : Service() {
 
                 DebugLogger.log("DOWNLOAD_SVC",
                     "COMPLETE ${destFile.name}  size=${destFile.length() / 1_048_576}MB")
+
+                // Integrity check — only runs once, right after a freshly
+                // completed download, and only for catalog entries that have
+                // opted in with a pinned checksum (expectedSha256 == null for
+                // every entry until Batch 7b pins real hashes, so this is
+                // currently a no-op app-wide). Soft-warn on mismatch, don't
+                // block completion: since the URL is pinned to an immutable
+                // commit revision, a mismatch can only mean real transfer
+                // corruption or a catalog data-entry error, not natural
+                // upstream drift — Engine.initialize() is still the existing
+                // safety net if the file is genuinely bad.
+                if (expectedSha256 != null) {
+                    val actual = withContext(Dispatchers.IO) { StreamingSha256.hex(destFile) }
+                    if (!actual.equals(expectedSha256, ignoreCase = true)) {
+                        Timber.e("Model checksum mismatch: $modelId  expected=$expectedSha256  actual=$actual")
+                        DebugLogger.log("DOWNLOAD_SVC",
+                            "WARN checksum mismatch for $modelId — expected=$expectedSha256 actual=$actual")
+                    } else {
+                        DebugLogger.log("DOWNLOAD_SVC", "Checksum verified for $modelId")
+                    }
+                }
+
                 manager.emitCompleted(modelId, destFile.absolutePath)
                 return
 
@@ -307,6 +341,15 @@ class ModelDownloadService : Service() {
                     manager.emitCompleted(modelId, destFile.absolutePath)
                     return
                 }
+
+            } catch (e: InsufficientStorageException) {
+                // Terminal — retrying a write against a full disk just burns
+                // battery on the identical failure. Leave the tmp file in
+                // place: resumable once the user frees space, same as any
+                // other interrupted-but-kept partial download.
+                DebugLogger.log("DOWNLOAD_SVC", "INSUFFICIENT STORAGE for $modelId  partial=${tmpFile.length() / 1_048_576}MB kept")
+                manager.emitFailed(modelId, e.message ?: "Not enough storage space to finish this download.")
+                return
 
             } catch (e: Exception) {
                 if (attempt >= MAX_ATTEMPTS) {
@@ -386,13 +429,35 @@ class ModelDownloadService : Service() {
                     emitProgress(modelId, written, totalBytes)
                     while (input.read(buffer).also { bytesRead = it } >= 0) {
                         if (!isActive) throw CancellationException("download cancelled")
-                        output.write(buffer, 0, bytesRead)
+                        try {
+                            output.write(buffer, 0, bytesRead)
+                        } catch (e: IOException) {
+                            // A disk-full write failure surfaces as a plain IOException
+                            // (typically "No space left on device") — detect it and
+                            // rethrow distinctly so runDownload() treats it as terminal
+                            // instead of retrying a doomed write 6 times.
+                            if (e.message?.contains("space", ignoreCase = true) == true ||
+                                tmpFile.usableSpace < bytesRead) {
+                                throw InsufficientStorageException("Not enough storage space to finish this download.")
+                            }
+                            throw e
+                        }
                         written += bytesRead
 
                         val now = System.currentTimeMillis()
                         if (now - lastReportMs >= PROGRESS_INTERVAL_MS) {
                             lastReportMs = now
                             emitProgress(modelId, written, totalBytes)
+                            // Soft early-warning on the same cadence as progress
+                            // reporting: catches storage slowly draining from
+                            // another app running concurrently. Cheap File call,
+                            // not the heavier StorageManager API — appropriate
+                            // for a hot loop. The write itself failing with
+                            // ENOSPC regardless of cause is still caught below.
+                            val remaining = totalBytes - written
+                            if (remaining > 0 && tmpFile.usableSpace < remaining) {
+                                throw InsufficientStorageException("Not enough storage space to finish this download.")
+                            }
                         }
                     }
                     emitProgress(modelId, written, totalBytes)
@@ -515,6 +580,7 @@ class ModelDownloadService : Service() {
         private const val EXTRA_TITLE    = "title"
         private const val EXTRA_HF_TOKEN = "hf_token"
         private const val EXTRA_REPLACE  = "replace"
+        private const val EXTRA_EXPECTED_SHA256 = "expected_sha256"
 
         /**
          * Starts (or resumes) a download. MUST be called from a foreground
@@ -525,6 +591,9 @@ class ModelDownloadService : Service() {
          * [replace] = true restarts from zero: any in-flight transfer for this
          * model is cancelled and the new one waits for it to fully stop before
          * writing, so the two never touch the tmp file at the same time.
+         *
+         * [expectedSha256] = null skips verification entirely (today's
+         * behavior for every catalog entry that hasn't been pinned yet).
          */
         fun start(
             context: Context,
@@ -535,6 +604,7 @@ class ModelDownloadService : Service() {
             title: String,
             token: String,
             replace: Boolean = false,
+            expectedSha256: String? = null,
         ) {
             val intent = Intent(context, ModelDownloadService::class.java).apply {
                 action = ACTION_START
@@ -545,6 +615,7 @@ class ModelDownloadService : Service() {
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_HF_TOKEN, token)
                 putExtra(EXTRA_REPLACE, replace)
+                if (expectedSha256 != null) putExtra(EXTRA_EXPECTED_SHA256, expectedSha256)
             }
             startServiceCompat(context, intent)
         }

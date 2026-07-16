@@ -59,6 +59,9 @@ data class OnboardingUiState(
     val manualPathInput: String = "",
     val needsAllFilesPermission: Boolean = false,
     val downloadedModelIds: Set<String> = emptySet(),
+    /** Persisted reason the auto-picked model's download last failed, if any —
+     *  survives a process restart, unlike [error] which clears on a fresh attempt. */
+    val lastFailureNote: String? = null,
 )
 
 enum class OnboardingStep {
@@ -85,6 +88,7 @@ class OnboardingViewModel @Inject constructor(
     private val downloadManager: ModelDownloadManager,
     private val hfTokenManager: HuggingFaceTokenManager,
     private val funnel: com.saarthi.core.inference.FunnelTracker,
+    private val failureStore: com.saarthi.core.inference.DownloadFailureStore,
 ) : ViewModel() {
 
     private val isModelChangeMode: Boolean =
@@ -152,38 +156,56 @@ class OnboardingViewModel @Inject constructor(
         // straight back into the download/init screen instead of making the
         // user re-click through Splash → Language → Welcome → Privacy for a
         // choice they already made (field report, Pixel 8, 2026-07-16).
-        if (!isModelChangeMode) {
-            val autoModel = modelCatalog.autoPick(profile)
-            if (autoModel != null) {
-                val alreadyComplete = downloadManager.isDownloaded(autoModel)
-                val hasPartial = !alreadyComplete &&
-                    downloadManager.tmpPathFor(autoModel).let { it.exists() && it.length() > 1_000_000L }
-                if (alreadyComplete || hasPartial) {
-                    isResumedFlow = true
-                    com.saarthi.core.inference.DebugLogger.log("ONBOARDING",
-                        "Resuming in-progress auto-model flow after relaunch: " +
-                        "${autoModel.id}  complete=$alreadyComplete")
-                    _uiState.update {
-                        it.copy(
-                            step = OnboardingStep.DOWNLOADING,
-                            selectedModelPath = downloadManager.localPathFor(autoModel).absolutePath,
-                        )
-                    }
-                    if (alreadyComplete) {
-                        confirmModelAndInit()
+        // Both the resume-detection disk checks below and the funnel-tracking
+        // decision that depends on isResumedFlow run in ONE IO-dispatched
+        // coroutine, in the same order as before — off the main thread (these
+        // were previously synchronous File I/O during ViewModel construction),
+        // but with the same internal sequencing so isResumedFlow is always
+        // settled before the funnel check reads it.
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!isModelChangeMode) {
+                val autoModel = modelCatalog.autoPick(profile)
+                if (autoModel != null) {
+                    val alreadyComplete = downloadManager.isDownloaded(autoModel)
+                    val hasPartial = !alreadyComplete &&
+                        downloadManager.tmpPathFor(autoModel).let { it.exists() && it.length() > 1_000_000L }
+                    if (alreadyComplete || hasPartial) {
+                        isResumedFlow = true
+                        com.saarthi.core.inference.DebugLogger.log("ONBOARDING",
+                            "Resuming in-progress auto-model flow after relaunch: " +
+                            "${autoModel.id}  complete=$alreadyComplete")
+                        _uiState.update {
+                            it.copy(
+                                step = OnboardingStep.DOWNLOADING,
+                                selectedModelPath = downloadManager.localPathFor(autoModel).absolutePath,
+                            )
+                        }
+                        if (alreadyComplete) {
+                            confirmModelAndInit()
+                        } else {
+                            // reattachActiveDownloads() further below resumes the
+                            // actual byte transfer; this just waits for it to finish.
+                            awaitDownloadThenInit(autoModel)
+                        }
                     } else {
-                        // reattachActiveDownloads() further below resumes the
-                        // actual byte transfer; this just waits for it to finish.
-                        awaitDownloadThenInit(autoModel)
+                        // Nothing to resume for this model — surface whether the
+                        // last attempt failed, so a fresh auto-download doesn't
+                        // silently retry with zero context if it fails again the
+                        // same way (e.g. the tmp file was cleaned up after an
+                        // ENOSPC failure, or the user deleted a corrupt partial).
+                        val failure = failureStore.lastFailure.first()
+                        if (failure != null && failure.first == autoModel.id) {
+                            _uiState.update { it.copy(lastFailureNote = failure.second) }
+                        }
                     }
                 }
             }
-        }
 
-        // Funnel: a genuine first-run onboarding started (not a model-change
-        // re-entry, and not a resumed flow re-firing the same session's start event).
-        if (!isModelChangeMode && !isResumedFlow) {
-            funnel.track(com.saarthi.core.inference.FunnelEvent.ONBOARDING_STARTED)
+            // Funnel: a genuine first-run onboarding started (not a model-change
+            // re-entry, and not a resumed flow re-firing the same session's start event).
+            if (!isModelChangeMode && !isResumedFlow) {
+                funnel.track(com.saarthi.core.inference.FunnelEvent.ONBOARDING_STARTED)
+            }
         }
 
         // Mirror app-lifetime download progress into UI state.
@@ -303,21 +325,23 @@ class OnboardingViewModel @Inject constructor(
             _uiState.update { it.copy(error = "Enter a file path first.") }
             return
         }
-        val file = File(path)
-        if (!file.exists()) {
-            _uiState.update { it.copy(error = "File not found at: $path") }
-            return
-        }
-        if (!file.canRead()) {
-            _uiState.update { it.copy(error = "Cannot read file at: $path — try granting All Files Access.") }
-            return
-        }
-        _uiState.update {
-            it.copy(
-                selectedModelPath = path,
-                modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
-                error = null,
-            )
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = File(path)
+            if (!file.exists()) {
+                _uiState.update { it.copy(error = "File not found at: $path") }
+                return@launch
+            }
+            if (!file.canRead()) {
+                _uiState.update { it.copy(error = "Cannot read file at: $path — try granting All Files Access.") }
+                return@launch
+            }
+            _uiState.update {
+                it.copy(
+                    selectedModelPath = path,
+                    modelCandidates = (listOf(path) + it.modelCandidates).distinct(),
+                    error = null,
+                )
+            }
         }
     }
 
@@ -354,48 +378,50 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun onModelUriPicked(context: Context, uri: Uri) {
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        }
-
-        val realPath = resolveRealPath(context, uri)
-        if (realPath != null && File(realPath).exists()) {
-            _uiState.update {
-                it.copy(
-                    selectedModelPath = realPath,
-                    modelCandidates = (listOf(realPath) + it.modelCandidates).distinct(),
-                    error = null,
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             }
-            return
-        }
 
-        var openError = "openFileDescriptor returned null"
-        val pfd = try {
-            context.contentResolver.openFileDescriptor(uri, "r")
-        } catch (e: Exception) {
-            openError = "${e.javaClass.simpleName}: ${e.message}"
-            null
-        }
-
-        if (pfd != null) {
-            modelPfd?.close()
-            modelPfd = pfd
-            val fdPath = "/proc/self/fd/${pfd.fd}"
-            _uiState.update {
-                it.copy(
-                    selectedModelPath = fdPath,
-                    modelCandidates = (listOf(fdPath) + it.modelCandidates).distinct(),
-                    error = null,
-                )
+            val realPath = resolveRealPath(context, uri)
+            if (realPath != null && File(realPath).exists()) {
+                _uiState.update {
+                    it.copy(
+                        selectedModelPath = realPath,
+                        modelCandidates = (listOf(realPath) + it.modelCandidates).distinct(),
+                        error = null,
+                    )
+                }
+                return@launch
             }
-            return
-        }
 
-        _uiState.update {
-            it.copy(error = "Could not open file ($openError). Try using 'Enter path manually' below, or grant All Files Access and rescan.")
+            var openError = "openFileDescriptor returned null"
+            val pfd = try {
+                context.contentResolver.openFileDescriptor(uri, "r")
+            } catch (e: Exception) {
+                openError = "${e.javaClass.simpleName}: ${e.message}"
+                null
+            }
+
+            if (pfd != null) {
+                modelPfd?.close()
+                modelPfd = pfd
+                val fdPath = "/proc/self/fd/${pfd.fd}"
+                _uiState.update {
+                    it.copy(
+                        selectedModelPath = fdPath,
+                        modelCandidates = (listOf(fdPath) + it.modelCandidates).distinct(),
+                        error = null,
+                    )
+                }
+                return@launch
+            }
+
+            _uiState.update {
+                it.copy(error = "Could not open file ($openError). Try using 'Enter path manually' below, or grant All Files Access and rescan.")
+            }
         }
     }
 
@@ -426,24 +452,28 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun cancelDownload(model: ModelEntry) {
-        downloadManager.cancelDownload(model)
-        refreshDownloadedModels()
+        viewModelScope.launch(Dispatchers.IO) {
+            downloadManager.cancelDownload(model)
+            refreshDownloadedModels()
+        }
     }
 
 
     fun deleteModel(model: ModelEntry) {
-        val file = downloadManager.localPathFor(model)
-        DebugLogger.log("DELETE", "Deleting ${file.absolutePath}  exists=${file.exists()}  size=${file.length() / 1_048_576}MB")
-        downloadManager.cancelDownload(model) // MUST cancel active download so it doesn't auto-complete
-        file.delete()
-        _uiState.update {
-            it.copy(
-                downloadProgress = it.downloadProgress - model.id,
-                downloadedModelIds = it.downloadedModelIds - model.id,
-                selectedModelPath = if (it.selectedModelPath?.endsWith(model.fileName) == true) null else it.selectedModelPath,
-                modelCandidates = it.modelCandidates.filterNot { p -> p.endsWith(model.fileName) },
-                error = null,
-            )
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = downloadManager.localPathFor(model)
+            DebugLogger.log("DELETE", "Deleting ${file.absolutePath}  exists=${file.exists()}  size=${file.length() / 1_048_576}MB")
+            downloadManager.cancelDownload(model) // MUST cancel active download so it doesn't auto-complete
+            file.delete()
+            _uiState.update {
+                it.copy(
+                    downloadProgress = it.downloadProgress - model.id,
+                    downloadedModelIds = it.downloadedModelIds - model.id,
+                    selectedModelPath = if (it.selectedModelPath?.endsWith(model.fileName) == true) null else it.selectedModelPath,
+                    modelCandidates = it.modelCandidates.filterNot { p -> p.endsWith(model.fileName) },
+                    error = null,
+                )
+            }
         }
     }
 
@@ -469,20 +499,22 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun selectDownloadedModel(model: ModelEntry) {
-        val file = downloadManager.localPathFor(model)
-        if (downloadManager.isFileComplete(file, model.fileSizeBytes)) {
-            _uiState.update {
-                it.copy(
-                    selectedModelPath = file.absolutePath,
-                    modelCandidates = (listOf(file.absolutePath) + it.modelCandidates).distinct(),
-                    error = null,
-                )
-            }
-        } else {
-            val sizeMb = if (file.exists()) file.length() / 1_048_576 else 0
-            val expectedMb = model.fileSizeBytes / 1_048_576
-            _uiState.update {
-                it.copy(error = "Download incomplete: ${sizeMb}MB of ${expectedMb}MB. Please wait or re-download.")
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = downloadManager.localPathFor(model)
+            if (downloadManager.isFileComplete(file, model.fileSizeBytes)) {
+                _uiState.update {
+                    it.copy(
+                        selectedModelPath = file.absolutePath,
+                        modelCandidates = (listOf(file.absolutePath) + it.modelCandidates).distinct(),
+                        error = null,
+                    )
+                }
+            } else {
+                val sizeMb = if (file.exists()) file.length() / 1_048_576 else 0
+                val expectedMb = model.fileSizeBytes / 1_048_576
+                _uiState.update {
+                    it.copy(error = "Download incomplete: ${sizeMb}MB of ${expectedMb}MB. Please wait or re-download.")
+                }
             }
         }
     }
@@ -490,10 +522,19 @@ class OnboardingViewModel @Inject constructor(
     // ── Model init ────────────────────────────────────────────────────────────
 
     fun confirmModelAndInit() {
-        confirmModelAndInitInternal()
+        // The whole body (pre-check file I/O + engine init) runs in one IO-
+        // dispatched coroutine now — previously the pre-checks (isFileComplete,
+        // deviceProfiler.profile()'s StatFs call) ran synchronously on whatever
+        // thread called this (often main). inferenceEngine.initialize() already
+        // internally hops to its own dispatcher regardless of caller context, so
+        // this is a pure thread-placement fix, not a behavior change: every call
+        // site already treated this as fire-and-forget / state-flow-observed.
+        viewModelScope.launch(Dispatchers.IO) {
+            confirmModelAndInitInternal()
+        }
     }
 
-    private fun confirmModelAndInitInternal() {
+    private suspend fun confirmModelAndInitInternal() {
         val path = _uiState.value.selectedModelPath
             ?: _uiState.value.modelCandidates.firstOrNull()
             ?: run {
@@ -536,37 +577,35 @@ class OnboardingViewModel @Inject constructor(
 
         _uiState.update { it.copy(step = OnboardingStep.MODEL_INIT, isLoading = true, error = null) }
         DebugLogger.log("VMODEL", "Starting model initialization: $path")
-        
-        viewModelScope.launch {
-            runCatching {
-                inferenceEngine.initialize(config)
-            }.onSuccess {
-                DebugLogger.log("VMODEL", "Inference engine initialized successfully")
-                modelPfd?.close()
-                modelPfd = null
-                if (!path.startsWith("/proc/self/fd/")) {
-                    repository.saveModelPath(path)
-                }
-                if (isResumedFlow) {
-                    // Setup finished while the app was backgrounded/killed —
-                    // skip the CHAT_TEST confirmation tap (see isResumedFlow
-                    // kdoc) and go straight to Home.
-                    _uiState.update { it.copy(isLoading = false, isModelReady = true) }
-                    completeOnboarding()
-                } else {
-                    _uiState.update { it.copy(isLoading = false, isModelReady = true, step = OnboardingStep.CHAT_TEST) }
-                }
-            }.onFailure { e ->
-                val errorMsg = when {
-                    e is OutOfMemoryError ->
-                        "Not enough RAM to load this model.\n\nClose background apps and try again, or choose a smaller model."
-                    e.message?.contains("RAM", ignoreCase = true) == true -> e.message!!
-                    e.message?.isNotBlank() == true -> "Model load failed: ${e.message}"
-                    else -> "Model load failed (${e.javaClass.simpleName}).\n\nThis model may be too large for your device. Try a smaller model."
-                }
-                DebugLogger.log("VMODEL", "Init failed: $errorMsg")
-                _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isLoading = false, error = errorMsg) }
+
+        runCatching {
+            inferenceEngine.initialize(config)
+        }.onSuccess {
+            DebugLogger.log("VMODEL", "Inference engine initialized successfully")
+            modelPfd?.close()
+            modelPfd = null
+            if (!path.startsWith("/proc/self/fd/")) {
+                repository.saveModelPath(path)
             }
+            if (isResumedFlow) {
+                // Setup finished while the app was backgrounded/killed —
+                // skip the CHAT_TEST confirmation tap (see isResumedFlow
+                // kdoc) and go straight to Home.
+                _uiState.update { it.copy(isLoading = false, isModelReady = true) }
+                completeOnboarding()
+            } else {
+                _uiState.update { it.copy(isLoading = false, isModelReady = true, step = OnboardingStep.CHAT_TEST) }
+            }
+        }.onFailure { e ->
+            val errorMsg = when {
+                e is OutOfMemoryError ->
+                    "Not enough RAM to load this model.\n\nClose background apps and try again, or choose a smaller model."
+                e.message?.contains("RAM", ignoreCase = true) == true -> e.message!!
+                e.message?.isNotBlank() == true -> "Model load failed: ${e.message}"
+                else -> "Model load failed (${e.javaClass.simpleName}).\n\nThis model may be too large for your device. Try a smaller model."
+            }
+            DebugLogger.log("VMODEL", "Init failed: $errorMsg")
+            _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isLoading = false, error = errorMsg) }
         }
     }
 
@@ -640,7 +679,7 @@ class OnboardingViewModel @Inject constructor(
 
     /** Shared by [proceedFromModelPick] and [proceedWithAutoModel]. */
     private fun startDownloadAndAutoInit(model: ModelEntry) {
-        _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING, error = null) }
+        _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING, error = null, lastFailureNote = null) }
         downloadManager.startDownload(model)
         awaitDownloadThenInit(model)
     }

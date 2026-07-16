@@ -34,6 +34,17 @@ data class ModelEntry(
     val socTarget: SocFamily = SocFamily.GENERIC,
     /** ID of the generic base model this is a device-specific variant of. Empty = is the base. */
     val baseModelId: String = "",
+    /**
+     * Expected lowercase-hex SHA-256 of the downloaded file, verified once
+     * right after a fresh download completes (see [ModelDownloadService]).
+     * Null = no verification (today's behavior — size-threshold only),
+     * so existing catalog entries and already-downloaded files on users'
+     * devices are unaffected. Only meaningful when [downloadUrl] is pinned
+     * to an immutable commit revision, not a mutable ref like `resolve/main`
+     * — otherwise the expected hash would go stale the moment upstream
+     * changes and every future download would fail verification.
+     */
+    val expectedSha256: String? = null,
 ) {
 
     val fileSizeMb: Int get() = (fileSizeBytes / 1_048_576).toInt()
@@ -57,14 +68,22 @@ data class ModelEntry(
      *    happens to have enough free RAM at this millisecond.
      *
      * 2. **Storage gate:**
-     *    The model must physically fit on the device's storage (with 500 MB
-     *    buffer for the tmp file during download + OS write margin).
+     *    The model must physically fit on the device's storage. Buffer is the
+     *    larger of 500 MB or 5% of the model's own size — a flat 500 MB alone
+     *    doesn't absorb the confirmed HuggingFace file-size drift (a live
+     *    field download completed at 2468 MB against a 2463 MB catalog
+     *    estimate); scaling with the model's size keeps margin proportional
+     *    for the larger (multi-GB) catalog entries. This is a cheap,
+     *    StatFs-based picker-list filter — the authoritative check right
+     *    before a download actually starts is [ModelDownloadManager]'s
+     *    StorageManager-based pre-flight gate.
      */
     fun isSafeFor(profile: DeviceProfile): Boolean {
         // Gate 1: device tier (total-RAM based — stable)
         if (profile.tier.ordinal < requiredTier.ordinal) return false
         // Gate 2: enough storage to download
-        if (profile.availableStorageMb < fileSizeMb + 500) return false
+        val bufferMb = maxOf(500, fileSizeMb / 20)
+        if (profile.availableStorageMb < fileSizeMb + bufferMb) return false
         return true
     }
 }
