@@ -37,6 +37,24 @@ import javax.inject.Inject
 private class DownloadHttpException(val code: Int, message: String) : IOException(message)
 
 /**
+ * Thrown when a Range-resume request gets HTTP 416 (Requested Range Not
+ * Satisfiable). Per RFC 7233 §4.4, this means the requested start offset is
+ * at or past the resource's current length — i.e. the local tmp file already
+ * has at least as many bytes as the server currently has to give. This
+ * happens when the catalog's hardcoded fileSizeBytes drifts from what
+ * HuggingFace actually serves for a revision, or when a transfer finished
+ * writing every byte but was killed the instant before the atomic rename.
+ *
+ * [serverTotalBytes] is parsed from the 416 response's own
+ * `Content-Range: bytes */<size>` header (RFC 7233 §4.4 requires the server
+ * to include it) — used by [runDownload] to verify the local file actually
+ * covers what the server reports before accepting it as complete, rather
+ * than assuming from the 416 status alone.
+ */
+private class RangeExhaustedException(val serverTotalBytes: Long?) :
+    IOException("Local file already complete relative to server")
+
+/**
  * Foreground Service that performs model downloads.
  *
  * WHY a foreground service and not WorkManager:
@@ -243,6 +261,52 @@ class ModelDownloadService : Service() {
                 manager.emitFailed(modelId, e.message ?: "Download failed (HTTP ${e.code})")
                 return
 
+            } catch (e: RangeExhaustedException) {
+                // A 416 on resume means our Range start is at/past the
+                // resource's current length — but verify against the size the
+                // server itself reported (Content-Range on the 416 response)
+                // before trusting it, rather than assuming from the status
+                // code alone. A genuinely short local file (corruption, not
+                // drift) gets discarded and restarted instead of silently
+                // accepted.
+                val localBytes = tmpFile.length()
+                val serverTotal = e.serverTotalBytes
+                if (serverTotal != null && localBytes < serverTotal) {
+                    Timber.w("416 on resume but local ${localBytes}B < server-reported ${serverTotal}B for ${tmpFile.name} — discarding and restarting")
+                    DebugLogger.log("DOWNLOAD_SVC",
+                        "416 on resume for $modelId: local=${localBytes}B < server=${serverTotal}B — restarting from zero")
+                    tmpFile.delete()
+                    if (attempt >= MAX_ATTEMPTS) {
+                        manager.emitFailed(modelId, "Download failed: local file shorter than server reports (HTTP 416)")
+                        return
+                    }
+                    delay((attempt * 10_000L).coerceAtMost(60_000L))
+                    // Loop continues; next downloadWithResume() starts clean
+                    // since the tmp file no longer exists (existingBytes = 0).
+                } else {
+                    // Local file already covers everything the server currently
+                    // has (or the server didn't report a total — fall back to
+                    // trusting the byte count, same as before). Accept as
+                    // complete rather than looping on retries that would hit
+                    // the identical 416 forever (the old behavior, which reset
+                    // the UI to 0% on the next attempt and looked like the
+                    // download "restarting from scratch"). Downstream,
+                    // ModelDownloadManager.isFileComplete() + confirmModelAndInit()
+                    // still re-validate size/magic-bytes before the model is
+                    // ever loaded, so a genuinely truncated file is still
+                    // caught there.
+                    DebugLogger.log("DOWNLOAD_SVC",
+                        "416 on resume for $modelId — accepting local ${localBytes / 1_048_576}MB as complete" +
+                            (serverTotal?.let { "  (server reports ${it / 1_048_576}MB)" } ?: "  (server total unknown)"))
+                    if (destFile.exists()) destFile.delete()
+                    if (!tmpFile.renameTo(destFile)) {
+                        tmpFile.copyTo(destFile, overwrite = true)
+                        tmpFile.delete()
+                    }
+                    manager.emitCompleted(modelId, destFile.absolutePath)
+                    return
+                }
+
             } catch (e: Exception) {
                 if (attempt >= MAX_ATTEMPTS) {
                     Timber.w(e, "Download failed after $attempt attempts: ${tmpFile.name}")
@@ -290,6 +354,14 @@ class ModelDownloadService : Service() {
                     else     -> "HTTP $code: ${response.message}"
                 }
                 throw DownloadHttpException(code, msg)
+            }
+            if (code == 416) {
+                // RFC 7233 §4.4: a 416 response SHOULD carry Content-Range:
+                // bytes */<current-total-size> — the server telling us exactly
+                // how large the resource is right now.
+                val serverTotal = response.headers["Content-Range"]
+                    ?.substringAfterLast('/')?.trim()?.toLongOrNull()
+                throw RangeExhaustedException(serverTotal)
             }
             throw IOException("HTTP $code: ${response.message}")
         }

@@ -115,6 +115,18 @@ class OnboardingViewModel @Inject constructor(
     /** Tracks completed downloads we've already acted on (set selectedModelPath). */
     private val handledCompletions = mutableSetOf<String>()
 
+    /**
+     * True when [init] detected an already in-flight/complete auto-model
+     * download from a prior process lifetime (killed while backgrounded) and
+     * resumed the flow without the user re-answering Splash/Language/Welcome/
+     * Privacy. Used by [confirmModelAndInitInternal] to skip the CHAT_TEST
+     * confirmation tap on success — nobody was watching setup happen live, so
+     * there's no "you're all set!" moment to show; land straight on Home
+     * instead, the same way Spotify/Play Store resume a background-completed
+     * operation without an extra affirmation screen.
+     */
+    private var isResumedFlow = false
+
 
     init {
         val profile = deviceProfiler.profile()
@@ -132,8 +144,47 @@ class OnboardingViewModel @Inject constructor(
         }
         _uiState.update { it.copy(deviceProfile = profile, catalogModels = catalog) }
 
-        // Funnel: a genuine first-run onboarding started (not a model-change re-entry).
-        if (!isModelChangeMode) funnel.track(com.saarthi.core.inference.FunnelEvent.ONBOARDING_STARTED)
+        // Resume-after-relaunch: if this device's auto-pick model already has
+        // bytes on disk (complete, or a genuine partial tmp file), onboarding
+        // was already in progress in a prior process lifetime that got killed
+        // — most commonly the OS reclaiming the whole process while the app
+        // was backgrounded mid-download despite the foreground service. Jump
+        // straight back into the download/init screen instead of making the
+        // user re-click through Splash → Language → Welcome → Privacy for a
+        // choice they already made (field report, Pixel 8, 2026-07-16).
+        if (!isModelChangeMode) {
+            val autoModel = modelCatalog.autoPick(profile)
+            if (autoModel != null) {
+                val alreadyComplete = downloadManager.isDownloaded(autoModel)
+                val hasPartial = !alreadyComplete &&
+                    downloadManager.tmpPathFor(autoModel).let { it.exists() && it.length() > 1_000_000L }
+                if (alreadyComplete || hasPartial) {
+                    isResumedFlow = true
+                    com.saarthi.core.inference.DebugLogger.log("ONBOARDING",
+                        "Resuming in-progress auto-model flow after relaunch: " +
+                        "${autoModel.id}  complete=$alreadyComplete")
+                    _uiState.update {
+                        it.copy(
+                            step = OnboardingStep.DOWNLOADING,
+                            selectedModelPath = downloadManager.localPathFor(autoModel).absolutePath,
+                        )
+                    }
+                    if (alreadyComplete) {
+                        confirmModelAndInit()
+                    } else {
+                        // reattachActiveDownloads() further below resumes the
+                        // actual byte transfer; this just waits for it to finish.
+                        awaitDownloadThenInit(autoModel)
+                    }
+                }
+            }
+        }
+
+        // Funnel: a genuine first-run onboarding started (not a model-change
+        // re-entry, and not a resumed flow re-firing the same session's start event).
+        if (!isModelChangeMode && !isResumedFlow) {
+            funnel.track(com.saarthi.core.inference.FunnelEvent.ONBOARDING_STARTED)
+        }
 
         // Mirror app-lifetime download progress into UI state.
         viewModelScope.launch {
@@ -496,7 +547,15 @@ class OnboardingViewModel @Inject constructor(
                 if (!path.startsWith("/proc/self/fd/")) {
                     repository.saveModelPath(path)
                 }
-                _uiState.update { it.copy(isLoading = false, isModelReady = true, step = OnboardingStep.CHAT_TEST) }
+                if (isResumedFlow) {
+                    // Setup finished while the app was backgrounded/killed —
+                    // skip the CHAT_TEST confirmation tap (see isResumedFlow
+                    // kdoc) and go straight to Home.
+                    _uiState.update { it.copy(isLoading = false, isModelReady = true) }
+                    completeOnboarding()
+                } else {
+                    _uiState.update { it.copy(isLoading = false, isModelReady = true, step = OnboardingStep.CHAT_TEST) }
+                }
             }.onFailure { e ->
                 val errorMsg = when {
                     e is OutOfMemoryError ->
@@ -557,6 +616,24 @@ class OnboardingViewModel @Inject constructor(
                 proceedToModelPick()
                 return@launch
             }
+            // Already fully downloaded — most likely the process was killed
+            // mid-download while backgrounded and the user reopened the app
+            // before onboarding was marked complete, restarting this flow
+            // from the top. Skip straight to init instead of re-issuing a
+            // download the server has nothing left to give (field report,
+            // Pixel 8, 2026-07-16 — surfaced as an HTTP 416 loop that reset
+            // the progress UI to 0% on every reopen).
+            if (model.id in _uiState.value.downloadedModelIds) {
+                _uiState.update {
+                    it.copy(
+                        step = OnboardingStep.DOWNLOADING,
+                        selectedModelPath = downloadManager.localPathFor(model).absolutePath,
+                        error = null,
+                    )
+                }
+                confirmModelAndInit()
+                return@launch
+            }
             startDownloadAndAutoInit(model)
         }
     }
@@ -565,8 +642,18 @@ class OnboardingViewModel @Inject constructor(
     private fun startDownloadAndAutoInit(model: ModelEntry) {
         _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING, error = null) }
         downloadManager.startDownload(model)
-        // Once the download completes, allProgress collector sets
-        // selectedModelPath + downloadedModelIds. Wait for that.
+        awaitDownloadThenInit(model)
+    }
+
+    /**
+     * Waits for [model]'s download to reach Completed (via the [allProgress]
+     * collector in [init] updating selectedModelPath/downloadedModelIds),
+     * then auto-confirms and loads it. Split out from [startDownloadAndAutoInit]
+     * so the init{}-level resume-after-relaunch path can observe an already
+     * in-flight download (resumed by [ModelDownloadManager.reattachActiveDownloads])
+     * without re-issuing its own startDownload() call.
+     */
+    private fun awaitDownloadThenInit(model: ModelEntry) {
         viewModelScope.launch {
             uiState.first { st ->
                 st.step != OnboardingStep.DOWNLOADING ||

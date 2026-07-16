@@ -141,9 +141,13 @@ class ModelDownloadManager @Inject constructor(
         // Immediate UI feedback: flip the model into a Downloading state right
         // away so the button reflects "starting" before the service emits its
         // first byte-level progress. Don't clobber an existing live progress.
+        // Seed from the tmp file's current size (not 0) — a resumed download
+        // already has bytes on disk, and showing 0% here made a resume look
+        // indistinguishable from a genuine restart-from-scratch.
+        val existingBytes = if (!replace) tmpPathFor(model).length() else 0L
         _allProgress.update { current ->
             if (current[model.id] is DownloadProgress.Downloading) current
-            else current + (model.id to DownloadProgress.Downloading(0L, model.fileSizeBytes))
+            else current + (model.id to DownloadProgress.Downloading(existingBytes, model.fileSizeBytes))
         }
 
         DebugLogger.log("DOWNLOAD",
