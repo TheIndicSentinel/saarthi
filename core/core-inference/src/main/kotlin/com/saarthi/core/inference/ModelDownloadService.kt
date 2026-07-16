@@ -45,9 +45,10 @@ private class DownloadHttpException(val code: Int, message: String) : IOExceptio
  * HuggingFace actually serves for a revision, or when a transfer finished
  * writing every byte but was killed the instant before the atomic rename.
  *
- * [serverTotalBytes] is parsed from the 416 response's own
- * `Content-Range: bytes */<size>` header (RFC 7233 §4.4 requires the server
- * to include it) — used by [runDownload] to verify the local file actually
+ * [serverTotalBytes] is parsed from the 416 response's own Content-Range
+ * header (an unsatisfied-range indicator followed by a slash and the total
+ * size — RFC 7233 §4.4 requires the server to include it) — used by
+ * [runDownload] to verify the local file actually
  * covers what the server reports before accepting it as complete, rather
  * than assuming from the 416 status alone.
  */
