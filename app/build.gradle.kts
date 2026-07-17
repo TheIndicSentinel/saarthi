@@ -157,26 +157,14 @@ android {
                 "org/bouncycastle/pqc/crypto/sike/*.properties",
             )
         }
-        // FontBox's predefined CJK (Chinese/Japanese/Korean) CMap resources —
-        // ~3.15MB across 92 files, none of which are reachable by anything
-        // Indian-language or English content would ever encode with (Adobe-
-        // Japan1/GB1/CNS1/Korea1 variants, Shift-JIS, GBK, Big5, KSC — all
-        // CJK-specific predefined encodings, not used by Devanagari/Tamil/
-        // Telugu/etc. or Latin text). Excluding this directory only affects
-        // extractPdfTextLayer() failing/returning thin text for the rare PDF
-        // that embeds actual CJK-encoded content — extractPdfText()'s
-        // existing two-stage design (see its kdoc) already falls back to the
-        // same OCR path used for scanned/encrypted/no-text-layer PDFs in
-        // that case, so nothing is lost, just a different already-relied-
-        // upon extraction path taken. Every other FontBox/PDFBox asset
-        // (Scripts.txt, standard font AFM metrics, glyphlist, BidiMirroring,
-        // the Latin TTF) is untouched — this excludes only the cmap/
-        // subdirectory specifically.
-        assets {
-            excludes += listOf(
-                "com/tom_roush/fontbox/resources/cmap/*",
-            )
-        }
+        // FontBox's predefined CJK CMap resources (~3.15MB, 92 files under
+        // assets/com/tom_roush/fontbox/resources/cmap/) are a separate,
+        // deferred follow-up — packaging.assets is not a valid DSL block on
+        // this AGP version (8.7.3; confirmed via a failed CI compile, not
+        // guessed twice), and assets/ bundled by a dependency AAR aren't
+        // reachable through packaging.resources.excludes either. Needs the
+        // correct AGP 8.7.3 mechanism identified before attempting again —
+        // not implemented here.
     }
 }
 
