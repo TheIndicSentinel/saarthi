@@ -444,6 +444,11 @@ class OnboardingViewModel @Inject constructor(
 
     fun downloadModel(model: ModelEntry) {
         funnel.track(com.saarthi.core.inference.FunnelEvent.MODEL_DOWNLOAD_STARTED)
+        // Refresh the device profile at the actual action point, not just
+        // whatever was current when the picker screen first loaded — RAM
+        // availability is dynamic and can swing meaningfully while the user
+        // is browsing the list before tapping Download.
+        _uiState.update { it.copy(deviceProfile = deviceProfiler.profile()) }
         downloadManager.startDownload(model)
     }
 
@@ -460,6 +465,16 @@ class OnboardingViewModel @Inject constructor(
 
 
     fun deleteModel(model: ModelEntry) {
+        // Enforced here, not just left to the UI to remember to disable the
+        // delete affordance for the active model (ManageDownloadsScreen does
+        // that, but OnboardingScreen's picker — reachable via "Change
+        // Model" — didn't, and neither ViewModel's deleteModel() itself
+        // checked). Deleting the file the engine currently has mmap'd/open
+        // is a real correctness risk, not just a UI nicety.
+        if (model.displayName == inferenceEngine.activeModelName) {
+            _uiState.update { it.copy(error = "Can't delete the model that's currently active — switch to a different model first.") }
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val file = downloadManager.localPathFor(model)
             DebugLogger.log("DELETE", "Deleting ${file.absolutePath}  exists=${file.exists()}  size=${file.length() / 1_048_576}MB")
@@ -679,7 +694,16 @@ class OnboardingViewModel @Inject constructor(
 
     /** Shared by [proceedFromModelPick] and [proceedWithAutoModel]. */
     private fun startDownloadAndAutoInit(model: ModelEntry) {
-        _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING, error = null, lastFailureNote = null) }
+        // Fresh profile at the action point — see downloadModel()'s comment;
+        // same reasoning applies to the auto-pick flow's own trigger point.
+        _uiState.update {
+            it.copy(
+                step = OnboardingStep.DOWNLOADING,
+                error = null,
+                lastFailureNote = null,
+                deviceProfile = deviceProfiler.profile(),
+            )
+        }
         downloadManager.startDownload(model)
         awaitDownloadThenInit(model)
     }

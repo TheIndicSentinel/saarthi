@@ -31,6 +31,7 @@ data class ManageDownloadsUiState(
     val phoneTotalBytes: Long = 0,
     val phoneFreeBytes: Long = 0,
     val activeModelName: String? = null,
+    val error: String? = null,
 )
 
 @HiltViewModel
@@ -69,6 +70,7 @@ class ManageDownloadsViewModel @Inject constructor(
                         phoneTotalBytes = total,
                         phoneFreeBytes = free,
                         activeModelName = active,
+                        error = null,
                     )
                 }
             }
@@ -76,6 +78,18 @@ class ManageDownloadsViewModel @Inject constructor(
     }
 
     fun deleteModel(model: ModelEntry) {
+        // Backstop, not the primary control — SettingsScreen already disables
+        // the delete affordance for the active model (DownloadedModel.active,
+        // computed in refresh() above). This guard exists because UI-level
+        // disabling alone isn't a reliable data-integrity control (stale
+        // recomposition, a race between engine state and the button's
+        // enabled flag) — deleting a file the engine currently has mmap'd
+        // open is a real correctness risk, not just a UI nicety.
+        if (inferenceEngine.activeModelName == model.displayName) {
+            DebugLogger.log("DELETE", "Blocked: ${model.id} is the active model")
+            _uiState.update { it.copy(error = "Can't delete the model that's currently active — switch to a different model first.") }
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val file = downloadManager.localPathFor(model)
             DebugLogger.log("DELETE", "From manage screen: ${file.absolutePath}")

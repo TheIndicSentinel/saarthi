@@ -81,13 +81,19 @@ class ModelDownloadManager @Inject constructor(
 
     fun modelsDir(): File = File(context.filesDir, "models").also { it.mkdirs() }
 
+    // Deliberately the SAME filesystem as modelsDir() (both under
+    // context.filesDir), not getExternalFilesDir(). Internal and app-specific
+    // external storage are different mount points on essentially every real
+    // device without a removable SD card — File.renameTo() cannot cross
+    // mount points, so the old external-tmp layout made the copyTo+delete
+    // fallback in ModelDownloadService the NORMAL completion path, not a rare
+    // edge case, doubling peak storage use to ~2x the model size during every
+    // finalization (field research, 2026-07-17). Keeping tmp and final on one
+    // volume makes the rename atomic and cheap, and means the storage
+    // pre-flight check (which only ever validated modelsDir()) is now
+    // actually checking the volume that matters for the whole transfer.
     fun tmpModelsDir(): File =
-        // getExternalFilesDir can return null when external storage is unavailable
-        // (device encrypted at boot before unlock, SD card ejected, etc.).
-        // Fall back to internal storage so the download can still proceed.
-        (context.getExternalFilesDir(null) ?: context.filesDir)
-            .let { File(it, "models_tmp") }
-            .also { it.mkdirs() }
+        File(context.filesDir, "models_tmp").also { it.mkdirs() }
 
     fun localPathFor(model: ModelEntry): File = File(modelsDir(), model.fileName)
     fun tmpPathFor(model: ModelEntry): File   = File(tmpModelsDir(), model.fileName)
@@ -173,7 +179,7 @@ class ModelDownloadManager @Inject constructor(
         DebugLogger.log("DOWNLOAD",
             "Starting foreground-service download  model=${model.id}  replace=$replace  ${networkSnapshot()}")
 
-        ModelDownloadService.start(
+        val serviceStarted = ModelDownloadService.start(
             context = context,
             modelId = model.id,
             url = model.downloadUrl,
@@ -184,6 +190,17 @@ class ModelDownloadManager @Inject constructor(
             replace = replace,
             expectedSha256 = model.expectedSha256,
         )
+        if (!serviceStarted) {
+            // startForegroundService() itself threw — the Intent never
+            // reached the service, so onStartCommand()'s own fgsStarted
+            // check never runs. Without this, the "Downloading" state set
+            // just above would sit unchanged forever with no real transfer
+            // behind it.
+            trackedModels.remove(model.id)
+            _allProgress.update {
+                it + (model.id to DownloadProgress.Failed("Could not start the download service. Please try again."))
+            }
+        }
     }
 
     /** Cancels the active download AND removes any partial tmp / final file. */
@@ -240,6 +257,7 @@ class ModelDownloadManager @Inject constructor(
      * resilience the old WorkManager path provided, now done explicitly.
      */
     fun reattachActiveDownloads(models: List<ModelEntry>) {
+        migrateLegacyExternalTmp(models)
         models.forEach { model ->
             val destFile = resolveLocalFile(model)
             if (isFileComplete(destFile, model.fileSizeBytes)) return@forEach
@@ -252,6 +270,100 @@ class ModelDownloadManager @Inject constructor(
             }
         }
         sweepOrphanedTmpFiles(models)
+    }
+
+    /**
+     * One-time migration: models_tmp used to live under getExternalFilesDir()
+     * before 2026-07-17 — see [tmpModelsDir]'s kdoc for why that changed
+     * (cross-mount-point renames made the non-atomic copyTo+delete fallback
+     * the routine case, not a rare edge case). Any partial download an older
+     * build left in the old location would otherwise become a permanent
+     * orphan: nothing else ever looks there again, so it would just sit
+     * unreachable on disk with no way to resume or reclaim it. Moves any
+     * matching file into the new internal [tmpModelsDir] so the normal
+     * resume pass above picks it up exactly as if it had always lived there —
+     * UNLESS the model already completed via some other path since then, in
+     * which case the legacy partial is discarded directly rather than
+     * migrated, so a stale leftover for a finished model never turns into an
+     * unreachable multi-GB copy that nothing would ever clean up again.
+     */
+    private fun migrateLegacyExternalTmp(models: List<ModelEntry>) {
+        val legacyDir = context.getExternalFilesDir(null)?.let { File(it, "models_tmp") } ?: return
+        if (!legacyDir.exists()) return
+        val modelsByFileName = models.associateBy { it.fileName }
+
+        legacyDir.listFiles()?.forEach { legacyFile ->
+            // Each file's migration is isolated in its own runCatching — one
+            // failure (e.g. a copy interrupted by low storage) must not
+            // abort the rest of the batch, and must not fail silently either.
+            runCatching {
+                val model = modelsByFileName[legacyFile.name]
+                when {
+                    model == null -> {
+                        // Not a current catalog model — same orphan reasoning
+                        // as sweepOrphanedTmpFiles, just for the legacy location.
+                        legacyFile.delete()
+                    }
+                    isFileComplete(resolveLocalFile(model), model.fileSizeBytes) -> {
+                        // The model already completed via some other path — a
+                        // fresh download after this dir moved, a restart, etc.
+                        // Migrating this partial would copy a multi-GB file
+                        // into internal storage that NOTHING would then ever
+                        // clean up: reattachActiveDownloads() skips it because
+                        // destFile is already complete, and sweepOrphanedTmpFiles()
+                        // won't touch it because its filename IS a valid
+                        // catalog entry. Discard directly instead — no copy.
+                        DebugLogger.log("DOWNLOAD",
+                            "Discarding legacy tmp for already-completed model ${model.id}: " +
+                            "${legacyFile.name} (${legacyFile.length() / 1_048_576}MB)")
+                        if (!legacyFile.delete()) {
+                            // Not compounding — same file is re-checked (and
+                            // re-attempted) on the next launch rather than
+                            // being migrated, so a stuck delete just retries
+                            // instead of leaking a multi-GB copy each time.
+                            Timber.w("Failed to delete legacy tmp for completed model: ${legacyFile.absolutePath}")
+                        }
+                    }
+                    else -> {
+                        val newLocation = File(tmpModelsDir(), legacyFile.name)
+                        when {
+                            !newLocation.exists() -> {
+                                DebugLogger.log("DOWNLOAD",
+                                    "Migrating legacy external tmp file to internal storage: " +
+                                    "${legacyFile.name} (${legacyFile.length() / 1_048_576}MB)")
+                                if (!legacyFile.renameTo(newLocation)) {
+                                    legacyFile.copyTo(newLocation, overwrite = true)
+                                    legacyFile.delete()
+                                }
+                            }
+                            legacyFile.length() > newLocation.length() -> {
+                                // Both exist — keep whichever has more bytes,
+                                // rather than unconditionally discarding the
+                                // legacy copy regardless of which one actually
+                                // has more resume progress.
+                                DebugLogger.log("DOWNLOAD",
+                                    "Legacy tmp (${legacyFile.length() / 1_048_576}MB) is more complete than " +
+                                    "internal (${newLocation.length() / 1_048_576}MB) for ${legacyFile.name} — replacing")
+                                newLocation.delete()
+                                if (!legacyFile.renameTo(newLocation)) {
+                                    legacyFile.copyTo(newLocation, overwrite = true)
+                                    legacyFile.delete()
+                                }
+                            }
+                            else -> {
+                                // Internal copy is already as complete or more —
+                                // legacy copy is redundant, reclaim the space.
+                                legacyFile.delete()
+                            }
+                        }
+                    }
+                }
+            }.onFailure {
+                DebugLogger.log("DOWNLOAD",
+                    "WARN legacy tmp migration failed for ${legacyFile.name}: ${it.message}")
+            }
+        }
+        runCatching { legacyDir.delete() }
     }
 
     /**

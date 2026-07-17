@@ -728,6 +728,16 @@ private fun Onb4ModelPick(
                 // render-time read, not a live-updating ticker.
                 val insufficientStorage = !isDownloaded && state.deviceProfile != null &&
                     model.fileSizeMb > state.deviceProfile.availableStorageMb
+                // Same 0.70 threshold LiteRTInferenceEngine's load-time gate
+                // uses (availableRamMb < sizeMb * 0.70) — the catalog filter
+                // that decides what's OFFERED is deliberately total-RAM-based
+                // (stable, doesn't flicker as available RAM swings), but that
+                // means a device can pass the offer gate and only discover it
+                // fails the load gate after spending the time/data to
+                // download a multi-GB file. Surfacing the same threshold here
+                // gives that warning before the download, not after.
+                val insufficientRam = !isDownloaded && state.deviceProfile != null &&
+                    state.deviceProfile.availableRamMb < model.fileSizeMb * 0.70
                 ModelOption(
                     model = model,
                     progress = progress,
@@ -740,6 +750,7 @@ private fun Onb4ModelPick(
                     onDelete = { onDelete(model) },
                     toneIndex = i,
                     insufficientStorage = insufficientStorage,
+                    insufficientRam = insufficientRam,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -818,6 +829,7 @@ private fun ModelOption(
     onDelete: () -> Unit,
     toneIndex: Int,
     insufficientStorage: Boolean = false,
+    insufficientRam: Boolean = false,
 ) {
     val tone = when (toneIndex % 4) {
         0 -> ChipTone.Marigold
@@ -911,6 +923,7 @@ private fun ModelOption(
                         progress is DownloadProgress.Failed -> "· Failed"
                         downloaded -> "· Ready to use"
                         insufficientStorage -> "· Not enough space"
+                        insufficientRam -> "· May not load right now"
                         else -> "· Not downloaded"
                     }
                     val statusColor = when {
@@ -918,6 +931,7 @@ private fun ModelOption(
                         progress is DownloadProgress.Failed -> SaarthiColors.Rose
                         downloaded -> SaarthiColors.Jade
                         insufficientStorage -> SaarthiColors.Rose
+                        insufficientRam -> SaarthiColors.Marigold
                         else -> SaarthiColors.Text3
                     }
                     Text(

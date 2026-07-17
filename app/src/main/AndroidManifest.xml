@@ -25,19 +25,29 @@
     <!-- Re-arm the daily wisdom alarm after device reboot (cleared by the OS). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!--
-        Foreground service keeps the app alive during heavy AI inference.
-        Without this, Android 14+/Samsung OneUI kills the process within 2–10 s.
+        Foreground service keeps the app alive during heavy AI inference and
+        model downloads. Without this, Android 14+/Samsung OneUI kills the
+        process within 2–10 s.
 
-        ⚠️  ANDROID 16 (API 36) BREAKING CHANGE:
-        FOREGROUND_SERVICE_DATA_SYNC and its associated permission were removed in API 36.
-        Declaring them causes startForeground() to throw SecurityException, which is
-        silently caught, leaving the app with NO foreground service protection.
-        The Android LMK then kills the CPU-heavy process in ~10 s — this was the
-        root cause of the crashes seen in the logs.
+        CORRECTED 2026-07-17: an earlier version of this comment claimed
+        FOREGROUND_SERVICE_DATA_SYNC and its permission were removed in
+        Android 16 (API 36). That was false — current Android documentation
+        still lists dataSync as a valid type. Since ModelDownloadService now
+        declares foregroundServiceType="dataSync" (switched from specialUse —
+        see that service's manifest entry for the full reasoning), its
+        matching FOREGROUND_SERVICE_DATA_SYNC permission below is REQUIRED:
+        every foreground service type needs its own type-specific permission
+        declared, and omitting it makes startForeground() throw
+        SecurityException on API 34+ — silently caught elsewhere in this
+        codebase's defensive try/catch, which is exactly how this would fail
+        invisibly if the permission were missing.
 
-        Only FOREGROUND_SERVICE_SPECIAL_USE is declared and safe on API 29–36+.
+        FOREGROUND_SERVICE_SPECIAL_USE remains required too, for
+        InferenceService (active LLM inference) and WorkManager's internal
+        SystemForegroundService.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Android 11+ package visibility: needed for SpeechRecognizer.isRecognitionAvailable()
          to correctly detect installed speech recognition services. Without this the API
@@ -126,12 +136,13 @@
         <!--
             Foreground service that keeps the process alive during AI model inference.
 
-            foregroundServiceType="specialUse" — the correct type for on-device LLM
-            inference on Android 10+ (API 29+) through Android 16 (API 36+).
-
-            DO NOT add "dataSync" here. FOREGROUND_SERVICE_TYPE_DATA_SYNC was removed
-            in Android 16 (API 36). Including it causes startForeground() to throw
-            SecurityException → FGS silently degrades → LMK kills the process mid-inference.
+            foregroundServiceType="specialUse" is used here. NOTE (corrected
+            2026-07-17): a prior version of this comment claimed dataSync was
+            removed in Android 16 — that was wrong. Current Android
+            documentation still lists dataSync and does not identify LLM
+            inference as a case dataSync covers, so specialUse remains the
+            better fit for THIS service; the removal claim specifically was
+            inaccurate and should not be used to justify the choice.
         -->
         <service
             android:name="com.saarthi.core.inference.InferenceService"
@@ -143,14 +154,17 @@
         </service>
 
         <!--
-            WorkManager uses this internal service to run Foreground Workers
-            (ModelDownloadWorker). Override is required to declare the correct
-            foregroundServiceType before Android 14+ enforces the type.
+            WorkManager uses this internal service to run Foreground Workers.
+            Override is required to declare a foregroundServiceType before
+            Android 14+ enforces one.
 
-            Same reasoning as InferenceService: specialUse is stable on API 29–36+.
-            DATA_SYNC was removed in Android 16 and must NOT be added here.
-            tools:node="merge" preserves WorkManager's own service attributes
-            (exported, process, etc.) while adding our type + special-use property.
+            specialUse is used here, same as InferenceService (see that
+            service's comment above — the "dataSync was removed" justification
+            was corrected 2026-07-17; it was factually wrong, though it
+            doesn't change the type choice for this WorkManager-internal
+            component). tools:node="merge" preserves WorkManager's own service
+            attributes (exported, process, etc.) while adding our type +
+            special-use property.
         -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
@@ -172,17 +186,38 @@
 
             Started directly from the user's "Download" tap, so the Android 12+
             foreground-service start is permitted; the ongoing notification then
-            keeps it alive across every OEM ROM. specialUse type matches
-            InferenceService (dataSync was removed in Android 16 / API 36).
+            keeps it alive across every OEM ROM.
+
+            foregroundServiceType="dataSync" — RESOLVED 2026-07-17 (was
+            specialUse; an earlier comment incorrectly justified that with a
+            claim that dataSync was removed in Android 16, which is false).
+            Android's own guidance describes dataSync as covering exactly
+            this ("data upload or download... transfer data between a device
+            and the cloud over a network"), and specialUse is meant only when
+            no standard type fits — dataSync fits, so it's the more correct,
+            better-justified choice for Play review.
+
+            The real tradeoff: dataSync gets a system-enforced 6 cumulative
+            background hours per rolling 24h window (API 35+), after which
+            the system calls Service.onTimeout() and expects stopSelf()
+            within seconds. specialUse has no such limit. This is handled:
+            ModelDownloadService.onTimeout() stops cleanly rather than
+            letting the OS throw, and the timer resets whenever the user
+            brings the app to the foreground — so it only binds for a
+            download left completely untouched for many hours straight. Even
+            then, no data is lost: the partial tmp file is unaffected by how
+            the service stops, and reattachActiveDownloads() resumes it via
+            Range the next time the app opens, the same as any other service
+            death this design already handles.
+
+            InferenceService stays specialUse — active LLM inference isn't a
+            data-transfer operation, so dataSync's own type description
+            doesn't fit it the way it fits this service.
         -->
         <service
             android:name="com.saarthi.core.inference.ModelDownloadService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="AI model file download (user-initiated, resumable via OkHttp)" />
-        </service>
+            android:foregroundServiceType="dataSync" />
 
         <!--
             Lets the Support screen attach saarthi_debug.log to an email even

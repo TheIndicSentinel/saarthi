@@ -1131,6 +1131,18 @@ fun ManageDownloadsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
+            if (state.error != null) {
+                Text(
+                    state.error!!,
+                    style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Rose),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SaarthiColors.Rose.copy(alpha = 0.08f))
+                        .padding(12.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+            }
             // Phone storage card
             Column(
                 modifier = Modifier
