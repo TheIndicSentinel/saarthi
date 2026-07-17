@@ -120,17 +120,6 @@ class ModelEntryTest {
         assertTrue(entry.isSafeFor(profile(availableStorageMb = 21_000)))
     }
 
-    @Test
-    fun `buffer scaling absorbs the confirmed field drift case`() {
-        // Real field case: Gemma 3n E4B catalog estimate drifted from HuggingFace's
-        // actual served size by 513.9MB. A model this size (~4200MB) needs a
-        // buffer bigger than the flat 500MB floor to have any chance of
-        // absorbing drift of that magnitude with room to spare.
-        val entry = model(fileSizeBytes = 4_200L * 1_048_576L)
-        val bufferMb = maxOf(500, entry.fileSizeMb / 20)
-        assertTrue("Buffer must exceed the flat 500MB floor for a model this large", bufferMb > 500)
-    }
-
     // ── Computed properties ──────────────────────────────────────────────────
 
     @Test

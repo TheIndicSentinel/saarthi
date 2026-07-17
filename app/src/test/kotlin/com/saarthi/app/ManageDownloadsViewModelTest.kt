@@ -24,9 +24,10 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import org.junit.After
+import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -84,21 +85,40 @@ class ManageDownloadsViewModelTest {
         mockDownloadManager = mockk(relaxed = true)
         mockInferenceEngine = mockk(relaxed = true)
         every { mockInferenceEngine.activeModelName } returns null
+    }
 
+    companion object {
         // refresh() (called from init{}) constructs a real StatFs against
         // Environment.getDataDirectory() — neither is injected, so both are
         // intercepted the same way DeviceProfilerTest already established.
-        mockkStatic(Environment::class)
-        every { Environment.getDataDirectory() } returns tempFolder.root
-        mockkConstructor(StatFs::class)
-        every { anyConstructed<StatFs>().totalBytes } returns 100_000_000_000L
-        every { anyConstructed<StatFs>().availableBytes } returns 50_000_000_000L
-    }
+        //
+        // These mocks are class-scoped (set up once, torn down once) rather
+        // than per-test: refresh() launches on the real Dispatchers.IO, which
+        // kotlinx-coroutines-test's runTest/advanceUntilIdle() cannot wait
+        // for, so a still-running coroutine from one test can outlive that
+        // test method and execute during the NEXT test's setUp/tearDown
+        // window. Per-test unmockkStatic/unmockkConstructor made that
+        // straggler hit unmocked statics and throw asynchronously, surfacing
+        // as UncaughtExceptionsBeforeTest in whichever later test happened to
+        // be running. Every test uses the identical stub values below, so
+        // there's no cross-test contamination risk in leaving them mocked
+        // for the whole class.
+        @BeforeClass
+        @JvmStatic
+        fun setUpMocks() {
+            mockkStatic(Environment::class)
+            every { Environment.getDataDirectory() } returns File("/manage-downloads-test-stub")
+            mockkConstructor(StatFs::class)
+            every { anyConstructed<StatFs>().totalBytes } returns 100_000_000_000L
+            every { anyConstructed<StatFs>().availableBytes } returns 50_000_000_000L
+        }
 
-    @After
-    fun tearDown() {
-        unmockkStatic(Environment::class)
-        unmockkConstructor(StatFs::class)
+        @AfterClass
+        @JvmStatic
+        fun tearDownMocks() {
+            unmockkStatic(Environment::class)
+            unmockkConstructor(StatFs::class)
+        }
     }
 
     private fun createViewModel() = ManageDownloadsViewModel(

@@ -1,6 +1,7 @@
 package com.saarthi.core.inference
 
 import android.content.Context
+import android.net.ConnectivityManager
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.model.DeviceTier
@@ -52,6 +53,13 @@ class ModelDownloadManagerTest {
         mockContext = mockk(relaxed = true)
         every { mockContext.filesDir } returns internalDir
         every { mockContext.getExternalFilesDir(null) } returns externalDir
+        // launchDownload()'s networkSnapshot() log helper calls the typed
+        // getSystemService(Class<T>) overload — a relaxed mock's default for
+        // this generic overload doesn't satisfy the implicit cast Kotlin
+        // inserts at the call site, so every actual download attempt threw
+        // a ClassCastException without this explicit stub (caught in CI,
+        // not locally — no Android SDK in the dev sandbox to run this test).
+        every { mockContext.getSystemService(ConnectivityManager::class.java) } returns null
 
         val mockHfTokenManager = mockk<HuggingFaceTokenManager>(relaxed = true)
         every { mockHfTokenManager.effectiveToken } returns MutableStateFlow("test-token")
