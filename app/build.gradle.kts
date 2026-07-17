@@ -139,6 +139,43 @@ android {
                 "META-INF/LICENSE*",
                 "META-INF/NOTICE*",
             )
+            // BouncyCastle post-quantum algorithm parameter files (Picnic,
+            // SIKE) — ~7.16MB, pulled in transitively via pdfbox-android's
+            // optional encrypted-PDF/signature support. Confirmed unused:
+            // FileContentExtractor.kt only does plain PDDocument.load() (no
+            // password/decryption/signature handling anywhere in this repo),
+            // and nothing in the codebase imports org.bouncycastle at all —
+            // PackVerifier's own crypto (SHA-256 + ECDSA) uses java.security
+            // directly. These are runtime-loaded resource files, not
+            // compile-time referenced, so excluding them can't break the
+            // build; they'd only matter if BC's PQC algorithms were ever
+            // invoked, which nothing here does. BC's small X.509
+            // cert-path-validation message properties are deliberately left
+            // alone (negligible size, less certain they're unreachable).
+            excludes += listOf(
+                "org/bouncycastle/pqc/crypto/picnic/*.properties",
+                "org/bouncycastle/pqc/crypto/sike/*.properties",
+            )
+        }
+        // FontBox's predefined CJK (Chinese/Japanese/Korean) CMap resources —
+        // ~3.15MB across 92 files, none of which are reachable by anything
+        // Indian-language or English content would ever encode with (Adobe-
+        // Japan1/GB1/CNS1/Korea1 variants, Shift-JIS, GBK, Big5, KSC — all
+        // CJK-specific predefined encodings, not used by Devanagari/Tamil/
+        // Telugu/etc. or Latin text). Excluding this directory only affects
+        // extractPdfTextLayer() failing/returning thin text for the rare PDF
+        // that embeds actual CJK-encoded content — extractPdfText()'s
+        // existing two-stage design (see its kdoc) already falls back to the
+        // same OCR path used for scanned/encrypted/no-text-layer PDFs in
+        // that case, so nothing is lost, just a different already-relied-
+        // upon extraction path taken. Every other FontBox/PDFBox asset
+        // (Scripts.txt, standard font AFM metrics, glyphlist, BidiMirroring,
+        // the Latin TTF) is untouched — this excludes only the cmap/
+        // subdirectory specifically.
+        assets {
+            excludes += listOf(
+                "com/tom_roush/fontbox/resources/cmap/*",
+            )
         }
     }
 }
