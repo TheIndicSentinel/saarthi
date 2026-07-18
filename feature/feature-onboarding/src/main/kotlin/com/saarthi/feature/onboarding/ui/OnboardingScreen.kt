@@ -794,12 +794,7 @@ private fun DeviceTierBadge(profile: DeviceProfile?) {
     // Honest, plain-language expectation for THIS phone. Setting it before the
     // download decision is what keeps a mid/low-RAM user from picking the
     // heaviest model, getting slow/blank replies, and leaving a 1-star review.
-    val expectation = when (profile.tier) {
-        DeviceTier.FLAGSHIP -> "Runs the best models smoothly."
-        DeviceTier.MID      -> "Pick the recommended model for the best balance of speed and quality."
-        DeviceTier.LOW      -> "Choose a lighter model for smooth replies — bigger ones may run slowly."
-        DeviceTier.MINIMAL  -> "Only the compact model will run well here; replies stay short and simple."
-    }
+    val expectation = deviceExpectationText(profile.tier, profile.totalRamMb)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -858,6 +853,27 @@ internal fun isLikelyCpuOnly(
     val restrictedByTier =
         (dp.tier == DeviceTier.LOW || dp.tier == DeviceTier.MINIMAL || dp.isLowRamDevice) && !isCompactModel
     return !dp.gpuSafe || restrictedByTier
+}
+
+/**
+ * MID tier spans 6-10GB total RAM — wide enough that a 6GB device and a
+ * 9GB device get materially different real-world headroom for a ~2.5GB
+ * model, even though DeviceTier buckets them identically (catalog
+ * filtering and GPU-admission math already treat them differently — see
+ * gpuSafetyMarginMb's continuous interpolation in LiteRTInferenceEngine —
+ * but this expectation text didn't, until now). 8GB is the split: it's
+ * the RAM class the recommended model targets as its intended baseline,
+ * and a natural boundary matching real device RAM SKUs (6/8/12GB), not an
+ * arbitrary number.
+ */
+internal fun deviceExpectationText(tier: DeviceTier, totalRamMb: Long): String = when {
+    tier == DeviceTier.FLAGSHIP -> "Runs the best models smoothly."
+    tier == DeviceTier.MID && totalRamMb >= 8_000 ->
+        "Pick the recommended model for the best balance of speed and quality."
+    tier == DeviceTier.MID ->
+        "Pick a lighter model, or close other apps first — this device has less headroom than newer phones."
+    tier == DeviceTier.LOW -> "Choose a lighter model for smooth replies — bigger ones may run slowly."
+    else -> "Only the compact model will run well here; replies stay short and simple."
 }
 
 @Composable

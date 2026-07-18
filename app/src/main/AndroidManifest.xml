@@ -63,6 +63,18 @@
          (2026-07-03): uninstall must be a clean wipe — models and all data are
          deleted with the app. Kept data also blocked reinstalls whenever the
          APK signature differed, which confused sideload testers. -->
+    <!-- NOTE: android:largeHeap is also deliberately ABSENT (removed
+         2026-07-19). It was added in commit fb0e0013e alongside
+         allowNativeHeapPointerTagging="false" and memtagMode="off" as part
+         of a "hardened process protection" bundle for a native SIGSEGV in
+         the (since-replaced) MediaPipe engine — but that crash was an ARM
+         MTE/pointer-tagging fault in llama.cpp's GGML allocator, which the
+         other two flags directly address (see the memtagMode comment
+         below); largeHeap only raises the Dalvik/ART JAVA heap ceiling and
+         does nothing for native malloc/mmap, which is where this app's
+         actual memory risk lives (the multi-GB model, GPU buffers, and
+         LiteRT's native allocations, all off-heap via JNI). It never had
+         its own justification — it just rode along with the real fix. -->
     <application
         android:name=".SaarthiApp"
         android:allowBackup="false"
@@ -73,7 +85,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Saarthi.SplashScreen"
         android:enableOnBackInvokedCallback="true"
-        android:largeHeap="true"
         android:allowNativeHeapPointerTagging="false"
         android:memtagMode="off"
         android:networkSecurityConfig="@xml/network_security_config">

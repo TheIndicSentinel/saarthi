@@ -1,12 +1,15 @@
 package com.saarthi.core.inference.engine
 
+import android.app.Activity
 import android.app.ActivityManager
+import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Bundle
 import android.os.PowerManager
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Conversation
@@ -26,6 +29,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -72,8 +77,89 @@ class LiteRTInferenceEngine @Inject constructor(
     private val generationPreference: com.saarthi.core.inference.GenerationPreference,
 ) : InferenceEngine, ComponentCallbacks2 {
 
+    // ── Background lifecycle: debounced engine release ──────────────────────
+    //
+    // Previously the engine only released its native/mmap/GPU footprint
+    // under actual memory-pressure signals (onTrimMemory RUNNING_CRITICAL/
+    // COMPLETE, onLowMemory — see below). Those fire late, if at all: many
+    // OEM skins kill background apps via their own process-killer well
+    // before Android's own trim ladder escalates that far, so a multi-GB
+    // model engine could sit fully resident for the entire time the app was
+    // backgrounded on exactly the 6-8GB devices with the least room to
+    // spare for it.
+    //
+    // ComponentCallbacks2 has no "app is visible again" signal (only
+    // increasing-pressure/backgrounding levels), so detecting the OTHER
+    // edge — for the debounce below — needs Application.
+    // ActivityLifecycleCallbacks instead: visibleActivityCount transitions
+    // 0→1 on return to foreground (cancels the pending release) and 1→0 on
+    // backgrounding (schedules it). This tracks the same "any activity
+    // visible" signal androidx.lifecycle.ProcessLifecycleOwner would, done
+    // manually here so core-inference doesn't need a new dependency for it.
+    private val lifecycleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    @Volatile private var pendingBackgroundRelease: Job? = null
+    @Volatile private var visibleActivityCount = 0
+
+    private val backgroundLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityStarted(activity: Activity) {
+            visibleActivityCount++
+            if (visibleActivityCount == 1) {
+                pendingBackgroundRelease?.cancel()
+                pendingBackgroundRelease = null
+            }
+        }
+        override fun onActivityStopped(activity: Activity) {
+            visibleActivityCount = (visibleActivityCount - 1).coerceAtLeast(0)
+            if (visibleActivityCount == 0) scheduleBackgroundRelease()
+        }
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+        override fun onActivityResumed(activity: Activity) {}
+        override fun onActivityPaused(activity: Activity) {}
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+        override fun onActivityDestroyed(activity: Activity) {}
+    }
+
+    /**
+     * Debounced, not immediate: a quick app-switch (checking a notification,
+     * glancing at another app) shouldn't pay the ~5-10s GPU reload cost the
+     * next time the user returns. [BACKGROUND_RELEASE_DELAY_MS] is a
+     * starting point, not a validated one — same caveat as the GPU-margin
+     * constants in gpuSafetyMarginMb(): needs real-device tuning against the
+     * actual supported RAM matrix before being trusted as final.
+     */
+    private fun scheduleBackgroundRelease() {
+        pendingBackgroundRelease?.cancel()
+        pendingBackgroundRelease = lifecycleScope.launch {
+            delay(BACKGROUND_RELEASE_DELAY_MS)
+            // Never interrupt an in-flight generation — closeInternal()'s
+            // existing deferred-close path handles a concurrent close
+            // safely, but a generation the user is actively waiting on
+            // finishing in the background shouldn't be torn down just
+            // because they alt-tabbed away. Also skip while a model load is
+            // in flight (initMutex held) — closeInternal() has no equivalent
+            // deferred-close guard for that phase, so closing the Engine out
+            // from under an active initialize() call could race. Both are
+            // narrow windows (generation/load are seconds, this delay is
+            // minutes), so skipping this cycle and trying again on the next
+            // backgrounding (or an actual memory-pressure callback) is safe.
+            if (!isNativeGenerating && !initMutex.isLocked) {
+                DebugLogger.log("LITERT",
+                    "App backgrounded for ${BACKGROUND_RELEASE_DELAY_MS / 1000}s — releasing engine")
+                release()
+            } else {
+                DebugLogger.log("LITERT", "Background release skipped — generation or load still in progress")
+            }
+        }
+    }
+
     init {
         context.registerComponentCallbacks(this)
+        // @ApplicationContext resolves to the actual Application instance —
+        // registerActivityLifecycleCallbacks is an Application-only method
+        // (unlike registerComponentCallbacks above, which any Context
+        // supports), so this cast is safe and standard for this Hilt
+        // qualifier.
+        (context as? Application)?.registerActivityLifecycleCallbacks(backgroundLifecycleCallbacks)
     }
 
     @Volatile private var engine: Engine? = null
@@ -180,6 +266,10 @@ class LiteRTInferenceEngine @Inject constructor(
         // means a model that crashed yesterday is usable again today
         // without uninstall+reinstall.
         private const val CRASH_COUNT_EXPIRY_MS = 24 * 60 * 60 * 1000L      // 24 hours
+
+        // See scheduleBackgroundRelease()'s kdoc — starting point pending
+        // real-device validation, not a final tuned value.
+        private const val BACKGROUND_RELEASE_DELAY_MS = 2 * 60 * 1000L      // 2 minutes
     }
 
     // ── Version-based crash state reset ──────────────────────────────────────
@@ -221,6 +311,28 @@ class LiteRTInferenceEngine @Inject constructor(
 
     private fun wasKilledDuringInit() =
         enginePrefs.getBoolean("litert_init_pending", false)
+
+    /**
+     * Whether Android itself attributes the most recent time this process
+     * died to REASON_LOW_MEMORY — confirmed OS evidence, not just "the
+     * process died while litert_gen_pending/litert_init_pending was set"
+     * (which can't distinguish an LMK kill from a user force-stop, an ANR,
+     * or an unrelated native crash the same way this can). Purely additive
+     * to the existing dead-man's-switch crash detection above: it only
+     * upgrades the CONFIDENCE of a diagnosis already made by
+     * wasKilledDuringGeneration()/wasKilledDuringInit(), never triggers
+     * recovery on its own. API 30+ only (getHistoricalProcessExitReasons);
+     * returns false below that, so older devices keep exactly today's
+     * behavior.
+     */
+    private fun lastExitWasConfirmedLowMemory(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        return runCatching {
+            val am = context.getSystemService(ActivityManager::class.java)
+            val reasons = am.getHistoricalProcessExitReasons(context.packageName, 0, 1)
+            reasons.firstOrNull()?.reason == android.app.ApplicationExitInfo.REASON_LOW_MEMORY
+        }.getOrDefault(false)
+    }
 
     private fun modelKey(modelPath: String) = modelPath.substringAfterLast('/')
 
@@ -580,12 +692,15 @@ class LiteRTInferenceEngine @Inject constructor(
                     }.getOrDefault(true)
 
                     val crashStage = enginePrefs.getString("litert_crash_stage", "UNKNOWN")
+                    // Confirmed OS evidence, not just an educated guess from the
+                    // pending-flag mechanism above — see the function's kdoc.
+                    val confirmedLowMemory = lastExitWasConfirmedLowMemory()
                     DebugLogger.log("LITERT", "=== CRASH RECOVERY ===")
                     DebugLogger.log("LITERT", "  stage=$crashStage  crashedDuringGen=$crashedDuringGen  crashedDuringInit=$crashedDuringInit")
                     DebugLogger.log("LITERT", "  wasUsingGPU/NPU=$wasGpuOrNpu  crashedModel=${crashedModelPath.substringAfterLast('/')}")
                     DebugLogger.log("LITERT", "  currentModel=${config.modelPath.substringAfterLast('/')}  sameModel=$crashWasThisModel")
                     DebugLogger.log("LITERT", "  crashCount=${getCrashCount(config.modelPath)}  gpuBanned=${gpuPreviouslyCrashedDuringGen(config.modelPath)}")
-                    DebugLogger.log("LITERT", "  batteryOptExempt=$batteryExempt")
+                    DebugLogger.log("LITERT", "  batteryOptExempt=$batteryExempt  confirmedLowMemoryExit=$confirmedLowMemory")
 
                     // Only attribute GPU fault when a *generation* was actively
                     // running on the GPU. wasUsingGpuAtCrash() can be stale from
@@ -593,17 +708,23 @@ class LiteRTInferenceEngine @Inject constructor(
                     // crashedDuringGen here prevents that misattribution.
                     val gpuActuallyAtFault = crashedDuringGen && wasGpuOrNpu && crashWasThisModel
 
-                    val likelyCause = when {
-                        gpuActuallyAtFault ->
-                            "GPU/NPU_FAULT: inference caused SIGKILL on GPU/NPU backend — banning GPU for 24h."
-                        crashedDuringGen && crashWasThisModel ->
-                            "CPU_CRASH: Process killed during CPU generation. " +
-                            "Possible OEM watchdog, OOM, or native LiteRT issue."
-                        crashedDuringInit ->
-                            "INIT_CRASH: Killed during model load — likely OOM. " +
-                            "Close background apps and retry, or choose a smaller model."
-                        else -> "UNKNOWN"
-                    }
+                    // confirmedLowMemory only changes the WORDING here (a
+                    // stronger diagnosis for the debug log), not which branch
+                    // fires or any count/ban decision below — deliberately not
+                    // wiring a new policy around it yet. This crash-recovery
+                    // system has been tuned through several real field
+                    // incidents (see the comments throughout this block); a
+                    // single confirmed-LOW_MEMORY reading is real signal but
+                    // not yet validated evidence for a NEW threshold, the same
+                    // caution already applied to the GPU-margin constants
+                    // elsewhere in this class.
+                    val likelyCause = classifyLikelyCrashCause(
+                        gpuActuallyAtFault = gpuActuallyAtFault,
+                        crashedDuringGen = crashedDuringGen,
+                        crashWasThisModel = crashWasThisModel,
+                        crashedDuringInit = crashedDuringInit,
+                        confirmedLowMemory = confirmedLowMemory,
+                    )
                     DebugLogger.log("LITERT", "  likelyCause=$likelyCause")
                     DebugLogger.log("LITERT", "=== END CRASH RECOVERY ===")
 
@@ -1739,4 +1860,36 @@ internal fun isGpuRestrictedToCompactOnLowTier(
         tier == com.saarthi.core.inference.model.DeviceTier.LOW ||
             tier == com.saarthi.core.inference.model.DeviceTier.MINIMAL
     return (tierRestricted || isLowRamDevice) && !isCompactModel
+}
+
+/**
+ * Picks the crash-recovery diagnosis string for the debug log. Order
+ * matters: GPU/NPU fault takes priority over a same-model CPU crash, which
+ * takes priority over an init crash, matching the priority the original
+ * inline `when` block in [LiteRTInferenceEngine.initialize] used.
+ * [confirmedLowMemory] only changes the wording (confirmed OS evidence vs.
+ * an educated guess) — see that call site's comment for why it doesn't
+ * change which branch fires or feed into any count/ban decision yet.
+ */
+internal fun classifyLikelyCrashCause(
+    gpuActuallyAtFault: Boolean,
+    crashedDuringGen: Boolean,
+    crashWasThisModel: Boolean,
+    crashedDuringInit: Boolean,
+    confirmedLowMemory: Boolean,
+): String = when {
+    gpuActuallyAtFault ->
+        "GPU/NPU_FAULT: inference caused SIGKILL on GPU/NPU backend — banning GPU for 24h."
+    crashedDuringGen && crashWasThisModel && confirmedLowMemory ->
+        "CPU_CRASH: Process killed during CPU generation — CONFIRMED low-memory kill (ApplicationExitInfo)."
+    crashedDuringGen && crashWasThisModel ->
+        "CPU_CRASH: Process killed during CPU generation. " +
+            "Possible OEM watchdog, OOM, or native LiteRT issue."
+    crashedDuringInit && confirmedLowMemory ->
+        "INIT_CRASH: Killed during model load — CONFIRMED low-memory kill (ApplicationExitInfo). " +
+            "Close background apps and retry, or choose a smaller model."
+    crashedDuringInit ->
+        "INIT_CRASH: Killed during model load — likely OOM. " +
+            "Close background apps and retry, or choose a smaller model."
+    else -> "UNKNOWN"
 }

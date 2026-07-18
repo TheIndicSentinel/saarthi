@@ -2,6 +2,7 @@ package com.saarthi.feature.onboarding.ui
 
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -199,6 +200,61 @@ class OnboardingScreenGpuMessagingTest {
                 insufficientStorage = false,
                 insufficientRam = false,
             ),
+        )
+    }
+
+    // ── deviceExpectationText: 6GB vs 8GB MID-tier split ────────────────────
+
+    @Test
+    fun `FLAGSHIP tier always gets the smooth-running message`() {
+        assertEquals("Runs the best models smoothly.", deviceExpectationText(DeviceTier.FLAGSHIP, 12_000))
+    }
+
+    @Test
+    fun `MID tier at exactly 8GB gets the recommended-model message`() {
+        assertEquals(
+            "Pick the recommended model for the best balance of speed and quality.",
+            deviceExpectationText(DeviceTier.MID, 8_000),
+        )
+    }
+
+    @Test
+    fun `MID tier well above 8GB gets the recommended-model message`() {
+        assertEquals(
+            "Pick the recommended model for the best balance of speed and quality.",
+            deviceExpectationText(DeviceTier.MID, 9_900),
+        )
+    }
+
+    @Test
+    fun `MID tier just under 8GB gets the lighter-model caution instead`() {
+        assertEquals(
+            "Pick a lighter model, or close other apps first — this device has less headroom than newer phones.",
+            deviceExpectationText(DeviceTier.MID, 7_999),
+        )
+    }
+
+    @Test
+    fun `MID tier at the 6GB floor gets the lighter-model caution`() {
+        assertEquals(
+            "Pick a lighter model, or close other apps first — this device has less headroom than newer phones.",
+            deviceExpectationText(DeviceTier.MID, 6_000),
+        )
+    }
+
+    @Test
+    fun `LOW tier gets the lighter-model message`() {
+        assertEquals(
+            "Choose a lighter model for smooth replies — bigger ones may run slowly.",
+            deviceExpectationText(DeviceTier.LOW, 4_000),
+        )
+    }
+
+    @Test
+    fun `MINIMAL tier gets the compact-only message`() {
+        assertEquals(
+            "Only the compact model will run well here; replies stay short and simple.",
+            deviceExpectationText(DeviceTier.MINIMAL, 2_000),
         )
     }
 }
