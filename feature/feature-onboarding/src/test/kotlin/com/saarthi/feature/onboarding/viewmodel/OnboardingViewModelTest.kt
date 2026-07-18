@@ -32,6 +32,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -172,6 +173,21 @@ class OnboardingViewModelTest {
             Thread.sleep(intervalMs)
         }
         assertTrue("Condition not met within ${timeoutMs}ms", condition())
+    }
+
+    @After
+    fun tearDown() {
+        // init{}'s resume-detection (and deleteModel()/confirmModelAndInit())
+        // launch on the real Dispatchers.IO, which runTest/advanceUntilIdle()
+        // can't wait for. A straggler from one test can still be executing
+        // when the next test's setUpDefaults() replaces this instance's
+        // mocks, and a late exception then surfaces as
+        // UncaughtExceptionsBeforeTest in whichever LATER test happens to be
+        // running — not the one that actually leaked it (same root cause
+        // and fix as ManageDownloadsViewModelTest's @After). This drain
+        // buffer runs before the next test's fresh mocks are installed,
+        // giving straggler work time to finish first.
+        Thread.sleep(400)
     }
 
     private fun createViewModel() = OnboardingViewModel(
