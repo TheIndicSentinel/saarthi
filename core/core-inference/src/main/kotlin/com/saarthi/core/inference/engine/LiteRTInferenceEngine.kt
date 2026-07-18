@@ -99,19 +99,25 @@ class LiteRTInferenceEngine @Inject constructor(
     // manually here so core-inference doesn't need a new dependency for it.
     private val lifecycleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     @Volatile private var pendingBackgroundRelease: Job? = null
+    @Volatile private var pendingConversationRelease: Job? = null
     @Volatile private var visibleActivityCount = 0
 
     private val backgroundLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityStarted(activity: Activity) {
             visibleActivityCount++
             if (visibleActivityCount == 1) {
+                pendingConversationRelease?.cancel()
+                pendingConversationRelease = null
                 pendingBackgroundRelease?.cancel()
                 pendingBackgroundRelease = null
             }
         }
         override fun onActivityStopped(activity: Activity) {
             visibleActivityCount = (visibleActivityCount - 1).coerceAtLeast(0)
-            if (visibleActivityCount == 0) scheduleBackgroundRelease()
+            if (visibleActivityCount == 0) {
+                scheduleConversationRelease()
+                scheduleBackgroundRelease()
+            }
         }
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
         override fun onActivityResumed(activity: Activity) {}
@@ -121,12 +127,44 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     /**
-     * Debounced, not immediate: a quick app-switch (checking a notification,
-     * glancing at another app) shouldn't pay the ~5-10s GPU reload cost the
-     * next time the user returns. [BACKGROUND_RELEASE_DELAY_MS] is a
-     * starting point, not a validated one — same caveat as the GPU-margin
-     * constants in gpuSafetyMarginMb(): needs real-device tuning against the
-     * actual supported RAM matrix before being trusted as final.
+     * Stage 1 of 2 on backgrounding: release just the Conversation (its
+     * KV-cache) at [CONVERSATION_RELEASE_DELAY_MS], well before the full
+     * Engine release at [BACKGROUND_RELEASE_DELAY_MS] in
+     * [scheduleBackgroundRelease]. The Conversation is cheap to recreate
+     * (~30-50ms with cached shaders — generateStream()'s existing
+     * "activeConversation == null" fallback, already used for the very
+     * first turn after init, does this transparently on the next
+     * generation) while the mmap'd Engine (model weights) is the expensive
+     * part to reload (~5-10s). Freeing the cheap-to-rebuild resource
+     * sooner gets real memory back faster without making every return-to-
+     * app pay the full reload cost the single-stage release used to.
+     *
+     * Both delays here are starting points pending real-device validation,
+     * same caveat as the GPU-margin constants in gpuSafetyMarginMb().
+     */
+    private fun scheduleConversationRelease() {
+        pendingConversationRelease?.cancel()
+        pendingConversationRelease = lifecycleScope.launch {
+            delay(CONVERSATION_RELEASE_DELAY_MS)
+            if (!isNativeGenerating && !initMutex.isLocked) {
+                DebugLogger.log("LITERT",
+                    "App backgrounded for ${CONVERSATION_RELEASE_DELAY_MS / 1000}s — releasing Conversation (KV-cache), engine stays resident")
+                releaseConversationOnly()
+            } else {
+                DebugLogger.log("LITERT", "Conversation release skipped — generation or load still in progress")
+            }
+        }
+    }
+
+    /**
+     * Stage 2 of 2 on backgrounding — see [scheduleConversationRelease]'s
+     * kdoc for why this is split into two stages. Debounced, not
+     * immediate: a quick app-switch (checking a notification, glancing at
+     * another app) shouldn't pay the ~5-10s GPU reload cost the next time
+     * the user returns. [BACKGROUND_RELEASE_DELAY_MS] is a starting point,
+     * not a validated one — same caveat as the GPU-margin constants in
+     * gpuSafetyMarginMb(): needs real-device tuning against the actual
+     * supported RAM matrix before being trusted as final.
      */
     private fun scheduleBackgroundRelease() {
         pendingBackgroundRelease?.cancel()
@@ -275,8 +313,14 @@ class LiteRTInferenceEngine @Inject constructor(
         // without uninstall+reinstall.
         private const val CRASH_COUNT_EXPIRY_MS = 24 * 60 * 60 * 1000L      // 24 hours
 
-        // See scheduleBackgroundRelease()'s kdoc — starting point pending
-        // real-device validation, not a final tuned value.
+        // See scheduleConversationRelease()'s kdoc — stage 1 of the
+        // two-stage background release, starting point pending real-device
+        // validation, not a final tuned value.
+        private const val CONVERSATION_RELEASE_DELAY_MS = 60 * 1000L        // 1 minute
+
+        // See scheduleBackgroundRelease()'s kdoc — stage 2 (full release),
+        // starting point pending real-device validation, not a final
+        // tuned value.
         private const val BACKGROUND_RELEASE_DELAY_MS = 2 * 60 * 1000L      // 2 minutes
     }
 
@@ -1247,6 +1291,26 @@ class LiteRTInferenceEngine @Inject constructor(
             _isFreshConversation = true
             fresh
         }
+
+    /**
+     * [scheduleConversationRelease]'s stage-1 action: closes the active
+     * Conversation and, unlike [recycleConversation], does NOT immediately
+     * create a replacement — the whole point is to free the KV-cache
+     * memory, not re-allocate it right away. Safe to leave
+     * [activeConversation] null: generateStream()'s existing
+     * "activeConversation == null" safety fallback (already exercised on
+     * the very first turn after init) transparently calls
+     * [recycleConversation] to create a fresh one on the next generation,
+     * so no other code path needs to change for this.
+     */
+    private suspend fun releaseConversationOnly() {
+        conversationLock.withLock {
+            val old = activeConversation ?: return@withLock
+            activeConversation = null
+            runCatching { old.close() }
+                .onFailure { Timber.w(it, "LiteRT Conversation-only release warning") }
+        }
+    }
 
     // ── generateStream ────────────────────────────────────────────────────────
 
