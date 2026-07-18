@@ -272,6 +272,42 @@ class ModelDownloadService : Service() {
 
     // ── Download ──────────────────────────────────────────────────────────────
 
+    /**
+     * Computes and compares [destFile]'s SHA-256 against [expectedSha256].
+     * Returns true if verified, or if no checksum is pinned for this catalog
+     * entry (expectedSha256 == null — unaffected). On mismatch, deletes
+     * [destFile] and logs loudly; does NOT throw — callers decide how to
+     * react (this file is a fresh download in either caller, current-session
+     * against the currently-pinned URL, so both react by discarding and
+     * retrying — see [verifyChecksumOrThrow] and the HTTP-416
+     * accept-as-complete branch in [runDownload]).
+     *
+     * Every catalog entry's downloadUrl is pinned to an immutable commit
+     * SHA, so a mismatch here can only mean real transfer corruption or a
+     * catalog data-entry error — not natural upstream drift — which means
+     * there's no good reason to promote the file to "ready to use" anyway.
+     */
+    private suspend fun verifyChecksum(modelId: String, destFile: File, expectedSha256: String?): Boolean {
+        if (expectedSha256 == null) return true
+        val actual = withContext(Dispatchers.IO) { StreamingSha256.hex(destFile) }
+        if (!actual.equals(expectedSha256, ignoreCase = true)) {
+            Timber.e("Model checksum mismatch: $modelId  expected=$expectedSha256  actual=$actual")
+            DebugLogger.log("DOWNLOAD_SVC",
+                "CHECKSUM MISMATCH for $modelId — expected=$expectedSha256 actual=$actual — discarding")
+            destFile.delete()
+            return false
+        }
+        DebugLogger.log("DOWNLOAD_SVC", "Checksum verified for $modelId")
+        return true
+    }
+
+    /** [verifyChecksum], but throws so the caller's normal retry/backoff catch handles it. */
+    private suspend fun verifyChecksumOrThrow(modelId: String, destFile: File, expectedSha256: String?) {
+        if (!verifyChecksum(modelId, destFile, expectedSha256)) {
+            throw ChecksumMismatchException("Downloaded file failed integrity check")
+        }
+    }
+
     private suspend fun runDownload(
         modelId: String,
         url: String,
@@ -301,30 +337,7 @@ class ModelDownloadService : Service() {
                 DebugLogger.log("DOWNLOAD_SVC",
                     "COMPLETE ${destFile.name}  size=${destFile.length() / 1_048_576}MB")
 
-                // Integrity check — only runs once, right after a freshly
-                // completed download, and only for catalog entries that have
-                // opted in with a pinned checksum (expectedSha256 == null for
-                // any entry without one, unaffected). Every catalog entry's
-                // downloadUrl is now pinned to an immutable commit SHA, so a
-                // mismatch can only mean real transfer corruption or a
-                // catalog data-entry error — not natural upstream drift —
-                // which means there's no longer a good reason to complete
-                // anyway. Discard and let it fall into the existing bounded
-                // retry loop (same MAX_ATTEMPTS/backoff as any other
-                // transient failure) rather than promoting a known-bad file
-                // to "ready to use".
-                if (expectedSha256 != null) {
-                    val actual = withContext(Dispatchers.IO) { StreamingSha256.hex(destFile) }
-                    if (!actual.equals(expectedSha256, ignoreCase = true)) {
-                        Timber.e("Model checksum mismatch: $modelId  expected=$expectedSha256  actual=$actual")
-                        DebugLogger.log("DOWNLOAD_SVC",
-                            "CHECKSUM MISMATCH for $modelId — expected=$expectedSha256 actual=$actual — discarding and retrying")
-                        destFile.delete()
-                        throw ChecksumMismatchException("Downloaded file failed integrity check")
-                    }
-                    DebugLogger.log("DOWNLOAD_SVC", "Checksum verified for $modelId")
-                }
-
+                verifyChecksumOrThrow(modelId, destFile, expectedSha256)
                 manager.emitCompleted(modelId, destFile.absolutePath)
                 return
 
@@ -383,8 +396,26 @@ class ModelDownloadService : Service() {
                         tmpFile.copyTo(destFile, overwrite = true)
                         tmpFile.delete()
                     }
-                    manager.emitCompleted(modelId, destFile.absolutePath)
-                    return
+                    // This is still a current-session download against the
+                    // currently-pinned URL — hold it to the same strict bar
+                    // as a normal completion, not the softer treatment
+                    // reattached/legacy files get. A throw from inside this
+                    // catch block would escape the whole retry loop instead
+                    // of being retried by it, so react inline the same way
+                    // the "local too short" branch above does.
+                    if (expectedSha256 != null && !verifyChecksum(modelId, destFile, expectedSha256)) {
+                        if (attempt >= MAX_ATTEMPTS) {
+                            manager.emitFailed(modelId, "Downloaded file failed integrity check after $attempt attempts")
+                            return
+                        }
+                        delay((attempt * 10_000L).coerceAtMost(60_000L))
+                        // Loop continues; verifyChecksum() already deleted
+                        // destFile on mismatch and tmpFile no longer exists,
+                        // so next downloadWithResume() starts clean.
+                    } else {
+                        manager.emitCompleted(modelId, destFile.absolutePath)
+                        return
+                    }
                 }
 
             } catch (e: InsufficientStorageException) {

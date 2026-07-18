@@ -8,8 +8,13 @@ import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.EngineType
 import com.saarthi.core.inference.model.ModelEntry
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
+import io.mockk.verify
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -44,6 +49,7 @@ class ModelDownloadManagerTest {
     private lateinit var internalDir: File
     private lateinit var externalDir: File
     private lateinit var manager: ModelDownloadManager
+    private lateinit var mockIntegrityStore: ModelIntegrityStore
 
     @Before
     fun setUp() {
@@ -68,8 +74,11 @@ class ModelDownloadManagerTest {
         every { mockLanguageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
 
         val mockFailureStore = mockk<DownloadFailureStore>(relaxed = true)
+        mockIntegrityStore = mockk(relaxed = true)
 
-        manager = ModelDownloadManager(mockContext, mockHfTokenManager, mockLanguageManager, mockFailureStore)
+        manager = ModelDownloadManager(
+            mockContext, mockHfTokenManager, mockLanguageManager, mockFailureStore, mockIntegrityStore,
+        )
     }
 
     private fun testModel(
@@ -343,6 +352,79 @@ class ModelDownloadManagerTest {
         manager.reattachActiveDownloads(listOf(model))
 
         assertNull(manager.allProgress.value[model.id])
+    }
+
+    // ── Background integrity verification on reattach ───────────────────────
+    // Soft-warn only, by design: these are already-installed files, which may
+    // predate the catalog's checksum pinning entirely — unlike a fresh
+    // current-session download (ModelDownloadService's hard-blocking check,
+    // covered separately), rejecting them here would break existing users
+    // over a check that postdates their install.
+
+    @Test
+    fun `reattach verifies a complete pinned model and records a matching verdict`() {
+        val payload = ByteArray(5_000_000)
+        val expectedHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(payload).joinToString("") { "%02x".format(it) }
+        val model = testModel(fileSizeBytes = 5_000_000L).copy(expectedSha256 = expectedHash)
+        val file = File(manager.modelsDir(), model.fileName).apply {
+            parentFile?.mkdirs()
+            writeBytes(payload)
+        }
+        coEvery { mockIntegrityStore.cachedVerdict(any(), any(), any()) } returns null
+
+        manager.reattachActiveDownloads(listOf(model))
+
+        coVerify(timeout = 2_000) {
+            mockIntegrityStore.recordVerdict(model.fileName, file.length(), file.lastModified(), true)
+        }
+        assertTrue("A soft-verified file must never be deleted", file.exists())
+    }
+
+    @Test
+    fun `reattach records a mismatch without deleting or rejecting the file`() {
+        val model = testModel(fileSizeBytes = 5_000_000L)
+            .copy(expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000")
+        val file = writeFile(manager.modelsDir(), model.fileName, sizeBytes = 5_000_000)
+        coEvery { mockIntegrityStore.cachedVerdict(any(), any(), any()) } returns null
+
+        manager.reattachActiveDownloads(listOf(model))
+
+        coVerify(timeout = 2_000) {
+            mockIntegrityStore.recordVerdict(model.fileName, file.length(), file.lastModified(), false)
+        }
+        assertTrue("Soft-warn: a mismatched legacy file is kept in place, not deleted", file.exists())
+        assertTrue("Soft-warn: still reported as downloaded/usable despite the mismatch", manager.isDownloaded(model))
+    }
+
+    @Test
+    fun `reattach skips re-hashing when a matching cached verdict already exists`() {
+        val model = testModel(fileSizeBytes = 5_000_000L).copy(expectedSha256 = "irrelevant-when-cached")
+        val file = writeFile(manager.modelsDir(), model.fileName, sizeBytes = 5_000_000)
+        coEvery {
+            mockIntegrityStore.cachedVerdict(model.fileName, file.length(), file.lastModified())
+        } returns true
+        mockkObject(StreamingSha256)
+        try {
+            manager.reattachActiveDownloads(listOf(model))
+
+            coVerify(timeout = 2_000) {
+                mockIntegrityStore.cachedVerdict(model.fileName, file.length(), file.lastModified())
+            }
+            verify(exactly = 0) { StreamingSha256.hex(any()) }
+        } finally {
+            unmockkObject(StreamingSha256)
+        }
+    }
+
+    @Test
+    fun `reattach does not touch integrity checking for a model with no pinned checksum`() {
+        val model = testModel(fileSizeBytes = 5_000_000L) // expectedSha256 = null, the default
+        writeFile(manager.modelsDir(), model.fileName, sizeBytes = 5_000_000)
+
+        manager.reattachActiveDownloads(listOf(model))
+
+        coVerify(exactly = 0) { mockIntegrityStore.cachedVerdict(any(), any(), any()) }
     }
 
     // ── cancel / restart ─────────────────────────────────────────────────────
