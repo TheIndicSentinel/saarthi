@@ -8,6 +8,12 @@ package com.saarthi.core.inference.model
  *   only to force-override during testing or device-specific tuning.
  * - [nThreads] is consumed by the CPU backend; the engine ignores it for
  *   GPU / NPU paths.
+ * - [temperature], [topK], and [promptTier] should be populated from the
+ *   selected model's [ModelEntry] fields of the same name (the catalog
+ *   entry the caller already resolved to get [modelPath]/[modelName]).
+ *   Their defaults here reproduce the engine's old fallback for a model
+ *   that doesn't match any catalog entry — not a value to rely on for a
+ *   real catalog model.
  *
  * The previous LoRA-adapter and llama.cpp-context fields (loraAdapterPath,
  * nCtx, nGpuLayers) were removed in v1.0.19 along with the unused native
@@ -16,8 +22,9 @@ package com.saarthi.core.inference.model
 data class InferenceConfig(
     val modelPath: String,
     val modelName: String? = null,
-    val temperature: Float = 0.7f,
+    val temperature: Float = 0.8f,
     val topK: Int = 40,
     val maxTokens: Int = 0,
     val nThreads: Int = 4,
+    val promptTier: PromptTier = PromptTier.STANDARD,
 )

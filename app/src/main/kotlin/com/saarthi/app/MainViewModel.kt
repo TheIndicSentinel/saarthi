@@ -8,6 +8,7 @@ import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.InferenceConfig
+import com.saarthi.core.inference.model.PromptTier
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -141,14 +142,22 @@ class MainViewModel @Inject constructor(
             }
 
             // Pass maxTokens=0 so LiteRTInferenceEngine picks the tier-aware default
-            // based on the model size / display name (Gemma 4 → 2048, mid → 1024,
+            // based on promptTier/model size (Gemma 4 → 2048, mid → 1024,
             // 1B / Compact → 512). See LiteRTInferenceEngine.effectiveMaxTokens.
+            // temperature/topK/promptTier come from the catalog entry itself
+            // (data-driven — see ModelEntry) rather than the engine re-deriving
+            // them by matching the model's name/path; the InferenceConfig
+            // defaults only apply when catalogEntry is null (a model that
+            // doesn't match any current catalog entry).
             val profile = deviceProfiler.profile()
             val config = InferenceConfig(
                 modelPath  = modelPath,
                 modelName  = catalogEntry?.displayName,
                 maxTokens  = 0,
                 nThreads   = profile.recommendedThreads,
+                temperature = catalogEntry?.defaultTemperature ?: 0.8f,
+                topK       = catalogEntry?.topK ?: 40,
+                promptTier = catalogEntry?.promptTier ?: PromptTier.STANDARD,
             )
 
 

@@ -1,20 +1,27 @@
 package com.saarthi.core.inference.engine
 
 import com.saarthi.core.inference.model.DeviceTier
+import com.saarthi.core.inference.model.PromptTier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [gpuSafetyMarginMb], [isCompactModel], and [isGpuRestrictedToCompactOnLowTier]
- * are the pure decision math behind the GPU-admission hardening pass: replacing
- * the old flat "avail < 3000MB" veto and flat per-tier margin with a
- * continuously-scaled reserve, and gating GPU to the compact model on
- * LOW/MINIMAL-tier (or OS-flagged low-RAM) devices. This is the only part of
- * that pass that's unit-testable at all — everything else lives inside
- * LiteRTInferenceEngine.initialize(), which needs the native engine and has no
- * coverage (no Robolectric in this project).
+ * [gpuSafetyMarginMb], [isLargeTier]/[isCompactTier], and
+ * [isGpuRestrictedToCompactOnLowTier] are the pure decision math behind the
+ * GPU-admission and token-ladder-tier hardening passes: replacing the old
+ * flat "avail < 3000MB" veto and flat per-tier margin with a
+ * continuously-scaled reserve, and replacing name-matched tier
+ * classification ("1b"/"compact"/"gemma 4" substrings) with
+ * ModelEntry.promptTier (data-driven — see ModelCatalog). Getting the tier
+ * classification wrong reproduces exactly the field bugs this project's
+ * history is full of (Gemma 4 E4B/E2B token starvation, Kisan RAG failing
+ * on the compact model's old 512-token cap), so this is real, load-bearing
+ * logic, not just a legibility improvement. This is the only part of
+ * either pass that's unit-testable at all — everything else lives inside
+ * LiteRTInferenceEngine.initialize(), which needs the native engine and
+ * has no coverage (no Robolectric in this project).
  */
 class GpuAdmissionPolicyTest {
 
@@ -82,26 +89,58 @@ class GpuAdmissionPolicyTest {
         }
     }
 
-    // ── isCompactModel ──────────────────────────────────────────────────────
+    // ── isLargeTier / isCompactTier ──────────────────────────────────────────
 
     @Test
-    fun `a small file under 700MB is compact regardless of name`() {
-        assertTrue(isCompactModel("mystery-model", 500L))
+    fun `LARGE promptTier is always large tier regardless of size`() {
+        assertTrue(isLargeTier(PromptTier.LARGE, sizeMb = 100L))
     }
 
     @Test
-    fun `a name containing 1b is compact regardless of size`() {
-        assertTrue(isCompactModel("gemma 3 · 1b compact", 3_000L))
+    fun `COMPACT promptTier is never large tier even if the file is huge`() {
+        // The explicit classification wins — a genuinely miscatalogued huge
+        // "compact" model isn't silently upgraded via the size fallback,
+        // which only applies to STANDARD (unclassified) models.
+        assertFalse(isLargeTier(PromptTier.COMPACT, sizeMb = 5_000L))
     }
 
     @Test
-    fun `a name containing compact is compact regardless of size`() {
-        assertTrue(isCompactModel("gemma compact & fast", 3_000L))
+    fun `STANDARD promptTier falls back to the sizeMb heuristic for large tier`() {
+        assertFalse(isLargeTier(PromptTier.STANDARD, sizeMb = 1_500L))
+        assertTrue(isLargeTier(PromptTier.STANDARD, sizeMb = 1_501L))
     }
 
     @Test
-    fun `a large named model is not compact`() {
-        assertFalse(isCompactModel("gemma 4 · best quality", 3_659L))
+    fun `COMPACT promptTier is always compact tier regardless of size`() {
+        assertTrue(isCompactTier(PromptTier.COMPACT, sizeMb = 5_000L))
+    }
+
+    @Test
+    fun `LARGE promptTier is never compact tier even if the file is tiny`() {
+        assertFalse(isCompactTier(PromptTier.LARGE, sizeMb = 100L))
+    }
+
+    @Test
+    fun `STANDARD promptTier falls back to the sizeMb heuristic for compact tier`() {
+        assertFalse(isCompactTier(PromptTier.STANDARD, sizeMb = 700L))
+        assertTrue(isCompactTier(PromptTier.STANDARD, sizeMb = 699L))
+    }
+
+    @Test
+    fun `a model can never be classified as both large and compact tier`() {
+        val allCombinations = listOf(
+            PromptTier.LARGE to 50L,
+            PromptTier.COMPACT to 5_000L,
+            PromptTier.STANDARD to 100L,
+            PromptTier.STANDARD to 1_000L,
+            PromptTier.STANDARD to 5_000L,
+        )
+        for ((tier, sizeMb) in allCombinations) {
+            assertFalse(
+                "tier=$tier sizeMb=$sizeMb must not be both large and compact",
+                isLargeTier(tier, sizeMb) && isCompactTier(tier, sizeMb),
+            )
+        }
     }
 
     // ── isGpuRestrictedToCompactOnLowTier ───────────────────────────────────

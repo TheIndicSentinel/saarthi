@@ -4,6 +4,7 @@ import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.model.EngineType
 import com.saarthi.core.inference.model.ModelEntry
+import com.saarthi.core.inference.model.PromptTier
 import com.saarthi.core.inference.model.SocFamily
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -132,6 +133,8 @@ class ModelCatalog @Inject constructor() {
             socTarget     = SocFamily.QUALCOMM_SM8750,
             baseModelId   = "gemma4-e2b-it-litert",
             expectedSha256 = "41dd675fbe735b6029012b5576a5716bac614fd8156de0128db4c9dff3cebd4e",
+            promptTier    = PromptTier.LARGE,
+            defaultTemperature = 1.0f,
         ),
 
         // ── Gemma 4 · Generic (all devices with GPU) ─────────────────────────
@@ -148,6 +151,8 @@ class ModelCatalog @Inject constructor() {
             contextLength = 8192,
             tags          = listOf("Recommended", "Best for most phones"),
             expectedSha256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
+            promptTier    = PromptTier.LARGE,
+            defaultTemperature = 1.0f,
         ),
 
         // ── Gemma 4 E4B · Generic (flagship, GPU required) ───────────────────
@@ -164,6 +169,11 @@ class ModelCatalog @Inject constructor() {
             contextLength = 8192,
             tags          = listOf("Best answers", "For high-end phones"),
             expectedSha256 = "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+            promptTier    = PromptTier.LARGE,
+            // Tighter than E2B's 1.0 — crisper, more authoritative answers
+            // for the bigger model (at 1.0 it tends to ramble). Matches the
+            // removed baseTemperatureFor()'s gemma4+e4b-specific branch.
+            defaultTemperature = 0.7f,
         ),
 
         // ══════════════════════════════════════════════════════════════════════
@@ -191,6 +201,8 @@ class ModelCatalog @Inject constructor() {
             contextLength = 8192,
             tags          = listOf("Balanced", "Everyday use"),
             expectedSha256 = "2ed7bc3a0026c93d5b8a4544b352d9d00cd66ff0bac3ef6a20ac3d2cba4010d6",
+            promptTier    = PromptTier.LARGE,
+            defaultTemperature = 1.0f,
         ),
 
         // ── Gemma 3n E4B · Generic (flagship only, 10 GB+ total RAM) ─────────
@@ -215,6 +227,13 @@ class ModelCatalog @Inject constructor() {
             contextLength = 8192,
             tags          = listOf("Detailed answers", "For high-end phones"),
             expectedSha256 = "2e67a6cd51dfe0f793431e6bd4ed8d029c88e10f52ca0469ad38445e3cd3c1f4",
+            promptTier    = PromptTier.LARGE,
+            // NOT the tighter 0.7 — the removed baseTemperatureFor()'s
+            // gemma4+e4b-specific branch only matched "gemma4"/"gemma-4"/
+            // "gemma 4", which this filename (gemma-3n-E4B...) never
+            // contained, so it fell through to the generic Gemma-3-family
+            // branch (1.0) despite also being an E4B variant.
+            defaultTemperature = 1.0f,
         ),
 
         // ══════════════════════════════════════════════════════════════════════
@@ -235,6 +254,15 @@ class ModelCatalog @Inject constructor() {
             contextLength = 4096,
             tags          = listOf("Smallest", "Works on any phone"),
             expectedSha256 = "1325ae366d31950f137c9c357b9fa89448b176d76998180c08ceaca78bba98be",
+            promptTier    = PromptTier.COMPACT,
+            // NOT the 0.8 "else" default — the filename "gemma3-1b-it..."
+            // contains the substring "gemma3", so the removed
+            // baseTemperatureFor() matched the generic Gemma-3-family
+            // branch (1.0) for this model too, same as the non-compact
+            // Gemma 3n entries above. Preserved exactly as today's actual
+            // behavior, not "corrected" to 0.8 — this field replaces how
+            // the value was computed, not what it evaluates to.
+            defaultTemperature = 1.0f,
         ),
     )
 

@@ -24,6 +24,7 @@ import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.model.PromptTier
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -175,6 +176,13 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile private var loadedMaxTokens: Int = 0
     // The actual maxNumTokens passed to the Engine (≤ loadedMaxTokens which stores config value).
     @Volatile private var loadedEffectiveMaxTokens: Int = 0
+    // The active model's catalog-provided sampler defaults (see ModelEntry.
+    // defaultTemperature/topK) — captured at load time so samplerForActiveModel()
+    // and activeModelDefaultTemperature can use them on later turns, once
+    // InferenceConfig is no longer in scope. Defaults here are never read
+    // before a successful initialize() sets them for real.
+    @Volatile private var loadedTemperature: Float = 0.8f
+    @Volatile private var loadedTopK: Int = 64
 
     private val _isReadyFlow = MutableStateFlow(false)
     override val isReadyFlow: Flow<Boolean> = _isReadyFlow.asStateFlow()
@@ -532,46 +540,31 @@ class LiteRTInferenceEngine @Inject constructor(
     // sequences (visible repetition in chat). Higher temp + larger topK gives
     // the diversity Gemma was trained for.
     //
+    // temperature/topK are now data-driven — see ModelEntry.defaultTemperature/
+    // topK — instead of being re-derived here by matching the model's file
+    // name/path against "gemma3"/"gemma4"/"e4b" substrings. This used to mean
+    // a per-VARIANT distinction (e.g. Gemma 4 E4B's tighter 0.7 default vs
+    // E2B's 1.0) could only be made from the file PATH, never the display
+    // name — see loadedTemperature/loadedTopK for where the caller's already-
+    // resolved catalog values are captured at load time.
+    //
     // NPU returns null because QNN handles sampling internally on Hexagon.
-    private fun samplerFor(modelPath: String): SamplerConfig? {
+    private fun samplerFor(temperature: Float, topK: Int): SamplerConfig? {
         if (usingNpu) return null
-        val name = modelPath.lowercase()
-        val isLargeGemma = name.contains("gemma3") || name.contains("gemma-3") || name.contains("gemma 3") ||
-            name.contains("gemma4") || name.contains("gemma-4") || name.contains("gemma 4")
-        val topK = if (isLargeGemma) 64 else 40
         // User temperature override (Settings → Response style). A value >= 0
         // replaces the model's recommended default; AUTO (-1) defers to it,
         // so users who never touch the slider keep the prior behaviour.
         // topK/topP stay model-tuned — only the temperature is user-facing.
         val userTemp = generationPreference.temperature.value
-        val temp = (if (userTemp >= 0f) userTemp else baseTemperatureFor(name)).toDouble()
+        val temp = (if (userTemp >= 0f) userTemp else temperature).toDouble()
         return SamplerConfig(topK = topK, topP = 0.95, temperature = temp)
     }
 
-    /** Google's recommended temperature per Gemma family — the AUTO baseline. */
-    private fun baseTemperatureFor(modelNameLower: String): Float = when {
-        modelNameLower.contains("gemma3") || modelNameLower.contains("gemma-3") || modelNameLower.contains("gemma 3") -> 1.0f
-        // Gemma 4 E4B ONLY: a tighter default than E2B gives the bigger model
-        // crisper, more authoritative, instruction-following answers (at temp 1.0
-        // it tends to ramble). E2B's quality is already good → it stays at 1.0.
-        // Matches on the model FILE path (…gemma-4-E4B-it…); the display name has
-        // no "e4b", so callers must pass the path (see samplerForActiveModel).
-        (modelNameLower.contains("gemma4") || modelNameLower.contains("gemma-4") || modelNameLower.contains("gemma 4")) &&
-            modelNameLower.contains("e4b") -> 0.7f
-        modelNameLower.contains("gemma4") || modelNameLower.contains("gemma-4") || modelNameLower.contains("gemma 4") -> 1.0f
-        else -> 0.8f
-    }
-
     override val activeModelDefaultTemperature: Float
-        // Prefer the file path: it carries the E2B/E4B variant ("…E4B-it…"); the
-        // display name ("Gemma 4 · Best Quality") does not, so per-variant tuning
-        // (e.g. E4B's tighter temperature) would be invisible from the name alone.
-        get() = baseTemperatureFor((loadedModelPath ?: activeModelName ?: "").lowercase())
+        get() = loadedTemperature
 
     private fun samplerForActiveModel(): SamplerConfig? =
-        // File path first — see activeModelDefaultTemperature: needed so the
-        // per-turn sampler can distinguish E4B from E2B (display name can't).
-        samplerFor(loadedModelPath ?: activeModelName ?: "")
+        samplerFor(loadedTemperature, loadedTopK)
 
     /**
      * Tighter sampler for RAG-grounded turns. Used when the incoming
@@ -840,10 +833,20 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 // Hoisted out of the token-ladder `run{}` below so the
                 // LOW/MINIMAL-tier GPU-admission gate further down can reuse
-                // the same compact-model classification instead of a second,
-                // possibly drifting copy of the same three conditions.
-                val nameForTier = (config.modelName ?: config.modelPath).lowercase()
-                val isCompactTier = isCompactModel(nameForTier, sizeMb)
+                // the same tier classification instead of a second,
+                // possibly drifting copy. Data-driven via config.promptTier
+                // (see ModelEntry.promptTier) rather than matching the
+                // model's name/path against substrings like "1b"/"compact"
+                // or "gemma 4"/"gemma4" — a new catalog entry whose name
+                // didn't happen to match one of those patterns used to
+                // silently fall through to STANDARD's defaults regardless
+                // of what the model actually was. The sizeMb fallback only
+                // matters for a model that doesn't match any catalog entry
+                // (config.promptTier stays PromptTier.STANDARD in that
+                // case) — same safety net the old name-matching had for an
+                // unrecognized model.
+                val isLargeTier = isLargeTier(config.promptTier, sizeMb)
+                val isCompactTier = isCompactTier(config.promptTier, sizeMb)
 
                 val effectiveMaxTokens: Int = run {
                     // headroom from the resident estimate, not the file size —
@@ -861,10 +864,6 @@ class LiteRTInferenceEngine @Inject constructor(
                     // stricter for files ≥3000MB so E4B only gets 4096 with
                     // real room to spare.
                     val scaled4096ThresholdMb = if (sizeMb >= 3000) 3400 else 2400
-                    val isLargeTier = nameForTier.contains("gemma 4") ||
-                        nameForTier.contains("gemma4") ||
-                        nameForTier.contains("gemma-4") ||
-                        sizeMb > 1500
                     when {
                         // Real CPU crash evidence — keep these as a recovery ladder
                         // since they react to ACTUAL inference instability, not
@@ -1042,7 +1041,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     
                     // Undo lazy init per research: create conversation synchronously during init
                     DebugLogger.log("LITERT", "[INIT] Engine loaded. Creating conversation matrix synchronously...")
-                    val samplerConfig = samplerFor(config.modelPath)
+                    val samplerConfig = samplerFor(config.temperature, config.topK)
                     markStage(CrashStage.CREATE_CONVERSATION)
                     DebugLogger.log("LITERT", "[NATIVE] [JNI_ENTER] createConversation (tokens=$effectiveMaxTokens, threads=$dynamicThreads, backend=${backendLabel()})")
                     try {
@@ -1074,6 +1073,8 @@ class LiteRTInferenceEngine @Inject constructor(
                     loadedModelPath = config.modelPath
                     loadedMaxTokens = config.maxTokens
                     loadedEffectiveMaxTokens = effectiveMaxTokens
+                    loadedTemperature = config.temperature
+                    loadedTopK = config.topK
                     activeModelName = config.modelName
                     _activeModelNameFlow.value = config.modelName
                     _isFreshConversation = true   // brand-new Conversation, no turns in KV
@@ -1826,13 +1827,20 @@ internal fun lerpMb(x: Long, x0: Long, x1: Long, y0: Long, y1: Long): Long =
     y0 + (y1 - y0) * (x - x0) / (x1 - x0)
 
 /**
- * Same classification the token ladder already used for "is this the
- * compact model" (name hints or a small file), now also the input to
- * [isGpuRestrictedToCompactOnLowTier] below. Pulled into one place so both
- * call sites can't drift apart.
+ * Token-ladder/context-window "LARGE tier" classification — data-driven via
+ * [promptTier] (see ModelEntry.promptTier), with a [sizeMb]-based fallback
+ * that only applies when promptTier is STANDARD (a model that doesn't
+ * match any current catalog entry) — the same safety net the old
+ * name-matching logic had for an unrecognized model, so a large-but-
+ * unclassified file still gets a large-enough context budget instead of
+ * silently landing on STANDARD's smaller default.
  */
-internal fun isCompactModel(nameForTier: String, sizeMb: Long): Boolean =
-    nameForTier.contains("1b") || nameForTier.contains("compact") || sizeMb < 700
+internal fun isLargeTier(promptTier: PromptTier, sizeMb: Long): Boolean =
+    promptTier == PromptTier.LARGE || (promptTier == PromptTier.STANDARD && sizeMb > 1500)
+
+/** [isLargeTier]'s counterpart for the COMPACT end of the ladder. */
+internal fun isCompactTier(promptTier: PromptTier, sizeMb: Long): Boolean =
+    promptTier == PromptTier.COMPACT || (promptTier == PromptTier.STANDARD && sizeMb < 700)
 
 /**
  * LOW/MINIMAL-tier devices (roughly ≤6GB total RAM) treat GPU as an

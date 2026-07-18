@@ -25,6 +25,7 @@ import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.model.PromptTier
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -582,12 +583,19 @@ class OnboardingViewModel @Inject constructor(
         // a value here used to short-circuit that logic and starve Gemma 4 turns
         // of response budget (the "incomplete reply" bug). Auto-recovery in the
         // engine still steps down to 256/64 on repeated CPU crashes.
+        // temperature/topK/promptTier come from the catalog entry itself
+        // (data-driven — see ModelEntry) rather than the engine re-deriving
+        // them by matching the model's name/path; the InferenceConfig
+        // defaults only apply when catalogEntry is null.
         val profile = deviceProfiler.profile()
         val config = InferenceConfig(
             modelPath   = path,
             modelName   = catalogEntry?.displayName,
             maxTokens   = 0,
             nThreads    = profile.recommendedThreads,
+            temperature = catalogEntry?.defaultTemperature ?: 0.8f,
+            topK        = catalogEntry?.topK ?: 40,
+            promptTier  = catalogEntry?.promptTier ?: PromptTier.STANDARD,
         )
 
         _uiState.update { it.copy(step = OnboardingStep.MODEL_INIT, isLoading = true, error = null) }

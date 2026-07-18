@@ -20,6 +20,20 @@ enum class EngineType {
     LITERT,
 }
 
+/**
+ * Which token-ladder/context-window bucket this model uses, and (via
+ * LiteRTInferenceEngine's GPU-admission gate) whether GPU is available by
+ * default on LOW/MINIMAL-tier devices or restricted to COMPACT only.
+ *
+ * Previously derived by matching the model's file name against substrings
+ * like "1b"/"compact" or "gemma 4"/"gemma4" — a new catalog entry whose
+ * name didn't happen to match one of those patterns would silently inherit
+ * STANDARD's defaults regardless of what the model actually was. Explicit
+ * per-entry now: whoever adds a catalog entry has to make this call
+ * deliberately instead of it being inferred from naming coincidence.
+ */
+enum class PromptTier { COMPACT, STANDARD, LARGE }
+
 data class ModelEntry(
     val id: String,
     val displayName: String,
@@ -45,6 +59,31 @@ data class ModelEntry(
      * changes and every future download would fail verification.
      */
     val expectedSha256: String? = null,
+    /** See [PromptTier] kdoc. */
+    val promptTier: PromptTier = PromptTier.STANDARD,
+    /**
+     * Google's recommended AUTO-baseline sampling temperature for this
+     * specific model variant — previously derived by matching the loaded
+     * file path against "gemma3"/"gemma4"/"e4b" substrings (the removed
+     * LiteRTInferenceEngine.baseTemperatureFor()). Explicit per-entry
+     * because it can differ between two variants that share the same
+     * [promptTier] and would otherwise be indistinguishable by tier alone
+     * — e.g. Gemma 4 E4B's tighter 0.7 (crisper, more authoritative answers
+     * for the bigger model) vs E2B's 1.0, despite both being LARGE tier.
+     * Overridden by the user's Settings → Response style temperature
+     * slider when set (see GenerationPreference); this is only the AUTO
+     * baseline shown/used when the user hasn't touched that slider.
+     */
+    val defaultTemperature: Float = 0.8f,
+    /**
+     * Sampler top-K — previously derived the same substring-matching way
+     * as [defaultTemperature] (the removed isLargeGemma check in
+     * LiteRTInferenceEngine.samplerFor()). Every current catalog entry
+     * uses 64 in practice (see ModelCatalog's per-entry values and the
+     * commit introducing this field for the exact trace of what each
+     * entry's old name-matching logic actually produced).
+     */
+    val topK: Int = 64,
 ) {
 
     val fileSizeMb: Int get() = (fileSizeBytes / 1_048_576).toInt()
