@@ -18,6 +18,16 @@ data class DeviceProfile(
      */
     val safeModelBudgetMb: Long,
     val availableStorageMb: Long,
+    /**
+     * Android's own OEM-influenced classification (`ActivityManager.
+     * isLowRamDevice()`) of whether this device model is memory-constrained.
+     * A coarse, largely static hardware signal — NOT a substitute for
+     * [availableRamMb], which is what actually decides memory eligibility at
+     * load time. Used only as an additional conservative input (e.g.
+     * widening which models get gated to CPU on this device), never as the
+     * primary or sole basis for a decision.
+     */
+    val isLowRamDevice: Boolean = false,
 
     // ── CPU ───────────────────────────────────────────────────────────────────
     val cpuCores: Int,
@@ -28,9 +38,12 @@ data class DeviceProfile(
     val hasVulkan: Boolean,
     val vulkanVersion: String?,
     /**
-     * Whether it is safe to use GPU/Vulkan-backed acceleration for this session.
-     * Takes into account: platform stability, available RAM (GPU shares LPDDR),
-     * and whether the model binary fits within the GPU memory budget.
+     * Whether this device's Vulkan support and SoC/OEM driver history make
+     * GPU acceleration worth attempting at all — a static hardware fact,
+     * independent of which model gets loaded. Whether there's enough RAM
+     * for a *specific* model's GPU footprint is a separate, load-time
+     * decision made by the engine once the model is known (see
+     * LiteRTInferenceEngine's memory-pressure and tier-restriction gates).
      */
     val gpuSafe: Boolean,
     /**

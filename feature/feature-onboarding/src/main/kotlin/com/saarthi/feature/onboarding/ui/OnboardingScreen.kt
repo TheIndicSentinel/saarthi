@@ -738,6 +738,17 @@ private fun Onb4ModelPick(
                 // gives that warning before the download, not after.
                 val insufficientRam = !isDownloaded && state.deviceProfile != null &&
                     state.deviceProfile.availableRamMb < model.fileSizeMb * 0.70
+                // See isLikelyCpuOnly() below for the full rationale — third
+                // state between "fine" and "may not load right now": the
+                // model WILL load, but is expected to run on CPU rather than
+                // GPU on this device.
+                val likelyCpuOnly = isLikelyCpuOnly(
+                    deviceProfile = state.deviceProfile,
+                    modelRequiredTier = model.requiredTier,
+                    isDownloaded = isDownloaded,
+                    insufficientStorage = insufficientStorage,
+                    insufficientRam = insufficientRam,
+                )
                 ModelOption(
                     model = model,
                     progress = progress,
@@ -751,6 +762,7 @@ private fun Onb4ModelPick(
                     toneIndex = i,
                     insufficientStorage = insufficientStorage,
                     insufficientRam = insufficientRam,
+                    likelyCpuOnly = likelyCpuOnly,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -818,6 +830,36 @@ private fun DeviceTierBadge(profile: DeviceProfile?) {
     }
 }
 
+/**
+ * Third state between "fine" and "may not load right now": the model WILL
+ * load, but is expected to run on CPU rather than GPU on this device —
+ * either the device's GPU driver isn't trusted at all (gpuSafe=false), or
+ * this device's tier restricts GPU to the compact model only (mirrors
+ * LiteRTInferenceEngine's isGpuRestrictedToCompactOnLowTier gate) and this
+ * model isn't that one. Reuses model.requiredTier (already the catalog's
+ * own compact-vs-not classification) rather than re-deriving "compact"
+ * from name/size heuristics that live in the engine. Informational only —
+ * the authoritative decision happens at load time.
+ *
+ * Top-level `internal`, plain (no Compose/Android dependency), so it's
+ * unit-testable directly — same reasoning as the extracted functions in
+ * LiteRTInferenceEngine.kt this mirrors.
+ */
+internal fun isLikelyCpuOnly(
+    deviceProfile: DeviceProfile?,
+    modelRequiredTier: DeviceTier,
+    isDownloaded: Boolean,
+    insufficientStorage: Boolean,
+    insufficientRam: Boolean,
+): Boolean {
+    if (isDownloaded || insufficientStorage || insufficientRam) return false
+    val dp = deviceProfile ?: return false
+    val isCompactModel = modelRequiredTier == DeviceTier.LOW || modelRequiredTier == DeviceTier.MINIMAL
+    val restrictedByTier =
+        (dp.tier == DeviceTier.LOW || dp.tier == DeviceTier.MINIMAL || dp.isLowRamDevice) && !isCompactModel
+    return !dp.gpuSafe || restrictedByTier
+}
+
 @Composable
 private fun ModelOption(
     model: ModelEntry,
@@ -830,6 +872,7 @@ private fun ModelOption(
     toneIndex: Int,
     insufficientStorage: Boolean = false,
     insufficientRam: Boolean = false,
+    likelyCpuOnly: Boolean = false,
 ) {
     val tone = when (toneIndex % 4) {
         0 -> ChipTone.Marigold
@@ -924,6 +967,7 @@ private fun ModelOption(
                         downloaded -> "· Ready to use"
                         insufficientStorage -> "· Not enough space"
                         insufficientRam -> "· May not load right now"
+                        likelyCpuOnly -> "· Runs in compatibility mode (slower)"
                         else -> "· Not downloaded"
                     }
                     val statusColor = when {
@@ -932,6 +976,10 @@ private fun ModelOption(
                         downloaded -> SaarthiColors.Jade
                         insufficientStorage -> SaarthiColors.Rose
                         insufficientRam -> SaarthiColors.Marigold
+                        // Neutral, not a warning — the model will run, just
+                        // without GPU on this device. Distinct from the
+                        // Marigold "may not load" caution above.
+                        likelyCpuOnly -> SaarthiColors.Text3
                         else -> SaarthiColors.Text3
                     }
                     Text(

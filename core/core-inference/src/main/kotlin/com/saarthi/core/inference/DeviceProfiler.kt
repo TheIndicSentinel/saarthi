@@ -29,8 +29,11 @@ import javax.inject.Singleton
  *    Android UI thread + system daemons. Going above 4 threads hits
  *    diminishing returns on ARM big.LITTLE and causes thermal throttling.
  *
- * 4. **GPU safety is SoC-aware**: Checks Vulkan support, OEM driver stability
- *    history, and whether the available RAM can handle shared-memory overhead.
+ * 4. **GPU safety is SoC-aware, not model-aware**: Checks Vulkan support and
+ *    OEM driver stability history only — static hardware facts. Whether
+ *    there's enough RAM for a *specific* model's GPU footprint is decided
+ *    at load time by the engine, once the model (and its resident-memory
+ *    estimate) is actually known.
  *
  * 5. **NPU safety**: Only Qualcomm SM8750 (Snapdragon 8 Gen 3) currently has
  *    QNN/Hexagon-compiled .litertlm bundles. All other SoCs use GPU or CPU.
@@ -47,6 +50,10 @@ class DeviceProfiler @Inject constructor(
     fun profile(): DeviceProfile {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memInfo = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        // OEM-influenced, largely static per device model — an additional
+        // conservative signal for the engine's load-time gates, not a
+        // replacement for the availMem reading above.
+        val isLowRamDevice = am.isLowRamDevice
 
         val totalRamMb = memInfo.totalMem / 1_048_576
         val availRamMb = memInfo.availMem / 1_048_576
@@ -109,8 +116,23 @@ class DeviceProfiler @Inject constructor(
         //  MEDIATEK flagship — GPU on ≥8GB RAM (Mali OpenCL stable on Dimensity flagship).
         //  MEDIATEK other   — CPU. OpenCL driver quality too variable for production.
         //  GENERIC / unknown — GPU if 4GB+ avail RAM.
+        //
+        // Deliberately NOT a memory-eligibility check for a specific model —
+        // gpuSafe answers "can this device's Vulkan/OEM driver run the GPU
+        // delegate at all", a static hardware fact independent of which
+        // model gets loaded. Whether there's enough headroom for THIS
+        // model's GPU footprint is a load-time question (model size/
+        // resident estimate + KV-cache aren't known here) — that's decided
+        // by LiteRTInferenceEngine's memoryPressureBannedGpu gate, which
+        // sizes its margin off the actual model instead of one number
+        // guessed to cover the largest catalog entry. (This property used
+        // to also veto on `availRamMb < 3_000` directly, which fired before
+        // that model-aware check ever ran — a capable device loading a
+        // small model could get vetoed by a floor sized for a much bigger
+        // one. MediaTek/Generic below still factor in RAM, but as a
+        // driver-confidence proxy for unproven chips, not a memory-headroom
+        // check — left as-is.)
         val gpuSafe: Boolean = when {
-            availRamMb < 3_000 -> false  // GPU VRAM overhead risks LMK on low-RAM devices
             !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
             else -> when (socFamily) {
                 SocFamily.QUALCOMM_SM8750  -> true
@@ -124,7 +146,6 @@ class DeviceProfiler @Inject constructor(
         }
 
         val gpuSafeReason = when {
-            availRamMb < 3_000 -> "low RAM (avail=${availRamMb}MB < 3000MB)"
             !hasVulkan         -> "no Vulkan support"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
@@ -168,6 +189,7 @@ class DeviceProfiler @Inject constructor(
             vulkanVersion     = vulkanVersion,
             gpuSafe           = gpuSafe,
             npuSafe           = npuSafe,
+            isLowRamDevice    = isLowRamDevice,
             abi               = abi,
             apiLevel          = apiLevel,
             manufacturer      = manufacturer,
@@ -179,7 +201,7 @@ class DeviceProfiler @Inject constructor(
         DebugLogger.log("PROFILE",
             "tier=${profile.tier}  totalRam=${totalRamMb}MB  avail=${availRamMb}MB  " +
             "budget=${safeModelBudgetMb}MB  storage=${availStorageMb}MB  " +
-            "gpu=$gpuSafe  npu=$npuSafe  cores=$cpuCores  abi=$abi")
+            "gpu=$gpuSafe  npu=$npuSafe  cores=$cpuCores  abi=$abi  lowRamDevice=$isLowRamDevice")
         return profile
     }
 

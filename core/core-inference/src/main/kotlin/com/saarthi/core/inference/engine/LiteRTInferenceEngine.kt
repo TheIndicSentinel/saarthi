@@ -717,6 +717,13 @@ class LiteRTInferenceEngine @Inject constructor(
                 // (1536-token floor + forced CPU backend on fresh installs).
                 val residentEstimateMb = (sizeMb * 6) / 10
 
+                // Hoisted out of the token-ladder `run{}` below so the
+                // LOW/MINIMAL-tier GPU-admission gate further down can reuse
+                // the same compact-model classification instead of a second,
+                // possibly drifting copy of the same three conditions.
+                val nameForTier = (config.modelName ?: config.modelPath).lowercase()
+                val isCompactTier = isCompactModel(nameForTier, sizeMb)
+
                 val effectiveMaxTokens: Int = run {
                     // headroom from the resident estimate, not the file size —
                     // the old (avail − FULL size) formula over-charged E4B by
@@ -733,14 +740,10 @@ class LiteRTInferenceEngine @Inject constructor(
                     // stricter for files ≥3000MB so E4B only gets 4096 with
                     // real room to spare.
                     val scaled4096ThresholdMb = if (sizeMb >= 3000) 3400 else 2400
-                    val nameForTier = (config.modelName ?: config.modelPath).lowercase()
                     val isLargeTier = nameForTier.contains("gemma 4") ||
                         nameForTier.contains("gemma4") ||
                         nameForTier.contains("gemma-4") ||
                         sizeMb > 1500
-                    val isCompactTier = nameForTier.contains("1b") ||
-                        nameForTier.contains("compact") ||
-                        sizeMb < 700
                     when {
                         // Real CPU crash evidence — keep these as a recovery ladder
                         // since they react to ACTUAL inference instability, not
@@ -846,21 +849,33 @@ class LiteRTInferenceEngine @Inject constructor(
                 // ~3.9GB) E4B silently ran on CPU: 15-26s TTFT, 1.5-4.6 tps,
                 // the reported "E4B chat not production ready". GPU load
                 // actually consumes ~residentEstimate (observed ~1.6-1.8GB for
-                // E4B on SM8550), so gate on resident + a tier-aware safety
+                // E4B on SM8550), so gate on resident + a size-aware safety
                 // margin for KV-cache/activations/OS instead. On the same
                 // fresh-install snapshot the new gate allows GPU (3866 ≥
-                // 2094+1200) → ~4s TTFT. Mid/low tiers keep bigger margins.
-                // A wrong call here degrades safely: a GPU OOM crash is caught
-                // by the crash-recovery ban and the next load goes CPU.
-                val gpuSafetyMarginMb = when (profile.tier) {
-                    com.saarthi.core.inference.model.DeviceTier.FLAGSHIP -> 1200
-                    com.saarthi.core.inference.model.DeviceTier.MID      -> 1400
-                    else                                                 -> 1800
-                }
+                // 2094+1200) → ~4s TTFT. Mid/low-RAM devices keep bigger
+                // margins — see gpuSafetyMarginMb() in the companion object
+                // above for how "bigger" now scales continuously instead of
+                // jumping at tier boundaries. A wrong call here degrades
+                // safely: a GPU OOM crash is caught by the crash-recovery
+                // ban and the next load goes CPU.
+                val gpuSafetyMarginMb = gpuSafetyMarginMb(profile.totalRamMb)
                 val memoryPressureBannedGpu =
                     profile.availableRamMb < residentEstimateMb + gpuSafetyMarginMb
                 if (memoryPressureBannedGpu && sizeMb > 2000) {
                     DebugLogger.log("LITERT", "[GPU] BANNED by RAM pressure: availRam (${profile.availableRamMb}MB) < residentEst (${residentEstimateMb}MB) + margin (${gpuSafetyMarginMb}MB) on tier=${profile.tier}. Falling back to CPU.")
+                }
+
+                // See isGpuRestrictedToCompactOnLowTier() in the companion
+                // object above for the full rationale (LOW/MINIMAL-tier GPU
+                // is compact-model-only, and isLowRamDevice is an additional
+                // conservative input, never a standalone veto).
+                val gpuRestrictedToCompactOnLowTier = isGpuRestrictedToCompactOnLowTier(
+                    tier = profile.tier,
+                    isLowRamDevice = profile.isLowRamDevice,
+                    isCompactModel = isCompactTier,
+                )
+                if (gpuRestrictedToCompactOnLowTier) {
+                    DebugLogger.log("LITERT", "[GPU] Restricted on tier=${profile.tier} (isLowRamDevice=${profile.isLowRamDevice}): GPU is compact-model-only here, and ${modelKey(config.modelPath)} isn't compact. Falling back to CPU.")
                 }
 
                 // Pre-load memory trim — large models (>1.5 GB) benefit from
@@ -890,7 +905,7 @@ class LiteRTInferenceEngine @Inject constructor(
                         modelPath = config.modelPath,
                         maxTokens = effectiveMaxTokens,
                         profile = profile,
-                        gpuBanned = gpuBanned || memoryPressureBannedGpu,
+                        gpuBanned = gpuBanned || memoryPressureBannedGpu || gpuRestrictedToCompactOnLowTier,
                         dynamicThreads = dynamicThreads,
                         xnnpackBanned = xnnpackBanned,
                     )
@@ -1046,9 +1061,10 @@ class LiteRTInferenceEngine @Inject constructor(
             }
         } else {
             val reason = when {
-                // gpuBanned here is (crash ban || RAM-pressure gate) merged by the
+                // gpuBanned here is (crash ban || RAM-pressure gate ||
+                // LOW/MINIMAL-tier compact-only restriction) merged by the
                 // caller — the specific cause was already logged above.
-                gpuBanned        -> "GPU banned for this load (crash ban or RAM pressure — see earlier [GPU] line) for ${modelKey(modelPath)}"
+                gpuBanned        -> "GPU banned for this load (crash ban, RAM pressure, or tier restriction — see earlier [GPU] line) for ${modelKey(modelPath)}"
                 !profile.gpuSafe -> "gpuSafe=false — SoC=${profile.socModel} API=${profile.apiLevel}"
                 else             -> "model too large for GPU memory budget"
             }
@@ -1639,4 +1655,88 @@ internal fun isRepetitionLoop(tail: String): Boolean {
         }
     }
     return false
+}
+
+// ── GPU admission policy (pure, no Android/native deps) ──────────────────
+// Top-level `internal`, same reason as [isRepetitionLoop] above: nothing
+// here touches Context or the native engine, so it's unit-testable without
+// Robolectric (which this project deliberately doesn't have).
+
+/**
+ * Combined OS + KV-cache/activations + GPU-backend-overhead reserve
+ * required above a model's resident estimate before attempting GPU.
+ *
+ * Continuous in [totalRamMb], not a 3-step lookup — interpolated between
+ * the same three field-validated anchors the old flat-tier version used
+ * (1800MB at the LOW/MINIMAL floor, 1400MB at the LOW/MID boundary,
+ * 1200MB at the MID/FLAGSHIP boundary; boundaries mirror DeviceTier's own
+ * in DeviceProfile.kt rather than duplicating a second set of numbers). A
+ * flat per-tier step gave a 6.1GB device and a 9.9GB device — both MID —
+ * the identical margin; this scales smoothly across the range instead.
+ * 1200MB is a floor for 10GB+, not decreased further past that point —
+ * it's already validated as sufficient at ~11GB (see the fresh-install
+ * evidence at this function's call site in [LiteRTInferenceEngine]), and
+ * there's no evidence a 16GB device needs LESS margin than an 11GB one.
+ *
+ * The three anchor values themselves aren't re-derived here, only their
+ * granularity is — this is still one combined reserve, not
+ * independently-measured OS / KV-cache / backend-overhead terms.
+ * Splitting it further needs real per-component data from testing across
+ * the actual supported device matrix, not guessed constants.
+ */
+internal fun gpuSafetyMarginMb(totalRamMb: Long): Long {
+    val lowAnchorRamMb = 3_500L   // DeviceTier LOW floor
+    val midAnchorRamMb = 6_000L   // DeviceTier LOW/MID boundary
+    val highAnchorRamMb = 10_000L // DeviceTier MID/FLAGSHIP boundary
+    val lowMarginMb = 1_800L
+    val midMarginMb = 1_400L
+    val highMarginMb = 1_200L
+    return when {
+        totalRamMb <= lowAnchorRamMb -> lowMarginMb
+        totalRamMb >= highAnchorRamMb -> highMarginMb
+        totalRamMb <= midAnchorRamMb ->
+            lerpMb(totalRamMb, lowAnchorRamMb, midAnchorRamMb, lowMarginMb, midMarginMb)
+        else ->
+            lerpMb(totalRamMb, midAnchorRamMb, highAnchorRamMb, midMarginMb, highMarginMb)
+    }
+}
+
+internal fun lerpMb(x: Long, x0: Long, x1: Long, y0: Long, y1: Long): Long =
+    y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+/**
+ * Same classification the token ladder already used for "is this the
+ * compact model" (name hints or a small file), now also the input to
+ * [isGpuRestrictedToCompactOnLowTier] below. Pulled into one place so both
+ * call sites can't drift apart.
+ */
+internal fun isCompactModel(nameForTier: String, sizeMb: Long): Boolean =
+    nameForTier.contains("1b") || nameForTier.contains("compact") || sizeMb < 700
+
+/**
+ * LOW/MINIMAL-tier devices (roughly ≤6GB total RAM) treat GPU as an
+ * optional path for the compact model only, not a default entitlement the
+ * way MID/FLAGSHIP get it — even when the memory-pressure gate clears.
+ * CPU stays the dependable default for the segment with the least
+ * headroom and the most OEM driver variance; a larger model on these
+ * devices only ever gets CPU.
+ *
+ * [isLowRamDevice] (Android's own OEM-influenced
+ * ActivityManager.isLowRamDevice() classification) widens this same
+ * restriction to any device the OS itself flags as memory-constrained,
+ * even one whose totalRamMb happens to land in MID. It's an ADDITIONAL
+ * conservative input, not a standalone veto: it only ever makes this
+ * restriction apply to MORE devices, never bans GPU by itself independent
+ * of tier/model, and never overrides the real-time memory-pressure gate
+ * elsewhere.
+ */
+internal fun isGpuRestrictedToCompactOnLowTier(
+    tier: com.saarthi.core.inference.model.DeviceTier,
+    isLowRamDevice: Boolean,
+    isCompactModel: Boolean,
+): Boolean {
+    val tierRestricted =
+        tier == com.saarthi.core.inference.model.DeviceTier.LOW ||
+            tier == com.saarthi.core.inference.model.DeviceTier.MINIMAL
+    return (tierRestricted || isLowRamDevice) && !isCompactModel
 }
