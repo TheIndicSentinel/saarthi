@@ -21,4 +21,7 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(libs.coroutines.android)
     implementation(project(":core:core-common"))
+
+    // Real SQLite engine for Migration tests — see SaarthiDatabaseMigrationTest.
+    testImplementation(libs.sqlite.jdbc)
 }

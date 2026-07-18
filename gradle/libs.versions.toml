@@ -25,6 +25,7 @@ pdfbox-android = "2.0.27.0"
 junit = "4.13.2"
 mockk = "1.13.13"
 turbine = "1.1.0"
+sqlite-jdbc = "3.46.1.3"
 androidx-test-runner = "1.6.2"
 androidx-test-ext-junit = "1.2.1"
 androidx-test-espresso = "3.6.1"
@@ -82,6 +83,11 @@ coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
+# Pure-JVM, self-contained SQLite engine — test-only. Lets a Room Migration's
+# raw execSQL() calls be verified against a REAL SQLite engine in an ordinary
+# JVM unit test (no Robolectric, no emulator/instrumented-test CI needed,
+# neither of which this project has).
+sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqlite-jdbc" }
 
 # Instrumentation tests (androidTest) — the test APK Firebase Test Lab runs.
 # androidx.test:runner carries AndroidJUnitRunner, the class the test APK's
