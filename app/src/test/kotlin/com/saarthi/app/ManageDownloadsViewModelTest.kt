@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -85,6 +86,23 @@ class ManageDownloadsViewModelTest {
         mockDownloadManager = mockk(relaxed = true)
         mockInferenceEngine = mockk(relaxed = true)
         every { mockInferenceEngine.activeModelName } returns null
+    }
+
+    @After
+    fun tearDown() {
+        // refresh()/deleteModel() launch on the real Dispatchers.IO, which
+        // runTest/advanceUntilIdle() can't wait for — a test's own
+        // background work (or a straggler from init{}'s refresh()) can
+        // still be executing when this test method returns. @Rule teardown
+        // (TemporaryFolder deleting its directory) runs AFTER this @After,
+        // so without a drain buffer here that teardown — or the NEXT
+        // test's fresh mocks replacing this instance's — can race a still
+        // -running coroutine, which then throws asynchronously and
+        // surfaces as UncaughtExceptionsBeforeTest in whichever LATER test
+        // happens to be running, not this one. 300ms is generous for what
+        // should be near-instant mock-backed work, including on a loaded
+        // CI runner.
+        Thread.sleep(300)
     }
 
     companion object {
