@@ -77,10 +77,6 @@ data class SettingsDetailStrings(
     val mdDownloadMore: String = "Download more models",
     val mdActive: String = "Active",
     val mdIntegrityWarning: String = "Verification issue — may be corrupted",
-    val mdDeleteConfirmTitle: String = "Delete this model?",
-    val mdDeleteConfirmBody: String = "You'll need to download it again to use it — and the next time it starts up, it may take longer while it re-optimizes for your device.",
-    val mdDelete: String = "Delete",
-    val mdCancel: String = "Cancel",
     // History
     val histTitle: String = "Conversations",
     val histTopSub: String = "All stored on your device",
