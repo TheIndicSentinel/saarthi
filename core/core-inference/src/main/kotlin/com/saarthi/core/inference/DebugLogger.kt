@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -162,6 +163,7 @@ object DebugLogger {
      * "saarthi_debug*.log" entries are deleted best-effort and a fresh
      * canonical file is created.
      */
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun findOrCreateMediaStoreEntry(context: Context): Uri? {
         return runCatching {
             val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
