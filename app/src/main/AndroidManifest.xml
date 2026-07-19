@@ -97,11 +97,29 @@
 
         <!--
             memtagMode="off": Disables ARM MTE (Memory Tagging Extension) for this process.
-            llama.cpp's GGML allocator does not tag memory allocations, so MTE on ARMv9
-            devices (Android 16+) converts previously-silent NEON kernel out-of-bound
-            writes into hard SIGSEGV crashes. The SVE2 root cause is addressed via the
-            CMake patch that removes android_armv9 GGML backend variants. This flag is a
-            secondary safeguard for any remaining untagged allocations in llama.cpp.
+
+            Verified facts as of 2026-07-19 (git history, not speculation):
+             - Added 2026-05-02 (fb0e0013e) to stop MTE on ARMv9 devices (Android 16+)
+               from converting a silent llama.cpp/GGML out-of-bound NEON write into a
+               hard SIGSEGV, under the MediaPipe-based engine of that time.
+             - The engine was fully replaced the very next day, 2026-05-03 (60e2f4f),
+               by litertlm-android (Google AI Edge LiteRT-LM) — this app has not run
+               llama.cpp/GGML code since. The CMake patch once referenced here (removing
+               android_armv9 GGML backend variants) no longer exists in this repo; it
+               went with the vendored llama.cpp build.
+             - In ~2.5 months of active native-crash diagnosis since that migration
+               (SM8550 GPU/OpenCL, NPU/QNN SIGKILL, XNNPACK CPU allocation, Conversation-
+               recycling SIGKILL — see git log for `fix(inference)` / `fix: ... crash`),
+               none were attributed to MTE or pointer tagging.
+             - NOT verified: whether LiteRT-LM's own native (C++) allocator is untagged
+               in a way MTE would fault on — it wasn't audited, only observed to not have
+               produced a crash yet, and this app has not been tested on real ARMv9/MTE
+               hardware (Android 16+ MTE-capable devices remain a small slice of this
+               app's mid-range-India-focused install base).
+
+            Kept "off" defensively: cost is zero on non-MTE hardware (the overwhelming
+            majority of this app's target devices), so there's no upside to removing an
+            unproven-safe flag ahead of real MTE-hardware validation.
         -->
 
         <activity
