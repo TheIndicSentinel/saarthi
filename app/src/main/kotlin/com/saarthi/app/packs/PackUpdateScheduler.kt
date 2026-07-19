@@ -21,8 +21,9 @@ import javax.inject.Singleton
  * the worker.
  *
  * Constraints chosen for "respectful background data refresh":
- *  • UNMETERED network only — never burns a user's cellular data
- *    pulling a knowledge-pack update.
+ *  • Any network (Wi-Fi or mobile data) — see [schedule]'s own comment for
+ *    why UNMETERED-only would be wrong here. The tiny pack size keeps
+ *    cellular impact negligible either way.
  *  • Battery not low — won't run when the user is conserving power.
  *  • Periodic, 24-hour interval — a pack updates daily at most.
  *
@@ -63,7 +64,7 @@ class PackUpdateScheduler @Inject constructor(
         val configured = BuildConfig.KISAN_PACK_MANIFEST_URL.isNotBlank()
         DebugLogger.log(
             "PACK",
-            "PackUpdateWorker enqueued (every ${REPEAT_INTERVAL_HOURS}h, UNMETERED). manifest=${if (configured) "configured" else "EMPTY (no-op)"}",
+            "PackUpdateWorker enqueued (every ${REPEAT_INTERVAL_HOURS}h, any network). manifest=${if (configured) "configured" else "EMPTY (no-op)"}",
         )
     }
 

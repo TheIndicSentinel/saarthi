@@ -45,7 +45,7 @@ import java.net.URL
  *  • Manifest `version` ≤ installed version → exits cleanly.
  *  • Any HTTP / IO failure → [Result.retry] so WorkManager backs off.
  *
- * Schedule + constraints: see [PackUpdateScheduler] — UNMETERED, idle,
+ * Schedule + constraints: see [PackUpdateScheduler] — any network,
  * battery-not-low, 24 h cadence.
  */
 class PackUpdateWorker(
