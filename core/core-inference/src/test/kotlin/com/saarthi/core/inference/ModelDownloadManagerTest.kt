@@ -16,6 +16,7 @@ import io.mockk.mockkObject
 import io.mockk.unmockkObject
 import io.mockk.verify
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -209,6 +210,41 @@ class ModelDownloadManagerTest {
         assertFalse(manager.isDownloaded(model))
         writeFile(manager.modelsDir(), model.fileName, sizeBytes = 5_000_000)
         assertTrue(manager.isDownloaded(model))
+    }
+
+    // ── hasIntegrityWarning ──────────────────────────────────────────────────
+
+    @Test
+    fun `hasIntegrityWarning is false when the file does not exist`() = runBlocking {
+        val model = testModel()
+        assertFalse(manager.hasIntegrityWarning(model))
+    }
+
+    @Test
+    fun `hasIntegrityWarning is false when no verdict is cached yet`() = runBlocking {
+        val model = testModel(fileSizeBytes = 1_000_000L)
+        writeFile(manager.modelsDir(), model.fileName, sizeBytes = 1_000_000)
+        coEvery { mockIntegrityStore.cachedVerdict(model.fileName, any(), any()) } returns null
+
+        assertFalse(manager.hasIntegrityWarning(model))
+    }
+
+    @Test
+    fun `hasIntegrityWarning is false when the cached verdict matched`() = runBlocking {
+        val model = testModel(fileSizeBytes = 1_000_000L)
+        writeFile(manager.modelsDir(), model.fileName, sizeBytes = 1_000_000)
+        coEvery { mockIntegrityStore.cachedVerdict(model.fileName, any(), any()) } returns true
+
+        assertFalse(manager.hasIntegrityWarning(model))
+    }
+
+    @Test
+    fun `hasIntegrityWarning is true when the cached verdict is a mismatch`() = runBlocking {
+        val model = testModel(fileSizeBytes = 1_000_000L)
+        writeFile(manager.modelsDir(), model.fileName, sizeBytes = 1_000_000)
+        coEvery { mockIntegrityStore.cachedVerdict(model.fileName, any(), any()) } returns false
+
+        assertTrue(manager.hasIntegrityWarning(model))
     }
 
     // ── Legacy external-tmp migration — the exact review-cycle bug fix ─────────

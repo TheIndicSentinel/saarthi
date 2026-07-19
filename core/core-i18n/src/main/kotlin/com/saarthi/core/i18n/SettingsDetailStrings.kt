@@ -76,6 +76,7 @@ data class SettingsDetailStrings(
     val mdNoModels: String = "No models downloaded yet.",
     val mdDownloadMore: String = "Download more models",
     val mdActive: String = "Active",
+    val mdIntegrityWarning: String = "Verification issue — may be corrupted",
     // History
     val histTitle: String = "Conversations",
     val histTopSub: String = "All stored on your device",

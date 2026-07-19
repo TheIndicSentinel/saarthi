@@ -124,6 +124,21 @@ class ModelDownloadManager @Inject constructor(
     fun isDownloaded(model: ModelEntry): Boolean =
         isFileComplete(resolveLocalFile(model), model.fileSizeBytes)
 
+    /**
+     * True only if [verifyExistingFileInBackground] already ran for this
+     * exact file state and recorded a hash mismatch — never triggers a hash
+     * computation itself (multi-GB files, must stay cheap for a UI read).
+     * Returns false while a check is still pending or none was ever needed
+     * (no pinned hash for this entry), so this is advisory ("known bad"),
+     * not a completeness guarantee ("known good").
+     */
+    suspend fun hasIntegrityWarning(model: ModelEntry): Boolean {
+        val file = resolveLocalFile(model)
+        if (!file.exists()) return false
+        val cached = integrityStore.cachedVerdict(file.name, file.length(), file.lastModified())
+        return cached == false
+    }
+
     // ── Download API ──────────────────────────────────────────────────────────
 
     /**

@@ -1222,6 +1222,7 @@ fun ManageDownloadsScreen(
                         InstalledModelRow(
                             model = m,
                             activeLabel = d.mdActive,
+                            integrityWarningLabel = d.mdIntegrityWarning,
                             onDelete = { viewModel.deleteModel(m.entry) },
                         )
                     }
@@ -1281,6 +1282,7 @@ private fun StorageLegend(color: Color, label: String) {
 private fun InstalledModelRow(
     model: com.saarthi.app.DownloadedModel,
     activeLabel: String,
+    integrityWarningLabel: String,
     onDelete: () -> Unit,
 ) {
     Row(
@@ -1310,6 +1312,9 @@ private fun InstalledModelRow(
                 )
                 if (model.active) {
                     SaarthiChip(text = activeLabel, tone = ChipTone.Jade, small = true)
+                }
+                if (model.hasIntegrityWarning) {
+                    SaarthiChip(text = integrityWarningLabel, tone = ChipTone.Terracotta, small = true)
                 }
             }
             Text(

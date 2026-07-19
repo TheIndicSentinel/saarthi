@@ -24,6 +24,7 @@ data class DownloadedModel(
     val entry: ModelEntry,
     val sizeBytes: Long,
     val active: Boolean,
+    val hasIntegrityWarning: Boolean = false,
 )
 
 data class ManageDownloadsUiState(
@@ -58,6 +59,7 @@ class ManageDownloadsViewModel @Inject constructor(
                         entry = m,
                         sizeBytes = if (file.exists()) file.length() else 0,
                         active = active == m.displayName,
+                        hasIntegrityWarning = downloadManager.hasIntegrityWarning(m),
                     )
                 }
             val stat = StatFs(Environment.getDataDirectory().path)
