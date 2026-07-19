@@ -1110,6 +1110,7 @@ fun ManageDownloadsScreen(
 ) {
     val d = currentLanguage.settingsDetail
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var modelPendingDelete by remember { mutableStateOf<com.saarthi.app.DownloadedModel?>(null) }
     val installedBytes = remember(state.installed) { state.installed.sumOf { it.sizeBytes } }
     val totalGb = state.phoneTotalBytes / 1_073_741_824f
     val freeGb = state.phoneFreeBytes / 1_073_741_824f
@@ -1223,7 +1224,7 @@ fun ManageDownloadsScreen(
                             model = m,
                             activeLabel = d.mdActive,
                             integrityWarningLabel = d.mdIntegrityWarning,
-                            onDelete = { viewModel.deleteModel(m.entry) },
+                            onDelete = { modelPendingDelete = m },
                         )
                     }
                 }
@@ -1261,6 +1262,28 @@ fun ManageDownloadsScreen(
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    modelPendingDelete?.let { pending ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { modelPendingDelete = null },
+            containerColor = SaarthiColors.Bg2,
+            title = { Text(d.mdDeleteConfirmTitle, color = SaarthiColors.Text) },
+            text = { Text(d.mdDeleteConfirmBody, color = SaarthiColors.Text2) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    viewModel.deleteModel(pending.entry)
+                    modelPendingDelete = null
+                }) {
+                    Text(d.mdDelete, color = SaarthiColors.Rose, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { modelPendingDelete = null }) {
+                    Text(d.mdCancel, color = SaarthiColors.Text2)
+                }
+            },
+        )
     }
 }
 
