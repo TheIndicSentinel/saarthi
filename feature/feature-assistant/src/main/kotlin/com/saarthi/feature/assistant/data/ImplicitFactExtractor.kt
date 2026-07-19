@@ -78,10 +78,12 @@ class ImplicitFactExtractor @Inject constructor() {
         // boundary so trailing junk never gets stored:
         // "Arjun and I'm vegetarian" → "Arjun", "Arjun aur main shakahari" → "Arjun".
         // Stops at and/or/with/&, romanised+Devanagari "and" (aur/और), a stray
-        // "I'm/I", any copula (hai/hoon/है), or a diet term.
+        // "I'm/I", any copula (hai/hoon/है for Hindi, aahe/आहे for Marathi), or
+        // a diet term.
         val nameBreakers = setOf(
             "and", "&", "or", "aur", "और", "with", "i'm", "im", "i", "also", "but",
             "hai", "hain", "hoon", "hun", "hu", "है", "हैं",
+            "aahe", "ahe", "आहे",
         )
         fun nameHead(s: String): String {
             val kept = mutableListOf<String>()
