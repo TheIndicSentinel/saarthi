@@ -25,8 +25,8 @@ android {
         // both resolve off applicationId automatically — no other code change
         // needed for this rename.
         applicationId = "com.indicsentinel.saarthi"
-        versionCode = 37
-        versionName = "1.0.36"
+        versionCode = 38
+        versionName = "1.0.37"
         // Instrumentation runner for the androidTest APK (Firebase Test Lab /
         // `connectedAndroidTest`). The app convention plugin doesn't set this
         // — only the library one did — so the generated test APK referenced a
