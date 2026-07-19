@@ -72,6 +72,23 @@ jobs:
           path: "**/build/reports/tests/"
           retention-days: 2
 
+      # lintDebug only (not the full `lint`, which also runs lintRelease — a
+      # second full analysis pass for zero extra coverage on a debug-only CI
+      # build, same reasoning as testDebugUnitTest above).
+      - name: Run Android Lint
+        run: |
+          chmod +x gradlew
+          ./gradlew lintDebug --stacktrace
+
+      - name: Upload lint report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: lint-report
+          path: "**/build/reports/lint-results-debug.html"
+          retention-days: 2
+
       # Debug APK — no R8, no keystore, no OOM. The artifact you install to test.
       - name: Build Debug APK
         run: |
@@ -95,6 +112,17 @@ jobs:
           name: build-log
           path: /tmp/build.log
           retention-days: 2
+
+      # Android 15+ devices with 16KB memory pages will refuse to load a
+      # native library that isn't 16KB-aligned inside the APK. -c checks
+      # only (no rewrite); covers both our own jniLibs (already uncompressed
+      # via useLegacyPackaging = false) and litertlm-android's bundled .so
+      # files, which this app doesn't control the build of.
+      - name: Verify 16KB page-size alignment (zipalign -P 16)
+        run: |
+          BUILD_TOOLS_VERSION=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign" \
+            -c -P 16 -v 4 app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
