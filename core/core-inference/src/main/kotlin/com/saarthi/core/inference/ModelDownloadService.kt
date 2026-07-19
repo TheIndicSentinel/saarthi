@@ -228,13 +228,22 @@ class ModelDownloadService : Service() {
                     }
                 }
                 jobs[modelId] = job
-                job.invokeOnCompletion {
+                job.invokeOnCompletion { cause ->
                     // remove(key, value): only clears the map if THIS job is still
                     // the registered one — avoids a restart's new job being evicted
                     // by the old job's completion callback.
                     jobs.remove(modelId, job)
                     latest.remove(modelId); titles.remove(modelId)
-                    if (jobs.isEmpty()) stopEverything() else refreshForeground()
+                    if (jobs.isEmpty()) {
+                        // cause == null means runDownload() returned normally, i.e.
+                        // the model is ready and the caller is about to hand off to
+                        // InferenceService.startLoading() on its own async coroutine
+                        // (see scheduleStopIfIdle's kdoc) — a failed/cancelled job has
+                        // no such handoff, so it stops immediately as before.
+                        if (cause == null) scheduleStopIfIdle() else stopEverything()
+                    } else {
+                        refreshForeground()
+                    }
                 }
             }
 
@@ -599,6 +608,33 @@ class ModelDownloadService : Service() {
         stopSelf()
     }
 
+    /**
+     * A completed download hands off directly to model loading
+     * (InferenceService.startLoading()) on a separate, async ViewModel
+     * coroutine — if this service's own FGS tears down before that call
+     * fires, the app can momentarily have ZERO active foreground service.
+     * Android's startForegroundService() background-launch restriction then
+     * blocks the handoff outright: a field log (2026-07-19) showed
+     * "FGS start skipped (ForegroundServiceStartNotAllowedException...)"
+     * firing within ~100ms of this service's own completion, both times a
+     * download finished with the screen off.
+     *
+     * Keeping this FGS alive a few seconds past completion covers that
+     * handoff window — the app never drops to zero active foreground
+     * services, so InferenceService's startForegroundService() call
+     * qualifies for Android's "app already has an active foreground
+     * service" exemption instead of racing to start from nothing. Re-checks
+     * jobs.isEmpty() at fire time (not schedule time), so a new download
+     * queued during the grace window is handled correctly without any
+     * extra cancellation bookkeeping.
+     */
+    private fun scheduleStopIfIdle() {
+        serviceScope.launch {
+            delay(STOP_GRACE_MS)
+            if (jobs.isEmpty()) stopEverything()
+        }
+    }
+
     private fun buildNotification(title: String, downloaded: Long, total: Long): Notification {
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
@@ -657,6 +693,7 @@ class ModelDownloadService : Service() {
         private const val DEFAULT_TITLE = "Downloading AI model…"
         private const val PROGRESS_INTERVAL_MS = 800L
         private const val MAX_ATTEMPTS = 6
+        private const val STOP_GRACE_MS = 3_000L
 
         private const val ACTION_START  = "com.saarthi.core.inference.action.DOWNLOAD_START"
         private const val ACTION_CANCEL = "com.saarthi.core.inference.action.DOWNLOAD_CANCEL"
