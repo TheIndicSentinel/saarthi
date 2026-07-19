@@ -13,6 +13,8 @@ class InferenceEngineSelector @Inject constructor(
 
     override val isReady: Boolean get() = liteRtEngine.isReady
     override val isReadyFlow: Flow<Boolean> get() = liteRtEngine.isReadyFlow
+    override val isInitializing: Boolean get() = liteRtEngine.isInitializing
+    override val isInitializingFlow: Flow<Boolean> get() = liteRtEngine.isInitializingFlow
 
     override val activeModelName: String? get() = liteRtEngine.activeModelName
     override val activeModelNameFlow: Flow<String?> get() = liteRtEngine.activeModelNameFlow

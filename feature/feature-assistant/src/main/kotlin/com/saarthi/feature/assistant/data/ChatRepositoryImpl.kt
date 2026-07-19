@@ -239,7 +239,16 @@ class ChatRepositoryImpl @Inject constructor(
         return flow {
             // Check readiness first
             if (!inferenceEngine.isReady) {
-                val errMsg = "⚠️ Model not ready. If this model keeps crashing, please go back to setup and select a different model."
+                // isInitializing distinguishes "still loading, this is normal"
+                // (can take a few seconds, or several minutes on a first-ever
+                // load while GPU shaders compile) from a genuine failure — the
+                // previous message implied a crash for BOTH cases, which was
+                // actively misleading during ordinary load time.
+                val errMsg = if (inferenceEngine.isInitializing) {
+                    "⏳ The AI model is still loading. Please wait a few seconds and try again."
+                } else {
+                    "⚠️ Model not ready. If this model keeps crashing, please go back to setup and select a different model."
+                }
                 InferenceService.stop(context)
                 _history.update { history ->
                     history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false) else it }

@@ -15,6 +15,20 @@ interface InferenceEngine {
     val isReadyFlow: Flow<Boolean>
         get() = kotlinx.coroutines.flow.flow { emit(isReady) }
 
+    /**
+     * True while [initialize] is actively running (model load, GPU/NPU
+     * backend selection, first-time shader compilation) — distinct from
+     * [isReady]. A chat screen sees `isReady=false` both while the model is
+     * genuinely still loading (expected, can take from a few seconds up to
+     * several minutes on a first-ever load) and after a real failure; this
+     * flag lets callers tell the two apart instead of assuming the worst.
+     */
+    val isInitializing: Boolean get() = false
+
+    /** Hot flow that emits whenever [isInitializing] changes. */
+    val isInitializingFlow: Flow<Boolean>
+        get() = kotlinx.coroutines.flow.flow { emit(isInitializing) }
+
     /** The display name of the currently loaded model, or null if none. */
     val activeModelName: String?
 

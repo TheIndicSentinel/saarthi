@@ -228,6 +228,10 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile override var isReady: Boolean = false
         private set
 
+    private val _isInitializingFlow = MutableStateFlow(false)
+    override val isInitializingFlow: Flow<Boolean> = _isInitializingFlow.asStateFlow()
+    override val isInitializing: Boolean get() = _isInitializingFlow.value
+
     private val _activeModelNameFlow = MutableStateFlow<String?>(null)
     override val activeModelNameFlow: Flow<String?> = _activeModelNameFlow.asStateFlow()
 
@@ -675,7 +679,24 @@ class LiteRTInferenceEngine @Inject constructor(
 
     // ── Initialize ────────────────────────────────────────────────────────────
 
-    override suspend fun initialize(config: InferenceConfig) = withContext(engineDispatcher) {
+    /**
+     * Thin wrapper around [initializeInternal] that tracks [isInitializing] —
+     * kept separate so the large existing init body below (crash recovery,
+     * tier/GPU decisions, native load) stays untouched. Chat screens use
+     * this to distinguish "still loading, please wait" from a genuine
+     * failure when a message arrives before [isReady] flips true; ANY exit
+     * (success or thrown) clears the flag via finally.
+     */
+    override suspend fun initialize(config: InferenceConfig) {
+        _isInitializingFlow.value = true
+        try {
+            initializeInternal(config)
+        } finally {
+            _isInitializingFlow.value = false
+        }
+    }
+
+    private suspend fun initializeInternal(config: InferenceConfig) = withContext(engineDispatcher) {
         initMutex.withLock {
             generateMutex.withLock {
                 crashLoopBlocked = false

@@ -292,6 +292,7 @@ fun AssistantScreen(
                     isStreaming = uiState.isStreaming,
                     tokensPerSecond = uiState.tokensPerSecond,
                     modelReady = uiState.modelReady,
+                    modelInitializing = uiState.modelInitializing,
                     activeModelName = uiState.activeModelName,
                     onClearChat = viewModel::showClearDialog,
                     isSearchMode = uiState.isSearchMode,
@@ -776,6 +777,7 @@ private fun ChatTopBar(
     isStreaming: Boolean,
     tokensPerSecond: Float,
     modelReady: Boolean,
+    modelInitializing: Boolean,
     activeModelName: String?,
     onClearChat: () -> Unit,
     isSearchMode: Boolean,
@@ -862,6 +864,11 @@ private fun ChatTopBar(
                     text = when {
                         isStreaming -> language.thinkingText
                         modelReady -> activeModelName ?: "AI ready"
+                        // Loading is expected/normal (a few seconds, or several
+                        // minutes on a first-ever load while GPU shaders
+                        // compile) — say so instead of the generic idle
+                        // tagline, which gave no sign anything was happening.
+                        modelInitializing -> language.loadingModelTitle
                         else -> language.chatOfflineSubtitle
                     },
                     style = MaterialTheme.typography.labelMedium.copy(

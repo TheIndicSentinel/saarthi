@@ -51,6 +51,10 @@ data class AssistantUiState(
     val showVoiceMode: Boolean = false,
     val tokensPerSecond: Float = 0f,
     val modelReady: Boolean = false,
+    /** True while the model is actively loading — lets the UI show "Loading
+     *  model…" instead of an alarming "not ready" state during ordinary,
+     *  expected load time (see [com.saarthi.core.inference.engine.InferenceEngine.isInitializing]). */
+    val modelInitializing: Boolean = false,
     val activeModelName: String? = null,
     /**
      * False when the active model is the COMPACT tier (Gemma 3 1B etc.) —
@@ -111,7 +115,9 @@ class AssistantViewModel @Inject constructor(
     // [allMessages] / [currentLanguage] are still null at this point in
     // Kotlin's property-initializer order.
 
-    private val _uiState = MutableStateFlow(AssistantUiState(modelReady = inferenceEngine.isReady))
+    private val _uiState = MutableStateFlow(
+        AssistantUiState(modelReady = inferenceEngine.isReady, modelInitializing = inferenceEngine.isInitializing),
+    )
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
 
     private val allMessages: StateFlow<List<ChatMessage>> = chatRepository.getHistory()
@@ -146,6 +152,10 @@ class AssistantViewModel @Inject constructor(
         // Push-based isReady observation via StateFlow — no polling, no wakeup cost.
         inferenceEngine.isReadyFlow
             .onEach { ready -> _uiState.update { it.copy(modelReady = ready) } }
+            .launchIn(viewModelScope)
+
+        inferenceEngine.isInitializingFlow
+            .onEach { loading -> _uiState.update { it.copy(modelInitializing = loading) } }
             .launchIn(viewModelScope)
 
         // Observe active model name changes — and derive the attachment
