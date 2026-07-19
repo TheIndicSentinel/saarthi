@@ -103,12 +103,6 @@
 -dontwarn androidx.compose.runtime.**
 -dontwarn androidx.compose.ui.tooling.**
 
-# ── Firebase Crashlytics (optional — only effective when google-services.json
-#    is present and the firebase plugins are applied; harmless otherwise) ──
--keepattributes *Annotation*
--keep class com.google.firebase.** { *; }
--dontwarn com.google.firebase.**
-
 # ── PdfBox-Android (PDF text-layer extraction) ─────────────────────────────
 # The TomRoush Android port references a handful of java.awt / java.beans /
 # javax.imageio desktop classes that don't exist on Android; they sit on code
