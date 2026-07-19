@@ -410,16 +410,16 @@ enum class SupportedLanguage(
     val searchHint: String get() = when (this) { HINDI -> "खोजें…"; MARATHI -> "शोधा…"; else -> "Search…" }
     /** Battery-optimization dialog: title (asks to skip battery optimization so long replies aren't cut off). */
     val notifPermTitle: String get() = when (this) {
-        ENGLISH  -> "Keep replies & reminders on time?"
-        HINDI    -> "जवाब और रिमाइंडर समय पर पाएँ?"
-        TAMIL    -> "பதில்களும் நினைவூட்டல்களும் சரியான நேரத்தில் வேண்டுமா?"
-        TELUGU   -> "సమాధానాలు, రిమైండర్‌లు సమయానికి కావాలా?"
-        BENGALI  -> "উত্তর ও রিমাইন্ডার সময়মতো পেতে চান?"
-        MARATHI  -> "उत्तरे आणि स्मरणपत्रे वेळेवर मिळवायची?"
-        KANNADA  -> "ಉತ್ತರಗಳು ಮತ್ತು ರಿಮೈಂಡರ್‌ಗಳು ಸಮಯಕ್ಕೆ ಬೇಕೇ?"
-        GUJARATI -> "જવાબો અને રિમાઇન્ડર સમયસર જોઈએ છે?"
-        PUNJABI  -> "ਜਵਾਬ ਅਤੇ ਰਿਮਾਈਂਡਰ ਸਮੇਂ ਸਿਰ ਚਾਹੀਦੇ ਹਨ?"
-        ODIA     -> "ଉତ୍ତର ଓ ରିମାଇଣ୍ଡର ସମୟରେ ପାଇବେ କି?"
+        ENGLISH  -> "Keep replies on time?"
+        HINDI    -> "जवाब समय पर पाएँ?"
+        TAMIL    -> "பதில் சரியான நேரத்தில் வேண்டுமா?"
+        TELUGU   -> "సమాధానాలు సమయానికి కావాలా?"
+        BENGALI  -> "উত্তর সময়মতো পেতে চান?"
+        MARATHI  -> "उत्तरे वेळेवर मिळवायची?"
+        KANNADA  -> "ಉತ್ತರಗಳು ಸಮಯಕ್ಕೆ ಬೇಕೇ?"
+        GUJARATI -> "જવાબો સમયસર જોઈએ છે?"
+        PUNJABI  -> "ਜਵਾਬ ਸਮੇਂ ਸਿਰ ਚਾਹੀਦੇ ਹਨ?"
+        ODIA     -> "ଉତ୍ତର ସମୟରେ ପାଇବେ କି?"
     }
     /** Battery-optimization dialog: body explaining why the exemption is needed. */
     val batteryOptExplanation: String get() = when (this) {
