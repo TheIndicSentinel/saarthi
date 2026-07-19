@@ -36,7 +36,7 @@ jobs:
     permissions:
       contents: write   # so the .aab can be attached to a GitHub Release too
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
