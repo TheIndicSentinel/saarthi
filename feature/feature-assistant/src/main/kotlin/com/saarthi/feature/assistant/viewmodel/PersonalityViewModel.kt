@@ -17,12 +17,17 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Drives the Personality Pal picker UI.
+ * Drives the Personality Pal picker UI — both chat's own ⋮ → Persona sheet
+ * and the dedicated Settings → Persona page.
  *
- * Selection is global and persisted. Switching personality mid-chat would be
- * confusing (the active conversation already has the previous persona in its
- * KV cache), so [select] also resets the chat session — the next message
- * starts a fresh conversation with the newly-picked persona.
+ * Selection is global and persisted, but resetting the active chat session
+ * is NOT automatic for every caller — only [selectAndStartNewChat] does
+ * that. A picker reached FROM an active chat should use it (continuing that
+ * chat would mix the previous persona's already-established voice, via the
+ * recent-turns recap, into replies from the new one). The Settings page has
+ * no active chat to reconcile, so it uses plain [select] — persist only,
+ * never silently spawning/switching to an empty session the user hasn't
+ * asked for or can't see.
  *
  * The Compact (Gemma 3 1B) tier ignores personality entirely; UI uses
  * [supportedForCurrentModel] to grey out the picker on that tier.
@@ -47,17 +52,29 @@ class PersonalityViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     /**
-     * Persist [id] and start a fresh chat so the new persona authors its own
-     * KV cache from turn one. The current chat is preserved in history.
+     * Persist [id] as the active persona. Does not touch the current chat
+     * session — use this from a picker with no active chat in view (the
+     * Settings page). Callers switching away from a live chat should use
+     * [selectAndStartNewChat] instead, or a stale persona/history mismatch
+     * can leak into the next reply.
      */
     fun select(id: String) {
         if (id == selected.value.id) return
+        viewModelScope.launch { personalityPreference.set(id) }
+    }
+
+    /**
+     * [select] + start a fresh chat so the new persona authors its own KV
+     * cache and turn history from scratch, instead of inheriting the
+     * previous persona's already-established voice via the recent-turns
+     * recap. The current chat is preserved in history, just no longer
+     * active. Use this from any picker reached FROM an active chat (chat's
+     * own ⋮ → Persona sheet) — not from Settings.
+     */
+    fun selectAndStartNewChat(id: String) {
+        if (id == selected.value.id) return
         viewModelScope.launch {
             personalityPreference.set(id)
-            // Reset the session — without this the next user message would be
-            // appended to a Conversation that already has the previous
-            // persona's system prompt baked in, and the persona switch would
-            // appear to do nothing until the user manually started a new chat.
             chatRepository.createSession()
         }
     }
