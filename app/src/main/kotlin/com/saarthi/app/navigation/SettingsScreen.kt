@@ -1150,9 +1150,18 @@ private fun CreativityCard(
  * supplies the ModalBottomSheet wrapper; here a plain top-bar page is the
  * wrapper instead). Wires directly to PersonalityViewModel (feature-assistant
  * already depends on nothing app-specific, and app already depends on
- * feature-assistant), the same ViewModel chat's picker uses — so selection
- * behavior (persist + start a new chat) is identical either way, not a
- * second, diverging implementation.
+ * feature-assistant), the same ViewModel chat's picker uses.
+ *
+ * Calls selectAndStartNewChat(), same as chat's own picker — NOT plain
+ * select(). ChatRepositoryImpl's current session is singleton-scoped
+ * (survives regardless of whether chat is on screen), so a persist-only
+ * selection from here would leave the OLD session active; the next message
+ * sent after returning to chat would then mix the NEW persona's system
+ * prompt with the OLD persona's conversation recap in the same prompt —
+ * the exact mismatch this split was meant to prevent, just relocated
+ * rather than fixed. Resetting here costs nothing the user can see (the
+ * reset isn't visible from Settings either way) and keeps persona/history
+ * consistent the moment they return to chat.
  */
 @Composable
 fun PersonaScreen(
@@ -1173,7 +1182,7 @@ fun PersonaScreen(
                 selectedId = activePersonality.id,
                 supportedForCurrentModel = personalitySupported,
                 language = currentLanguage,
-                onPick = { id -> personalityVm.select(id) },
+                onPick = { id -> personalityVm.selectAndStartNewChat(id) },
                 onDismiss = onBack,
             )
         }
