@@ -60,6 +60,7 @@ sealed class Route(val path: String) {
     /** Help & support — contact + problem report. */
     data object Support      : Route("support")
     data object ResponseStyle: Route("response-style")
+    data object Persona      : Route("persona")
     data object Downloads    : Route("downloads")
     // Model change is onboarding re-entry — same composable, modelChange flag
     data object ModelChange  : Route("onboarding?modelChange=true")
@@ -208,6 +209,7 @@ fun SaarthiNavHost(
                         "about" -> navController.navigate(Route.About.path)
                         "support" -> navController.navigate(Route.Support.path)
                         "response-style" -> navController.navigate(Route.ResponseStyle.path)
+                        "persona" -> navController.navigate(Route.Persona.path)
                         "downloads" -> navController.navigate(Route.Downloads.path)
                         "assistant" -> navController.navigate(Route.Assistant.path)
                     }
@@ -235,6 +237,9 @@ fun SaarthiNavHost(
         }
         composable(Route.ResponseStyle.path) {
             ResponseStyleScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)
+        }
+        composable(Route.Persona.path) {
+            PersonaScreen(onBack = { navController.popBackStack() }, currentLanguage = currentLanguage)
         }
         composable(Route.Downloads.path) {
             ManageDownloadsScreen(

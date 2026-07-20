@@ -156,19 +156,25 @@ fun SettingsScreen(
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("response-style") },
             )
-            // Personality Pal — read-only summary; tapping opens chat where
-            // the picker sheet lives (single source of truth for selection +
-            // session reset).
+            // Personality Pal — tapping opens a dedicated full-page picker
+            // (Route.Persona), not chat. The limitation on Compact-tier
+            // models is surfaced here, in the row subtitle, before the user
+            // navigates in at all — not only after opening the picker.
             val settingsPersonaVm: com.saarthi.app.SettingsPersonalityViewModel =
                 androidx.hilt.navigation.compose.hiltViewModel()
             val activePersona by settingsPersonaVm.active.collectAsStateWithLifecycle()
+            val personaSupported by settingsPersonaVm.supportedForCurrentModel.collectAsStateWithLifecycle()
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Face, contentDescription = null) },
                 title = s.persona,
-                subtitle = "${activePersona.displayName} · ${activePersona.tagline}",
+                subtitle = if (personaSupported) {
+                    "${activePersona.displayName} · ${activePersona.tagline}"
+                } else {
+                    "Not available on the compact model"
+                },
                 tone = ChipTone.Indigo,
                 trailing = { ChevronRight() },
-                onClick = { onNavigate("assistant") },
+                onClick = { onNavigate("persona") },
             )
 
             SectionLabel(s.sectionApp)
@@ -1129,6 +1135,45 @@ private fun CreativityCard(
             style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3, lineHeight = 14.sp),
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
         )
+    }
+}
+
+// ── Persona ──────────────────────────────────────────────────────────────────
+
+/**
+ * Dedicated full-page persona picker, reached from Settings → Persona.
+ * Reuses PersonalityPickerSheet's exact content (list, selection state,
+ * compact-tier banner, "switching starts a new chat" note) unmodified —
+ * that composable was already sheet-agnostic (its caller in AssistantScreen
+ * supplies the ModalBottomSheet wrapper; here a plain top-bar page is the
+ * wrapper instead). Wires directly to PersonalityViewModel (feature-assistant
+ * already depends on nothing app-specific, and app already depends on
+ * feature-assistant), the same ViewModel chat's picker uses — so selection
+ * behavior (persist + start a new chat) is identical either way, not a
+ * second, diverging implementation.
+ */
+@Composable
+fun PersonaScreen(
+    onBack: () -> Unit,
+    currentLanguage: SupportedLanguage = SupportedLanguage.HINDI,
+) {
+    val s = currentLanguage.settings
+    val personalityVm: com.saarthi.feature.assistant.viewmodel.PersonalityViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel()
+    val activePersonality by personalityVm.selected.collectAsStateWithLifecycle()
+    val personalitySupported by personalityVm.supportedForCurrentModel.collectAsStateWithLifecycle()
+
+    Column(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
+        SaarthiTopBar(title = s.persona, onBack = onBack)
+        Column(modifier = Modifier.padding(top = 8.dp)) {
+            com.saarthi.feature.assistant.ui.components.PersonalityPickerSheet(
+                personalities = personalityVm.all,
+                selectedId = activePersonality.id,
+                supportedForCurrentModel = personalitySupported,
+                onPick = { id -> personalityVm.select(id) },
+                onDismiss = onBack,
+            )
+        }
     }
 }
 
