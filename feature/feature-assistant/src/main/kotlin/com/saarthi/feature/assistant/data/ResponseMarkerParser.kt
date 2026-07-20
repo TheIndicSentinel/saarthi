@@ -81,6 +81,22 @@ object ResponseMarkerParser {
         RegexOption.IGNORE_CASE,
     )
 
+    // Defensive net for a GARBLED marker keyword. A real production leak:
+    // "[SAARMY_MEMORY key=\"lying_is_always_wrong\" value=\"...\"]" — the
+    // model dropped a letter from SAARTHI. ANY_SAARTHI_MARKER_REGEX above
+    // requires the exact literal "SAARTHI_" and can't catch a misspelling.
+    // No legitimate reply content, in any supported language, contains a
+    // bracketed, single-identifier token immediately followed by "_MEMORY"
+    // or "_REMINDER" — that shape alone is the leak signature, regardless
+    // of whether the prefix is spelled correctly. Matching on shape instead
+    // of the literal brand name catches this and any future misspelling of
+    // the same kind, the same way the other passes below catch missing
+    // brackets / colon-form / orphan attribute lines.
+    private val GARBLED_MARKER_KEYWORD_REGEX = Regex(
+        """\[?\s*[A-Za-z][A-Za-z0-9]*_(?:MEMORY|REMINDER)\b[^\]\n]*\]?""",
+        RegexOption.IGNORE_CASE,
+    )
+
     // The Kisan pack tells the model to prefix a general-knowledge fallback
     // answer with [GENERAL] (the ViewModel reads it to set the source label);
     // it must NEVER render in the bubble. Match it anywhere, with or without a
@@ -391,11 +407,15 @@ object ResponseMarkerParser {
             // regexes above miss (empty values, wrong spacing, partial fields,
             // curly quotes, missing brackets).
             .replace(ANY_SAARTHI_MARKER_REGEX, "")
-            // Second defensive pass — wipe lines that consist solely of one
+            // Second defensive pass — same idea, but for a GARBLED marker
+            // keyword (e.g. "SAARMY_MEMORY") that ANY_SAARTHI_MARKER_REGEX's
+            // exact-literal match can't catch.
+            .replace(GARBLED_MARKER_KEYWORD_REGEX, "")
+            // Third defensive pass — wipe lines that consist solely of one
             // or more marker attribute fragments. Covers the multi-line-leak
             // case where the marker keyword landed on a prior line.
             .replace(ORPHAN_MARKER_ATTRIBUTE_LINE, "")
-            // Third pass — the YAML / colon-form leak ("marker:" + "key: ...").
+            // Fourth pass — the YAML / colon-form leak ("marker:" + "key: ...").
             .replace(MARKER_LABEL_LINE, "")
             .replace(ORPHAN_MARKER_COLON_LINE, "")
         for (token in GEMMA_SPECIAL_TOKENS) {

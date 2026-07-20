@@ -202,6 +202,18 @@ class ResponseMarkerParserTest {
     }
 
     @Test
+    fun stripForDisplay_removes_marker_with_garbled_keyword() {
+        // Real field leak: the model dropped a letter from SAARTHI, so
+        // "[SAARMY_MEMORY key=\"lying_is_always_wrong\" value=\"...\"]"
+        // slipped past ANY_SAARTHI_MARKER_REGEX's exact-literal match and
+        // rendered visibly in the chat bubble.
+        val raw = "Lying is not always wrong.\n" +
+            "[SAARMY_MEMORY key=\"lying_is_always_wrong\" value=\"depends on context\"]"
+        val out = ResponseMarkerParser.stripForDisplay(raw, streaming = false)
+        assertEquals("Lying is not always wrong.", out)
+    }
+
+    @Test
     fun stripForDisplay_removes_general_tag() {
         assertEquals("Not in the pack.", ResponseMarkerParser.stripForDisplay("[GENERAL] Not in the pack.", streaming = false))
     }
