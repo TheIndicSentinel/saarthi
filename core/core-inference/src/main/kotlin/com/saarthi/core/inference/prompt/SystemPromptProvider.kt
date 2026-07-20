@@ -188,25 +188,12 @@ class SystemPromptProvider @Inject constructor() {
         // attention is strongest on Gemma 4 / 3n, so this is what actually
         // makes the persona feel different in the reply — not the identity
         // paragraph alone.
-        val finalBehaviourBlock = buildString {
-            if (personalityBehaviorRules.isNotEmpty()) {
-                append("PERSONA BEHAVIOUR (apply on EVERY reply, in this order of priority):\n")
-                personalityBehaviorRules.forEach { rule ->
-                    append("- ")
-                    append(rule)
-                    append('\n')
-                }
-            }
-            if (responseStyleSuffix.isNotBlank()) {
-                if (isNotEmpty()) append('\n')
-                append("REPLY-STYLE CONSTRAINTS (the user has set these in Settings — honour them):\n")
-                append(responseStyleSuffix)
-            }
-            if (reasoningRules.isNotBlank()) {
-                if (isNotEmpty()) append('\n')
-                append(reasoningRules)
-            }
-        }.trimEnd()
+        //
+        // Computed via criticalTail() below (not inline) so a caller that
+        // needs to protect this exact content from truncation (see that
+        // function's kdoc) can get the identical value instead of
+        // reconstructing it from scratch and risking drift.
+        val tail = criticalTail(personalityBehaviorRules, responseStyleSuffix, reasoningRules, languageInstruction)
         // Sandwich layout — language directive at BOTH ends of the prompt.
         //
         //   1. TOP language directive — anchors the model's output language
@@ -259,15 +246,63 @@ class SystemPromptProvider @Inject constructor() {
                 append("\n\n")
                 append(priorTurnsContext)
             }
-            if (finalBehaviourBlock.isNotBlank()) {
+            if (tail.isNotBlank()) {
                 append("\n\n")
-                append(finalBehaviourBlock)
-            }
-            if (languageInstruction.isNotBlank()) {
-                append("\n\n")
-                append(languageInstruction)
+                append(tail)
             }
         }.trimEnd()
+    }
+
+    /**
+     * The exact tail [build] appends at the end of the prompt: persona
+     * behaviour rules + response-style constraints + reasoning rules,
+     * followed by the language directive — everything that comes after the
+     * memory/recap context. Exposed separately so a caller trimming an
+     * over-budget prompt can pin this verbatim instead of reconstructing it
+     * from its own copies of these values, which risks drifting from what
+     * was actually assembled (e.g. a caller using the app's raw selected
+     * language when [languageInstruction] here reflects a resolved
+     * override — that mismatch was a real bug: the pin silently failed to
+     * match, so a truncated prompt could lose persona/style behaviour
+     * entirely while keeping only a language directive that didn't match
+     * what the rest of the prompt was built with).
+     *
+     * Pure function of its arguments — [build] computes this exact value
+     * internally (never duplicated), so calling this again with the SAME
+     * arguments [build] was given is guaranteed to reproduce it exactly.
+     */
+    fun criticalTail(
+        personalityBehaviorRules: List<String>,
+        responseStyleSuffix: String,
+        reasoningRules: String,
+        languageInstruction: String,
+    ): String {
+        val finalBehaviourBlock = buildString {
+            if (personalityBehaviorRules.isNotEmpty()) {
+                append("PERSONA BEHAVIOUR (apply on EVERY reply, in this order of priority):\n")
+                personalityBehaviorRules.forEach { rule ->
+                    append("- ")
+                    append(rule)
+                    append('\n')
+                }
+            }
+            if (responseStyleSuffix.isNotBlank()) {
+                if (isNotEmpty()) append('\n')
+                append("REPLY-STYLE CONSTRAINTS (the user has set these in Settings — honour them):\n")
+                append(responseStyleSuffix)
+            }
+            if (reasoningRules.isNotBlank()) {
+                if (isNotEmpty()) append('\n')
+                append(reasoningRules)
+            }
+        }.trimEnd()
+        return buildString {
+            if (finalBehaviourBlock.isNotBlank()) append(finalBehaviourBlock)
+            if (languageInstruction.isNotBlank()) {
+                if (isNotEmpty()) append("\n\n")
+                append(languageInstruction)
+            }
+        }
     }
 
     // ── COMPACT (Gemma 3 1B / Compact) ───────────────────────────────────────

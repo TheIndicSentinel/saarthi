@@ -779,7 +779,8 @@ class ChatRepositoryImpl @Inject constructor(
             // reply at all. The compact version (~160 tokens) both fits the
             // small window AND frees ~1000 tokens for actual document chunks,
             // which is the real lever for answer quality on E2B/3n.
-            val systemInstructions = buildSystemPrompt(memoryContext, priorTurns, grounded = docsPinned)
+            val systemPromptBuild = buildSystemPrompt(memoryContext, priorTurns, grounded = docsPinned)
+            val systemInstructions = systemPromptBuild.prompt
             val budget = maxPromptChars
             // Size the RAG block to fit the remaining budget AFTER the
             // system prompt and the user message have claimed their space.
@@ -820,12 +821,22 @@ class ChatRepositoryImpl @Inject constructor(
                 // On weaker models (Gemma 4 E2B) the bottom directive is what
                 // actually forces the reply language, so losing it made every
                 // reply revert to English regardless of the selected language.
-                // Pin the bottom language directive to the user tail (no docs
-                // turn only — on doc turns RAG sits between them) so trimming
-                // can never cut it.
-                val langTail = currentLanguage.systemPromptInstruction
-                val pinnedTail = if (fileContext.isEmpty() && langTail.isNotBlank())
-                    "$langTail\n\n$userMessage" else userMessage
+                //
+                // Originally this pin only covered the raw language directive
+                // (currentLanguage.systemPromptInstruction) — but overflow was
+                // also silently dropping persona behaviour rules and response
+                // -style constraints along with it, since neither was pinned,
+                // producing longer/off-persona replies once a long
+                // conversation's memory+recap pushed the prompt over budget.
+                // criticalTail is the exact tail build() assembled the prompt
+                // with (persona rules + style constraints + reasoning rules +
+                // the RESOLVED effective-language directive, which can differ
+                // from currentLanguage when Response Style forces English) —
+                // pinning it verbatim instead of reconstructing it here means
+                // this can never drift from what the prompt actually contains.
+                val criticalTail = systemPromptBuild.criticalTail
+                val pinnedTail = if (fileContext.isEmpty() && criticalTail.isNotBlank())
+                    "$criticalTail\n\n$userMessage" else userMessage
                 val finalPrompt = trimPrompt(prompt, budget, pinnedTail = pinnedTail)
                 DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget")
                 finalPrompt
@@ -1290,7 +1301,19 @@ class ChatRepositoryImpl @Inject constructor(
         return result
     }
 
-    private fun buildSystemPrompt(memoryContext: String, priorTurnsContext: String = "", grounded: Boolean = false): String {
+    /**
+     * @property prompt The fully assembled system prompt.
+     * @property criticalTail The exact tail [prompt] ends with — persona
+     *   behaviour rules + response-style constraints + reasoning rules +
+     *   the resolved language directive (see
+     *   [SystemPromptProvider.criticalTail]). [buildPrompt] pins this
+     *   verbatim when trimming an over-budget prompt, instead of
+     *   reconstructing it from separate copies of these values that could
+     *   drift from what [prompt] was actually built with.
+     */
+    private data class SystemPromptBuild(val prompt: String, val criticalTail: String)
+
+    private fun buildSystemPrompt(memoryContext: String, priorTurnsContext: String = "", grounded: Boolean = false): SystemPromptBuild {
         val modelName = inferenceEngine.activeModelName
         val tier = systemPromptProvider.tierFor(modelName)
         if (memoryContext.isNotEmpty()) {
@@ -1342,7 +1365,7 @@ class ChatRepositoryImpl @Inject constructor(
             !grounded &&
             maxPromptChars >= 7000
         ) REASONING_RULES else ""
-        return systemPromptProvider.build(
+        val prompt = systemPromptProvider.build(
             modelName = modelName,
             pack = PackType.BASE,
             languageInstruction = langLine,
@@ -1356,6 +1379,21 @@ class ChatRepositoryImpl @Inject constructor(
             maxContextTokens = inferenceEngine.maxContextTokens,
             reasoningRules = reasoning,
         )
+        // Same arguments build() was just given — a pure function of them,
+        // so this is guaranteed to reproduce the exact tail build() used,
+        // never a hand-reconstructed (and possibly stale/mismatched) copy.
+        // Guarded on prompt.isNotBlank(): COMPACT tier's build() returns ""
+        // unconditionally (see its kdoc — Compact gets no system prompt at
+        // all), but criticalTail() alone doesn't know that and would still
+        // compute persona/style content from personalityRules/styleSuffix —
+        // which must NOT then get pinned into what's supposed to be an
+        // empty Compact-tier prompt.
+        val tail = if (prompt.isNotBlank()) {
+            systemPromptProvider.criticalTail(personalityRules, styleSuffix, reasoning, langLine)
+        } else {
+            ""
+        }
+        return SystemPromptBuild(prompt, tail)
     }
 
     /**
@@ -1396,15 +1434,6 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Intelligent Sliding Window: Handles context overflow for the model's compiled KV limits.
-     *
-     * Strategy (in priority order):
-     * 1. Fast path: already within budget, return immediately.
-     * 2. Drop middle history turns one-by-one until budget is met.
-     * 3. If still over budget (e.g. system prompt alone overflows), hard-truncate
-     *    the system turn as a last resort.
-     */
-    /**
      * String.take() truncates at a UTF-16 code-unit boundary, which splits
      * mid-character on scripts that use combining marks (Devanagari, Tamil,
      * Telugu, Bengali, …). For session titles built from "नमस्ते आज क्या करूँ?"
@@ -1425,74 +1454,6 @@ class ChatRepositoryImpl @Inject constructor(
             cur = it.next()
         }
         return s.substring(0, last)
-    }
-
-    private fun trimPrompt(prompt: String, budget: Int = 3000, pinnedTail: String = ""): String {
-        if (prompt.length <= budget) return prompt
-
-        val marker = "<start_of_turn>"
-        val turns = prompt.split(marker).filter { it.isNotBlank() }.map { marker + it }
-
-        if (turns.size < 2) {
-            DebugLogger.log("PROMPT", "WARN: single-turn prompt (${prompt.length}c) exceeds budget ($budget) — preserving user tail")
-            // Critical: when the FRESH prompt is one big concatenated block
-            // (system + "\n\n" + userMessage), the user message lives at the
-            // end. take(budget) would chop the tail off and the model would
-            // read the system prompt aloud. Instead, KEEP the user tail intact
-            // and squeeze the system prefix to whatever room is left.
-            //
-            // We require at least 32 chars of system prefix; if pinnedTail
-            // alone would blow the budget, fall back to keeping the LAST
-            // `budget` chars of the prompt (still tail-aligned — guarantees
-            // the user message is the most-recent thing the model sees).
-            if (pinnedTail.isNotBlank() && prompt.endsWith(pinnedTail)) {
-                val tailLen = pinnedTail.length
-                val systemRoom = budget - tailLen - 4  // " … " separator
-                return if (systemRoom >= 32) {
-                    val systemPrefix = prompt.substring(0, prompt.length - tailLen)
-                    val trimmedSystem = systemPrefix.take(systemRoom)
-                    "$trimmedSystem … \n$pinnedTail"
-                } else {
-                    // User message alone is larger than budget — keep the tail.
-                    prompt.substring(prompt.length - budget)
-                }
-            }
-            return prompt.takeLast(budget)
-        }
-
-        val systemTurn  = turns.first()
-        val latestTurns = turns.takeLast(minOf(2, turns.size - 1))
-        val middleTurns = turns.drop(1).dropLast(latestTurns.size).toMutableList()
-
-        // Phase 1: Try to fit by dropping middle history
-        var currentPrompt = buildString {
-            append(systemTurn)
-            middleTurns.forEach { append(it) }
-            latestTurns.forEach { append(it) }
-        }
-        
-        while (currentPrompt.length > budget && middleTurns.isNotEmpty()) {
-            middleTurns.removeAt(0)
-            currentPrompt = buildString {
-                append(systemTurn)
-                middleTurns.forEach { append(it) }
-                latestTurns.forEach { append(it) }
-            }
-        }
-
-        // Phase 2: If still over, drop ALL history except system and latest turn
-        if (currentPrompt.length > budget) {
-            currentPrompt = systemTurn + latestTurns.joinToString("")
-        }
-
-        // Phase 3: Final hard truncation if even system + latest user Q is too big.
-        // We take the budget but ensure we at least try to keep the roles intact.
-        if (currentPrompt.length > budget) {
-            DebugLogger.log("PROMPT", "WARN: critical truncation to budget $budget")
-            return currentPrompt.take(budget)
-        }
-
-        return currentPrompt
     }
 
     // ── Mapping ───────────────────────────────────────────────────────────────
@@ -1589,6 +1550,92 @@ internal fun formatConversationContext(
         window--
     }
     return ""
+}
+
+/**
+ * Intelligent Sliding Window: Handles context overflow for the model's compiled KV limits.
+ *
+ * Strategy (in priority order):
+ * 1. Fast path: already within budget, return immediately.
+ * 2. Drop middle history turns one-by-one until budget is met.
+ * 3. If still over budget (e.g. system prompt alone overflows), hard-truncate
+ *    the system turn as a last resort.
+ *
+ * On a single-turn (no `<start_of_turn>` markers) prompt that overflows, [pinnedTail]
+ * is kept intact and the system prefix is squeezed to whatever room is left — see
+ * [ChatRepositoryImpl]'s call site for why the pinned text must be the exact tail
+ * [com.saarthi.core.inference.prompt.SystemPromptProvider] assembled the prompt with,
+ * not a separately reconstructed copy.
+ *
+ * Extracted as a top-level `internal` function so it is unit-testable without
+ * constructing [ChatRepositoryImpl] and its dependencies.
+ */
+internal fun trimPrompt(prompt: String, budget: Int = 3000, pinnedTail: String = ""): String {
+    if (prompt.length <= budget) return prompt
+
+    val marker = "<start_of_turn>"
+    val turns = prompt.split(marker).filter { it.isNotBlank() }.map { marker + it }
+
+    if (turns.size < 2) {
+        DebugLogger.log("PROMPT", "WARN: single-turn prompt (${prompt.length}c) exceeds budget ($budget) — preserving user tail")
+        // Critical: when the FRESH prompt is one big concatenated block
+        // (system + "\n\n" + userMessage), the user message lives at the
+        // end. take(budget) would chop the tail off and the model would
+        // read the system prompt aloud. Instead, KEEP the user tail intact
+        // and squeeze the system prefix to whatever room is left.
+        //
+        // We require at least 32 chars of system prefix; if pinnedTail
+        // alone would blow the budget, fall back to keeping the LAST
+        // `budget` chars of the prompt (still tail-aligned — guarantees
+        // the user message is the most-recent thing the model sees).
+        if (pinnedTail.isNotBlank() && prompt.endsWith(pinnedTail)) {
+            val tailLen = pinnedTail.length
+            val systemRoom = budget - tailLen - 4  // " … " separator
+            return if (systemRoom >= 32) {
+                val systemPrefix = prompt.substring(0, prompt.length - tailLen)
+                val trimmedSystem = systemPrefix.take(systemRoom)
+                "$trimmedSystem … \n$pinnedTail"
+            } else {
+                // User message alone is larger than budget — keep the tail.
+                prompt.substring(prompt.length - budget)
+            }
+        }
+        return prompt.takeLast(budget)
+    }
+
+    val systemTurn  = turns.first()
+    val latestTurns = turns.takeLast(minOf(2, turns.size - 1))
+    val middleTurns = turns.drop(1).dropLast(latestTurns.size).toMutableList()
+
+    // Phase 1: Try to fit by dropping middle history
+    var currentPrompt = buildString {
+        append(systemTurn)
+        middleTurns.forEach { append(it) }
+        latestTurns.forEach { append(it) }
+    }
+
+    while (currentPrompt.length > budget && middleTurns.isNotEmpty()) {
+        middleTurns.removeAt(0)
+        currentPrompt = buildString {
+            append(systemTurn)
+            middleTurns.forEach { append(it) }
+            latestTurns.forEach { append(it) }
+        }
+    }
+
+    // Phase 2: If still over, drop ALL history except system and latest turn
+    if (currentPrompt.length > budget) {
+        currentPrompt = systemTurn + latestTurns.joinToString("")
+    }
+
+    // Phase 3: Final hard truncation if even system + latest user Q is too big.
+    // We take the budget but ensure we at least try to keep the roles intact.
+    if (currentPrompt.length > budget) {
+        DebugLogger.log("PROMPT", "WARN: critical truncation to budget $budget")
+        return currentPrompt.take(budget)
+    }
+
+    return currentPrompt
 }
 
 /**

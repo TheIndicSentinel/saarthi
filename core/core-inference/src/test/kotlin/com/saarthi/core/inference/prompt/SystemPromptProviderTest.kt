@@ -326,4 +326,125 @@ class SystemPromptProviderTest {
             compact.length < standard.length,
         )
     }
+
+    // ── criticalTail: the exact tail ChatRepositoryImpl pins on truncation ──
+
+    @Test
+    fun criticalTail_matches_the_tail_build_actually_appends() {
+        // criticalTail() must never drift from what build() assembled — the
+        // whole point of exposing it is that ChatRepositoryImpl can pin this
+        // verbatim instead of reconstructing its own copy. Verify byte-for-
+        // byte: build()'s output must end with exactly what criticalTail()
+        // returns for the same arguments.
+        val personaRules = listOf("Keep replies short.", "Never fabricate rituals.")
+        val styleSuffix = "REPLY-STYLE CONSTRAINTS (the user has set these in Settings — honour them):\nKeep it brief."
+        val reasoning = "Think step by step before answering."
+        val langLine = "Always reply in Hindi."
+
+        val prompt = provider.build(
+            modelName = "Gemma 4",
+            pack = PackType.BASE,
+            languageInstruction = langLine,
+            memoryContext = "",
+            responseStyleSuffix = styleSuffix,
+            personalityBehaviorRules = personaRules,
+            reasoningRules = reasoning,
+        )
+        val tail = provider.criticalTail(personaRules, styleSuffix, reasoning, langLine)
+
+        assertTrue("criticalTail must be non-empty for this input", tail.isNotBlank())
+        assertTrue(
+            "build()'s prompt must end with exactly criticalTail(). tail=\n$tail\n---\nprompt=\n$prompt",
+            prompt.trimEnd().endsWith(tail.trimEnd()),
+        )
+    }
+
+    @Test
+    fun criticalTail_includes_persona_behavior_rules_when_present() {
+        val rules = listOf("Never issue binding ritual instructions.", "Prefer natural conversational prose.")
+        val tail = provider.criticalTail(rules, "", "", "")
+        rules.forEach { rule ->
+            assertTrue("criticalTail must include persona rule '$rule'. Got:\n$tail", tail.contains(rule))
+        }
+    }
+
+    @Test
+    fun criticalTail_is_empty_for_Saarthi_default_persona_with_no_style_or_language() {
+        // Default (Saarthi) persona passes empty behaviorRules — with no
+        // response-style suffix, reasoning rules, or language instruction
+        // either, there's nothing to pin.
+        val tail = provider.criticalTail(emptyList(), "", "", "")
+        assertTrue("criticalTail must be empty with no inputs. Got:\n$tail", tail.isEmpty())
+    }
+
+    @Test
+    fun criticalTail_includes_response_style_constraints_when_present() {
+        val styleSuffix = "Keep answers under three sentences."
+        val tail = provider.criticalTail(emptyList(), styleSuffix, "", "")
+        assertTrue("criticalTail must include the response-style suffix. Got:\n$tail", tail.contains(styleSuffix))
+    }
+
+    @Test
+    fun criticalTail_includes_reasoning_rules_when_active() {
+        val reasoning = "Reason through the problem step by step before giving your final answer."
+        val tail = provider.criticalTail(emptyList(), "", reasoning, "")
+        assertTrue("criticalTail must include reasoning rules. Got:\n$tail", tail.contains(reasoning))
+    }
+
+    @Test
+    fun criticalTail_ends_with_the_language_instruction_it_was_given() {
+        // ChatRepositoryImpl resolves effectiveLanguage (which can be forced
+        // to English by Response Style) BEFORE calling criticalTail — this
+        // function must faithfully reflect whatever languageInstruction it's
+        // handed, not re-derive it. Cover both a matching-language case and
+        // a resolved-English-override case explicitly.
+        val hindiLine = "Always reply in Hindi."
+        val hindiTail = provider.criticalTail(listOf("Keep it brief."), "", "", hindiLine)
+        assertTrue(
+            "criticalTail must end with the given Hindi language directive. Got:\n$hindiTail",
+            hindiTail.trimEnd().endsWith(hindiLine),
+        )
+
+        // Simulates: app language is Hindi, but Response Style's language
+        // mix is set to English override, so ChatRepositoryImpl resolved
+        // effectiveLanguage = ENGLISH and passes the ENGLISH directive here
+        // — NOT the raw Hindi app-language directive.
+        val englishOverrideLine = "Always reply in English."
+        val overrideTail = provider.criticalTail(listOf("Keep it brief."), "", "", englishOverrideLine)
+        assertTrue(
+            "criticalTail must end with the resolved English-override directive, not the app's raw language. Got:\n$overrideTail",
+            overrideTail.trimEnd().endsWith(englishOverrideLine),
+        )
+        assertFalse(
+            "criticalTail must NOT contain the app's raw Hindi directive when English override was resolved",
+            overrideTail.contains(hindiLine),
+        )
+    }
+
+    @Test
+    fun criticalTail_no_overflow_case_reproduces_build_prompt_end_exactly_for_non_default_persona() {
+        // Non-default persona (e.g. Pandit ji): behaviorRules non-empty. This
+        // is the "no overflow" contract case — trimPrompt is never invoked,
+        // so build()'s own prompt already ends with this exact tail; a caller
+        // pinning criticalTail on an over-budget turn must reproduce the same
+        // bytes the untruncated prompt would have ended with.
+        val panditRules = listOf(
+            "Never issue binding ritual, spiritual, or religious instructions.",
+            "Prefer natural conversational prose; use lists only for structured tasks.",
+        )
+        val langLine = "Always reply in Marathi."
+        val prompt = provider.build(
+            modelName = "Gemma 4",
+            pack = PackType.BASE,
+            languageInstruction = langLine,
+            memoryContext = "",
+            personalityOverride = "You are Pandit ji, a warm spiritual guide.",
+            personalityBehaviorRules = panditRules,
+        )
+        val tail = provider.criticalTail(panditRules, "", "", langLine)
+        assertTrue(
+            "Non-default persona prompt must end with criticalTail exactly. tail=\n$tail\n---\nprompt=\n$prompt",
+            prompt.trimEnd().endsWith(tail.trimEnd()),
+        )
+    }
 }
