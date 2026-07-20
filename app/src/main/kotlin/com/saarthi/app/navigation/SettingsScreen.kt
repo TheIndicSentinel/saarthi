@@ -774,7 +774,7 @@ fun ResponseStyleScreen(
             Spacer(Modifier.height(20.dp))
             // Live preview — shows the user what a Saarthi reply will look
             // like under their current preferences. Pure UI, no model call.
-            ResponseStylePreview(style, d.rsPreview, currentLanguage)
+            ResponseStylePreview(style, d.rsPreview, d.rsPreviewIllustrative, currentLanguage)
             Spacer(Modifier.height(8.dp))
             Text(
                 d.rsAppliedNote,
@@ -789,6 +789,7 @@ fun ResponseStyleScreen(
 private fun ResponseStylePreview(
     style: com.saarthi.core.i18n.ResponseStyle,
     previewLabel: String,
+    illustrativeLabel: String,
     language: SupportedLanguage,
 ) {
     val examplePrompt = when (language) {
@@ -857,6 +858,11 @@ private fun ResponseStylePreview(
                 ),
             )
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            illustrativeLabel,
+            style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Text3, fontSize = 11.sp),
+        )
     }
 }
 
