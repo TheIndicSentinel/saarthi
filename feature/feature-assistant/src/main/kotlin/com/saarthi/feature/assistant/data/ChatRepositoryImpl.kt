@@ -1299,13 +1299,29 @@ class ChatRepositoryImpl @Inject constructor(
         } else {
             DebugLogger.log("MEMORY", "No user memories stored yet")
         }
-        val timeContext = buildTimeContext(currentLanguage)
-        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}  recap=${priorTurnsContext.isNotEmpty()}  lang=${currentLanguage.code}  time=$timeContext")
+        // Single source of truth for output language: the app's selected
+        // language, UNLESS the user's Response Style "English" option asks
+        // for a different one — resolved once, here, so the canonical
+        // language directive below (both its top and recency-anchored
+        // bottom placement in SystemPromptProvider) is the only thing that
+        // ever tells the model what language to reply in. A prior version
+        // had the response-style compiler emit a second, competing "Override"
+        // instruction for this case, positioned earlier in the prompt than
+        // the bottom-anchored directive — which could lose to it. See
+        // ResponseStyleInstructionCompiler's kdoc.
+        val style = responseStyleManager.style.value
+        val effectiveLanguage = if (style.languageMix == com.saarthi.core.i18n.ReplyLanguageMix.ENGLISH) {
+            SupportedLanguage.ENGLISH
+        } else {
+            currentLanguage
+        }
+        val timeContext = buildTimeContext(effectiveLanguage)
+        DebugLogger.log("PROMPT", "tier=$tier  model=${modelName ?: "unknown"}  recap=${priorTurnsContext.isNotEmpty()}  lang=${effectiveLanguage.code}  time=$timeContext")
         // Always pass the language instruction, including for English. Without it
         // the model defaults to whatever it picks up from the user's input or its
         // training mix (we saw English-selected users getting Hindi replies).
-        val langLine = currentLanguage.systemPromptInstruction
-        val styleSuffix = buildResponseStyleSuffix(grounded)
+        val langLine = effectiveLanguage.systemPromptInstruction
+        val styleSuffix = buildResponseStyleSuffix(style, effectiveLanguage, grounded)
         // Personality Pal: read the user's selected persona; SystemPromptProvider
         // gates COMPACT tier so 1B always gets an empty system block regardless.
         // For STANDARD/LARGE BASE, the override replaces the default Saarthi
@@ -1345,16 +1361,17 @@ class ChatRepositoryImpl @Inject constructor(
     /**
      * Render the user's Response Style preferences (set in Settings → Response
      * style) as a short suffix appended to the system prompt. Empty when the
-     * user is on defaults, so existing behaviour is preserved. Actual
-     * conflict resolution + safety invariants live in
-     * [ResponseStyleInstructionCompiler] — this is just the call site.
+     * user is on defaults, so existing behaviour is preserved. [language] is
+     * the caller's resolved effectiveLanguage (see buildSystemPrompt), not
+     * necessarily the raw app language. Actual conflict resolution + safety
+     * invariants live in [ResponseStyleInstructionCompiler] — this is just
+     * the call site.
      */
-    private fun buildResponseStyleSuffix(grounded: Boolean): String =
-        responseStyleInstructionCompiler.compile(
-            style = responseStyleManager.style.value,
-            language = currentLanguage,
-            grounded = grounded,
-        )
+    private fun buildResponseStyleSuffix(
+        style: com.saarthi.core.i18n.ResponseStyle,
+        language: SupportedLanguage,
+        grounded: Boolean,
+    ): String = responseStyleInstructionCompiler.compile(style = style, language = language, grounded = grounded)
 
     /**
      * Single-line time context surfaced to the model so greetings match the

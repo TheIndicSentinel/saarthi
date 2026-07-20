@@ -13,10 +13,12 @@ import org.junit.Test
 /**
  * Contract tests for the response-style -> system-prompt-instruction
  * compilation this Settings screen depends on. Covers what the guardrails
- * review flagged: safety must never be suppressible from here, "pure"/"eng"
- * must be relative to the actual output language (not hardcoded Hindi), and
- * two known-conflicting preference pairs must resolve deterministically
- * rather than emitting contradictory lines in the same instruction block.
+ * review flagged: safety must never be suppressible from here, "pure" must
+ * be relative to the actual output language (not hardcoded Hindi), "eng"
+ * must NOT be compiled into a competing instruction here at all (that's
+ * ChatRepositoryImpl.buildSystemPrompt's job now — see the compiler's
+ * kdoc), and known-conflicting preference pairs must resolve
+ * deterministically rather than emitting contradictory lines.
  */
 class ResponseStyleInstructionCompilerTest {
 
@@ -73,12 +75,17 @@ class ResponseStyleInstructionCompilerTest {
     }
 
     @Test
-    fun `english override is explicit, not a bare contradiction`() {
+    fun `english language mix emits no instruction from the compiler itself`() {
+        // Resolving ENGLISH to a real output-language change is
+        // ChatRepositoryImpl.buildSystemPrompt's job (effectiveLanguage,
+        // fed into the canonical top+bottom language directive) — the
+        // compiler emitting its own competing line here was the bug (it sat
+        // earlier in the prompt than the recency-anchored bottom directive
+        // and could lose to it).
         val result = compiler.compile(
             ResponseStyle(languageMix = ReplyLanguageMix.ENGLISH), SupportedLanguage.HINDI, grounded = false,
         )
-        assertTrue("must say Override so it doesn't silently fight systemPromptInstruction: $result", result.contains("Override"))
-        assertTrue(result.contains("English"))
+        assertEquals("", result)
     }
 
     @Test
@@ -92,14 +99,28 @@ class ResponseStyleInstructionCompilerTest {
     // ── Conflict resolution ──────────────────────────────────────────────────
 
     @Test
-    fun `long length wins over includeExamples=false instead of contradicting it`() {
+    fun `long length and includeExamples are independent, not one overriding the other`() {
+        // LONG used to bake in "with examples", which made includeExamples=false
+        // silently inert at this length (toggling it produced identical
+        // output) — a real settings-contract violation, not just wording.
         val result = compiler.compile(
             ResponseStyle(length = ReplyLength.LONG, includeExamples = false),
             SupportedLanguage.ENGLISH,
             grounded = false,
         )
-        assertTrue("long must still ask for examples: $result", result.contains("examples when useful"))
-        assertFalse("must not also say to avoid examples: $result", result.contains("Avoid worked examples"))
+        assertFalse("LONG must no longer couple detail to examples: $result", result.contains("with examples"))
+        assertTrue("includeExamples=false must still be honoured at LONG: $result", result.contains("Avoid worked examples"))
+    }
+
+    @Test
+    fun `long length with includeExamples=true asks only for detail, no example claim`() {
+        val result = compiler.compile(
+            ResponseStyle(length = ReplyLength.LONG, includeExamples = true),
+            SupportedLanguage.ENGLISH,
+            grounded = false,
+        )
+        assertTrue(result.contains("detailed"))
+        assertFalse("must not itself claim examples — that's includeExamples' job: $result", result.contains("examples"))
     }
 
     @Test
@@ -122,14 +143,14 @@ class ResponseStyleInstructionCompilerTest {
     }
 
     @Test
-    fun `grounded turns still apply tone and language preferences`() {
+    fun `grounded turns still apply tone and pure-language preferences`() {
         val result = compiler.compile(
-            ResponseStyle(tone = ReplyTone.FORMAL, languageMix = ReplyLanguageMix.ENGLISH),
+            ResponseStyle(tone = ReplyTone.FORMAL, languageMix = ReplyLanguageMix.PURE),
             SupportedLanguage.HINDI,
             grounded = true,
         )
         assertTrue(result.contains("formal"))
-        assertTrue(result.contains("Override"))
+        assertTrue(result.contains("Hindi"))
     }
 
     // ── Individual axes (non-conflicting cases) ──────────────────────────────
