@@ -34,22 +34,25 @@ import javax.inject.Singleton
  *     language [language] resolves to elsewhere in the prompt
  *     (SupportedLanguage.systemPromptInstruction).
  *
- *     ENGLISH is NOT compiled into an instruction line here — an earlier
- *     version emitted "Override: reply in English...", but
- *     SystemPromptProvider places the canonical language directive both at
- *     the very top of the prompt AND again at the very end (recency
- *     reinforcement — the model's last-read instruction before the user
- *     message), specifically so it wins. A second, competing "Override"
- *     line placed earlier in the prompt was structurally weaker than that
- *     bottom-anchored directive and could lose to it. The correct fix is
+ *     Neither ENGLISH nor PURE is compiled into an instruction line here —
+ *     earlier versions emitted competing lines ("Override: reply in
+ *     English...", "Use pure Hindi — avoid English loanwords...") from this
+ *     compiler, positioned in the prompt BEFORE the canonical language
+ *     directive that SystemPromptProvider places at the very top AND again
+ *     at the very end (recency reinforcement — the model's last-read
+ *     instruction before the user message). A line positioned earlier than
+ *     that bottom-anchored directive is structurally weaker and can lose to
+ *     it — which is exactly what happened to PURE: the directive's old
+ *     unconditional "do not write the reply in English under any
+ *     circumstance" could win by recency even when PURE hadn't been picked,
+ *     and conversely a future looser default directive could silently drop
+ *     PURE's stricter constraint the same way. The correct fix for both is
  *     upstream, in ChatRepositoryImpl.buildSystemPrompt: it resolves a
- *     single `effectiveLanguage` (ENGLISH when the user picked this option,
- *     else the app's language) and feeds THAT into the canonical directive
- *     itself, so there is only ever one source of truth for output
- *     language, positioned where it already reliably wins. PURE has no such
- *     conflict — it never asks for a different language than the app
- *     setting, only a stricter register of the same one — so it's still
- *     compiled here as an additional constraint.
+ *     single `effectiveLanguage` (ENGLISH when the user picked that option,
+ *     else the app's language) and a single `pureLoanwords` flag (from
+ *     `style.languageMix == PURE`), feeding both into
+ *     [SupportedLanguage.systemPromptInstruction] — the ONE canonical
+ *     directive, positioned where it already reliably wins.
  *  3. Tone
  *  4. Length
  *  5. Examples — fully independent of length now. LONG used to bake in
@@ -65,8 +68,7 @@ class ResponseStyleInstructionCompiler @Inject constructor() {
         val lines = mutableListOf<String>()
 
         when (style.languageMix) {
-            ReplyLanguageMix.PURE ->
-                lines += "Use pure ${language.englishName} — avoid English loanwords or code-switching."
+            ReplyLanguageMix.PURE -> { /* handled upstream via pureLoanwords — see kdoc */ }
             ReplyLanguageMix.ENGLISH -> { /* handled upstream via effectiveLanguage — see kdoc */ }
             ReplyLanguageMix.MIX -> { /* natural code-switching default — no extra instruction */ }
         }

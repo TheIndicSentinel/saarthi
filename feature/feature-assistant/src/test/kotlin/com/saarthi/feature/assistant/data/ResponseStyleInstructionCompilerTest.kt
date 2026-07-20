@@ -13,12 +13,14 @@ import org.junit.Test
 /**
  * Contract tests for the response-style -> system-prompt-instruction
  * compilation this Settings screen depends on. Covers what the guardrails
- * review flagged: safety must never be suppressible from here, "pure" must
- * be relative to the actual output language (not hardcoded Hindi), "eng"
- * must NOT be compiled into a competing instruction here at all (that's
- * ChatRepositoryImpl.buildSystemPrompt's job now — see the compiler's
- * kdoc), and known-conflicting preference pairs must resolve
- * deterministically rather than emitting contradictory lines.
+ * review flagged: safety must never be suppressible from here; neither
+ * "pure" nor "eng" may compile into a competing instruction here at all —
+ * both are resolved upstream, in ChatRepositoryImpl.buildSystemPrompt, into
+ * SystemPromptProvider's one canonical, recency-anchored language directive
+ * (see the compiler's kdoc for why: a line positioned earlier in the prompt
+ * than that directive can silently lose to it); and known-conflicting
+ * preference pairs must resolve deterministically rather than emitting
+ * contradictory lines.
  */
 class ResponseStyleInstructionCompilerTest {
 
@@ -61,17 +63,24 @@ class ResponseStyleInstructionCompilerTest {
     // ── Language contract: relative to the actual output language ───────────
 
     @Test
-    fun `pure references the actual app language, not a hardcoded one`() {
+    fun `pure emits no instruction from the compiler itself`() {
+        // Same reasoning as ENGLISH below: PURE used to emit its own "Use
+        // pure X — avoid English loanwords..." line here, positioned earlier
+        // in the prompt than SystemPromptProvider's recency-anchored bottom
+        // language directive — a looser default directive could silently
+        // override it by appearing later. PURE is now resolved into that one
+        // canonical directive via SupportedLanguage.systemPromptInstruction's
+        // pureLoanwords parameter (see SupportedLanguageTest for coverage of
+        // the actual pure-vs-default wording).
         val tamil = compiler.compile(
             ResponseStyle(languageMix = ReplyLanguageMix.PURE), SupportedLanguage.TAMIL, grounded = false,
         )
-        assertTrue("expected Tamil to be named: $tamil", tamil.contains("Tamil"))
-        assertFalse("must not hardcode Hindi for a Tamil user: $tamil", tamil.contains("Hindi"))
+        assertEquals("", tamil)
 
         val telugu = compiler.compile(
             ResponseStyle(languageMix = ReplyLanguageMix.PURE), SupportedLanguage.TELUGU, grounded = false,
         )
-        assertTrue("expected Telugu to be named: $telugu", telugu.contains("Telugu"))
+        assertEquals("", telugu)
     }
 
     @Test
@@ -143,14 +152,16 @@ class ResponseStyleInstructionCompilerTest {
     }
 
     @Test
-    fun `grounded turns still apply tone and pure-language preferences`() {
+    fun `grounded turns still apply the tone preference`() {
+        // PURE dropped from this assertion — it no longer emits a compiler
+        // line at all (see the dedicated PURE test above), so there is
+        // nothing language-specific left for a grounded turn to preserve here.
         val result = compiler.compile(
             ResponseStyle(tone = ReplyTone.FORMAL, languageMix = ReplyLanguageMix.PURE),
             SupportedLanguage.HINDI,
             grounded = true,
         )
         assertTrue(result.contains("formal"))
-        assertTrue(result.contains("Hindi"))
     }
 
     // ── Individual axes (non-conflicting cases) ──────────────────────────────

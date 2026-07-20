@@ -1381,7 +1381,12 @@ enum class SupportedLanguage(
 
     /**
      * Instruction sandwiched at the TOP and BOTTOM of the system prompt so
-     * the model responds in this language.
+     * the model responds in this language. This is the canonical, recency-
+     * anchored (bottom placement, last thing before the user message)
+     * directive — see [com.saarthi.core.inference.prompt.SystemPromptProvider]
+     * — so it must be the ONE place that decides the loanword register too,
+     * not a competing line placed earlier in the prompt that this can silently
+     * override by recency.
      *
      * Each non-English directive starts with a **native-script seed phrase**
      * meaning "reply in <this language>". Models with weaker
@@ -1390,18 +1395,51 @@ enum class SupportedLanguage(
      * ignored because the surrounding English prompt dilutes it. A
      * native-script seed plus an emphatic English emphasis is the industry-
      * standard pattern for multilingual production prompts.
+     *
+     * @param pureLoanwords `true` for [ReplyLanguageMix.PURE] — the user's
+     *   explicit choice to avoid English loanwords/code-switching entirely.
+     *   `false` (default) is the normal case, and previously read "Do not
+     *   write the reply in English under any circumstance" — taken too
+     *   literally, that produced unnatural, overly Sanskritized/Tatsama
+     *   translations for words every speaker actually borrows from English
+     *   (e.g. Hindi "दबाव रसोईघर" instead of the universally-used
+     *   "प्रेशर कुकर"). The default now explicitly allows common loanwords
+     *   written in the target script, while still requiring the script/
+     *   language itself and still refusing to switch to Latin-script English.
+     *   [ResponseStyleInstructionCompiler] no longer emits a separate PURE
+     *   line for the same reason ENGLISH doesn't: a line positioned earlier
+     *   in the prompt than this bottom-anchored directive can lose to it, so
+     *   PURE is resolved into this one canonical directive instead.
      */
-    val systemPromptInstruction: String get() = when (this) {
+    fun systemPromptInstruction(pureLoanwords: Boolean = false): String = when (this) {
         ENGLISH  -> "Reply ONLY in English. You MUST reply entirely in English. Do not reply in Hindi, Marathi, or any other language or script under any circumstance."
-        HINDI    -> "हिन्दी में जवाब दें। You MUST reply entirely in Hindi (हिन्दी), in Devanagari script. Do not write the reply in English under any circumstance."
-        TAMIL    -> "தமிழில் பதிலளிக்கவும். You MUST reply entirely in Tamil (தமிழ்), in Tamil script. Do not write the reply in English under any circumstance."
-        TELUGU   -> "తెలుగులో సమాధానం ఇవ్వండి. You MUST reply entirely in Telugu (తెలుగు), in Telugu script. Do not write the reply in English under any circumstance."
-        BENGALI  -> "বাংলায় উত্তর দিন। You MUST reply entirely in Bengali (বাংলা), in Bengali script. Do not write the reply in English under any circumstance."
-        MARATHI  -> "मराठीत उत्तर द्या. You MUST reply entirely in Marathi (मराठी), in Devanagari script. Do not write the reply in English under any circumstance."
-        KANNADA  -> "ಕನ್ನಡದಲ್ಲಿ ಉತ್ತರಿಸಿ. You MUST reply entirely in Kannada (ಕನ್ನಡ), in Kannada script. Do not write the reply in English under any circumstance."
-        GUJARATI -> "ગુજરાતીમાં જવાબ આપો. You MUST reply entirely in Gujarati (ગુજરાતી), in Gujarati script. Do not write the reply in English under any circumstance."
-        PUNJABI  -> "ਪੰਜਾਬੀ ਵਿੱਚ ਜਵਾਬ ਦਿਓ। You MUST reply entirely in Punjabi (ਪੰਜਾਬੀ), in Gurmukhi script. Do not write the reply in English under any circumstance."
-        ODIA     -> "ଓଡ଼ିଆରେ ଉତ୍ତର ଦିଅନ୍ତୁ। You MUST reply entirely in Odia (ଓଡ଼ିଆ), in Odia script. Do not write the reply in English under any circumstance."
+        HINDI    -> "हिन्दी में जवाब दें। You MUST reply entirely in Hindi (हिन्दी), in Devanagari script. " +
+            if (pureLoanwords) "Use pure Hindi — avoid English loanwords and code-switching; prefer native Hindi vocabulary throughout."
+            else "Use natural, commonly spoken Hindi vocabulary — common loanwords written in Devanagari (like मोबाइल, डॉक्टर, प्रेशर कुकर) are allowed. Do not switch to English/Latin script unless the user asks for it."
+        TAMIL    -> "தமிழில் பதிலளிக்கவும். You MUST reply entirely in Tamil (தமிழ்), in Tamil script. " +
+            if (pureLoanwords) "Use pure Tamil — avoid English loanwords and code-switching; prefer native Tamil vocabulary throughout."
+            else "Use natural, commonly spoken Tamil vocabulary — common loanwords written in Tamil script (like மொபைல், டாக்டர்) are allowed. Do not switch to English/Latin script unless the user asks for it."
+        TELUGU   -> "తెలుగులో సమాధానం ఇవ్వండి. You MUST reply entirely in Telugu (తెలుగు), in Telugu script. " +
+            if (pureLoanwords) "Use pure Telugu — avoid English loanwords and code-switching; prefer native Telugu vocabulary throughout."
+            else "Use natural, commonly spoken Telugu vocabulary — common loanwords written in Telugu script (like మొబైల్, డాక్టర్) are allowed. Do not switch to English/Latin script unless the user asks for it."
+        BENGALI  -> "বাংলায় উত্তর দিন। You MUST reply entirely in Bengali (বাংলা), in Bengali script. " +
+            if (pureLoanwords) "Use pure Bengali — avoid English loanwords and code-switching; prefer native Bengali vocabulary throughout."
+            else "Use natural, commonly spoken Bengali vocabulary — common loanwords written in Bengali script (like মোবাইল, ডাক্তার) are allowed. Do not switch to English/Latin script unless the user asks for it."
+        MARATHI  -> "मराठीत उत्तर द्या. You MUST reply entirely in Marathi (मराठी), in Devanagari script. " +
+            if (pureLoanwords) "Use pure Marathi — avoid English loanwords and code-switching; prefer native Marathi vocabulary throughout."
+            else "Use natural, commonly spoken Marathi vocabulary — common loanwords written in Devanagari (like मोबाईल, डॉक्टर) are allowed. Do not switch to English/Latin script unless the user asks for it."
+        KANNADA  -> "ಕನ್ನಡದಲ್ಲಿ ಉತ್ತರಿಸಿ. You MUST reply entirely in Kannada (ಕನ್ನಡ), in Kannada script. " +
+            if (pureLoanwords) "Use pure Kannada — avoid English loanwords and code-switching; prefer native Kannada vocabulary throughout."
+            else "Use natural, commonly spoken Kannada vocabulary — common loanwords written in Kannada script (like ಮೊಬೈಲ್, ಡಾಕ್ಟರ್) are allowed. Do not switch to English/Latin script unless the user asks for it."
+        GUJARATI -> "ગુજરાતીમાં જવાબ આપો. You MUST reply entirely in Gujarati (ગુજરાતી), in Gujarati script. " +
+            if (pureLoanwords) "Use pure Gujarati — avoid English loanwords and code-switching; prefer native Gujarati vocabulary throughout."
+            else "Use natural, commonly spoken Gujarati vocabulary — common loanwords written in Gujarati script (like મોબાઇલ, ડોક્ટર) are allowed. Do not switch to English/Latin script unless the user asks for it."
+        PUNJABI  -> "ਪੰਜਾਬੀ ਵਿੱਚ ਜਵਾਬ ਦਿਓ। You MUST reply entirely in Punjabi (ਪੰਜਾਬੀ), in Gurmukhi script. " +
+            if (pureLoanwords) "Use pure Punjabi — avoid English loanwords and code-switching; prefer native Punjabi vocabulary throughout."
+            else "Use natural, commonly spoken Punjabi vocabulary — common loanwords written in Gurmukhi script (like ਮੋਬਾਈਲ, ਡਾਕਟਰ) are allowed. Do not switch to English/Latin script unless the user asks for it."
+        ODIA     -> "ଓଡ଼ିଆରେ ଉତ୍ତର ଦିଅନ୍ତୁ। You MUST reply entirely in Odia (ଓଡ଼ିଆ), in Odia script. " +
+            if (pureLoanwords) "Use pure Odia — avoid English loanwords and code-switching; prefer native Odia vocabulary throughout."
+            else "Use natural, commonly spoken Odia vocabulary — common loanwords written in Odia script (like ମୋବାଇଲ, ଡାକ୍ତର) are allowed. Do not switch to English/Latin script unless the user asks for it."
     }
 
     companion object {

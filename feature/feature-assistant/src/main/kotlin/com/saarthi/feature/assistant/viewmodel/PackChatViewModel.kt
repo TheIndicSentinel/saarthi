@@ -403,7 +403,7 @@ class PackChatViewModel @Inject constructor(
         // Language directive — same mechanism the main chat uses. Notes
         // remain in English (the curated pack), but the model answers in
         // the user's selected language.
-        val langLine = lang.systemPromptInstruction
+        val langLine = lang.systemPromptInstruction()
 
         // NOTE: the COMPACT (Gemma 1B) tier never reaches here — ask() blocks the
         // Kisan chat on that tier. Only STANDARD / LARGE build the advisor prompt.
@@ -485,7 +485,7 @@ class PackChatViewModel @Inject constructor(
      * general answer so the screen is still useful, rather than a dead end.
      */
     private fun buildGeneralFallbackPrompt(question: String, lang: SupportedLanguage): String {
-        val langLine = lang.systemPromptInstruction
+        val langLine = lang.systemPromptInstruction()
         return buildString {
             if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
             append("You are Saarthi's Kisan Saathi, a farming advisor for Indian farmers. ")

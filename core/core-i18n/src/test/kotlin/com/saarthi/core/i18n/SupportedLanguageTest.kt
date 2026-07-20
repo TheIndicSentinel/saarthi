@@ -52,7 +52,7 @@ class SupportedLanguageTest {
         for (lang in SupportedLanguage.entries) {
             assertFalse(
                 "${lang.englishName} must have a non-blank prompt instruction",
-                lang.systemPromptInstruction.isBlank(),
+                lang.systemPromptInstruction().isBlank(),
             )
         }
     }
@@ -62,7 +62,7 @@ class SupportedLanguageTest {
         // Regression guard: v1.0.14 fixed a bug where English's instruction
         // was empty, causing English-selected users to get Hindi replies.
         // The English line must explicitly say "reply in English".
-        val english = SupportedLanguage.ENGLISH.systemPromptInstruction
+        val english = SupportedLanguage.ENGLISH.systemPromptInstruction()
         assertTrue(
             "English instruction must mention English. Got: '$english'",
             english.contains("English", ignoreCase = true),
@@ -74,12 +74,12 @@ class SupportedLanguageTest {
         // Non-English instructions should reference the native script name
         // so a model that fixates on the prompt has the right token to
         // anchor on.
-        val hindi = SupportedLanguage.HINDI.systemPromptInstruction
+        val hindi = SupportedLanguage.HINDI.systemPromptInstruction()
         assertTrue(
             "Hindi instruction must contain the native script. Got: '$hindi'",
             hindi.contains(SupportedLanguage.HINDI.nativeName),
         )
-        val tamil = SupportedLanguage.TAMIL.systemPromptInstruction
+        val tamil = SupportedLanguage.TAMIL.systemPromptInstruction()
         assertTrue(
             "Tamil instruction must contain the native script. Got: '$tamil'",
             tamil.contains(SupportedLanguage.TAMIL.nativeName),
@@ -91,8 +91,64 @@ class SupportedLanguageTest {
         // The two must NOT collide on a default — that would resurface the
         // English-treated-as-default bug in a different form.
         assertNotEquals(
-            SupportedLanguage.ENGLISH.systemPromptInstruction,
-            SupportedLanguage.HINDI.systemPromptInstruction,
+            SupportedLanguage.ENGLISH.systemPromptInstruction(),
+            SupportedLanguage.HINDI.systemPromptInstruction(),
+        )
+    }
+
+    // ── systemPromptInstruction: loanword register (pureLoanwords) ───────
+
+    @Test
+    fun systemPromptInstruction_default_allows_common_loanwords_in_native_script() {
+        // Regression guard: the old unconditional "do not write the reply in
+        // English under any circumstance" caused overly Sanskritized/formal
+        // translations for words every speaker actually borrows from English
+        // (Hindi "दबाव रसोईघर" instead of "प्रेशर कुकर"). The default
+        // (non-pure) directive must explicitly say loanwords are allowed.
+        for (lang in SupportedLanguage.entries.filter { it != SupportedLanguage.ENGLISH }) {
+            val instruction = lang.systemPromptInstruction(pureLoanwords = false)
+            assertTrue(
+                "${lang.englishName} default instruction must explicitly allow loanwords. Got: '$instruction'",
+                instruction.contains("loanword", ignoreCase = true),
+            )
+        }
+    }
+
+    @Test
+    fun systemPromptInstruction_pure_asks_to_avoid_loanwords() {
+        // The Response Style "Pure" option's explicit escape hatch — see
+        // ResponseStyleInstructionCompiler's kdoc for why this lives here
+        // (the one canonical, recency-anchored directive) rather than as a
+        // separate compiler line.
+        for (lang in SupportedLanguage.entries.filter { it != SupportedLanguage.ENGLISH }) {
+            val instruction = lang.systemPromptInstruction(pureLoanwords = true)
+            assertTrue(
+                "${lang.englishName} pure instruction must ask to avoid loanwords. Got: '$instruction'",
+                instruction.contains("avoid", ignoreCase = true) && instruction.contains("loanword", ignoreCase = true),
+            )
+        }
+    }
+
+    @Test
+    fun systemPromptInstruction_pure_and_default_both_still_require_the_target_script() {
+        // The loanword register must never weaken the actual script/language
+        // requirement — that's a separate, non-negotiable axis.
+        for (lang in SupportedLanguage.entries.filter { it != SupportedLanguage.ENGLISH }) {
+            for (pure in listOf(true, false)) {
+                val instruction = lang.systemPromptInstruction(pureLoanwords = pure)
+                assertTrue(
+                    "${lang.englishName} (pure=$pure) must still name its native script. Got: '$instruction'",
+                    instruction.contains(lang.nativeName),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun systemPromptInstruction_defaults_to_non_pure_when_called_with_no_argument() {
+        assertEquals(
+            SupportedLanguage.HINDI.systemPromptInstruction(),
+            SupportedLanguage.HINDI.systemPromptInstruction(pureLoanwords = false),
         )
     }
 

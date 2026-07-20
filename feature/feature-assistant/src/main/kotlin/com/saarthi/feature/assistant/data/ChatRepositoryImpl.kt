@@ -82,6 +82,7 @@ private const val RECAP_MAX_CHARS = 280
 private const val REASONING_RULES = """REASONING (apply only when the message calls for it):
 - Give the direct answer first in one line, then explain briefly if useful.
 - For logic or puzzles, reason ONLY from the stated facts — even if they contradict the real world — and follow chains (if A > B and B > C then A > C). If the facts don't decide it, say it cannot be concluded.
+- For any arithmetic, work it out one step at a time and re-check the result (and its sign, for multiplication/division of negatives) before stating it — a wrong confident number is worse than a slower correct one.
 - Never invent books, reports, products, people, or events. If you cannot verify something, say so and ask for details instead of guessing.
 - State any key assumption you relied on, and name real uncertainties honestly — never claim there are none when asked.
 - For a device or app problem, first ask which device and what exactly happens before suggesting drastic fixes.
@@ -624,7 +625,7 @@ class ChatRepositoryImpl @Inject constructor(
             isIdentityQuestion(userMessage)
         ) {
             val lang = currentLanguage
-            val langLine = lang.systemPromptInstruction
+            val langLine = lang.systemPromptInstruction()
             DebugLogger.log("PROMPT", "Identity question → grounded identity answer  lang=${lang.code}")
             return buildString {
                 if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
@@ -1343,7 +1344,15 @@ class ChatRepositoryImpl @Inject constructor(
         // Always pass the language instruction, including for English. Without it
         // the model defaults to whatever it picks up from the user's input or its
         // training mix (we saw English-selected users getting Hindi replies).
-        val langLine = effectiveLanguage.systemPromptInstruction
+        //
+        // pureLoanwords resolves style.languageMix == PURE into the ONE
+        // canonical, recency-anchored directive (see
+        // SupportedLanguage.systemPromptInstruction's kdoc) instead of a
+        // separate compiler line that a looser default directive could
+        // silently override by appearing later in the prompt.
+        val langLine = effectiveLanguage.systemPromptInstruction(
+            pureLoanwords = style.languageMix == com.saarthi.core.i18n.ReplyLanguageMix.PURE,
+        )
         val styleSuffix = buildResponseStyleSuffix(style, effectiveLanguage, grounded)
         // Personality Pal: read the user's selected persona; SystemPromptProvider
         // gates COMPACT tier so 1B always gets an empty system block regardless.
