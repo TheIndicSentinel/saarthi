@@ -75,6 +75,7 @@ import com.saarthi.core.ui.components.SaarthiTopBar
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.settings
 import com.saarthi.core.i18n.settingsDetail
+import com.saarthi.core.i18n.taglineFor
 import com.saarthi.core.ui.components.SectionLabel
 import com.saarthi.core.ui.theme.DisplayAccent
 import com.saarthi.core.ui.theme.SaarthiColors
@@ -164,13 +165,14 @@ fun SettingsScreen(
                 androidx.hilt.navigation.compose.hiltViewModel()
             val activePersona by settingsPersonaVm.active.collectAsStateWithLifecycle()
             val personaSupported by settingsPersonaVm.supportedForCurrentModel.collectAsStateWithLifecycle()
+            val personaD = currentLanguage.settingsDetail
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Face, contentDescription = null) },
                 title = s.persona,
                 subtitle = if (personaSupported) {
-                    "${activePersona.displayName} · ${activePersona.tagline}"
+                    "${activePersona.displayName} · ${activePersona.taglineFor(currentLanguage)}"
                 } else {
-                    "Not available on the compact model"
+                    personaD.personaCompactLimit
                 },
                 tone = ChipTone.Indigo,
                 trailing = { ChevronRight() },
@@ -1170,6 +1172,7 @@ fun PersonaScreen(
                 personalities = personalityVm.all,
                 selectedId = activePersonality.id,
                 supportedForCurrentModel = personalitySupported,
+                language = currentLanguage,
                 onPick = { id -> personalityVm.select(id) },
                 onDismiss = onBack,
             )

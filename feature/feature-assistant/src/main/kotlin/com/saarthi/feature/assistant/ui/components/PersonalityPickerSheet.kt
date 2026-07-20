@@ -32,6 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saarthi.core.i18n.Personality
 import com.saarthi.core.i18n.PersonalityAccent
+import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.settingsDetail
+import com.saarthi.core.i18n.taglineFor
 import com.saarthi.core.ui.theme.SaarthiColors
 
 /**
@@ -41,15 +44,20 @@ import com.saarthi.core.ui.theme.SaarthiColors
  * and a check badge.
  *
  * On Compact (1B) tier, rows are dimmed + an inline banner explains why.
+ *
+ * Sheet-agnostic — used both as chat's ⋮ → Persona bottom sheet content
+ * and, unmodified, as the dedicated Settings → Persona full page.
  */
 @Composable
 fun PersonalityPickerSheet(
     personalities: List<Personality>,
     selectedId: String,
     supportedForCurrentModel: Boolean,
+    language: SupportedLanguage,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val d = language.settingsDetail
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -57,7 +65,7 @@ fun PersonalityPickerSheet(
             .padding(top = 4.dp, bottom = 16.dp),
     ) {
         Text(
-            "Pick a persona",
+            d.personaPickTitle,
             style = MaterialTheme.typography.titleMedium.copy(
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
@@ -66,10 +74,7 @@ fun PersonalityPickerSheet(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            if (supportedForCurrentModel)
-                "Switching starts a new chat. Existing conversations stay saved."
-            else
-                "The compact 1B model can't sustain a persona — switch to Gemma 3n or Gemma 4 to use this.",
+            if (supportedForCurrentModel) d.personaSwitchNote else d.personaCompactLimit,
             style = MaterialTheme.typography.bodySmall.copy(
                 color = if (supportedForCurrentModel) SaarthiColors.Text3 else SaarthiColors.Rose,
                 fontSize = 12.sp,
@@ -87,6 +92,8 @@ fun PersonalityPickerSheet(
                     personality = p,
                     selected = p.id == selectedId,
                     enabled = supportedForCurrentModel,
+                    language = language,
+                    selectedDesc = d.personaSelectedDesc,
                     onClick = {
                         if (supportedForCurrentModel) {
                             onPick(p.id)
@@ -104,6 +111,8 @@ private fun PersonalityRow(
     personality: Personality,
     selected: Boolean,
     enabled: Boolean,
+    language: SupportedLanguage,
+    selectedDesc: String,
     onClick: () -> Unit,
 ) {
     val tone = accentColor(personality.accent)
@@ -153,7 +162,7 @@ private fun PersonalityRow(
                 ),
             )
             Text(
-                personality.tagline,
+                personality.taglineFor(language),
                 style = MaterialTheme.typography.bodySmall.copy(
                     color = taglineColor,
                     fontSize = 12.5.sp,
@@ -171,7 +180,7 @@ private fun PersonalityRow(
             ) {
                 Icon(
                     Icons.Default.Check,
-                    contentDescription = "Selected persona",
+                    contentDescription = selectedDesc,
                     tint = SaarthiColors.OnMarigold,
                     modifier = Modifier.size(14.dp),
                 )

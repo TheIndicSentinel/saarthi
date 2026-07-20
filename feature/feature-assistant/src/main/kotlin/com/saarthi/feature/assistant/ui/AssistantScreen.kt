@@ -505,6 +505,7 @@ fun AssistantScreen(
                 personalities = personalityVm.all,
                 selectedId = activePersonality.id,
                 supportedForCurrentModel = personalitySupported,
+                language = currentLanguage,
                 onPick = { id -> personalityVm.selectAndStartNewChat(id) },
                 onDismiss = { showPersonalitySheet = false },
             )

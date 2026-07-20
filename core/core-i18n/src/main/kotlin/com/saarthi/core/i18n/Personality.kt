@@ -239,3 +239,88 @@ object PersonalityCatalog {
     /** Lookup by id; falls back to SAARTHI for unknown/missing ids. */
     fun byId(id: String?): Personality = all.firstOrNull { it.id == id } ?: SAARTHI
 }
+
+/**
+ * User-facing one-line description shown in the persona picker/summary rows
+ * — unlike [Personality.systemPersona]/[Personality.behaviorRules] (prompt
+ * text the model reads, deliberately English-only like every other prompt
+ * in this app), the tagline is UI copy the user reads directly, so it needs
+ * real per-language text. [Personality.tagline] stays as the English
+ * default/fallback; a language without its own line here falls back to it,
+ * same convention as every other localized string in this app.
+ */
+fun Personality.taglineFor(language: SupportedLanguage): String = when (id) {
+    "saarthi" -> when (language) {
+        SupportedLanguage.ENGLISH  -> tagline
+        SupportedLanguage.HINDI    -> "आपका मित्र AI साथी"
+        SupportedLanguage.TAMIL    -> "உங்கள் நட்பு AI துணை"
+        SupportedLanguage.TELUGU   -> "మీ స్నేహపూర్వక AI సహచరుడు"
+        SupportedLanguage.BENGALI  -> "আপনার বন্ধুত্বপূর্ণ AI সঙ্গী"
+        SupportedLanguage.MARATHI  -> "तुमचा मैत्रीपूर्ण AI सोबती"
+        SupportedLanguage.KANNADA  -> "ನಿಮ್ಮ ಸ್ನೇಹಪರ AI ಸಂಗಾತಿ"
+        SupportedLanguage.GUJARATI -> "તમારો મૈત્રીપૂર્ણ AI સાથી"
+        SupportedLanguage.PUNJABI  -> "ਤੁਹਾਡਾ ਦੋਸਤਾਨਾ AI ਸਾਥੀ"
+        SupportedLanguage.ODIA     -> "ଆପଣଙ୍କ ବନ୍ଧୁତ୍ୱପୂର୍ଣ୍ଣ AI ସାଥୀ"
+    }
+    "pandit" -> when (language) {
+        SupportedLanguage.ENGLISH  -> tagline
+        SupportedLanguage.HINDI    -> "हर विषय के धैर्यवान विद्वान"
+        SupportedLanguage.TAMIL    -> "ஒவ்வொரு பாடத்திலும் பொறுமையான அறிஞர்"
+        SupportedLanguage.TELUGU   -> "ప్రతి విషయంలో ఓపికైన పండితుడు"
+        SupportedLanguage.BENGALI  -> "প্রতিটি বিষয়ে ধৈর্যশীল পণ্ডিত"
+        SupportedLanguage.MARATHI  -> "प्रत्येक विषयातील धीराचा विद्वान"
+        SupportedLanguage.KANNADA  -> "ಪ್ರತಿ ವಿಷಯದಲ್ಲೂ ತಾಳ್ಮೆಯ ವಿದ್ವಾಂಸ"
+        SupportedLanguage.GUJARATI -> "દરેક વિષયના ધીરજવાન વિદ્વાન"
+        SupportedLanguage.PUNJABI  -> "ਹਰ ਵਿਸ਼ੇ ਦਾ ਧੀਰਜਵਾਨ ਵਿਦਵਾਨ"
+        SupportedLanguage.ODIA     -> "ପ୍ରତ୍ୟେକ ବିଷୟର ଧୈର୍ଯ୍ୟବାନ ପଣ୍ଡିତ"
+    }
+    "dadi" -> when (language) {
+        SupportedLanguage.ENGLISH  -> tagline
+        SupportedLanguage.HINDI    -> "प्यारी दादी — घरेलू ज्ञान"
+        SupportedLanguage.TAMIL    -> "அன்பான பாட்டி — வீட்டு ஞானம்"
+        SupportedLanguage.TELUGU   -> "ప్రేమగల నానమ్మ — ఇంటి జ్ఞానం"
+        SupportedLanguage.BENGALI  -> "স্নেহময়ী ঠাকুমা — ঘরোয়া জ্ঞান"
+        SupportedLanguage.MARATHI  -> "प्रेमळ आजी — घरगुती शहाणपण"
+        SupportedLanguage.KANNADA  -> "ಪ್ರೀತಿಯ ಅಜ್ಜಿ — ಮನೆಯ ಜ್ಞಾನ"
+        SupportedLanguage.GUJARATI -> "પ્રેમાળ દાદી — ઘરેલુ શાણપણ"
+        SupportedLanguage.PUNJABI  -> "ਪਿਆਰੀ ਦਾਦੀ — ਘਰੇਲੂ ਸਿਆਣਪ"
+        SupportedLanguage.ODIA     -> "ସ୍ନେହମୟୀ ଜେଜେମା — ଘରୋଇ ଜ୍ଞାନ"
+    }
+    "coach" -> when (language) {
+        SupportedLanguage.ENGLISH  -> tagline
+        SupportedLanguage.HINDI    -> "सीधी, स्पष्ट प्रेरणा"
+        SupportedLanguage.TAMIL    -> "நேரடி, உறுதியான ஊக்கம்"
+        SupportedLanguage.TELUGU   -> "నేరుగా, స్పష్టమైన ప్రేరణ"
+        SupportedLanguage.BENGALI  -> "সরাসরি, স্পষ্ট প্রেরণা"
+        SupportedLanguage.MARATHI  -> "थेट, स्पष्ट प्रेरणा"
+        SupportedLanguage.KANNADA  -> "ನೇರ, ಸ್ಪಷ್ಟ ಪ್ರೇರಣೆ"
+        SupportedLanguage.GUJARATI -> "સીધી, સ્પષ્ટ પ્રેરણા"
+        SupportedLanguage.PUNJABI  -> "ਸਿੱਧੀ, ਸਪਸ਼ਟ ਪ੍ਰੇਰਣਾ"
+        SupportedLanguage.ODIA     -> "ସିଧାସଳଖ, ସ୍ପଷ୍ଟ ପ୍ରେରଣା"
+    }
+    "kathakar" -> when (language) {
+        SupportedLanguage.ENGLISH  -> tagline
+        SupportedLanguage.HINDI    -> "छोटी कहानियों से जवाब"
+        SupportedLanguage.TAMIL    -> "சிறு கதைகள் மூலம் பதில்"
+        SupportedLanguage.TELUGU   -> "చిన్న కథల ద్వారా సమాధానాలు"
+        SupportedLanguage.BENGALI  -> "ছোট গল্পের মাধ্যমে উত্তর"
+        SupportedLanguage.MARATHI  -> "छोट्या गोष्टींमधून उत्तरे"
+        SupportedLanguage.KANNADA  -> "ಚಿಕ್ಕ ಕಥೆಗಳ ಮೂಲಕ ಉತ್ತರಗಳು"
+        SupportedLanguage.GUJARATI -> "નાની વાર્તાઓ દ્વારા જવાબો"
+        SupportedLanguage.PUNJABI  -> "ਛੋਟੀਆਂ ਕਹਾਣੀਆਂ ਰਾਹੀਂ ਜਵਾਬ"
+        SupportedLanguage.ODIA     -> "ଛୋଟ କାହାଣୀ ମାଧ୍ୟମରେ ଉତ୍ତର"
+    }
+    "code_guru" -> when (language) {
+        SupportedLanguage.ENGLISH  -> tagline
+        SupportedLanguage.HINDI    -> "डेवलपर्स के लिए तकनीकी गुरु"
+        SupportedLanguage.TAMIL    -> "டெவலப்பர்களுக்கான தொழில்நுட்ப வழிகாட்டி"
+        SupportedLanguage.TELUGU   -> "డెవలపర్ల కోసం సాంకేతిక గురువు"
+        SupportedLanguage.BENGALI  -> "ডেভেলপারদের জন্য প্রযুক্তিগত গুরু"
+        SupportedLanguage.MARATHI  -> "डेव्हलपर्ससाठी तांत्रिक गुरू"
+        SupportedLanguage.KANNADA  -> "ಡೆವಲಪರ್‌ಗಳಿಗಾಗಿ ತಾಂತ್ರಿಕ ಗುರು"
+        SupportedLanguage.GUJARATI -> "ડેવલપર્સ માટે ટેક્નિકલ ગુરુ"
+        SupportedLanguage.PUNJABI  -> "ਡਿਵੈਲਪਰਾਂ ਲਈ ਤਕਨੀਕੀ ਗੁਰੂ"
+        SupportedLanguage.ODIA     -> "ଡେଭଲପରଙ୍କ ପାଇଁ ଟେକ୍ନିକାଲ ଗୁରୁ"
+    }
+    else -> tagline
+}
