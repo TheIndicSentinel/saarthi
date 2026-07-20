@@ -101,6 +101,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val personalityPreference: com.saarthi.core.i18n.PersonalityPreference,
     private val ragRepository: RagDocumentRepository,
     private val implicitFactExtractor: ImplicitFactExtractor,
+    private val responseStyleInstructionCompiler: ResponseStyleInstructionCompiler,
 ) : ChatRepository {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -1304,7 +1305,7 @@ class ChatRepositoryImpl @Inject constructor(
         // the model defaults to whatever it picks up from the user's input or its
         // training mix (we saw English-selected users getting Hindi replies).
         val langLine = currentLanguage.systemPromptInstruction
-        val styleSuffix = buildResponseStyleSuffix()
+        val styleSuffix = buildResponseStyleSuffix(grounded)
         // Personality Pal: read the user's selected persona; SystemPromptProvider
         // gates COMPACT tier so 1B always gets an empty system block regardless.
         // For STANDARD/LARGE BASE, the override replaces the default Saarthi
@@ -1344,34 +1345,16 @@ class ChatRepositoryImpl @Inject constructor(
     /**
      * Render the user's Response Style preferences (set in Settings → Response
      * style) as a short suffix appended to the system prompt. Empty when the
-     * user is on defaults, so existing behaviour is preserved.
+     * user is on defaults, so existing behaviour is preserved. Actual
+     * conflict resolution + safety invariants live in
+     * [ResponseStyleInstructionCompiler] — this is just the call site.
      */
-    private fun buildResponseStyleSuffix(): String {
-        val style = responseStyleManager.style.value
-        val lines = mutableListOf<String>()
-        when (style.length) {
-            "short" -> lines += "Keep replies short (1–2 sentences)."
-            "long"  -> lines += "Give detailed replies with examples when useful."
-            else    -> { /* medium = no extra instruction */ }
-        }
-        when (style.tone) {
-            "warm"   -> lines += "Use a warm, friendly tone."
-            "formal" -> lines += "Use a formal, professional tone."
-            else     -> { /* balanced = no extra instruction */ }
-        }
-        when (style.languageMix) {
-            "pure" -> lines += "Use pure Hindi (शुद्ध हिन्दी) without English loanwords."
-            "eng"  -> lines += "Reply only in English."
-            else   -> { /* mix = no extra instruction */ }
-        }
-        if (!style.showDisclaimers) {
-            lines += "Skip safety/medical disclaimers unless the user asks."
-        }
-        if (!style.includeExamples) {
-            lines += "Avoid worked examples; explain concepts without illustrations."
-        }
-        return lines.joinToString(separator = " ")
-    }
+    private fun buildResponseStyleSuffix(grounded: Boolean): String =
+        responseStyleInstructionCompiler.compile(
+            style = responseStyleManager.style.value,
+            language = currentLanguage,
+            grounded = grounded,
+        )
 
     /**
      * Single-line time context surfaced to the model so greetings match the

@@ -13,11 +13,17 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.remember
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -714,21 +720,33 @@ fun ResponseStyleScreen(
                 title = d.rsAnswerLength,
                 value = style.length,
                 onChange = viewModel::setLength,
-                options = listOf("short" to d.optShort, "medium" to d.optMedium, "long" to d.optLong),
+                options = listOf(
+                    com.saarthi.core.i18n.ReplyLength.SHORT to d.optShort,
+                    com.saarthi.core.i18n.ReplyLength.MEDIUM to d.optMedium,
+                    com.saarthi.core.i18n.ReplyLength.LONG to d.optLong,
+                ),
             )
             Spacer(Modifier.height(14.dp))
             SegmentedCard(
                 title = d.rsTone,
                 value = style.tone,
                 onChange = viewModel::setTone,
-                options = listOf("warm" to d.optWarm, "balanced" to d.optBalanced, "formal" to d.optFormal),
+                options = listOf(
+                    com.saarthi.core.i18n.ReplyTone.WARM to d.optWarm,
+                    com.saarthi.core.i18n.ReplyTone.BALANCED to d.optBalanced,
+                    com.saarthi.core.i18n.ReplyTone.FORMAL to d.optFormal,
+                ),
             )
             Spacer(Modifier.height(14.dp))
             SegmentedCard(
                 title = d.rsLanguageStyle,
                 value = style.languageMix,
                 onChange = viewModel::setLanguageMix,
-                options = listOf("pure" to d.optPure, "mix" to d.optHinglish, "eng" to d.optEnglish),
+                options = listOf(
+                    com.saarthi.core.i18n.ReplyLanguageMix.PURE to d.optPure,
+                    com.saarthi.core.i18n.ReplyLanguageMix.MIX to d.optHinglish,
+                    com.saarthi.core.i18n.ReplyLanguageMix.ENGLISH to d.optEnglish,
+                ),
             )
 
             Spacer(Modifier.height(14.dp))
@@ -742,18 +760,6 @@ fun ResponseStyleScreen(
             )
 
             Spacer(Modifier.height(20.dp))
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.Shield, null) },
-                title = d.rsShowDisclaimers,
-                subtitle = d.rsShowDisclaimersSub,
-                trailing = {
-                    SaarthiToggle(
-                        on = style.showDisclaimers,
-                        onToggle = { viewModel.setShowDisclaimers(!style.showDisclaimers) },
-                    )
-                },
-            )
-            Spacer(Modifier.height(6.dp))
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.MenuBook, null) },
                 title = d.rsIncludeExamples,
@@ -859,69 +865,82 @@ private fun buildPreviewReply(
     language: SupportedLanguage,
 ): String {
     // Deterministic sample so a preference change instantly shows a new result.
-    // Rendered in the UI language: languageMix "eng" → English; "pure" → native
-    // (no English words); else (हिंग्लिश/mix) → native script with light English
+    // Rendered in the UI language: languageMix ENGLISH → English; PURE → native
+    // (no English words); else (हिंग्लिश/MIX) → native script with light English
     // loanwords. Only Hindi & Marathi have native sample text — other languages
     // fall back to English (avoids showing Hindi to e.g. a Tamil user) until
     // their language pass adds samples.
+    //
+    // No disclaimer line here (there used to be one, toggled by a
+    // "Show disclaimers" setting) — safety/disclaimer framing is no longer a
+    // configurable response-style preference at all (see
+    // ResponseStyleInstructionCompiler's kdoc), so it has nothing to do with
+    // what THIS preview is illustrating.
     val mr = language == SupportedLanguage.MARATHI
     val native = language == SupportedLanguage.HINDI || mr
-    val useEng = style.languageMix == "eng" || !native
-    val pure = style.languageMix == "pure"
+    val useEng = style.languageMix == com.saarthi.core.i18n.ReplyLanguageMix.ENGLISH || !native
+    val pure = style.languageMix == com.saarthi.core.i18n.ReplyLanguageMix.PURE
 
     val warmth = when {
-        useEng -> when (style.tone) { "warm" -> "Sure thing — "; "formal" -> "Certainly. "; else -> "" }
-        mr     -> when (style.tone) { "warm" -> "नक्कीच — "; "formal" -> "नक्कीच. "; else -> "" }
-        else   -> when (style.tone) { "warm" -> "ज़रूर — "; "formal" -> "जी ज़रूर। "; else -> "" }
+        useEng -> when (style.tone) {
+            com.saarthi.core.i18n.ReplyTone.WARM -> "Sure thing — "
+            com.saarthi.core.i18n.ReplyTone.FORMAL -> "Certainly. "
+            else -> ""
+        }
+        mr -> when (style.tone) {
+            com.saarthi.core.i18n.ReplyTone.WARM -> "नक्कीच — "
+            com.saarthi.core.i18n.ReplyTone.FORMAL -> "नक्कीच. "
+            else -> ""
+        }
+        else -> when (style.tone) {
+            com.saarthi.core.i18n.ReplyTone.WARM -> "ज़रूर — "
+            com.saarthi.core.i18n.ReplyTone.FORMAL -> "जी ज़रूर। "
+            else -> ""
+        }
     }
     val body = when {
         useEng -> when (style.length) {
-            "short" -> "Boil ginger, add honey, sip warm."
-            "long"  -> "Add 5 thin ginger slices to a cup of water. Simmer for 5 minutes, strain, stir in a teaspoon of honey and a pinch of turmeric. Sip twice a day for about four days."
-            else    -> "Simmer ginger in water for 5 minutes, strain, then mix in honey. Drink twice daily."
+            com.saarthi.core.i18n.ReplyLength.SHORT -> "Boil ginger, add honey, sip warm."
+            com.saarthi.core.i18n.ReplyLength.LONG  -> "Add 5 thin ginger slices to a cup of water. Simmer for 5 minutes, strain, stir in a teaspoon of honey and a pinch of turmeric. Sip twice a day for about four days."
+            else -> "Simmer ginger in water for 5 minutes, strain, then mix in honey. Drink twice daily."
         }
         pure && mr -> when (style.length) {
-            "short" -> "आले उकळून मध मिसळा, कोमट प्या."
-            "long"  -> "एक कप पाण्यात आल्याचे पाच पातळ काप घालून पाच मिनिटे उकळा. गाळून घ्या, चवीसाठी मध आणि चिमूटभर हळद घाला. दिवसातून दोनदा, चार दिवस."
-            else    -> "एक कप पाण्यात आले उकळून मध मिसळा — दिवसातून दोनदा घ्या."
+            com.saarthi.core.i18n.ReplyLength.SHORT -> "आले उकळून मध मिसळा, कोमट प्या."
+            com.saarthi.core.i18n.ReplyLength.LONG  -> "एक कप पाण्यात आल्याचे पाच पातळ काप घालून पाच मिनिटे उकळा. गाळून घ्या, चवीसाठी मध आणि चिमूटभर हळद घाला. दिवसातून दोनदा, चार दिवस."
+            else -> "एक कप पाण्यात आले उकळून मध मिसळा — दिवसातून दोनदा घ्या."
         }
         pure -> when (style.length) {
-            "short" -> "अदरक उबाल कर शहद मिलाइए, गर्म पीजिए।"
-            "long"  -> "एक कप पानी में अदरक की पाँच पतली स्लाइस डाल कर पाँच मिनट उबालें। थोड़ा छान लीजिए, स्वाद के लिए शहद और चुटकी भर हल्दी डालें। दिन में दो बार, चार दिन तक।"
-            else    -> "एक कप पानी में अदरक उबाल कर शहद मिलाइए — दिन में दो बार लीजिए।"
+            com.saarthi.core.i18n.ReplyLength.SHORT -> "अदरक उबाल कर शहद मिलाइए, गर्म पीजिए।"
+            com.saarthi.core.i18n.ReplyLength.LONG  -> "एक कप पानी में अदरक की पाँच पतली स्लाइस डाल कर पाँच मिनट उबालें। थोड़ा छान लीजिए, स्वाद के लिए शहद और चुटकी भर हल्दी डालें। दिन में दो बार, चार दिन तक।"
+            else -> "एक कप पानी में अदरक उबाल कर शहद मिलाइए — दिन में दो बार लीजिए।"
         }
         mr -> when (style.length) {
-            "short" -> "आले पाण्यात boil करून मध मिसळा — घशाला relief मिळेल."
-            "long"  -> "एक कप पाण्यात आल्याचे 5 पातळ slices घालून 5 मिनिटे simmer करा. गाळून एक चमचा मध आणि चिमूटभर हळद mix करा. दिवसातून 2 वेळा, 3–4 दिवस घ्या."
-            else    -> "आले पाण्यात 5 मिनिटे boil करा, गाळून मध मिसळा. दिवसातून 2 वेळा घ्या."
+            com.saarthi.core.i18n.ReplyLength.SHORT -> "आले पाण्यात boil करून मध मिसळा — घशाला relief मिळेल."
+            com.saarthi.core.i18n.ReplyLength.LONG  -> "एक कप पाण्यात आल्याचे 5 पातळ slices घालून 5 मिनिटे simmer करा. गाळून एक चमचा मध आणि चिमूटभर हळद mix करा. दिवसातून 2 वेळा, 3–4 दिवस घ्या."
+            else -> "आले पाण्यात 5 मिनिटे boil करा, गाळून मध मिसळा. दिवसातून 2 वेळा घ्या."
         }
         else -> when (style.length) {
-            "short" -> "अदरक को पानी में boil करके शहद मिलाएँ — गले को relief मिलेगा।"
-            "long"  -> "एक कप पानी में अदरक की 5 पतली slices डाल कर 5 मिनट simmer करें। छान कर एक चम्मच शहद और चुटकी भर हल्दी mix करें। दिन में 2 बार, 3–4 दिन तक लें।"
-            else    -> "अदरक को पानी में 5 मिनट boil करें, छान कर शहद मिला लें। दिन में 2 बार लें।"
+            com.saarthi.core.i18n.ReplyLength.SHORT -> "अदरक को पानी में boil करके शहद मिलाएँ — गले को relief मिलेगा।"
+            com.saarthi.core.i18n.ReplyLength.LONG  -> "एक कप पानी में अदरक की 5 पतली slices डाल कर 5 मिनट simmer करें। छान कर एक चम्मच शहद और चुटकी भर हल्दी mix करें। दिन में 2 बार, 3–4 दिन तक लें।"
+            else -> "अदरक को पानी में 5 मिनट boil करें, छान कर शहद मिला लें। दिन में 2 बार लें।"
         }
     }
-    val example = if (style.includeExamples && style.length != "short") when {
+    val example = if (style.includeExamples && style.length != com.saarthi.core.i18n.ReplyLength.SHORT) when {
         useEng -> " For example: warm liquids loosen throat mucus, and honey coats the inflamed tissue."
         pure && mr -> " उदाहरणार्थ: कोमट द्रव घशातील कफ सैल करतात आणि मध सूज कमी करतो."
         pure -> " उदाहरण के लिए: गर्म तरल पदार्थ गले की बलगम ढीली करते हैं, और शहद सूजन वाली परत को राहत देता है।"
         mr -> " उदाहरणार्थ: गरम liquids घशातील कफ loosen करतात आणि मध tissue ला आराम देतो."
         else -> " उदाहरण के लिए: गरम liquids गले की बलगम loosen करते हैं और शहद tissue को coat करता है।"
     } else ""
-    val disclaimer = if (style.showDisclaimers && style.length != "short") when {
-        useEng -> " If symptoms last more than 3 days, please see a doctor."
-        mr     -> " त्रास 3 दिवसांपेक्षा जास्त राहिल्यास, कृपया डॉक्टरांना दाखवा."
-        else   -> " अगर तकलीफ़ 3 दिन से ज़्यादा रहे, तो कृपया डॉक्टर को दिखाएँ।"
-    } else ""
-    return warmth + body + example + disclaimer
+    return warmth + body + example
 }
 
 @Composable
-private fun SegmentedCard(
+private fun <T> SegmentedCard(
     title: String,
-    value: String,
-    onChange: (String) -> Unit,
-    options: List<Pair<String, String>>,
+    value: T,
+    onChange: (T) -> Unit,
+    options: List<Pair<T, String>>,
 ) {
     Column {
         Text(
@@ -930,7 +949,10 @@ private fun SegmentedCard(
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
         )
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .selectableGroup()
+                .semantics { contentDescription = title },
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             options.forEach { (k, label) ->
@@ -938,6 +960,7 @@ private fun SegmentedCard(
                 Box(
                     modifier = Modifier
                         .weight(1f)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(if (selected) SaarthiColors.MarigoldSoft else Color.Transparent)
                         .border(
@@ -945,7 +968,11 @@ private fun SegmentedCard(
                             if (selected) SaarthiColors.MarigoldBd else SaarthiColors.Border,
                             RoundedCornerShape(12.dp),
                         )
-                        .clickable(onClick = { onChange(k) })
+                        .selectable(
+                            selected = selected,
+                            onClick = { onChange(k) },
+                            role = Role.RadioButton,
+                        )
                         .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
