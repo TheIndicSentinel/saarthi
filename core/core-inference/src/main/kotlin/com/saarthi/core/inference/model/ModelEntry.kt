@@ -12,6 +12,7 @@ enum class SocFamily {
     GOOGLE_TENSOR,    // Pixel devices        — use generic file
     SAMSUNG_EXYNOS,   // Exynos variants      — use generic file
     MEDIATEK,         // Dimensity, etc.      — use generic file
+    MEDIATEK_FLAGSHIP, // Dimensity 9000-series (MT6983/85/89/91) — identified by chip code, not RAM.
     GENERIC,          // Unknown / other      — use generic file
 }
 
