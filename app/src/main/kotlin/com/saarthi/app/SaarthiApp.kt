@@ -35,7 +35,11 @@ class SaarthiApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        Timber.plant(Timber.DebugTree())
+        // Logcat is reachable via local/adb access on any installed build — planting
+        // DebugTree unconditionally meant every Timber.d/e/i call in the app reached
+        // production Logcat too, inconsistent with this app's privacy-by-default
+        // posture. DebugLogger (the file-backed log) is unaffected by this gate.
+        if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree())
         DebugLogger.init(this)
         // Remove any stale inference notification left from a previous session that ended
         // via SIGKILL (onDestroy was never called, so the FGS notification persists on

@@ -70,6 +70,12 @@ data class AssistantUiState(
     val showDrawer: Boolean = false,
     val isSearchMode: Boolean = false,
     val searchQuery: String = "",
+    /**
+     * True while this voice session is using the standard SpeechRecognizer
+     * path that may send audio to the device speech provider (Point 6).
+     * Drives a one-line disclosure on the voice overlay — only when needed.
+     */
+    val voiceMayUseCloudSpeech: Boolean = false,
 )
 
 @HiltViewModel
@@ -82,6 +88,7 @@ class AssistantViewModel @Inject constructor(
     private val memoryRepository: MemoryRepository,
     private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
     private val ttsPreference: com.saarthi.core.i18n.TtsPreference,
+    private val voicePrivacyPreference: com.saarthi.core.i18n.VoicePrivacyPreference,
     private val personalityPreference: com.saarthi.core.i18n.PersonalityPreference,
     private val funnel: FunnelTracker,
     private val entitlements: com.saarthi.core.i18n.EntitlementManager,
@@ -143,6 +150,8 @@ class AssistantViewModel @Inject constructor(
     val allMemories: Flow<List<MemoryEntry>> = memoryRepository.observeAll()
 
     private var speechRecognizer: SpeechRecognizer? = null
+    /** Matches whether [speechRecognizer] was created via the on-device API. */
+    private var speechRecognizerIsOnDevice: Boolean = false
 
     init {
         chatRepository.getTokensPerSecond()
@@ -177,6 +186,26 @@ class AssistantViewModel @Inject constructor(
         // no longer speaking (natural end, error, or stop()).
         ttsManager.isSpeaking
             .onEach { speaking -> if (!speaking) _speakingMessageId.value = null }
+            .launchIn(viewModelScope)
+
+        // TTS — if the engine gives up permanently after repeated init
+        // failure (see TtsManager.ttsAvailable's kdoc), clear any stuck
+        // "speaking" highlight. Without this, toggleSpeak() sets
+        // _speakingMessageId optimistically BEFORE the async init result
+        // is known; on a device with broken TTS, isSpeaking never
+        // transitions to true (so it never transitions back to false
+        // either — MutableStateFlow doesn't re-emit an unchanged value),
+        // leaving the Listen chip stuck showing "speaking" forever with
+        // no audio and no way to clear it. Surfaced via the same `error`
+        // field + Snackbar already used for streaming failures — no new
+        // UI needed.
+        ttsManager.ttsAvailable
+            .onEach { available ->
+                if (!available) {
+                    _speakingMessageId.value = null
+                    _uiState.update { it.copy(error = currentLanguage.value.voiceReadingNotAvailable) }
+                }
+            }
             .launchIn(viewModelScope)
 
         // TTS — when "Read replies aloud" is on, auto-speak each assistant
@@ -230,8 +259,18 @@ class AssistantViewModel @Inject constructor(
 
         _uiState.update { it.copy(inputText = "", pendingAttachments = emptyList(), isStreaming = true, error = null) }
 
+        // Point 8a: streamResponse() now launches on the repository's own
+        // app-scoped coroutine and hands back the Job directly (no more
+        // `.launchIn(viewModelScope)`) — so navigating away from this screen
+        // (which clears viewModelScope) no longer cancels an in-flight
+        // generation; it finishes and gets persisted/displayed in the
+        // background, same as ChatGPT/Gemini/Claude. This ViewModel instance
+        // may itself be gone by the time invokeOnCompletion fires below —
+        // that's fine, it's a harmless no-op update to a StateFlow nobody's
+        // observing anymore; the actual reply lives in the repository's
+        // history, which is what the (new) ViewModel instance reads when the
+        // user navigates back.
         streamJob = chatRepository.streamResponse(text, attachments)
-            .launchIn(viewModelScope)
             .also { job ->
                 job.invokeOnCompletion { throwable ->
                     // A user-initiated Stop cancels the coroutine → don't
@@ -380,6 +419,7 @@ class AssistantViewModel @Inject constructor(
             it.copy(
                 showVoiceMode = false,
                 isListening = false,
+                voiceMayUseCloudSpeech = false,
                 inputText = if (clearText) "" else it.inputText,
             )
         }
@@ -440,50 +480,83 @@ class AssistantViewModel @Inject constructor(
     }
 
     fun startListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            _uiState.update { it.copy(error = currentLanguage.value.voiceNotAvailable) }
-            return
-        }
-        // Reuse a SINGLE recognizer instance across turns. cancel() clears any
-        // prior (finished) session, then we start fresh — this is the reliable
-        // pattern. The old destroy()+recreate raced the async teardown so the
-        // 2nd voice turn silently did nothing until the user cancelled.
-        //
-        // Prefer on-device recognition: the default createSpeechRecognizer()
-        // routes through Google's cloud speech service on most devices with
-        // Play Services, which is a real (if narrow) exception to "100%
-        // offline, nothing leaves the phone." Where the platform can confirm
-        // an on-device model is actually installed (API 33+ via
-        // isOnDeviceRecognitionAvailable), use createOnDeviceSpeechRecognizer()
-        // instead. Below API 33, or when no on-device model is present, fall
-        // back to the standard recognizer with EXTRA_PREFER_OFFLINE set as a
-        // best-effort hint — some recognizer implementations honor it outside
-        // the dedicated on-device API too, and voice input must keep working
-        // (including for languages an on-device model may not cover) rather
-        // than fail outright when on-device isn't available.
+        // Prefer on-device recognition. Standard createSpeechRecognizer() may
+        // route through the device speech provider's cloud (often Google) —
+        // a narrow exception to "AI is 100% offline." Point 6: disclose when
+        // that path is used; Settings "On-device voice only" can block it.
+        val recognitionAvailable = SpeechRecognizer.isRecognitionAvailable(context)
         val onDeviceAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(context) }.getOrDefault(false)
-        val recognizer = speechRecognizer
-            ?: (if (onDeviceAvailable) {
+        val onDeviceVoiceOnly = voicePrivacyPreference.onDeviceVoiceOnly.value
+        val path = com.saarthi.feature.assistant.voice.resolveSpeechRecognitionPath(
+            recognitionAvailable = recognitionAvailable,
+            onDeviceAvailable = onDeviceAvailable,
+            onDeviceVoiceOnly = onDeviceVoiceOnly,
+        )
+        val lang = currentLanguage.value
+        when (path) {
+            com.saarthi.feature.assistant.voice.SpeechRecognitionPath.UNAVAILABLE -> {
+                val error = when {
+                    !recognitionAvailable -> lang.voiceNotAvailable
+                    onDeviceVoiceOnly && !onDeviceAvailable -> lang.voiceOnDeviceOnlyUnavailable
+                    else -> lang.voiceNotAvailable
+                }
+                _uiState.update {
+                    it.copy(
+                        isListening = false,
+                        showVoiceMode = false,
+                        voiceMayUseCloudSpeech = false,
+                        error = error,
+                    )
+                }
+                return
+            }
+            else -> Unit
+        }
+        val wantOnDevice =
+            path == com.saarthi.feature.assistant.voice.SpeechRecognitionPath.ON_DEVICE
+        // Reuse one recognizer across turns (cancel → start). Recreate only
+        // when the on-device vs standard choice changes (e.g. user toggled
+        // privacy mid-session) — destroy()+recreate every turn raced async
+        // teardown and made the 2nd voice turn silently no-op.
+        if (speechRecognizer != null && speechRecognizerIsOnDevice != wantOnDevice) {
+            runCatching { speechRecognizer?.destroy() }
+            speechRecognizer = null
+        }
+        val recognizer = speechRecognizer ?: run {
+            val created = if (wantOnDevice) {
                 SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             } else {
                 SpeechRecognizer.createSpeechRecognizer(context)
-            }).also {
-                it.setRecognitionListener(recognitionListener)
-                speechRecognizer = it
             }
+            created.setRecognitionListener(recognitionListener)
+            speechRecognizer = created
+            speechRecognizerIsOnDevice = wantOnDevice
+            created
+        }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         }
+        val mayUseCloud =
+            path == com.saarthi.feature.assistant.voice.SpeechRecognitionPath.STANDARD_MAY_USE_CLOUD
         runCatching {
             recognizer.cancel()
             recognizer.startListening(intent)
         }.onFailure {
-            _uiState.update { it.copy(isListening = false, error = currentLanguage.value.voiceStartFailed) }
+            _uiState.update {
+                it.copy(
+                    isListening = false,
+                    voiceMayUseCloudSpeech = false,
+                    error = lang.voiceStartFailed,
+                )
+            }
+            return
         }
-        _uiState.update { it.copy(isListening = true) }
+        _uiState.update {
+            it.copy(isListening = true, voiceMayUseCloudSpeech = mayUseCloud)
+        }
     }
 
     fun stopListening() {
@@ -541,7 +614,7 @@ class AssistantViewModel @Inject constructor(
         if (exists == null) {
             com.saarthi.core.inference.DebugLogger.log(
                 "MEMORY",
-                "deleteMemory: no entry for sessionId=$sessionId key=$key — caller likely passed the wrong session",
+                "deleteMemory: no entry for ${com.saarthi.core.inference.LogPrivacy.sessionIdLen(sessionId)} ${com.saarthi.core.inference.LogPrivacy.keyLen(key)} — caller likely passed the wrong session",
             )
             return@launch
         }
@@ -550,6 +623,7 @@ class AssistantViewModel @Inject constructor(
 
     override fun onCleared() {
         speechRecognizer?.destroy()
+        speechRecognizer = null
         ttsManager.stop()
         super.onCleared()
     }

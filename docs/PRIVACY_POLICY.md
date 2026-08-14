@@ -22,7 +22,9 @@ Your conversations, attached files, and remembered facts (name, preferences, etc
   speech model, Android's standard speech service is used instead, which may send the
   audio to that service's provider (typically Google) for transcription — this is a
   device/platform behavior, not something Saarthi's own servers ever see (Saarthi has
-  no servers). Nothing is collected by us either way.
+  no servers). You can turn on **Settings → On-device voice only** to block that
+  fallback (voice input then works only when an on-device speech model is available).
+  Nothing is collected by us either way.
 
 ## Network connections the app makes
 Saarthi is offline for AI — there is no server-side chat processing, and Saarthi has
@@ -34,7 +36,8 @@ no backend to send your data to. It does connect to the internet for:
 3. **Crash & support reports you choose to send.** Saarthi has no automatic crash
    reporting or analytics of any kind — no Firebase, no telemetry. If something goes
    wrong, the on-device debug log (technical: timings, error codes, device model —
-   never your message content) is written to your phone only. The Support screen's
+   lengths/counts for attachments — never your message content or document
+   names) is written to your phone only. The Support screen's
    "Report a problem" lets you email it to us, with the log attached automatically so
    you can review exactly what's being sent before you send it — nothing leaves your
    device unless you choose to send that email.
@@ -55,7 +58,9 @@ Saarthi is not directed at children under 13.
 
 ## Data deletion
 All on-device data is removed when you clear chat history or uninstall the app.
-Diagnostic data (if enabled) is managed per Google Firebase retention policies.
+There is no automatic diagnostic collection to retain — see "Network connections
+the app makes" above: the debug log stays on your device unless you personally
+choose to email it to us via the Support screen.
 
 ## Contact
 Questions or requests: **<add support email — e.g. inerd1412@gmail.com>**

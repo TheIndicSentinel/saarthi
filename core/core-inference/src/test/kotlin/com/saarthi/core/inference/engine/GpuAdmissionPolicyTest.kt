@@ -8,20 +8,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [gpuSafetyMarginMb], [isLargeTier]/[isCompactTier], and
- * [isGpuRestrictedToCompactOnLowTier] are the pure decision math behind the
- * GPU-admission and token-ladder-tier hardening passes: replacing the old
- * flat "avail < 3000MB" veto and flat per-tier margin with a
- * continuously-scaled reserve, and replacing name-matched tier
- * classification ("1b"/"compact"/"gemma 4" substrings) with
- * ModelEntry.promptTier (data-driven — see ModelCatalog). Getting the tier
- * classification wrong reproduces exactly the field bugs this project's
- * history is full of (Gemma 4 E4B/E2B token starvation, Kisan RAG failing
- * on the compact model's old 512-token cap), so this is real, load-bearing
- * logic, not just a legibility improvement. This is the only part of
- * either pass that's unit-testable at all — everything else lives inside
- * LiteRTInferenceEngine.initialize(), which needs the native engine and
- * has no coverage (no Robolectric in this project).
+ * [gpuSafetyMarginMb], [isLargeTier]/[isCompactTier],
+ * [isGpuRestrictedToCompactOnLowTier], and [calculateEffectiveMaxTokens] are
+ * the pure decision math behind the GPU-admission and token-ladder-tier
+ * hardening passes: replacing the old flat "avail < 3000MB" veto and flat
+ * per-tier margin with a continuously-scaled reserve, and replacing
+ * name-matched tier classification ("1b"/"compact"/"gemma 4" substrings)
+ * with ModelEntry.promptTier (data-driven — see ModelCatalog). Getting the
+ * tier classification wrong reproduces exactly the field bugs this
+ * project's history is full of (Gemma 4 E4B/E2B token starvation, Kisan RAG
+ * failing on the compact model's old 512-token cap), so this is real,
+ * load-bearing logic, not just a legibility improvement.
+ *
+ * These pure functions (plus the crash-persistence logic now in
+ * CrashRecoveryStore) are what's unit-testable at all in this area — the
+ * orchestration that calls them lives inside
+ * LiteRTInferenceEngine.initialize(), which needs the native engine and has
+ * no coverage (no Robolectric in this project).
  */
 class GpuAdmissionPolicyTest {
 
@@ -221,5 +224,154 @@ class GpuAdmissionPolicyTest {
                 tier = DeviceTier.FLAGSHIP, isLowRamDevice = true, isCompactModel = false,
             ),
         )
+    }
+
+    // ── calculateEffectiveMaxTokens (extracted from LiteRTInferenceEngine's
+    // token-ladder run{} block as part of the C3 God-class-reduction pass) ──
+    // Each case below traces to a specific field bug — see the function's
+    // kdoc. Default args make every test isolate the ONE thing it's testing.
+
+    private fun tokens(
+        cpuCrashCount: Int = 0,
+        isLargeTier: Boolean = false,
+        isCompactTier: Boolean = false,
+        configMaxTokens: Int = 0,
+        headroomMb: Long = 5_000L,
+        sizeMb: Long = 2_000L,
+        residentEstimateMb: Long = 1_200L,
+    ) = calculateEffectiveMaxTokens(
+        cpuCrashCount, isLargeTier, isCompactTier, configMaxTokens, headroomMb, sizeMb, residentEstimateMb,
+    )
+
+    @Test
+    fun `2 or more CPU crashes floors LARGE tier at 1536, not lower`() {
+        // The bricked-E4B incident: dropping below this made every
+        // generation fail with "Input token ids are too long", even a
+        // one-word "Hi". Must never regress below 1536 for LARGE.
+        assertEquals(1_536, tokens(cpuCrashCount = 2, isLargeTier = true, headroomMb = 10_000L))
+        assertEquals(1_536, tokens(cpuCrashCount = 5, isLargeTier = true, headroomMb = 10_000L))
+    }
+
+    @Test
+    fun `2 or more CPU crashes drops non-LARGE tier to the ultra-safe 64 floor`() {
+        assertEquals(64, tokens(cpuCrashCount = 2, isLargeTier = false, headroomMb = 10_000L))
+    }
+
+    @Test
+    fun `exactly 1 CPU crash uses the auto-recovery floor, less severe than ultra-safe`() {
+        assertEquals(1_536, tokens(cpuCrashCount = 1, isLargeTier = true, headroomMb = 10_000L))
+        assertEquals(256, tokens(cpuCrashCount = 1, isLargeTier = false, headroomMb = 10_000L))
+    }
+
+    @Test
+    fun `a crash-recovery floor overrides the caller's configMaxTokens, not the other way round`() {
+        // Real crash evidence must win over a caller-supplied override —
+        // the ladder checks cpuCrashCount BEFORE configMaxTokens.
+        assertEquals(1_536, tokens(cpuCrashCount = 2, isLargeTier = true, configMaxTokens = 3000, headroomMb = 10_000L))
+    }
+
+    @Test
+    fun `caller override wins when there is no crash evidence`() {
+        assertEquals(3_000, tokens(configMaxTokens = 3_000, headroomMb = 10_000L))
+    }
+
+    @Test
+    fun `caller override outside the valid 1 to 4096 range is ignored, not passed through`() {
+        assertEquals(1_024, tokens(configMaxTokens = 5_000, headroomMb = 3_000L)) // falls to STANDARD default
+    }
+
+    @Test
+    fun `LARGE tier scales to 4096 only with real headroom to spare, threshold stricter for big files`() {
+        // sizeMb < 3000 → threshold 2400
+        assertEquals(4_096, tokens(isLargeTier = true, headroomMb = 2_400L, sizeMb = 2_000L))
+        assertEquals(2_048, tokens(isLargeTier = true, headroomMb = 2_399L, sizeMb = 2_000L))
+        // sizeMb >= 3000 (e.g. E4B) → stricter threshold 3400
+        assertEquals(4_096, tokens(isLargeTier = true, headroomMb = 3_400L, sizeMb = 3_500L))
+        assertEquals(2_048, tokens(isLargeTier = true, headroomMb = 3_399L, sizeMb = 3_500L))
+    }
+
+    @Test
+    fun `LARGE tier never drops below 1536 regardless of how little headroom remains`() {
+        assertEquals(1_536, tokens(isLargeTier = true, headroomMb = 0L))
+        assertEquals(1_536, tokens(isLargeTier = true, headroomMb = 1_499L))
+    }
+
+    @Test
+    fun `COMPACT tier fits the Kisan RAG prompt at 2048 even under low headroom`() {
+        // The Kisan-pack field bug: 512 caused "Input token ids are too
+        // long: 1484 >= 512" on every RAG-attached prompt. COMPACT must
+        // never fall through to the generic low-headroom 512 branch.
+        assertEquals(2_048, tokens(isCompactTier = true, headroomMb = 100L))
+    }
+
+    @Test
+    fun `STANDARD tier (neither LARGE nor COMPACT) drops to 512 under low headroom`() {
+        assertEquals(512, tokens(headroomMb = 2_047L))
+    }
+
+    @Test
+    fun `STANDARD tier defaults to 1024 with adequate headroom`() {
+        assertEquals(1_024, tokens(headroomMb = 2_048L))
+    }
+
+    @Test
+    fun `a model can never be classified as both LARGE and COMPACT for this ladder`() {
+        // Defensive: if a caller ever passes both true (should be
+        // impossible per isLargeTier/isCompactTier's own mutual-exclusion
+        // guarantee), LARGE's branches are checked first and win — verifies
+        // the when-ordering doesn't silently do something else.
+        assertEquals(1_536, tokens(isLargeTier = true, isCompactTier = true, headroomMb = 0L))
+    }
+
+    // ── isNpuEligible / isGpuEligible (the "BackendSelector" half of the
+    // same extraction, from tryLoadWithFallback's two if-conditions) ──────
+
+    @Test
+    fun `NPU is eligible only when the SoC allows it, GPU isn't banned, and the model has QNN layers`() {
+        assertTrue(isNpuEligible(npuSafe = true, gpuBanned = false, modelNpuCompatible = true))
+    }
+
+    @Test
+    fun `NPU is not eligible when the SoC doesn't allow it, regardless of the other two`() {
+        assertFalse(isNpuEligible(npuSafe = false, gpuBanned = false, modelNpuCompatible = true))
+    }
+
+    @Test
+    fun `NPU is not eligible when banned, even if the SoC and model would otherwise allow it`() {
+        // The ban is shared between GPU and NPU (see CrashRecoveryStore's
+        // kdoc — "A prior GPU/NPU crash bans both for 24h").
+        assertFalse(isNpuEligible(npuSafe = true, gpuBanned = true, modelNpuCompatible = true))
+    }
+
+    @Test
+    fun `NPU is not eligible when the model file has no QNN layers for this SoC`() {
+        assertFalse(isNpuEligible(npuSafe = true, gpuBanned = false, modelNpuCompatible = false))
+    }
+
+    @Test
+    fun `GPU is eligible when SoC-safe and not banned`() {
+        // Memory fit is NOT part of isGpuEligible — it is enforced earlier via
+        // residentEstimate + gpuSafetyMargin and folded into gpuBanned.
+        assertTrue(isGpuEligible(gpuSafe = true, gpuBanned = false))
+    }
+
+    @Test
+    fun `GPU is not eligible when the SoC or driver isn't safe`() {
+        assertFalse(isGpuEligible(gpuSafe = false, gpuBanned = false))
+    }
+
+    @Test
+    fun `GPU is not eligible when banned`() {
+        assertFalse(isGpuEligible(gpuSafe = true, gpuBanned = true))
+    }
+
+    @Test
+    fun `GPU eligibility does not depend on a fake bytes-vs-tokens budget check`() {
+        // Regression guard for the removed third clause:
+        // (safeModelBudgetMb * 1_048_576L) >= maxTokens — unit-mismatched and
+        // always true for real budgets. Eligibility must stay true here; RAM
+        // pressure bans GPU via gpuBanned instead.
+        assertTrue(isGpuEligible(gpuSafe = true, gpuBanned = false))
+        assertFalse(isGpuEligible(gpuSafe = true, gpuBanned = true))
     }
 }

@@ -61,6 +61,8 @@ fun VoiceModeOverlay(
     onSend: () -> Unit,
     onStop: () -> Unit,
     onRestart: () -> Unit = {},
+    /** Point 6: show a one-line note only when STT may use the phone speech provider. */
+    mayUseCloudSpeech: Boolean = false,
 ) {
     val transition = rememberInfiniteTransition(label = "voice")
     val pulse1 by transition.animateFloat(
@@ -137,6 +139,18 @@ fun VoiceModeOverlay(
                     )
                 }
                 Box(Modifier.size(40.dp))
+            }
+
+            if (mayUseCloudSpeech) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    language.voiceCloudSpeechHint,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = SaarthiColors.Text3,
+                        textAlign = TextAlign.Center,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             Spacer(Modifier.height(28.dp))

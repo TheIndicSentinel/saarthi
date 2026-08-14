@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Public
@@ -53,6 +54,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,6 +96,7 @@ fun SettingsScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     var showLangPicker by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
     val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
     val darkOn = themeMode == com.saarthi.core.ui.theme.ThemeMode.DARK
     // Daily wisdom notification — preference-backed (DataStore) and tied
@@ -103,6 +106,18 @@ fun SettingsScreen(
     val wisdomVm: com.saarthi.app.wisdom.WisdomSettingsViewModel =
         androidx.hilt.navigation.compose.hiltViewModel()
     val notifOn by wisdomVm.enabled.collectAsStateWithLifecycle()
+
+    // Bug fix: settingsViewModel.toast (e.g. "All conversations cleared"
+    // after Clear-all) was emitted but never collected anywhere, so it
+    // silently never reached the user. Surface it as a one-shot system
+    // Toast, then consume it so it doesn't re-fire on recomposition/rotation.
+    val toastMessage by settingsViewModel.toast.collectAsStateWithLifecycle()
+    LaunchedEffect(toastMessage) {
+        toastMessage?.let { message ->
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+            settingsViewModel.consumeToast()
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg),
@@ -228,6 +243,21 @@ fun SettingsScreen(
             }
 
             SectionLabel(s.sectionPrivacy)
+            val voicePrivacyVm: com.saarthi.app.VoicePrivacySettingsViewModel =
+                androidx.hilt.navigation.compose.hiltViewModel()
+            val onDeviceVoiceOnly by voicePrivacyVm.onDeviceVoiceOnly.collectAsStateWithLifecycle()
+            SaarthiListRow(
+                leadingIcon = { Icon(Icons.Outlined.Mic, null) },
+                title = s.onDeviceVoiceOnly,
+                subtitle = if (onDeviceVoiceOnly) s.onDeviceVoiceOnlyOn else s.onDeviceVoiceOnlyOff,
+                tone = ChipTone.Jade,
+                trailing = {
+                    SaarthiToggle(
+                        on = onDeviceVoiceOnly,
+                        onToggle = { voicePrivacyVm.toggle() },
+                    )
+                },
+            )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Shield, null) },
                 title = s.privacyDetails,
@@ -235,6 +265,14 @@ fun SettingsScreen(
                 tone = ChipTone.Jade,
                 trailing = { ChevronRight() },
                 onClick = { onNavigate("privacy") },
+            )
+            SaarthiListRow(
+                leadingIcon = { Icon(Icons.Outlined.Share, null) },
+                title = s.exportData,
+                subtitle = s.exportDataSub,
+                tone = ChipTone.Jade,
+                trailing = { ChevronRight() },
+                onClick = { showExportDialog = true },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Delete, null) },
@@ -364,6 +402,52 @@ fun SettingsScreen(
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { showClearDialog = false }) {
+                    Text(s.cancel, color = SaarthiColors.Text2)
+                }
+            },
+        )
+    }
+
+    if (showExportDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            containerColor = SaarthiColors.Bg2,
+            title = { Text(s.exportDialogTitle, color = SaarthiColors.Text) },
+            text = {
+                Text(
+                    s.exportDialogBody,
+                    color = SaarthiColors.Text2,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    settingsViewModel.exportData(
+                        onExported = { file ->
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                file,
+                            )
+                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "application/json"
+                                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            runCatching {
+                                context.startActivity(android.content.Intent.createChooser(intent, s.exportData))
+                            }
+                        },
+                        onFailed = {
+                            android.widget.Toast.makeText(context, s.exportFailed, android.widget.Toast.LENGTH_LONG).show()
+                        },
+                    )
+                    showExportDialog = false
+                }) {
+                    Text(s.exportConfirm, color = SaarthiColors.Text, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showExportDialog = false }) {
                     Text(s.cancel, color = SaarthiColors.Text2)
                 }
             },

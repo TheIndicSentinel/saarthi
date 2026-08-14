@@ -1,15 +1,11 @@
 package com.saarthi.core.inference.engine
 
-import android.app.Activity
 import android.app.ActivityManager
-import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.Context
-import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.os.BatteryManager
 import android.os.Build
-import android.os.Bundle
 import android.os.PowerManager
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Conversation
@@ -28,9 +24,9 @@ import com.saarthi.core.inference.model.PromptTier
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
@@ -63,7 +59,14 @@ import javax.inject.Singleton
  *   3. CPU  — XNNPACK NEON (guaranteed path on all ARM64 devices)
  *
  * Key safety invariants preserved from the MediaPipe era:
- *   • Per-model crash tracking (crash count + GPU ban, 24h expiry)
+ *   • Per-model crash tracking (crash count + GPU ban, 24h expiry), plus a
+ *     per-SoC-family GPU ban set alongside it — a proven GPU/NPU fault on
+ *     one model also distrusts GPU for every other model on this device's
+ *     SoC family, not just the one that crashed. All of this persistence
+ *     lives in [CrashRecoveryStore], extracted out of this class so it's a
+ *     standalone, independently reviewable unit — this class only reacts
+ *     to what that store reports, it doesn't touch SharedPreferences
+ *     directly anywhere.
  *   • Generation heartbeat (10s interval) for crash timing diagnosis
  *   • FGS lifecycle via [InferenceService] during model load AND inference
  *   • Deferred engine close — never closes [Engine] while native thread is active
@@ -75,130 +78,33 @@ enum class CrashStage { MODEL_LOAD, GPU_INIT, CPU_INIT, CREATE_CONVERSATION, WAR
 class LiteRTInferenceEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val deviceProfiler: DeviceProfiler,
-    private val generationPreference: com.saarthi.core.inference.GenerationPreference,
+    private val crashRecoveryStore: CrashRecoveryStore,
+    private val samplerPolicy: SamplerPolicy,
 ) : InferenceEngine, ComponentCallbacks2 {
 
     // ── Background lifecycle: debounced engine release ──────────────────────
     //
-    // Previously the engine only released its native/mmap/GPU footprint
-    // under actual memory-pressure signals (onTrimMemory RUNNING_CRITICAL/
-    // COMPLETE, onLowMemory — see below). Those fire late, if at all: many
-    // OEM skins kill background apps via their own process-killer well
-    // before Android's own trim ladder escalates that far, so a multi-GB
-    // model engine could sit fully resident for the entire time the app was
-    // backgrounded on exactly the 6-8GB devices with the least room to
-    // spare for it.
-    //
-    // ComponentCallbacks2 has no "app is visible again" signal (only
-    // increasing-pressure/backgrounding levels), so detecting the OTHER
-    // edge — for the debounce below — needs Application.
-    // ActivityLifecycleCallbacks instead: visibleActivityCount transitions
-    // 0→1 on return to foreground (cancels the pending release) and 1→0 on
-    // backgrounding (schedules it). This tracks the same "any activity
-    // visible" signal androidx.lifecycle.ProcessLifecycleOwner would, done
-    // manually here so core-inference doesn't need a new dependency for it.
-    private val lifecycleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    @Volatile private var pendingBackgroundRelease: Job? = null
-    @Volatile private var pendingConversationRelease: Job? = null
-    @Volatile private var visibleActivityCount = 0
-
-    private val backgroundLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
-        override fun onActivityStarted(activity: Activity) {
-            visibleActivityCount++
-            if (visibleActivityCount == 1) {
-                pendingConversationRelease?.cancel()
-                pendingConversationRelease = null
-                pendingBackgroundRelease?.cancel()
-                pendingBackgroundRelease = null
-            }
-        }
-        override fun onActivityStopped(activity: Activity) {
-            visibleActivityCount = (visibleActivityCount - 1).coerceAtLeast(0)
-            if (visibleActivityCount == 0) {
-                scheduleConversationRelease()
-                scheduleBackgroundRelease()
-            }
-        }
-        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
-        override fun onActivityResumed(activity: Activity) {}
-        override fun onActivityPaused(activity: Activity) {}
-        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-        override fun onActivityDestroyed(activity: Activity) {}
-    }
-
-    /**
-     * Stage 1 of 2 on backgrounding: release just the Conversation (its
-     * KV-cache) at [CONVERSATION_RELEASE_DELAY_MS], well before the full
-     * Engine release at [BACKGROUND_RELEASE_DELAY_MS] in
-     * [scheduleBackgroundRelease]. The Conversation is cheap to recreate
-     * (~30-50ms with cached shaders — generateStream()'s existing
-     * "activeConversation == null" fallback, already used for the very
-     * first turn after init, does this transparently on the next
-     * generation) while the mmap'd Engine (model weights) is the expensive
-     * part to reload (~5-10s). Freeing the cheap-to-rebuild resource
-     * sooner gets real memory back faster without making every return-to-
-     * app pay the full reload cost the single-stage release used to.
-     *
-     * Both delays here are starting points pending real-device validation,
-     * same caveat as the GPU-margin constants in gpuSafetyMarginMb().
-     */
-    private fun scheduleConversationRelease() {
-        pendingConversationRelease?.cancel()
-        pendingConversationRelease = lifecycleScope.launch {
-            delay(CONVERSATION_RELEASE_DELAY_MS)
-            if (!isNativeGenerating && !initMutex.isLocked) {
-                DebugLogger.log("LITERT",
-                    "App backgrounded for ${CONVERSATION_RELEASE_DELAY_MS / 1000}s — releasing Conversation (KV-cache), engine stays resident")
-                releaseConversationOnly()
-            } else {
-                DebugLogger.log("LITERT", "Conversation release skipped — generation or load still in progress")
-            }
-        }
-    }
-
-    /**
-     * Stage 2 of 2 on backgrounding — see [scheduleConversationRelease]'s
-     * kdoc for why this is split into two stages. Debounced, not
-     * immediate: a quick app-switch (checking a notification, glancing at
-     * another app) shouldn't pay the ~5-10s GPU reload cost the next time
-     * the user returns. [BACKGROUND_RELEASE_DELAY_MS] is a starting point,
-     * not a validated one — same caveat as the GPU-margin constants in
-     * gpuSafetyMarginMb(): needs real-device tuning against the actual
-     * supported RAM matrix before being trusted as final.
-     */
-    private fun scheduleBackgroundRelease() {
-        pendingBackgroundRelease?.cancel()
-        pendingBackgroundRelease = lifecycleScope.launch {
-            delay(BACKGROUND_RELEASE_DELAY_MS)
-            // Never interrupt an in-flight generation — closeInternal()'s
-            // existing deferred-close path handles a concurrent close
-            // safely, but a generation the user is actively waiting on
-            // finishing in the background shouldn't be torn down just
-            // because they alt-tabbed away. Also skip while a model load is
-            // in flight (initMutex held) — closeInternal() has no equivalent
-            // deferred-close guard for that phase, so closing the Engine out
-            // from under an active initialize() call could race. Both are
-            // narrow windows (generation/load are seconds, this delay is
-            // minutes), so skipping this cycle and trying again on the next
-            // backgrounding (or an actual memory-pressure callback) is safe.
-            if (!isNativeGenerating && !initMutex.isLocked) {
-                DebugLogger.log("LITERT",
-                    "App backgrounded for ${BACKGROUND_RELEASE_DELAY_MS / 1000}s — releasing engine")
-                release()
-            } else {
-                DebugLogger.log("LITERT", "Background release skipped — generation or load still in progress")
-            }
-        }
-    }
+    // The scheduling/debounce/ActivityLifecycleCallbacks bookkeeping now
+    // lives in [EngineLifecycleReleaseManager] (C3 God-class reduction) —
+    // this class only supplies the callbacks that manager can't own itself:
+    // its own mutable state (isNativeGenerating, initMutex) and the actual
+    // native release calls, each hopped onto [engineDispatcher] before
+    // running (the H13 fix folded into this extraction — these used to run
+    // directly on the manager's Dispatchers.Main.immediate scope, meaning a
+    // backgrounding event could block the main thread with native
+    // Engine/Conversation close() calls and a synchronous SharedPreferences
+    // commit()).
+    private val engineLifecycleReleaseManager = EngineLifecycleReleaseManager(
+        context = context,
+        isNativeGenerating = { isNativeGenerating },
+        isInitInProgress = { initMutex.isLocked },
+        releaseConversationOnly = { withContext(engineDispatcher) { releaseConversationOnly() } },
+        releaseEngine = { withContext(engineDispatcher) { release() } },
+    )
 
     init {
         context.registerComponentCallbacks(this)
-        // @ApplicationContext resolves to the actual Application instance —
-        // registerActivityLifecycleCallbacks is an Application-only method
-        // (unlike registerComponentCallbacks above, which any Context
-        // supports), so this cast is safe and standard for this Hilt
-        // qualifier.
-        (context as? Application)?.registerActivityLifecycleCallbacks(backgroundLifecycleCallbacks)
+        engineLifecycleReleaseManager.register()
     }
 
     @Volatile private var engine: Engine? = null
@@ -295,46 +201,28 @@ class LiteRTInferenceEngine @Inject constructor(
     // never accessed concurrently and callbacks return to a stable thread context.
     private val engineDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
-    // Crash detection: synchronous SharedPrefs writes survive process kills.
-    //   litert_gen_pending      — set during generation; true at startup → crashed mid-response
-    //   litert_init_pending     — set during model init; true at startup → crashed mid-load (OOM)
-    //   litert_was_using_gpu    — which backend was active at crash (GPU/NPU = true)
-    //   litert_crash_model_path — which model was generating at crash
-    //   litert_conv_ready       — false during createConversation(), true after; crash while false = don't ban GPU
-    //   litert_crash_count_*    — per-model consecutive crash count
-    //   litert_gpu_ban_*        — per-model GPU ban flag (true = use CPU for 24h)
-    //   litert_gpu_ban_ts_*     — per-model GPU ban timestamp
-    private val enginePrefs: SharedPreferences
-        get() = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE)
-
-    companion object {
-        private const val GPU_BAN_EXPIRY_MS = 24 * 60 * 60 * 1000L          // 24 hours
-        // Crash counts auto-expire after this window. Previously they only
-        // reset on a successful onDone or a version bump (= reinstall),
-        // which left users permanently locked out of a model that hit the
-        // crash-loop threshold even once. Aligning with the GPU-ban window
-        // means a model that crashed yesterday is usable again today
-        // without uninstall+reinstall.
-        private const val CRASH_COUNT_EXPIRY_MS = 24 * 60 * 60 * 1000L      // 24 hours
-
-        // See scheduleConversationRelease()'s kdoc — stage 1 of the
-        // two-stage background release, starting point pending real-device
-        // validation, not a final tuned value.
-        private const val CONVERSATION_RELEASE_DELAY_MS = 60 * 1000L        // 1 minute
-
-        // See scheduleBackgroundRelease()'s kdoc — stage 2 (full release),
-        // starting point pending real-device validation, not a final
-        // tuned value.
-        private const val BACKGROUND_RELEASE_DELAY_MS = 2 * 60 * 1000L      // 2 minutes
+    // Point 4: onDone/onError used to each spin up a brand-new, untracked
+    // `CoroutineScope(Dispatchers.IO)` — no SupervisorJob, no exception
+    // handler — for the mandatory per-turn recycleConversation() call (see
+    // conversationLock's kdoc above for why this must be async). Without a
+    // handler, a failure inside recycleConversation() (e.g. the native
+    // close()/create() calls it makes) was an uncaught exception that could
+    // hard-crash the process on every single turn's completion, with no
+    // trace. One shared, supervised, logged scope replaces both call sites.
+    private val recycleExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        DebugLogger.log("LITERT", "Recycle failure: ${throwable::class.simpleName}: ${throwable.message}")
     }
+    private val callbackScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + recycleExceptionHandler)
 
     // ── Version-based crash state reset ──────────────────────────────────────
-
+    //
     // On each new APK install, clear all per-session crash tracking so stale crash
     // counts from a previous build don't trigger the crash loop blocker on first run.
     // GPU bans are also cleared — a new build may have different backend config.
+    // The actual SharedPreferences work lives in CrashRecoveryStore; this class
+    // only resolves the app version code (a Context/PackageManager concern, not
+    // a crash-persistence one) and hands it off.
     init {
-        val prefs = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE)
         val currentVersion = runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toInt()
@@ -343,216 +231,13 @@ class LiteRTInferenceEngine @Inject constructor(
                 context.packageManager.getPackageInfo(context.packageName, 0).versionCode
             }
         }.getOrDefault(-1)
-        val storedVersion = prefs.getInt("litert_app_version", 0)
-        if (currentVersion != -1 && currentVersion != storedVersion) {
-            val editor = prefs.edit()
-            editor.putBoolean("litert_gen_pending", false)
-            editor.putBoolean("litert_init_pending", false)
-            editor.putBoolean("litert_conv_ready", true)
-            prefs.all.keys.filter {
-                it.startsWith("litert_crash_count_") ||
-                it.startsWith("litert_cpu_crash_count_") ||  // separate prefix; was leaking across installs
-                it.startsWith("litert_gpu_ban_")
-            }.forEach { editor.remove(it) }
-            editor.putInt("litert_app_version", currentVersion)
-            editor.commit()
-            DebugLogger.log("LITERT", "[VERSION] New install v$currentVersion (was v$storedVersion) — crash state cleared")
-        }
+        crashRecoveryStore.resetOnVersionChange(currentVersion)
     }
 
     // ── Crash detection helpers ───────────────────────────────────────────────
-
-    private fun wasKilledDuringGeneration() =
-        enginePrefs.getBoolean("litert_gen_pending", false)
-
-    private fun wasKilledDuringInit() =
-        enginePrefs.getBoolean("litert_init_pending", false)
-
-    /**
-     * Whether Android itself attributes the most recent time this process
-     * died to REASON_LOW_MEMORY — confirmed OS evidence, not just "the
-     * process died while litert_gen_pending/litert_init_pending was set"
-     * (which can't distinguish an LMK kill from a user force-stop, an ANR,
-     * or an unrelated native crash the same way this can). Purely additive
-     * to the existing dead-man's-switch crash detection above: it only
-     * upgrades the CONFIDENCE of a diagnosis already made by
-     * wasKilledDuringGeneration()/wasKilledDuringInit(), never triggers
-     * recovery on its own. API 30+ only (getHistoricalProcessExitReasons);
-     * returns false below that, so older devices keep exactly today's
-     * behavior.
-     */
-    private fun lastExitWasConfirmedLowMemory(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-        return runCatching {
-            val am = context.getSystemService(ActivityManager::class.java)
-            val reasons = am.getHistoricalProcessExitReasons(context.packageName, 0, 1)
-            reasons.firstOrNull()?.reason == android.app.ApplicationExitInfo.REASON_LOW_MEMORY
-        }.getOrDefault(false)
-    }
-
-    private fun modelKey(modelPath: String) = modelPath.substringAfterLast('/')
-
-    /**
-     * Returns the per-model consecutive-crash count, automatically expiring
-     * it after [CRASH_COUNT_EXPIRY_MS] of no new crashes.
-     *
-     * Legacy state from older APK versions has no timestamp; we stamp it
-     * on first read so the 24-hour clock starts then. After expiry the
-     * count is wiped so the user gets a clean attempt without a reinstall.
-     */
-    private fun getCrashCount(modelPath: String): Int =
-        readExpiringCount("litert_crash_count_${modelKey(modelPath)}")
-
-    private fun getCpuCrashCount(modelPath: String): Int =
-        readExpiringCount("litert_cpu_crash_count_${modelKey(modelPath)}")
-
-    private fun readExpiringCount(baseKey: String): Int {
-        val count = enginePrefs.getInt(baseKey, 0)
-        if (count == 0) return 0
-        val tsKey = "${baseKey}_ts"
-        val ts = enginePrefs.getLong(tsKey, 0L)
-        if (ts == 0L) {
-            // Legacy state from before timestamp tracking — stamp it now
-            // so the expiry clock starts from this read.
-            enginePrefs.edit().putLong(tsKey, System.currentTimeMillis()).apply()
-            return count
-        }
-        val ageMs = System.currentTimeMillis() - ts
-        if (ageMs >= CRASH_COUNT_EXPIRY_MS) {
-            DebugLogger.log(
-                "LITERT",
-                "$baseKey expired after ${ageMs / 3_600_000}h — clearing (auto-recovery)",
-            )
-            enginePrefs.edit().remove(baseKey).remove(tsKey).apply()
-            return 0
-        }
-        return count
-    }
-
-    private fun incrementCrashCount(modelPath: String, wasGpuOrNpu: Boolean) {
-        val key = modelKey(modelPath)
-        val now = System.currentTimeMillis()
-        val count = getCrashCount(modelPath) + 1
-        val editor = enginePrefs.edit()
-            .putInt("litert_crash_count_$key", count)
-            .putLong("litert_crash_count_$key" + "_ts", now)
-
-        if (!wasGpuOrNpu) {
-            val cpuCount = getCpuCrashCount(modelPath) + 1
-            editor.putInt("litert_cpu_crash_count_$key", cpuCount)
-                .putLong("litert_cpu_crash_count_$key" + "_ts", now)
-            DebugLogger.log("LITERT", "Crash count for $key: $count (CPU count: $cpuCount)")
-        } else {
-            DebugLogger.log("LITERT", "Crash count for $key: $count")
-        }
-        editor.commit()
-    }
-
-    private fun resetCrashCount(modelPath: String) {
-        val key = modelKey(modelPath)
-        enginePrefs.edit()
-            .remove("litert_crash_count_$key")
-            .remove("litert_crash_count_${key}_ts")
-            .apply()
-    }
-
-    private fun gpuPreviouslyCrashedDuringGen(modelPath: String): Boolean {
-        val key = modelKey(modelPath)
-        if (!enginePrefs.getBoolean("litert_gpu_ban_$key", false)) return false
-        val bannedAt = enginePrefs.getLong("litert_gpu_ban_ts_$key", 0L)
-        val banAgeMs = System.currentTimeMillis() - bannedAt
-        return if (banAgeMs < GPU_BAN_EXPIRY_MS) {
-            true
-        } else {
-            DebugLogger.log("LITERT", "GPU ban expired for $key after ${banAgeMs / 3_600_000}h — retrying GPU")
-            clearGpuGenCrashedFlag(modelPath)
-            false
-        }
-    }
-
-    private fun breakCrashLoopIfNeeded(modelPath: String): Boolean {
-        val count = getCrashCount(modelPath)
-        if (count >= 4) {
-            val key = modelKey(modelPath)
-            DebugLogger.log(
-                "LITERT",
-                "CRASH LOOP ($count crashes for $key) — blocking. Auto-expires in ${CRASH_COUNT_EXPIRY_MS / 3_600_000}h, " +
-                "or sooner if a generation eventually succeeds.",
-            )
-            // Reset the in-flight crash trackers (so we don't double-count next
-            // attempt), but DO NOT reset the persistent count — that's how the
-            // block stays in place until the 24-hour expiry kicks in via
-            // getCrashCount() / readExpiringCount(). Reinstall is no longer
-            // required as a recovery path.
-            enginePrefs.edit()
-                .putBoolean("litert_gen_pending", false)
-                .putBoolean("litert_init_pending", false)
-                .putBoolean("litert_gpu_ban_$key", false)
-                .putLong("litert_gpu_ban_ts_$key", 0L)
-                .commit()
-            crashLoopBlocked = true
-            return true
-        }
-        return false
-    }
-
-    private fun markGpuGenCrashed(modelPath: String) {
-        val key = modelKey(modelPath)
-        enginePrefs.edit()
-            .putBoolean("litert_gpu_ban_$key", true)
-            .putLong("litert_gpu_ban_ts_$key", System.currentTimeMillis())
-            .commit()
-    }
-
-    private fun clearGpuGenCrashedFlag(modelPath: String) {
-        val key = modelKey(modelPath)
-        enginePrefs.edit()
-            .putBoolean("litert_gpu_ban_$key", false)
-            .putLong("litert_gpu_ban_ts_$key", 0L)
-            .apply()
-    }
-
-    private fun markInitStarted(modelPath: String) {
-        enginePrefs.edit()
-            .putBoolean("litert_init_pending", true)
-            .putString("litert_crash_model_path", modelPath)
-            .commit()
-    }
-
-    private fun markInitEnded() =
-        enginePrefs.edit().putBoolean("litert_init_pending", false).commit()
-
-    private fun markGenerationStarted() {
-        enginePrefs.edit()
-            .putBoolean("litert_gen_pending", true)
-            .putBoolean("litert_was_using_gpu", usingGpu || usingNpu)
-            .putString("litert_crash_model_path", loadedModelPath ?: "")
-            .commit()
-    }
-
-    private fun markGenerationEnded() =
-        enginePrefs.edit().putBoolean("litert_gen_pending", false).commit()
-
-    private fun wasUsingGpuAtCrash() =
-        enginePrefs.getBoolean("litert_was_using_gpu", false)
-
-    private fun markConvStarted() =
-        enginePrefs.edit().putBoolean("litert_conv_ready", false).commit()
-
-    private fun markConvReady() =
-        enginePrefs.edit().putBoolean("litert_conv_ready", true).commit()
-
-    // Default true = conservative (unknown crash assumed post-conv → ban GPU).
-    // markConvStarted() sets false before createConversation(); markConvReady() sets true after.
-    // A crash in createConversation() leaves the pref false → GPU is NOT banned on next run
-    // (second run has cached shaders, may complete in time).
-    private fun wasConvReadyAtCrash() =
-        enginePrefs.getBoolean("litert_conv_ready", true)
-
-    private fun markStage(stage: CrashStage) {
-        enginePrefs.edit().putString("litert_crash_stage", stage.name).commit()
-        DebugLogger.log("LITERT", "[STAGE] Entering stage: $stage")
-    }
+    // All persisted crash-tracking state now lives in [CrashRecoveryStore] —
+    // this class only calls it and reacts to what it reports. See that
+    // class's kdoc for the full SharedPreferences key inventory.
 
     private fun setReady(value: Boolean) {
         isReady = value
@@ -582,70 +267,23 @@ class LiteRTInferenceEngine @Inject constructor(
 
     // ── Sampler config (model-aware) ──────────────────────────────────────────
     //
-    // Google's recommended Gemma 3/4 sampling — temp=1.0, topK=64, topP=0.95 —
-    // matches the AI Edge Gallery reference implementation. The previous
-    // temp=0.7 + topK=40 combination caused 1B models to loop on high-probability
-    // sequences (visible repetition in chat). Higher temp + larger topK gives
-    // the diversity Gemma was trained for.
+    // The actual decisions (temperature-override math, grounded-sampler
+    // tuning, the RAG-marker string check) now live in [SamplerPolicy] —
+    // extracted as part of the C3 God-class reduction. These three stay as
+    // thin wrappers because they're called from many sites throughout this
+    // class and only exist to supply the engine-local state (usingNpu,
+    // loadedTemperature, loadedTopK) that SamplerPolicy itself doesn't own.
     //
-    // temperature/topK are now data-driven — see ModelEntry.defaultTemperature/
-    // topK — instead of being re-derived here by matching the model's file
-    // name/path against "gemma3"/"gemma4"/"e4b" substrings. This used to mean
-    // a per-VARIANT distinction (e.g. Gemma 4 E4B's tighter 0.7 default vs
-    // E2B's 1.0) could only be made from the file PATH, never the display
-    // name — see loadedTemperature/loadedTopK for where the caller's already-
-    // resolved catalog values are captured at load time.
-    //
-    // NPU returns null because QNN handles sampling internally on Hexagon.
-    private fun samplerFor(temperature: Float, topK: Int): SamplerConfig? {
-        if (usingNpu) return null
-        // User temperature override (Settings → Response style). A value >= 0
-        // replaces the model's recommended default; AUTO (-1) defers to it,
-        // so users who never touch the slider keep the prior behaviour.
-        // topK/topP stay model-tuned — only the temperature is user-facing.
-        val userTemp = generationPreference.temperature.value
-        val temp = (if (userTemp >= 0f) userTemp else temperature).toDouble()
-        return SamplerConfig(topK = topK, topP = 0.95, temperature = temp)
-    }
-
+    // temperature/topK are data-driven — see ModelEntry.defaultTemperature/
+    // topK — captured at load time into loadedTemperature/loadedTopK below.
     override val activeModelDefaultTemperature: Float
         get() = loadedTemperature
 
     private fun samplerForActiveModel(): SamplerConfig? =
-        samplerFor(loadedTemperature, loadedTopK)
+        samplerPolicy.samplerFor(usingNpu, loadedTemperature, loadedTopK)
 
-    /**
-     * Tighter sampler for RAG-grounded turns. Used when the incoming
-     * prompt carries the strict-mode "ATTACHED EXCERPTS" header so the
-     * detection is automatic and no API change is needed.
-     *
-     * Why a separate sampler for RAG mode:
-     *  • The default Gemma 3/4 sampler (temp=1.0, topK=64, topP=0.95) is
-     *    optimised for creative chat — it tolerates high-probability
-     *    diversion. Inside RAG mode that diversion turns into the
-     *    repetition loops we kept seeing ("[REP] Loop detected at 82
-     *    tokens" on the latest production log).
-     *  • Industry standard for document-grounded Q&A is temp ≈ 0.3–0.5
-     *    with tighter top-p — pulls the model toward verbatim quotation
-     *    of the cited excerpt, which is exactly what we want when we've
-     *    already told it "answer ONLY from these excerpts".
-     *  • NPU still returns null (Hexagon does sampling on-chip).
-     */
-    private fun groundedSamplerFor(modelPath: String): SamplerConfig? {
-        if (usingNpu) return null
-        return SamplerConfig(topK = 40, topP = 0.85, temperature = 0.4)
-    }
-
-    /**
-     * Marker baked into [ChatRepositoryImpl.buildRagPromptBlock] for the
-     * LARGE/STANDARD strict-mode block. Detecting this here keeps the
-     * engine API unchanged — no new parameter on `generateStream()` — and
-     * automatically swaps in the grounded sampler whenever RAG context is
-     * present. False-positive risk is negligible: the literal phrase
-     * "ATTACHED EXCERPTS" doesn't appear in normal chat content.
-     */
-    private fun isGroundedPrompt(prompt: String): Boolean =
-        prompt.contains("ATTACHED EXCERPTS")
+    private fun groundedSamplerFor(): SamplerConfig? =
+        samplerPolicy.groundedSamplerFor(usingNpu)
 
     /**
      * Tracks the sampler mode the live [activeConversation] was created
@@ -702,10 +340,11 @@ class LiteRTInferenceEngine @Inject constructor(
                 crashLoopBlocked = false
 
                 // Crash loop breaker: must run before normal crash recovery.
-                val loopBroken = breakCrashLoopIfNeeded(config.modelPath)
+                val loopBroken = crashRecoveryStore.breakCrashLoopIfNeeded(config.modelPath)
                 if (loopBroken) {
-                    markGenerationEnded()
-                    markInitEnded()
+                    crashLoopBlocked = true
+                    crashRecoveryStore.markGenerationEnded()
+                    crashRecoveryStore.markInitEnded()
                     closeInternal()
                     InferenceService.stop(context)
                     DebugLogger.log("LITERT", "Crash loop: throwing — model not compatible with this device")
@@ -716,8 +355,8 @@ class LiteRTInferenceEngine @Inject constructor(
                     )
                 }
 
-                val crashedDuringGen  = wasKilledDuringGeneration()
-                val crashedDuringInit = wasKilledDuringInit()
+                val crashedDuringGen  = crashRecoveryStore.wasKilledDuringGeneration()
+                val crashedDuringInit = crashRecoveryStore.wasKilledDuringInit()
                 // ── JVM crash filter ──────────────────────────────────────
                 // SaarthiApp's uncaught-exception handler stamps this flag
                 // before the process dies. A JVM-side Throwable (NPE, OOM in
@@ -727,21 +366,16 @@ class LiteRTInferenceEngine @Inject constructor(
                 // here, see a stale `wasUsingGpu=true` from a previous session's
                 // successful generation, and ban the GPU for 24h on a perfectly
                 // healthy device.
-                val lastCrashWasJvm = enginePrefs.getBoolean("saarthi_last_crash_was_jvm", false)
+                val lastCrashWasJvm = crashRecoveryStore.lastCrashWasJvm()
                 if (lastCrashWasJvm) {
-                    val cls = enginePrefs.getString("saarthi_last_crash_class", "?")
+                    val cls = crashRecoveryStore.lastCrashClass()
                     DebugLogger.log("LITERT", "[RECOVERY] Last crash was JVM ($cls) — engine not at fault. Skipping ban / count logic.")
-                    enginePrefs.edit()
-                        .remove("saarthi_last_crash_was_jvm")
-                        .remove("saarthi_last_crash_class")
-                        .putBoolean("litert_init_pending", false)
-                        .putBoolean("litert_gen_pending", false)
-                        .commit()
+                    crashRecoveryStore.clearJvmCrashState()
                 }
 
                 if ((crashedDuringGen || crashedDuringInit) && !lastCrashWasJvm) {
-                    val wasGpuOrNpu = wasUsingGpuAtCrash()
-                    val crashedModelPath = enginePrefs.getString("litert_crash_model_path", "") ?: ""
+                    val wasGpuOrNpu = crashRecoveryStore.wasUsingGpuAtCrash()
+                    val crashedModelPath = crashRecoveryStore.crashedModelPath()
                     val crashWasThisModel = (crashedDuringGen || crashedDuringInit) &&
                         (crashedModelPath == config.modelPath || crashedModelPath.isEmpty())
                     val batteryExempt = runCatching {
@@ -749,15 +383,15 @@ class LiteRTInferenceEngine @Inject constructor(
                             .isIgnoringBatteryOptimizations(context.packageName)
                     }.getOrDefault(true)
 
-                    val crashStage = enginePrefs.getString("litert_crash_stage", "UNKNOWN")
+                    val crashStage = crashRecoveryStore.crashStageRaw()
                     // Confirmed OS evidence, not just an educated guess from the
                     // pending-flag mechanism above — see the function's kdoc.
-                    val confirmedLowMemory = lastExitWasConfirmedLowMemory()
+                    val confirmedLowMemory = crashRecoveryStore.lastExitWasConfirmedLowMemory()
                     DebugLogger.log("LITERT", "=== CRASH RECOVERY ===")
                     DebugLogger.log("LITERT", "  stage=$crashStage  crashedDuringGen=$crashedDuringGen  crashedDuringInit=$crashedDuringInit")
                     DebugLogger.log("LITERT", "  wasUsingGPU/NPU=$wasGpuOrNpu  crashedModel=${crashedModelPath.substringAfterLast('/')}")
                     DebugLogger.log("LITERT", "  currentModel=${config.modelPath.substringAfterLast('/')}  sameModel=$crashWasThisModel")
-                    DebugLogger.log("LITERT", "  crashCount=${getCrashCount(config.modelPath)}  gpuBanned=${gpuPreviouslyCrashedDuringGen(config.modelPath)}")
+                    DebugLogger.log("LITERT", "  crashCount=${crashRecoveryStore.getCrashCount(config.modelPath)}  gpuBanned=${crashRecoveryStore.gpuPreviouslyCrashedDuringGen(config.modelPath)}")
                     DebugLogger.log("LITERT", "  batteryOptExempt=$batteryExempt  confirmedLowMemoryExit=$confirmedLowMemory")
 
                     // Only attribute GPU fault when a *generation* was actively
@@ -787,14 +421,21 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "=== END CRASH RECOVERY ===")
 
                     if (crashWasThisModel) {
-                        incrementCrashCount(config.modelPath, gpuActuallyAtFault)
+                        crashRecoveryStore.incrementCrashCount(config.modelPath, gpuActuallyAtFault)
                         if (gpuActuallyAtFault) {
-                            val convWasReady = wasConvReadyAtCrash()
-                            if (convWasReady) {
+                            val convWasReady = crashRecoveryStore.wasConvReadyAtCrash()
+                            if (shouldBanGpuAfterAttributedGenCrash(convWasReady)) {
                                 // Crash happened inside sendMessageAsync — GPU actually ran but died
                                 // during token generation. Ban GPU for 24h, fall back to CPU.
-                                markGpuGenCrashed(config.modelPath)
-                                DebugLogger.log("LITERT", "[CRASH] GPU/NPU crashed post-conv-ready (sendMessageAsync) — banning GPU for ${modelKey(config.modelPath)}")
+                                crashRecoveryStore.markGpuGenCrashed(config.modelPath)
+                                // Also ban GPU for the rest of this device's SoC family, not
+                                // just this model file — see gpuFamilyPreviouslyCrashedDuringGen's
+                                // kdoc. A fresh profile() call here is deliberate (the device
+                                // hasn't been re-profiled yet at this point in initializeInternal)
+                                // and cheap — this only runs on the rare crash-attribution path.
+                                val crashSocFamily = deviceProfiler.profile().socFamily
+                                crashRecoveryStore.markGpuGenCrashedForSoc(crashSocFamily)
+                                DebugLogger.log("LITERT", "[CRASH] GPU/NPU crashed post-conv-ready (sendMessageAsync) — banning GPU for ${crashRecoveryStore.modelKey(config.modelPath)} AND for SoC family $crashSocFamily")
                             } else {
                                 // Crash happened inside createConversation() — GPU never ran a single
                                 // token. This is a shader compilation / KV-cache alloc timeout on
@@ -813,10 +454,10 @@ class LiteRTInferenceEngine @Inject constructor(
                     // (Compact 1B) to the UNSTABLE threshold and brick it — exactly
                     // backwards, since Compact is the safe model we fall back TO.
                     if (crashedDuringInit && !crashWasThisModel && crashedModelPath.isNotEmpty()) {
-                        incrementCrashCount(crashedModelPath, false)
+                        crashRecoveryStore.incrementCrashCount(crashedModelPath, false)
                     }
-                    markGenerationEnded()
-                    markInitEnded()
+                    crashRecoveryStore.markGenerationEnded()
+                    crashRecoveryStore.markInitEnded()
                     closeInternal()
                 }
 
@@ -859,12 +500,15 @@ class LiteRTInferenceEngine @Inject constructor(
                 logDeviceState("INIT")
                 val profile = deviceProfiler.profile()
 
-                // If we have less than 70% of the model's size in free RAM, the mmap will thrash the OS.
-                if (profile.availableRamMb < (sizeMb * 0.70)) {
+                // mmap-aware: LiteRT demand-pages weights — gate on ~60% resident
+                // estimate (same as token ladder / GPU margin), not 70% of full
+                // file size (that falsely rejected capable devices).
+                if (isInsufficientRamForModelLoad(profile.availableRamMb, sizeMb)) {
                     throw RuntimeException("Not enough active memory to run this model safely. Please close other apps or use a smaller model.")
                 }
 
-                val gpuBanned = gpuPreviouslyCrashedDuringGen(config.modelPath)
+                val gpuBanned = crashRecoveryStore.gpuPreviouslyCrashedDuringGen(config.modelPath) ||
+                    crashRecoveryStore.gpuFamilyPreviouslyCrashedDuringGen(profile.socFamily)
 
                 // maxNumTokens = total context window (input + output tokens).
                 // 1024 = Google AI Edge Gallery default for all backends including CPU.
@@ -872,7 +516,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 // the full KV-cache synchronously. At 1024 tokens the allocation + shader warm-up
                 // exceeds the ~5–7s Android process watchdog threshold, causing a SIGKILL before
                 // a single token is generated. 512 halves the KV-cache, giving more headroom.
-                val cpuCrashCount = getCpuCrashCount(config.modelPath)
+                val cpuCrashCount = crashRecoveryStore.getCpuCrashCount(config.modelPath)
                 if (cpuCrashCount >= 3) {
                     DebugLogger.log("LITERT", "[CRASH] Model marked UNSTABLE after $cpuCrashCount CPU crashes.")
                     throw RuntimeException("Model is unstable on this device. Please use a smaller model.")
@@ -894,7 +538,8 @@ class LiteRTInferenceEngine @Inject constructor(
                 // Shared by the token ladder AND the GPU memory gate below —
                 // both previously charged the FULL file size and crippled E4B
                 // (1536-token floor + forced CPU backend on fresh installs).
-                val residentEstimateMb = (sizeMb * 6) / 10
+                // Pre-load reject gate above uses the same helper.
+                val residentEstimateMb = estimateResidentModelMb(sizeMb)
 
                 // Hoisted out of the token-ladder `run{}` below so the
                 // LOW/MINIMAL-tier GPU-admission gate further down can reuse
@@ -913,103 +558,21 @@ class LiteRTInferenceEngine @Inject constructor(
                 val isLargeTier = isLargeTier(config.promptTier, sizeMb)
                 val isCompactTier = isCompactTier(config.promptTier, sizeMb)
 
-                val effectiveMaxTokens: Int = run {
-                    // headroom from the resident estimate, not the file size —
-                    // the old (avail − FULL size) formula over-charged E4B by
-                    // ~1.4GB, so the "Best Quality" model almost always landed
-                    // on the 1536 floor — which also swaps in the lean ~1.2k
-                    // system prompt and starves recap + RAG (the reported
-                    // "E4B worse than E2B" bug). The crash-recovery ladder
-                    // above remains the hard safety net, and mid-range (6-8GB)
-                    // devices still land on the same 1536/2048 windows —
-                    // only devices with genuinely spare RAM are upgraded.
-                    val headroomMb = profile.availableRamMb - residentEstimateMb
-                    // KV-cache at 4096 scales with model size (~300MB for E2B,
-                    // roughly 2× for E4B) — the scaled-context gate must be
-                    // stricter for files ≥3000MB so E4B only gets 4096 with
-                    // real room to spare.
-                    val scaled4096ThresholdMb = if (sizeMb >= 3000) 3400 else 2400
-                    when {
-                        // Real CPU crash evidence — keep these as a recovery ladder
-                        // since they react to ACTUAL inference instability, not
-                        // battery state. Crash counters are cleared on every new
-                        // APK install (see version-reset block).
-                        // Recovery ladder — but NEVER below a tier's usable
-                        // minimum. A Gemma 4 prompt is ~1,100+ tokens; dropping
-                        // a LARGE model to 256/64 doesn't "recover" it, it just
-                        // swaps the crash for a guaranteed "Input token ids are
-                        // too long" on EVERY turn — even a one-word "Hi". This
-                        // bricked E4B after a single transient init crash:
-                        // maxTokens=256 made normal chat (1051 tok), RAG, and
-                        // every attachment fail with 0 tokens generated. For
-                        // LARGE the recovery floor is 1536 (KV-cache already 25%
-                        // smaller than 2048, and its own prompt still fits); if
-                        // even that won't init, the model is marked UNSTABLE
-                        // above at cpuCrashCount>=3 with a user-facing message.
-                        cpuCrashCount >= 2 -> {
-                            val t = if (isLargeTier) 1536 else 64
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=$t (ULTRA-SAFE: CPU crash count $cpuCrashCount, largeTier=$isLargeTier)")
-                            t
-                        }
-                        cpuCrashCount >= 1 -> {
-                            val t = if (isLargeTier) 1536 else 256
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=$t (AUTO-RECOVERY: CPU crash count $cpuCrashCount, largeTier=$isLargeTier)")
-                            t
-                        }
-                        config.maxTokens > 0 && config.maxTokens <= 4096 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=${config.maxTokens} (caller override)")
-                            config.maxTokens
-                        }
-                        isLargeTier && headroomMb >= scaled4096ThresholdMb -> {
-                            // High-end scaling: when the device has ample RAM
-                            // headroom, double the window so long multi-turn
-                            // chats keep more history before the recap has to
-                            // drop turns. KV-cache for E2B at 4096 is only
-                            // ~300 MB — comfortably inside a 2400 MB headroom —
-                            // and the crash-recovery ladder above still steps
-                            // back to 2048/1536 if any device proves unstable.
-                            // Mid-range stays at 2048 (next branch); low-RAM at
-                            // 1536. No effect on the mid-range primary audience.
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=4096 (LARGE tier, high RAM headroom=${headroomMb}MB ≥ ${scaled4096ThresholdMb}MB — scaled context)  model=${sizeMb}MB  residentEst=${residentEstimateMb}MB")
-                            4096
-                        }
-                        isLargeTier && headroomMb >= 1500 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (LARGE tier — Gemma 4 needs room for system+recap+reply)  headroom=${headroomMb}MB  model=${sizeMb}MB  residentEst=${residentEstimateMb}MB")
-                            2048
-                        }
-                        isLargeTier -> {
-                            // CRITICAL: a Gemma 4 prompt (system + RAG + recap) is
-                            // ~1,100–1,450 tokens. The old low-RAM fallback of 512
-                            // tokens made EVERY generation fail with "Input token ids
-                            // are too long: 1092 >= 512" — no response until the user
-                            // restarted (see crash logs). 1536 holds the prompt while
-                            // keeping the KV-cache ~25% smaller than 2048 for the
-                            // tight-RAM load. Never drop a LARGE model below this.
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1536 (LARGE tier, low RAM headroom=${headroomMb}MB — must fit its own prompt)  residentEst=${residentEstimateMb}MB")
-                            1536
-                        }
-                        isCompactTier -> {
-                            // 2048 (was 512): the 512 cap made the Kisan pack fail
-                            // on Compact with "Input token ids are too long:
-                            // 1484 >= 512" — a Kisan RAG prompt runs ~1500 tokens.
-                            // The 1B model's KV-cache at 2048 is only ~55 MB, safe
-                            // even on low-RAM devices, and the same SM8550 runs
-                            // Gemma 4 E2B at 2048 on GPU without issue. The
-                            // crash-recovery ladder above still drops to 256/64 if
-                            // any device proves unstable at this size.
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (COMPACT tier — fits Kisan RAG prompt)")
-                            2048
-                        }
-                        headroomMb < 2048 -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB")
-                            512
-                        }
-                        else -> {
-                            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024 (STANDARD tier default)  headroom=${headroomMb}MB")
-                            1024
-                        }
-                    }
-                }
+                // headroom from the resident estimate, not the file size — the
+                // old (avail − FULL size) formula over-charged E4B by ~1.4GB,
+                // so the "Best Quality" model almost always landed on the 1536
+                // floor. See calculateEffectiveMaxTokens's kdoc for the full
+                // decision ladder and the field incidents behind each branch.
+                val headroomMb = profile.availableRamMb - residentEstimateMb
+                val effectiveMaxTokens: Int = calculateEffectiveMaxTokens(
+                    cpuCrashCount = cpuCrashCount,
+                    isLargeTier = isLargeTier,
+                    isCompactTier = isCompactTier,
+                    configMaxTokens = config.maxTokens,
+                    headroomMb = headroomMb,
+                    sizeMb = sizeMb,
+                    residentEstimateMb = residentEstimateMb,
+                )
 
                 // Honour the threads the device profiler recommended (typically
                 // cpuCores − 2, clamped to 2..4 on Snapdragon 8 Gen 2 → 4). The
@@ -1060,7 +623,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     isCompactModel = isCompactTier,
                 )
                 if (gpuRestrictedToCompactOnLowTier) {
-                    DebugLogger.log("LITERT", "[GPU] Restricted on tier=${profile.tier} (isLowRamDevice=${profile.isLowRamDevice}): GPU is compact-model-only here, and ${modelKey(config.modelPath)} isn't compact. Falling back to CPU.")
+                    DebugLogger.log("LITERT", "[GPU] Restricted on tier=${profile.tier} (isLowRamDevice=${profile.isLowRamDevice}): GPU is compact-model-only here, and ${crashRecoveryStore.modelKey(config.modelPath)} isn't compact. Falling back to CPU.")
                 }
 
                 // Pre-load memory trim — large models (>1.5 GB) benefit from
@@ -1083,8 +646,8 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 DebugLogger.log("LITERT", "Loading ${config.modelPath.substringAfterLast('/')}  size=${sizeMb}MB  maxTokens=$effectiveMaxTokens")
 
-                markInitStarted(config.modelPath)
-                markStage(CrashStage.MODEL_LOAD)
+                crashRecoveryStore.markInitStarted(config.modelPath)
+                crashRecoveryStore.markStage(CrashStage.MODEL_LOAD)
                 try {
                     val newEngine = tryLoadWithFallback(
                         modelPath = config.modelPath,
@@ -1095,22 +658,19 @@ class LiteRTInferenceEngine @Inject constructor(
                         xnnpackBanned = xnnpackBanned,
                     )
                     
-                    // CRITICAL: Save the active backend state BEFORE we do any heavy operations
-                    // like createConversation. If the native driver SIGKILLs during the next step,
-                    // the Crash Recovery system will correctly see that the GPU was active and ban it.
-                    enginePrefs.edit()
-                        .putBoolean("litert_was_using_gpu", usingGpu || usingNpu)
-                        .commit()
+                    // CRITICAL: Save the active backend state BEFORE createConversation.
+                    // A SIGKILL during createConversation is attributed via litert_was_using_gpu,
+                    // but GPU is ONLY banned when litert_conv_ready was true (post-conv /
+                    // sendMessageAsync crash) — see shouldBanGpuAfterAttributedGenCrash.
+                    crashRecoveryStore.recordBackendForCrashAttribution(usingGpu || usingNpu)
 
-
-                    
                     // Undo lazy init per research: create conversation synchronously during init
                     DebugLogger.log("LITERT", "[INIT] Engine loaded. Creating conversation matrix synchronously...")
-                    val samplerConfig = samplerFor(config.temperature, config.topK)
-                    markStage(CrashStage.CREATE_CONVERSATION)
+                    val samplerConfig = samplerPolicy.samplerFor(usingNpu, config.temperature, config.topK)
+                    crashRecoveryStore.markStage(CrashStage.CREATE_CONVERSATION)
                     DebugLogger.log("LITERT", "[NATIVE] [JNI_ENTER] createConversation (tokens=$effectiveMaxTokens, threads=$dynamicThreads, backend=${backendLabel()})")
                     try {
-                        activeConversation = newEngine.createConversation(ConversationConfig(samplerConfig = samplerConfig))
+                        activeConversation = createConversationTracked(newEngine, samplerConfig)
                         DebugLogger.log("LITERT", "[NATIVE] [JNI_EXIT] createConversation SUCCESS")
                     } catch (e: Exception) {
                         DebugLogger.log("LITERT", "[JNI_ERROR] createConversation threw: ${e.message}")
@@ -1143,27 +703,19 @@ class LiteRTInferenceEngine @Inject constructor(
                     activeModelName = config.modelName
                     _activeModelNameFlow.value = config.modelName
                     _isFreshConversation = true   // brand-new Conversation, no turns in KV
-                    markInitEnded()
-                    // ── Stale-ban self-heal ──────────────────────────────
-                    // If a previous session left a GPU ban + crash count on
-                    // this model (e.g. from a misattributed JVM crash), the
-                    // very fact that init just completed proves the device
-                    // can load it. Clear both so the next session tries GPU
-                    // again instead of permanently downgrading to CPU.
-                    runCatching {
-                        if (gpuPreviouslyCrashedDuringGen(config.modelPath)) {
-                            DebugLogger.log("LITERT", "[RECOVERY] Init succeeded — clearing stale GPU ban for ${modelKey(config.modelPath)}")
-                            clearGpuGenCrashedFlag(config.modelPath)
-                        }
-                        if (getCrashCount(config.modelPath) > 0) {
-                            DebugLogger.log("LITERT", "[RECOVERY] Init succeeded — resetting stale crash count")
-                            resetCrashCount(config.modelPath)
-                        }
-                    }
+                    crashRecoveryStore.markInitEnded()
+                    // Point 4: do NOT clear GPU bans or crash counts here.
+                    // Init (often on CPU while a ban is active) ≠ proof that
+                    // GPU generation is safe. Clearing caused: gen crash →
+                    // ban → CPU init succeeds → clear ban → retry GPU →
+                    // crash again. Heal only via onDone when
+                    // shouldClearGpuBanAfterSuccessfulGeneration is true, or
+                    // CrashRecoveryStore's 24h expiry. Policy pinned by
+                    // shouldClearStaleGpuRecoveryOnInitSuccess() === false.
                     setReady(true)
                     DebugLogger.log("LITERT", "Model ready & pre-warmed  $profile  backend=${backendLabel()}")
                 } catch (e: OutOfMemoryError) {
-                    markInitEnded()
+                    crashRecoveryStore.markInitEnded()
                     val rawMsg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                     val msg = "Not enough RAM to load this model. Close background apps and try again, or choose a smaller model."
                     DebugLogger.log("LITERT", "Load failed: $rawMsg")
@@ -1171,7 +723,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     InferenceService.stop(context)
                     throw RuntimeException("LiteRT failed to load model: $msg", e)
                 } catch (e: Throwable) {
-                    markInitEnded()
+                    crashRecoveryStore.markInitEnded()
                     val rawMsg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                     val msg = when {
                         rawMsg.contains("LiteRtLmJni", ignoreCase = true) ||
@@ -1210,11 +762,15 @@ class LiteRTInferenceEngine @Inject constructor(
     ): Engine {
 
         val modelNpuCompatible = isModelNpuOptimised(modelPath, profile)
+        val npuEligible = isNpuEligible(profile.npuSafe, gpuBanned, modelNpuCompatible)
+        // Memory fit is decided earlier (residentEstimate + gpuSafetyMargin →
+        // folded into gpuBanned). isGpuEligible is SoC-safe + not-banned only.
+        val gpuEligible = isGpuEligible(profile.gpuSafe, gpuBanned)
 
         // ── NPU (Qualcomm QNN — SM8750/SM8550 with device-specific .litertlm) ──
         // Only attempted when the SoC allows NPU AND the model file has QNN-compiled
         // layers for this SoC. Generic bundles have no QNN layers and throw immediately.
-        if (profile.npuSafe && !gpuBanned && modelNpuCompatible) {
+        if (npuEligible) {
             try {
                 DebugLogger.log("LITERT", "[NPU] Trying QNN/Hexagon NPU backend...")
                 return buildEngine(modelPath, maxTokens, Backend.NPU(context.applicationInfo.nativeLibraryDir))
@@ -1232,8 +788,7 @@ class LiteRTInferenceEngine @Inject constructor(
         }
 
         // ── GPU (OpenCL/Vulkan — fast on Adreno, Mali, Tensor GPU) ────────────
-        if (profile.gpuSafe && !gpuBanned &&
-            (profile.safeModelBudgetMb * 1_048_576L) >= maxTokens.toLong()) {
+        if (gpuEligible) {
             try {
                 DebugLogger.log("LITERT", "[GPU] Trying OpenCL/Vulkan GPU backend...")
                 return buildEngine(modelPath, maxTokens, Backend.GPU())
@@ -1251,9 +806,11 @@ class LiteRTInferenceEngine @Inject constructor(
                 // gpuBanned here is (crash ban || RAM-pressure gate ||
                 // LOW/MINIMAL-tier compact-only restriction) merged by the
                 // caller — the specific cause was already logged above.
-                gpuBanned        -> "GPU banned for this load (crash ban, RAM pressure, or tier restriction — see earlier [GPU] line) for ${modelKey(modelPath)}"
+                gpuBanned        -> "GPU banned for this load (crash ban, RAM pressure, or tier restriction — see earlier [GPU] line) for ${crashRecoveryStore.modelKey(modelPath)}"
                 !profile.gpuSafe -> "gpuSafe=false — SoC=${profile.socModel} API=${profile.apiLevel}"
-                else             -> "model too large for GPU memory budget"
+                // Memory budget is no longer a third isGpuEligible clause
+                // (was a bytes-vs-tokens no-op); RAM gating is in gpuBanned.
+                else             -> "gpuEligible=false"
             }
             DebugLogger.log("LITERT", "[GPU] Skipped — $reason")
         }
@@ -1289,6 +846,23 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     /**
+     * Creates a LiteRT [Conversation] while tracking [CrashRecoveryStore]'s
+     * `litert_conv_ready` flag: false for the duration of [Engine.createConversation],
+     * true only after success. A SIGKILL mid-create leaves the flag false so the
+     * next launch does NOT 24h-ban GPU (shader/KV timeout, not a generation fault).
+     *
+     * Every createConversation path MUST go through this helper — previously the
+     * markConvStarted/markConvReady APIs existed but were never called, so every
+     * crash defaulted to conv-ready=true and banned GPU incorrectly.
+     */
+    private fun createConversationTracked(eng: Engine, sampler: SamplerConfig?): Conversation {
+        crashRecoveryStore.markConvStarted()
+        val conversation = eng.createConversation(ConversationConfig(samplerConfig = sampler))
+        crashRecoveryStore.markConvReady()
+        return conversation
+    }
+
+    /**
      * Atomically replace [activeConversation]: close the current one (if any)
      * THEN create a fresh one — all under [conversationLock] so two native
      * sessions can never coexist (the "A session already exists" race).
@@ -1305,9 +879,9 @@ class LiteRTInferenceEngine @Inject constructor(
                 activeConversation = null
                 runCatching { old.close() }
             }
-            val fresh = runCatching {
-                eng.createConversation(ConversationConfig(samplerConfig = sampler))
-            }.getOrNull()
+            // Failure leaves litert_conv_ready=false (markConvStarted ran, markConvReady
+            // did not) — correct for crash attribution if the process dies here.
+            val fresh = runCatching { createConversationTracked(eng, sampler) }.getOrNull()
             activeConversation = fresh
             _isFreshConversation = true
             fresh
@@ -1385,7 +959,7 @@ class LiteRTInferenceEngine @Inject constructor(
 
             try {
                 isGenerating = true
-                markGenerationStarted()
+                crashRecoveryStore.markGenerationStarted(usingGpu || usingNpu, loadedModelPath ?: "")
 
                 // ── Wait for previous native thread (with timeout) ────────────
                 nativeDoneSignal?.let { prev ->
@@ -1429,8 +1003,8 @@ class LiteRTInferenceEngine @Inject constructor(
                 // conversation, recycle so the new sampler actually
                 // takes effect — `createConversation` is the only place
                 // the sampler is bound.
-                val groundedNow = isGroundedPrompt(prompt)
-                val desiredSampler = if (groundedNow) groundedSamplerFor(loadedModelPath ?: "")
+                val groundedNow = samplerPolicy.isGroundedPrompt(prompt)
+                val desiredSampler = if (groundedNow) groundedSamplerFor()
                                      else samplerForActiveModel()
                 if (activeConversation != null && conversationIsGrounded != groundedNow) {
                     DebugLogger.log("LITERT", "[SAMPLER] mode flipped (grounded=$groundedNow) — recycling conversation")
@@ -1525,15 +1099,30 @@ class LiteRTInferenceEngine @Inject constructor(
                         // mutex that LiteRT holds until this callback returns.
                         // Preserve the sampler mode the just-completed turn used (a
                         // doc-Q&A follow-up is very likely also grounded).
-                        CoroutineScope(Dispatchers.IO).launch {
-                            val sc = if (conversationIsGrounded) groundedSamplerFor(loadedModelPath ?: "")
+                        callbackScope.launch {
+                            val sc = if (conversationIsGrounded) groundedSamplerFor()
                                      else samplerForActiveModel()
                             recycleConversation(sc)
                             thisDone.complete(Unit)
                         }
 
-                        resetCrashCount(loadedModelPath ?: "")
-                        markGenerationEnded()
+                        crashRecoveryStore.resetCrashCount(loadedModelPath ?: "")
+                        // Self-heal GPU bans only after a completed generation
+                        // on GPU/NPU — the same class of work that earned the
+                        // ban. CPU onDone must not clear a GPU ban.
+                        if (shouldClearGpuBanAfterSuccessfulGeneration(usingGpu || usingNpu)) {
+                            val path = loadedModelPath ?: ""
+                            val socFamily = deviceProfiler.profile().socFamily
+                            runCatching {
+                                crashRecoveryStore.clearGpuGenCrashedFlag(path)
+                                crashRecoveryStore.clearGpuGenCrashedFlagForSoc(socFamily)
+                                DebugLogger.log(
+                                    "LITERT",
+                                    "[RECOVERY] GPU/NPU generation succeeded — clearing GPU ban for ${crashRecoveryStore.modelKey(path)} and SoC family $socFamily",
+                                )
+                            }
+                        }
+                        crashRecoveryStore.markGenerationEnded()
                         val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                         val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
                         // Decode-only tps excludes the prefill wait, so it reflects
@@ -1575,14 +1164,14 @@ class LiteRTInferenceEngine @Inject constructor(
                         // a brand-new conversation (system prompt re-sent).
                         // Async to avoid native-thread deadlock (LiteRT holds an internal mutex
                         // until this callback returns; createConversation() needs that mutex).
-                        CoroutineScope(Dispatchers.IO).launch {
-                            val sc = if (conversationIsGrounded) groundedSamplerFor(loadedModelPath ?: "")
+                        callbackScope.launch {
+                            val sc = if (conversationIsGrounded) groundedSamplerFor()
                                      else samplerForActiveModel()
                             recycleConversation(sc)
                             thisDone.complete(Unit)
                         }
 
-                        markGenerationEnded()
+                        crashRecoveryStore.markGenerationEnded()
 
                         // cancelProcess() triggers CancellationException — treat as
                         // normal stop (user navigated away), not as an error.
@@ -1590,7 +1179,7 @@ class LiteRTInferenceEngine @Inject constructor(
                             val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                             val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
                             DebugLogger.log("LITERT", "Stream cancelled  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}")
-                            resetCrashCount(loadedModelPath ?: "")
+                            crashRecoveryStore.resetCrashCount(loadedModelPath ?: "")
                             InferenceService.stop(context)
                             close()  // normal close — no error
                         } else {
@@ -1628,50 +1217,6 @@ class LiteRTInferenceEngine @Inject constructor(
             }
         }
     }.flowOn(engineDispatcher)
-
-    // ── generate (one-shot) ───────────────────────────────────────────────────
-
-    override suspend fun generate(prompt: String, packType: PackType): String =
-        withContext(engineDispatcher) {
-            val eng = engine ?: throw IllegalStateException("LiteRT engine not initialised.")
-            DebugLogger.log("LITERT", "Generate start  promptChars=${prompt.length}")
-            // Mirror streamResponse's foreground-service guard so the OEM
-            // power-manager (Samsung OneUI / Xiaomi MIUI in particular) can't
-            // kill the process while a long one-shot generate runs. Safe to
-            // call repeatedly — startGenerating just updates the notification
-            // state. The matching stop() is called in the finally block.
-            com.saarthi.core.inference.InferenceService.startGenerating(context)
-            generateMutex.withLock {
-                isGenerating = true
-                markGenerationStarted()
-                try {
-                    val samplerConfig = samplerForActiveModel()
-                    val conv = eng.createConversation(ConversationConfig(samplerConfig = samplerConfig))
-                    try {
-                        val deferred = CompletableDeferred<String>()
-                        val sb = StringBuilder()
-                        conv.sendMessageAsync(prompt, object : MessageCallback {
-                            override fun onMessage(m: Message) {
-                                sb.append(m.toString().filterSpecialTokens())
-                            }
-                            override fun onDone() { deferred.complete(sb.toString()) }
-                            override fun onError(e: Throwable) { deferred.completeExceptionally(e) }
-                        })
-                        deferred.await()
-                    } finally {
-                        runCatching { conv.close() }
-                    }
-                } catch (e: Exception) {
-                    val msg = e.message?.takeIf { it.isNotBlank() } ?: "Generation failed"
-                    Timber.e(e, "LiteRT generation failed")
-                    throw RuntimeException(msg, e)
-                } finally {
-                    isGenerating = false
-                    markGenerationEnded()
-                    runCatching { com.saarthi.core.inference.InferenceService.stop(context) }
-                }
-            }
-        }
 
     // ── Session reset ─────────────────────────────────────────────────────────
 
@@ -1715,7 +1260,7 @@ class LiteRTInferenceEngine @Inject constructor(
     }
 
     override fun release() {
-        markStage(CrashStage.CLEANUP)
+        crashRecoveryStore.markStage(CrashStage.CLEANUP)
         closeInternal()
     }
 
@@ -1910,6 +1455,193 @@ internal fun gpuSafetyMarginMb(totalRamMb: Long): Long {
 
 internal fun lerpMb(x: Long, x0: Long, x1: Long, y0: Long, y1: Long): Long =
     y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+/**
+ * Backend-eligibility checks — the "BackendSelector" half of the C3
+ * backend/token-budget extraction (the other half is
+ * [calculateEffectiveMaxTokens]). Extracted out of
+ * [LiteRTInferenceEngine.tryLoadWithFallback]'s two `if` conditions,
+ * unchanged, so they're directly unit-testable.
+ *
+ * Deliberately scoped to ELIGIBILITY only — whether a backend is even
+ * worth attempting — not the sequential try-NPU-then-GPU-then-CPU
+ * native-call orchestration in `tryLoadWithFallback`, which mutates live
+ * engine state (`usingNpu`/`usingGpu`) and calls into the native `Engine`
+ * constructor inside try/catch fallback chains. That orchestration isn't
+ * safely separable from [LiteRTInferenceEngine] without either moving
+ * ownership of that mutable native state into a new class — a
+ * fundamentally bigger change than a function extraction, and one this
+ * project has no real-device way to validate — or wrapping it in a
+ * pass-through class that adds indirection without reducing real
+ * coupling. Neither is attempted here.
+ */
+internal fun isNpuEligible(npuSafe: Boolean, gpuBanned: Boolean, modelNpuCompatible: Boolean): Boolean =
+    npuSafe && !gpuBanned && modelNpuCompatible
+
+/** [isNpuEligible]'s GPU counterpart — SoC/driver-safe and not banned.
+ *
+ * Deliberately two-part only. A previous third clause compared
+ * `(safeModelBudgetMb * 1_048_576L) >= maxTokens` (bytes vs token count) —
+ * unit-mismatched and always true for real budgets, so it gave a false
+ * sense of memory gating. Actual GPU RAM admission is
+ * `availableRam < residentEstimate + gpuSafetyMargin`, merged into
+ * [gpuBanned] by the caller before this runs.
+ */
+internal fun isGpuEligible(gpuSafe: Boolean, gpuBanned: Boolean): Boolean =
+    gpuSafe && !gpuBanned
+
+/**
+ * After a GPU/NPU crash was attributed to the current model (`gpuActuallyAtFault`),
+ * whether to apply the 24h GPU ban (and SoC-family ban).
+ *
+ * [wasConvReadyAtCrash] mirrors [CrashRecoveryStore.wasConvReadyAtCrash]:
+ *  - `true`  → crash after createConversation succeeded (typically mid-
+ *    sendMessageAsync) → ban GPU.
+ *  - `false` → crash while createConversation was in flight (shader compile /
+ *    KV alloc timeout) → do NOT ban; cached shaders often fix the next run.
+ *
+ * Default when the pref was never written is `true` (conservative). That is
+ * why every createConversation path must call markConvStarted before the
+ * native call — otherwise createConversation timeouts were treated as
+ * generation faults and banned GPU incorrectly.
+ */
+internal fun shouldBanGpuAfterAttributedGenCrash(wasConvReadyAtCrash: Boolean): Boolean =
+    wasConvReadyAtCrash
+
+/**
+ * Whether successful model init alone may clear GPU bans / crash counts.
+ *
+ * Always `false`. Init proves load + createConversation, not that GPU
+ * generation is safe. Clearing recovery state here let CPU-fallback inits
+ * wipe a ban earned mid-sendMessageAsync and re-open the GPU crash loop.
+ * Heal via [shouldClearGpuBanAfterSuccessfulGeneration] or 24h expiry.
+ */
+internal fun shouldClearStaleGpuRecoveryOnInitSuccess(): Boolean = false
+
+/**
+ * Whether a completed generation (`onDone`) may clear per-model and
+ * SoC-family GPU bans.
+ *
+ * Only when that turn ran on GPU/NPU — the failing stage that set the ban.
+ * A successful CPU turn must leave the ban in place until GPU/NPU proves
+ * itself or [CrashRecoveryStore]'s 24h expiry elapses.
+ */
+internal fun shouldClearGpuBanAfterSuccessfulGeneration(wasUsingGpuOrNpu: Boolean): Boolean =
+    wasUsingGpuOrNpu
+
+/**
+ * mmap-aware resident weight estimate (MB): ~60% of on-disk model size.
+ * Field-validated above observed ~48–58% including GPU buffers; used by the
+ * pre-load RAM gate, token ladder headroom, and GPU memory-pressure ban so
+ * all three share one definition (not a second 70%-of-file-size gate).
+ *
+ * Public so feature-onboarding can mirror the engine load gate in the picker
+ * (same threshold before download as at initialize).
+ */
+fun estimateResidentModelMb(sizeMb: Long): Long = (sizeMb * 6) / 10
+
+/**
+ * True when available RAM is below the mmap resident estimate — the model
+ * should not be offered/loaded right now. Callers may still succeed after
+ * the user closes background apps; GPU admission applies an *additional*
+ * safety margin on top of this estimate and is independent.
+ *
+ * Public so feature-onboarding can mirror the engine load gate in the picker.
+ */
+fun isInsufficientRamForModelLoad(availableRamMb: Long, sizeMb: Long): Boolean =
+    availableRamMb < estimateResidentModelMb(sizeMb)
+
+/**
+ * The token-ladder decision: how many tokens (input + output) to load the
+ * model with. Extracted out of [LiteRTInferenceEngine.initializeInternal]'s
+ * inline `run{}` block so this decision math is directly unit-testable —
+ * that function itself needs the native engine and has no coverage.
+ *
+ * This is real, field-tuned logic, not a guess — every branch below traces
+ * to a specific reported bug:
+ *  • The CPU-crash recovery floors (never below 1536 for LARGE tier) fix a
+ *    bricked-E4B incident: dropping to 256 tokens made every generation
+ *    fail with "Input token ids are too long: 1092 >= 512", including a
+ *    one-word "Hi".
+ *  • The COMPACT-tier 2048 floor (was 512) fixes the Kisan pack failing on
+ *    Compact with "Input token ids are too long: 1484 >= 512" — a Kisan RAG
+ *    prompt runs ~1500 tokens.
+ *  • The 4096 high-headroom scaling uses [residentEstimateMb] (mmap-aware,
+ *    ~60% of file size), not the full file size — the old (avail − FULL
+ *    size) formula over-charged E4B by ~1.4GB and almost always landed it
+ *    on the 1536 floor, which also swaps in a leaner system prompt and
+ *    starves recap + RAG (the reported "E4B worse than E2B" bug).
+ *
+ * Deliberately keeps its [DebugLogger] calls — this is the exact
+ * field-diagnostic output this class's crash-recovery tooling depends on to
+ * explain "why did this device get N tokens", so moving the decision logic
+ * out must not silently change what shows up in a debug log a user shares
+ * for support. The return value is what's unit-testable; the logging is
+ * preserved byte-for-byte from before this extraction.
+ */
+internal fun calculateEffectiveMaxTokens(
+    cpuCrashCount: Int,
+    isLargeTier: Boolean,
+    isCompactTier: Boolean,
+    configMaxTokens: Int,
+    headroomMb: Long,
+    sizeMb: Long,
+    residentEstimateMb: Long,
+): Int {
+    // KV-cache at 4096 scales with model size (~300MB for E2B, roughly 2×
+    // for E4B) — the scaled-context gate must be stricter for files
+    // ≥3000MB so E4B only gets 4096 with real room to spare.
+    val scaled4096ThresholdMb = if (sizeMb >= 3000) 3400 else 2400
+    return when {
+        // Real CPU crash evidence — keep these as a recovery ladder since
+        // they react to ACTUAL inference instability, not battery state.
+        // Crash counters are cleared on every new APK install.
+        cpuCrashCount >= 2 -> {
+            val t = if (isLargeTier) 1536 else 64
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=$t (ULTRA-SAFE: CPU crash count $cpuCrashCount, largeTier=$isLargeTier)")
+            t
+        }
+        cpuCrashCount >= 1 -> {
+            val t = if (isLargeTier) 1536 else 256
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=$t (AUTO-RECOVERY: CPU crash count $cpuCrashCount, largeTier=$isLargeTier)")
+            t
+        }
+        configMaxTokens > 0 && configMaxTokens <= 4096 -> {
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=$configMaxTokens (caller override)")
+            configMaxTokens
+        }
+        isLargeTier && headroomMb >= scaled4096ThresholdMb -> {
+            // High-end scaling: when the device has ample RAM headroom,
+            // double the window so long multi-turn chats keep more history
+            // before the recap has to drop turns. Mid-range stays at 2048
+            // (next branch); low-RAM at 1536.
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=4096 (LARGE tier, high RAM headroom=${headroomMb}MB ≥ ${scaled4096ThresholdMb}MB — scaled context)  model=${sizeMb}MB  residentEst=${residentEstimateMb}MB")
+            4096
+        }
+        isLargeTier && headroomMb >= 1500 -> {
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (LARGE tier — Gemma 4 needs room for system+recap+reply)  headroom=${headroomMb}MB  model=${sizeMb}MB  residentEst=${residentEstimateMb}MB")
+            2048
+        }
+        isLargeTier -> {
+            // Never drop a LARGE model below this — a Gemma 4 prompt
+            // (system + RAG + recap) is ~1,100-1,450 tokens on its own.
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1536 (LARGE tier, low RAM headroom=${headroomMb}MB — must fit its own prompt)  residentEst=${residentEstimateMb}MB")
+            1536
+        }
+        isCompactTier -> {
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=2048 (COMPACT tier — fits Kisan RAG prompt)")
+            2048
+        }
+        headroomMb < 2048 -> {
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=512 — low RAM headroom=${headroomMb}MB")
+            512
+        }
+        else -> {
+            DebugLogger.log("LITERT", "[TOKENS] maxTokens=1024 (STANDARD tier default)  headroom=${headroomMb}MB")
+            1024
+        }
+    }
+}
 
 /**
  * Token-ladder/context-window "LARGE tier" classification — data-driven via

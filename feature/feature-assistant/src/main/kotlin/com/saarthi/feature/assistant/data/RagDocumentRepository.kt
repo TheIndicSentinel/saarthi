@@ -199,9 +199,13 @@ class RagDocumentRepository @Inject constructor(
         // — Timber alone is invisible in production captures.
         com.saarthi.core.inference.DebugLogger.log(
             "RAG",
-            "indexed ${entities.size} chunks (${totalChars}c, outline=$hasOutline) for ${file.name} (session=$sessionId)"
+            "indexed ${entities.size} chunks (${totalChars}c, outline=$hasOutline) for ${com.saarthi.core.inference.LogPrivacy.nameLen(file.name)} (sessionIdLen=${sessionId.length})"
         )
-        Timber.d("RAG: indexed ${entities.size} chunks (${totalChars}c, outline=$hasOutline) for ${file.name}")
+        // Same lengths-only contract as DebugLogger (Point 9) — Timber can
+        // reach logcat on debug builds; never echo the user filename.
+        Timber.d(
+            "RAG: indexed ${entities.size} chunks (${totalChars}c, outline=$hasOutline) for ${com.saarthi.core.inference.LogPrivacy.nameLen(file.name)}",
+        )
     }
 
     /**

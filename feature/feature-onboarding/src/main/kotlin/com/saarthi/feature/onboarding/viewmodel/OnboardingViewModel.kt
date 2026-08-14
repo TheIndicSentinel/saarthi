@@ -478,7 +478,10 @@ class OnboardingViewModel @Inject constructor(
         }
         viewModelScope.launch(Dispatchers.IO) {
             val file = downloadManager.localPathFor(model)
-            DebugLogger.log("DELETE", "Deleting ${file.absolutePath}  exists=${file.exists()}  size=${file.length() / 1_048_576}MB")
+            DebugLogger.log(
+                "DELETE",
+                "Deleting modelId=${model.id} ${com.saarthi.core.inference.LogPrivacy.nameLen(file.name)}  exists=${file.exists()}  size=${file.length() / 1_048_576}MB",
+            )
             downloadManager.cancelDownload(model) // MUST cancel active download so it doesn't auto-complete
             file.delete()
             _uiState.update {

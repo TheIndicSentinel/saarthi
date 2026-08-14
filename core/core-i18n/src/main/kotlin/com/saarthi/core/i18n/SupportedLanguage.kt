@@ -620,6 +620,58 @@ enum class SupportedLanguage(
         PUNJABI  -> "ਵੌਇਸ ਇਨਪੁੱਟ ਸ਼ੁਰੂ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
         ODIA     -> "ଭଏସ୍ ଇନପୁଟ୍ ଆରମ୍ଭ ହୋଇପାରିଲା ନାହିଁ। ଦୟାକରି ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।"
     }
+    /**
+     * Voice error: Settings "On-device voice only" is on, but this phone has
+     * no on-device speech model — cloud fallback is blocked (Point 6).
+     */
+    val voiceOnDeviceOnlyUnavailable: String get() = when (this) {
+        ENGLISH  -> "On-device voice isn't available here. Turn off “On-device voice only” in Settings, or type instead."
+        HINDI    -> "यहाँ ऑन-डिवाइस आवाज़ उपलब्ध नहीं है। Settings में “केवल ऑन-डिवाइस आवाज़” बंद करें, या टाइप करें।"
+        TAMIL    -> "இங்கே சாதனத்திற்குள் குரல் இல்லை. Settings இல் “சாதன குரல் மட்டும்” அணைக்கவும், அல்லது தட்டச்சு செய்யவும்."
+        TELUGU   -> "ఇక్కడ ఆన్-డివైస్ వాయిస్ లేదు. Settings లో “ఆన్-డివైస్ వాయిస్ మాత్రమే” ఆఫ్ చేయండి, లేదా టైప్ చేయండి."
+        BENGALI  -> "এখানে অন-ডিভাইস ভয়েস নেই। Settings-এ “শুধু অন-ডিভাইস ভয়েস” বন্ধ করুন, অথবা টাইপ করুন।"
+        MARATHI  -> "येथे ऑन-डिव्हाइस आवाज उपलब्ध नाही. Settings मध्ये “फक्त ऑन-डिव्हाइस आवाज” बंद करा, किंवा टाइप करा."
+        KANNADA  -> "ಇಲ್ಲಿ ಆನ್-ಡಿವೈಸ್ ಧ್ವನಿ ಲಭ್ಯವಿಲ್ಲ. Settings ನಲ್ಲಿ “ಆನ್-ಡಿವೈಸ್ ಧ್ವನಿ ಮಾತ್ರ” ಆಫ್ ಮಾಡಿ, ಅಥವಾ ಟೈಪ್ ಮಾಡಿ."
+        GUJARATI -> "અહીં ઓન-ડિવાઇસ વૉઇસ ઉપલબ્ધ નથી. Settings માં “ફક્ત ઓન-ડિવાઇસ વૉઇસ” બંધ કરો, અથવા ટાઇપ કરો."
+        PUNJABI  -> "ਇੱਥੇ ਆਨ-ਡਿਵਾਈਸ ਵੌਇਸ ਉਪਲਬਧ ਨਹੀਂ। Settings ਵਿੱਚ “ਸਿਰਫ਼ ਆਨ-ਡਿਵਾਈਸ ਵੌਇਸ” ਬੰਦ ਕਰੋ, ਜਾਂ ਟਾਈਪ ਕਰੋ।"
+        ODIA     -> "ଏଠାରେ ଅନ୍-ଡିଭାଇସ୍ ଭଏସ୍ ଉପଲବ୍ଧ ନାହିଁ। Settings ରେ “କେବଳ ଅନ୍-ଡିଭାଇସ୍ ଭଏସ୍” ବନ୍ଦ କରନ୍ତୁ, କିମ୍ବା ଟାଇପ୍ କରନ୍ତୁ।"
+    }
+    /** One-line disclosure when voice may use the device speech provider (cloud). */
+    val voiceCloudSpeechHint: String get() = when (this) {
+        ENGLISH  -> "Uses your phone’s speech service"
+        HINDI    -> "फ़ोन की स्पीच सेवा का उपयोग"
+        TAMIL    -> "உங்கள் போனின் பேச்சு சேவையைப் பயன்படுத்துகிறது"
+        TELUGU   -> "మీ ఫోన్ స్పీచ్ సేవను ఉపయోగిస్తుంది"
+        BENGALI  -> "আপনার ফোনের স্পিচ সার্ভিস ব্যবহার করে"
+        MARATHI  -> "तुमच्या फोनची स्पीच सेवा वापरते"
+        KANNADA  -> "ನಿಮ್ಮ ಫೋನ್‌ನ ಸ್ಪೀಚ್ ಸೇವೆಯನ್ನು ಬಳಸುತ್ತದೆ"
+        GUJARATI -> "તમારા ફોનની સ્પીચ સેવા વાપરે છે"
+        PUNJABI  -> "ਤੁਹਾਡੇ ਫ਼ੋਨ ਦੀ ਸਪੀਚ ਸੇਵਾ ਵਰਤਦਾ ਹੈ"
+        ODIA     -> "ଆପଣଙ୍କ ଫୋନର ସ୍ପିଚ୍ ସେବା ବ୍ୟବହାର କରେ"
+    }
+    /**
+     * TTS error: text-to-speech (Listen/read-aloud) engine failed to
+     * initialise on this device, after retrying — see
+     * TtsManager.ttsAvailable's kdoc. Deliberately no "try again" wording
+     * (unlike [voiceStartFailed]) since retries already happened
+     * internally and failed; this is a device-capability message, not a
+     * transient one. Adapted from [voiceNotAvailable]'s exact structure
+     * (same "X not available on this device" template, same per-language
+     * phrasing style) rather than composed from scratch, since that
+     * string already covers the parallel case for voice INPUT.
+     */
+    val voiceReadingNotAvailable: String get() = when (this) {
+        ENGLISH  -> "Voice reading isn't available on this device"
+        HINDI    -> "इस डिवाइस पर आवाज़ में पढ़ना उपलब्ध नहीं है"
+        TAMIL    -> "இந்த சாதனத்தில் குரல் வாசிப்பு இல்லை"
+        TELUGU   -> "ఈ పరికరంలో వాయిస్ రీడింగ్ అందుబాటులో లేదు"
+        BENGALI  -> "এই ডিভাইসে ভয়েসে পড়া উপলব্ধ নেই"
+        MARATHI  -> "या डिव्हाइसवर आवाजात वाचन उपलब्ध नाही"
+        KANNADA  -> "ಈ ಸಾಧನದಲ್ಲಿ ಧ್ವನಿ ವಾಚನ ಲಭ್ಯವಿಲ್ಲ"
+        GUJARATI -> "આ ડિવાઇસ પર અવાજમાં વાંચન ઉપલબ્ધ નથી"
+        PUNJABI  -> "ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਆਵਾਜ਼ ਵਿੱਚ ਪੜ੍ਹਨਾ ਉਪਲਬਧ ਨਹੀਂ ਹੈ"
+        ODIA     -> "ଏହି ଡିଭାଇସ୍‌ରେ ସ୍ୱର ପଠନ ଉପଲବ୍ଧ ନାହିଁ"
+    }
 
     /** Chat top-bar subtitle while generating. */
     val thinkingText: String get() = when (this) {

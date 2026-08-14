@@ -6,6 +6,7 @@ import android.os.StatFs
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.inference.DebugLogger
+import com.saarthi.core.inference.LogPrivacy
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.ModelDownloadManager
 import com.saarthi.core.inference.engine.InferenceEngine
@@ -94,7 +95,10 @@ class ManageDownloadsViewModel @Inject constructor(
         }
         viewModelScope.launch(Dispatchers.IO) {
             val file = downloadManager.localPathFor(model)
-            DebugLogger.log("DELETE", "From manage screen: ${file.absolutePath}")
+            DebugLogger.log(
+                "DELETE",
+                "From manage screen: modelId=${model.id} ${LogPrivacy.nameLen(file.name)} sizeMb=${file.length() / 1_048_576}",
+            )
             downloadManager.cancelDownload(model)
             file.delete()
             refresh()

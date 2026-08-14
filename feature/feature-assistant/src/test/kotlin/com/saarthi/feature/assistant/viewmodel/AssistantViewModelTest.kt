@@ -18,7 +18,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestDispatcher
@@ -61,6 +61,7 @@ class AssistantViewModelTest {
     private val mockMemoryRepository: MemoryRepository = mockk(relaxed = true)
     private val mockTtsManager: TtsManager = mockk(relaxed = true)
     private val mockTtsPreference: TtsPreference = mockk(relaxed = true)
+    private val mockVoicePrivacyPreference: com.saarthi.core.i18n.VoicePrivacyPreference = mockk(relaxed = true)
     private val mockPersonalityPreference: PersonalityPreference = mockk(relaxed = true)
     private val mockFunnel: com.saarthi.core.inference.FunnelTracker = mockk(relaxed = true)
     private val mockEntitlements: com.saarthi.core.i18n.EntitlementManager = mockk(relaxed = true)
@@ -68,6 +69,7 @@ class AssistantViewModelTest {
     // Mutable flows controlled by individual tests
     private val isReadyFlow = MutableStateFlow(false)
     private val activeModelNameFlow = MutableStateFlow<String?>(null)
+    private val ttsAvailableFlow = MutableStateFlow(true)
 
     @Before
     fun setUp() {
@@ -82,7 +84,9 @@ class AssistantViewModelTest {
         every { mockLanguageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
         every { mockMemoryRepository.observeAll() } returns flowOf(emptyList())
         every { mockTtsManager.isSpeaking } returns MutableStateFlow(false)
+        every { mockTtsManager.ttsAvailable } returns ttsAvailableFlow
         every { mockTtsPreference.autoSpeakReplies } returns MutableStateFlow(false)
+        every { mockVoicePrivacyPreference.onDeviceVoiceOnly } returns MutableStateFlow(false)
         every { mockPersonalityPreference.selected } returns MutableStateFlow(PersonalityCatalog.SAARTHI)
         every { mockEntitlements.isPro } returns MutableStateFlow(false)
     }
@@ -96,6 +100,7 @@ class AssistantViewModelTest {
         memoryRepository = mockMemoryRepository,
         ttsManager = mockTtsManager,
         ttsPreference = mockTtsPreference,
+        voicePrivacyPreference = mockVoicePrivacyPreference,
         personalityPreference = mockPersonalityPreference,
         funnel = mockFunnel,
         entitlements = mockEntitlements,
@@ -105,17 +110,22 @@ class AssistantViewModelTest {
 
     @Test
     fun `sendMessage clears inputText and sets isStreaming true`() = runTest {
-        every { mockChatRepository.streamResponse(any(), any()) } returns flowOf()
+        // Point 8a: streamResponse() now returns a Job directly (launched on
+        // the repository's own scope) instead of a cold Flow the ViewModel
+        // launches itself. An already-completed Job mirrors the old "empty
+        // flow, completes instantly" double — invokeOnCompletion fires
+        // synchronously for a Job that's already done.
+        every { mockChatRepository.streamResponse(any(), any()) } returns Job().apply { complete() }
         val vm = createViewModel()
 
         vm.onInputChange("Hello Saarthi")
         vm.sendMessage()
 
         assertEquals("", vm.uiState.value.inputText)
-        // isStreaming may have already cleared to false because streamResponse
-        // returned an empty flow (completed instantly with UnconfinedTestDispatcher).
-        // The important contract is: it DID set isStreaming = true, then cleared.
-        // Verify streamResponse was called with the correct text.
+        // isStreaming may have already cleared to false because the Job
+        // completed instantly. The important contract is: it DID set
+        // isStreaming = true, then cleared. Verify streamResponse was
+        // called with the correct text.
         verify { mockChatRepository.streamResponse("Hello Saarthi", any()) }
     }
 
@@ -132,9 +142,10 @@ class AssistantViewModelTest {
 
     @Test
     fun `sendMessage while already streaming is a no-op`() = runTest {
-        // Non-completing stream so isStreaming stays true
-        val openStream = MutableSharedFlow<String>()
-        every { mockChatRepository.streamResponse(any(), any()) } returns openStream
+        // Incomplete Job so isStreaming stays true (mirrors the old
+        // "non-completing stream" double — see point 8a's comment above).
+        val openJob = Job()
+        every { mockChatRepository.streamResponse(any(), any()) } returns openJob
 
         val vm = createViewModel()
         vm.onInputChange("first message")
@@ -151,8 +162,8 @@ class AssistantViewModelTest {
 
     @Test
     fun `stopGeneration calls cancelGeneration and clears isStreaming`() = runTest {
-        val openStream = MutableSharedFlow<String>()
-        every { mockChatRepository.streamResponse(any(), any()) } returns openStream
+        val openJob = Job()
+        every { mockChatRepository.streamResponse(any(), any()) } returns openJob
 
         val vm = createViewModel()
         vm.onInputChange("generate something")
@@ -244,6 +255,61 @@ class AssistantViewModelTest {
             advanceUntilIdle()
             assertFalse("$name must be detected as compact", vm.uiState.value.attachmentsEnabled)
         }
+    }
+
+    // ── TTS unavailable (H2 fix regression) ─────────────────────────────────
+    // toggleSpeak() sets _speakingMessageId optimistically before the async
+    // TTS init result is known. Before this fix, if TtsManager gave up after
+    // repeated init failure, isSpeaking never transitioned true→false (it
+    // never became true in the first place, and MutableStateFlow doesn't
+    // re-emit an unchanged value) — so the Listen chip stayed stuck showing
+    // "speaking" forever with no audio and no way to clear it. See
+    // TtsManager.ttsAvailable's kdoc for the full root cause.
+
+    @Test
+    fun `toggleSpeak highlights the message optimistically before TTS reports availability`() = runTest {
+        val vm = createViewModel()
+
+        vm.toggleSpeak("msg-1", "hello")
+
+        assertEquals("msg-1", vm.speakingMessageId.value)
+    }
+
+    @Test
+    fun `TTS becoming unavailable clears a stuck speaking highlight`() = runTest {
+        val vm = createViewModel()
+        vm.toggleSpeak("msg-1", "hello")
+        assertEquals("Sanity check: chip should be highlighted first", "msg-1", vm.speakingMessageId.value)
+
+        ttsAvailableFlow.value = false
+        advanceUntilIdle()
+
+        assertEquals("Stuck chip must clear once TTS gives up", null, vm.speakingMessageId.value)
+    }
+
+    @Test
+    fun `TTS becoming unavailable surfaces a user-visible error message`() = runTest {
+        val vm = createViewModel()
+
+        ttsAvailableFlow.value = false
+        advanceUntilIdle()
+
+        assertEquals(
+            SupportedLanguage.ENGLISH.voiceReadingNotAvailable,
+            vm.uiState.value.error,
+        )
+    }
+
+    @Test
+    fun `TTS staying available never touches the speaking highlight or error state`() = runTest {
+        val vm = createViewModel()
+        vm.toggleSpeak("msg-1", "hello")
+
+        // No change to ttsAvailableFlow (stays true, the setUp default).
+        advanceUntilIdle()
+
+        assertEquals("msg-1", vm.speakingMessageId.value)
+        assertEquals(null, vm.uiState.value.error)
     }
 }
 

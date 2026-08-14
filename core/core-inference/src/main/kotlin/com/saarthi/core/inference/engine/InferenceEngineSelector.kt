@@ -56,9 +56,6 @@ class InferenceEngineSelector @Inject constructor(
     override fun generateStream(prompt: String, packType: PackType): Flow<String> =
         liteRtEngine.generateStream(prompt, packType)
 
-    override suspend fun generate(prompt: String, packType: PackType): String =
-        liteRtEngine.generate(prompt, packType)
-
     override fun release() {
         liteRtEngine.release()
     }

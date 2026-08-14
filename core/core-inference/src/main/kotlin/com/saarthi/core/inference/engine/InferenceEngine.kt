@@ -84,9 +84,6 @@ interface InferenceEngine {
     /** Streams partial tokens as they are generated. */
     fun generateStream(prompt: String, packType: PackType = PackType.BASE): Flow<String>
 
-    /** One-shot generation — waits for the full response. */
-    suspend fun generate(prompt: String, packType: PackType = PackType.BASE): String
-
     /**
      * Reset the inference session state (KV cache, conversation context).
      * Called when the user starts a new chat or clears history.

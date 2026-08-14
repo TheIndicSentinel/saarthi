@@ -106,16 +106,28 @@ class DeviceProfiler @Inject constructor(
 
         // ── GPU Safety: SoC-aware backend policy ─────────────────────────────────
         //
-        // Per-chip policy:
-        //  QUALCOMM SM8750  — GPU always (Adreno 830, no known issues).
-        //  QUALCOMM SM8550  — CPU only. The Adreno 740 driver crashes deeply in the native
-        //                     OpenCL litertlm library during createConversation().
+        // Per-chip policy (Point 5 Option B — best accelerator per device class):
+        //  QUALCOMM SM8750  — GPU always (Adreno 830, no known issues). NPU also on.
+        //  QUALCOMM SM8550  — GPU *attempted* (high-range SoC; do not blanket CPU-only).
+        //                     Path-specific faults (createConversation / recycled
+        //                     Conversation) are mitigated in the engine (per-turn
+        //                     recycle, token floors) + CrashRecoveryStore 24h ban
+        //                     after a real GPU gen crash. NPU stays disabled
+        //                     (HTP v69 mismatch — always wrong, unlike GPU).
         //  QUALCOMM GENERIC — GPU enabled.
         //  GOOGLE TENSOR    — GPU always. Stable OpenCL on all API levels.
-        //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level.
-        //  MEDIATEK flagship — GPU on ≥8GB RAM (Mali OpenCL stable on Dimensity flagship).
-        //  MEDIATEK other   — CPU. OpenCL driver quality too variable for production.
-        //  GENERIC / unknown — GPU if 4GB+ avail RAM.
+        //  SAMSUNG EXYNOS   — CPU on API 34+. OpenCL driver regression is OEM-level
+        //                     and always-wrong → proactive fail-closed (unlike
+        //                     SM8550 GPU, which is try + recover).
+        //  MEDIATEK FLAGSHIP — GPU enabled. Chip-identified (Dimensity 9000/9200/
+        //                     9300/9400 — see classifySoc), not RAM-gated — but
+        //                     currently the SAME call as plain MEDIATEK below; no
+        //                     field evidence yet justifies treating this
+        //                     generation differently on GPU (see gpuSafeForSoc).
+        //  MEDIATEK / GENERIC — GPU enabled, same as the rest. No confirmed
+        //                     driver-quality signal; rely on load-time RAM gates
+        //                     + crash recovery (same pattern as SM8550 GPU).
+        //                     See below for why a static RAM floor used to live here.
         //
         // Deliberately NOT a memory-eligibility check for a specific model —
         // gpuSafe answers "can this device's Vulkan/OEM driver run the GPU
@@ -129,29 +141,24 @@ class DeviceProfiler @Inject constructor(
         // to also veto on `availRamMb < 3_000` directly, which fired before
         // that model-aware check ever ran — a capable device loading a
         // small model could get vetoed by a floor sized for a much bigger
-        // one. MediaTek/Generic below still factor in RAM, but as a
-        // driver-confidence proxy for unproven chips, not a memory-headroom
-        // check — left as-is.)
-        val gpuSafe: Boolean = when {
-            !hasVulkan -> false           // No Vulkan = no GPU delegate in LiteRT
-            else -> when (socFamily) {
-                SocFamily.QUALCOMM_SM8750  -> true
-                SocFamily.QUALCOMM_SM8550  -> true // Dynamic retry allowed now that models are in internal storage
-                SocFamily.QUALCOMM_GENERIC -> true
-                SocFamily.GOOGLE_TENSOR    -> true
-                SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
-                SocFamily.MEDIATEK         -> totalRamMb >= 8_000 && availRamMb >= 4_000
-                SocFamily.GENERIC          -> availRamMb >= 4_000
-            }
-        }
+        // one. MediaTek/Generic used to keep their own RAM floor here as a
+        // driver-confidence proxy for unproven chips — totalRamMb >= 8_000
+        // for MediaTek, availRamMb >= 4_000 for Generic — but that floor had
+        // no field validation behind it (unlike Exynos API 34+, which traces
+        // to a confirmed OpenCL regression) and duplicated, in a cruder form,
+        // exactly what the load-time margin gate below already checks per-model.
+        // Removed so MediaTek/Generic get the same static-hardware-only
+        // answer everyone else does, on the same memory-safety gates already
+        // governing Qualcomm/Tensor/Exynos.)
+        val gpuSafe: Boolean = gpuSafeForSoc(hasVulkan, socFamily, apiLevel)
 
         val gpuSafeReason = when {
             !hasVulkan         -> "no Vulkan support"
             socFamily == SocFamily.SAMSUNG_EXYNOS && apiLevel >= 34 ->
                 "Exynos+API34+: OpenCL driver regression"
-            socFamily == SocFamily.MEDIATEK && !(totalRamMb >= 8_000 && availRamMb >= 4_000) ->
-                "MediaTek: insufficient RAM for reliable GPU"
-            else -> if (gpuSafe) "OK" else "GENERIC: avail RAM < 4GB"
+            // SM8550 GPU is intentionally allowed (gpuSafe=true); residual
+            // faults use crash-ban recovery — not a static reason string.
+            else -> "OK"
         }
 
         // ── NPU Safety: QNN/Hexagon backend policy ────────────────────────────
@@ -220,31 +227,6 @@ class DeviceProfiler @Inject constructor(
         return Build.HARDWARE.orEmpty()
     }
 
-    /**
-     * Maps a raw SoC model string to a high-level SoC family for model selection.
-     * Pattern matches against known Qualcomm (Snapdragon) naming.
-     */
-    private fun classifySoc(socModel: String): SocFamily {
-        val s = socModel.lowercase()
-        return when {
-            // Snapdragon 8 Gen 3 and newer flagship (SM8750+)
-            s.contains("sm8750") || s.contains("8gen3") -> SocFamily.QUALCOMM_SM8750
-            // Snapdragon 8 Gen 2 (SM8550)
-            s.contains("sm8550") || s.contains("8gen2") || s.contains("kalama") -> SocFamily.QUALCOMM_SM8550
-            // Snapdragon 8 Gen 1 / 8+ Gen 1 (SM8450/SM8475)
-            s.contains("sm8450") || s.contains("sm8475") || s.contains("waipio") -> SocFamily.QUALCOMM_GENERIC
-            // Any other Qualcomm
-            s.contains("sm") || s.contains("qcs") || s.contains("snapdragon") -> SocFamily.QUALCOMM_GENERIC
-            // MediaTek
-            s.contains("mt") || s.contains("dimensity") -> SocFamily.MEDIATEK
-            // Google Tensor
-            s.contains("tensor") || s.contains("gs") -> SocFamily.GOOGLE_TENSOR
-            // Samsung Exynos
-            s.contains("exynos") -> SocFamily.SAMSUNG_EXYNOS
-            else -> SocFamily.GENERIC
-        }
-    }
-
     private fun getVulkanVersion(): String? = runCatching {
         val pm = context.packageManager
         when {
@@ -258,4 +240,87 @@ class DeviceProfiler @Inject constructor(
             else -> null
         }
     }.getOrNull()
+}
+
+/**
+ * Pure static-hardware GPU-eligibility decision, extracted out of
+ * [DeviceProfiler.profile] so it's directly unit-testable — the profiler
+ * itself needs a live Context/ActivityManager and has no test coverage
+ * (same reasoning as the pure functions in LiteRTInferenceEngine covered by
+ * GpuAdmissionPolicyTest). Deliberately takes no RAM input: whether Vulkan/
+ * the SoC's OEM driver history make GPU worth attempting at all is a static
+ * hardware fact, independent of any specific model's memory footprint —
+ * that's a separate, load-time decision (LiteRTInferenceEngine's
+ * memoryPressureBannedGpu gate, sized off the actual model).
+ */
+internal fun gpuSafeForSoc(hasVulkan: Boolean, socFamily: SocFamily, apiLevel: Int): Boolean = when {
+    !hasVulkan -> false // No Vulkan = no GPU delegate in LiteRT
+    else -> when (socFamily) {
+        SocFamily.QUALCOMM_SM8750  -> true
+        // Point 5 Option B: high-range SoC — attempt GPU for best throughput
+        // across mid/flagship RAM tiers. Do NOT fail-closed to CPU (that would
+        // tax every SM8550 user forever). Path-specific faults are handled by
+        // engine mitigations + 24h crash ban; NPU remains separately disabled.
+        SocFamily.QUALCOMM_SM8550  -> true
+        SocFamily.QUALCOMM_GENERIC -> true
+        SocFamily.GOOGLE_TENSOR    -> true
+        // Proactive fail-closed: OEM OpenCL regression is always-wrong on
+        // API 34+, unlike SM8550 GPU (try + recover).
+        SocFamily.SAMSUNG_EXYNOS   -> apiLevel < 34
+        // MEDIATEK_FLAGSHIP and MEDIATEK currently make the identical call —
+        // this branch exists so the compiler forces a decision here the
+        // moment either one needs to diverge, rather than the two silently
+        // sharing behavior via a shared `MEDIATEK ->` line. The
+        // classification itself (see classifySoc) is real chip-generation
+        // identity, not RAM correlation; it is NOT yet a validated
+        // GPU-driver denylist the way Exynos API 34+ is — there's no field
+        // evidence yet that flagship Dimensity silicon is more (or less)
+        // trustworthy on GPU than the rest of the family. Splitting the
+        // *decision* is future work once that evidence exists (see item B:
+        // logging socModel/socFamily/outcome per load).
+        SocFamily.MEDIATEK_FLAGSHIP -> true
+        SocFamily.MEDIATEK         -> true
+        SocFamily.GENERIC          -> true
+    }
+}
+
+/**
+ * Maps a raw SoC model string to a high-level SoC family for model
+ * selection. Extracted out of [DeviceProfiler] (pure function of the model
+ * string, no Context needed) so it's directly unit-testable, same rationale
+ * as [gpuSafeForSoc].
+ *
+ * The MEDIATEK_FLAGSHIP branch is a chip-code lookup, not a substring/RAM
+ * guess: MT6983/MT6985/MT6989/MT6991 are the Dimensity 9000/9200/9300/9400
+ * silicon codes (the flagship-tier lineage MediaTek ships against Qualcomm's
+ * *_SM8xxx flagships above) — the same level of confidence as the existing
+ * Qualcomm SM-number entries below, which are public chip identifiers too.
+ * What this lookup does NOT claim is that this generation's GPU/OpenCL
+ * driver is more reliable than the rest of the MediaTek family — see
+ * [gpuSafeForSoc]'s kdoc for why that's still one unified decision today.
+ */
+internal fun classifySoc(socModel: String): SocFamily {
+    val s = socModel.lowercase()
+    return when {
+        // Snapdragon 8 Gen 3 and newer flagship (SM8750+)
+        s.contains("sm8750") || s.contains("8gen3") -> SocFamily.QUALCOMM_SM8750
+        // Snapdragon 8 Gen 2 (SM8550)
+        s.contains("sm8550") || s.contains("8gen2") || s.contains("kalama") -> SocFamily.QUALCOMM_SM8550
+        // Snapdragon 8 Gen 1 / 8+ Gen 1 (SM8450/SM8475)
+        s.contains("sm8450") || s.contains("sm8475") || s.contains("waipio") -> SocFamily.QUALCOMM_GENERIC
+        // Any other Qualcomm
+        s.contains("sm") || s.contains("qcs") || s.contains("snapdragon") -> SocFamily.QUALCOMM_GENERIC
+        // MediaTek Dimensity flagship tier (9000/9200/9300/9400) — checked
+        // before the generic MediaTek match below so these codes don't fall
+        // through to the coarser bucket.
+        s.contains("mt6983") || s.contains("mt6985") ||
+            s.contains("mt6989") || s.contains("mt6991") -> SocFamily.MEDIATEK_FLAGSHIP
+        // Any other MediaTek (older/lower Dimensity, Helio, unrecognized codes)
+        s.contains("mt") || s.contains("dimensity") -> SocFamily.MEDIATEK
+        // Google Tensor
+        s.contains("tensor") || s.contains("gs") -> SocFamily.GOOGLE_TENSOR
+        // Samsung Exynos
+        s.contains("exynos") -> SocFamily.SAMSUNG_EXYNOS
+        else -> SocFamily.GENERIC
+    }
 }

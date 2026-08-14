@@ -9,6 +9,12 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.RequiresApi
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -28,6 +34,29 @@ import java.util.Locale
  *    (works with the legacy WRITE_EXTERNAL_STORAGE model).
  *  - If both fail (extremely locked-down OEM): fall back to
  *    `externalFilesDir → filesDir` so the log still exists somewhere.
+ *
+ * H12 fix: [log] used to open/write/close the MediaStore or File sink
+ * SYNCHRONOUSLY on the calling thread — including LiteRTInferenceEngine's
+ * single-threaded `engineDispatcher`, which also serializes every other
+ * engine operation (next generate call, release, reset). A slow write on a
+ * contended device could stall inference itself for a diagnostic side
+ * effect. [log] now only formats the line and enqueues it (an in-memory,
+ * non-suspending, effectively-instant op); a single background coroutine
+ * drains the channel and performs the actual I/O off the caller's thread.
+ * Deliberately NOT also batching multiple lines into fewer writes — this
+ * log's whole purpose is crash forensics ("the line just before the gap is
+ * what caused the kill" — see docs/PRODUCTION.md), so each line is still
+ * written with its own open/append/close the moment the writer coroutine
+ * picks it up, preserving the "durable across process death" property the
+ * original per-call synchronous write had, rather than trading it away for
+ * a bigger throughput win this log doesn't need (it's low-volume — decision
+ * points, not a per-token hot path).
+ *
+ * Point 9 (file privacy): messages written here may be user-attached via
+ * Support (and, in beta, public Downloads). Call sites must not put
+ * user-sourced content in [msg] — use [LogPrivacy] (lengths/counts only) for
+ * document names, memory keys, reminder text, etc. Catalog model ids and
+ * hardware facts remain fine.
  */
 object DebugLogger {
 
@@ -35,9 +64,14 @@ object DebugLogger {
 
     private val fmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
-    // One of these is non-null after init():
-    private var mediaUri: Uri? = null
-    private var fileSink: File? = null
+    // One of these is non-null after init(). @Volatile because the writer
+    // coroutine (a different thread than whatever called init()) reads
+    // them — the channel send/receive between log() and the writer already
+    // establishes happens-before for the LINE content, but these two are
+    // read independently of any one specific channel item, so they need
+    // their own visibility guarantee rather than relying on that.
+    @Volatile private var mediaUri: Uri? = null
+    @Volatile private var fileSink: File? = null
 
     // Cached resolver so log() doesn't have to walk back through Context.
     @Volatile private var resolverContext: Context? = null
@@ -45,8 +79,34 @@ object DebugLogger {
     // Human-readable label for the "session start" line, e.g. "Downloads/saarthi_debug.log".
     private var pathLabel: String = "(uninit)"
 
+    // Point 4: writeLine() already wraps its own I/O in runCatching, so this
+    // is defense-in-depth (not a known live bug) — but an unguarded scope
+    // is exactly the shape that turns any FUTURE change to this loop into a
+    // silent hard crash of the app's own crash-forensics writer. Falls back
+    // to plain Log.e (not DebugLogger.log — this scope IS DebugLogger, would
+    // self-reenter) so it stays debug-build-only per point 1's gate.
+    private val writerExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        if (BuildConfig.DEBUG) Log.e("SaarthiDbg", "writerScope failure: ${throwable::class.simpleName}: ${throwable.message}")
+    }
+    // Process-lifetime scope for the background writer — never explicitly
+    // cancelled, same rationale as ChatRepositoryImpl's own singleton
+    // `scope`: an Android process just dies, there's no clean shutdown hook
+    // to cancel it from. SupervisorJob so one bad write can't kill the loop.
+    private val writerScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + writerExceptionHandler)
+    // Unlimited so log() (called from 200+ call sites, many NOT in a
+    // coroutine) never suspends or drops a line waiting for channel space —
+    // it only formats + enqueues, an effectively-instant in-memory op.
+    private val lineChannel = Channel<String>(Channel.UNLIMITED)
+    @Volatile private var writerStarted = false
+
     @Synchronized
     fun init(context: Context) {
+        if (!writerStarted) {
+            writerStarted = true
+            writerScope.launch {
+                for (line in lineChannel) writeLine(line)
+            }
+        }
         if (mediaUri != null || fileSink != null) return
         val app = context.applicationContext
         resolverContext = app
@@ -111,8 +171,20 @@ object DebugLogger {
 
     fun log(tag: String, msg: String) {
         val line = "${fmt.format(Date())} [$tag] $msg\n"
-        Log.d("SaarthiDbg", line.trimEnd())
-        writeLine(line)
+        // Logcat mirror is debug-build only — release builds must not put
+        // diagnostic content (model names, memory keys, doc names, funnel
+        // events) anywhere Logcat-observable, matching the same threshold
+        // BuildConfig.PUBLIC_DEBUG_LOG already applies to the file sink
+        // above. The file write below is unaffected — "attach log" still
+        // works in every build.
+        if (BuildConfig.DEBUG) Log.d("SaarthiDbg", line.trimEnd())
+        // Enqueue only — the actual file/MediaStore write happens on the
+        // background writer coroutine (see writerScope above), never on the
+        // caller's thread. trySend on an UNLIMITED channel never suspends
+        // and only fails if the channel was closed (never happens here), so
+        // this stays a fire-and-forget, non-suspending call every one of
+        // this function's 200+ call sites can keep using exactly as before.
+        lineChannel.trySend(line)
     }
 
     // ── internals ────────────────────────────────────────────────────────────

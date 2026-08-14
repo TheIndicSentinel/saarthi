@@ -173,6 +173,24 @@ class SupportedLanguageTest {
         }
     }
 
+    // H2 fix: TtsManager surfaces this when the read-aloud engine gives up
+    // after repeated init failure — see TtsManager.ttsAvailable's kdoc.
+    @Test
+    fun every_language_has_non_blank_voiceReadingNotAvailable() {
+        for (lang in SupportedLanguage.entries) {
+            assertFalse("${lang.englishName} voiceReadingNotAvailable blank", lang.voiceReadingNotAvailable.isBlank())
+        }
+    }
+
+    @Test
+    fun every_language_has_distinct_voiceReadingNotAvailable() {
+        // Catches an accidental copy-paste-across-languages mistake (every
+        // other per-language string block in this file is hand-written per
+        // entry, with no shared default to silently fall through to).
+        val strings = SupportedLanguage.entries.map { it.voiceReadingNotAvailable }
+        assertEquals(SupportedLanguage.entries.size, strings.toSet().size)
+    }
+
     @Test
     fun every_language_has_at_least_three_suggestion_chips() {
         // The empty-chat home screen renders 3-4 quick-suggestion chips.
@@ -248,6 +266,8 @@ class SupportedLanguageTest {
         assertNonBlankForEveryLanguage("voiceGenericError") { voiceGenericError }
         assertNonBlankForEveryLanguage("voiceNotAvailable") { voiceNotAvailable }
         assertNonBlankForEveryLanguage("voiceStartFailed") { voiceStartFailed }
+        assertNonBlankForEveryLanguage("voiceOnDeviceOnlyUnavailable") { voiceOnDeviceOnlyUnavailable }
+        assertNonBlankForEveryLanguage("voiceCloudSpeechHint") { voiceCloudSpeechHint }
         for (lang in SupportedLanguage.entries) {
             assertFalse(
                 "${lang.englishName} freeDocumentLimitReached(1) must be non-blank",

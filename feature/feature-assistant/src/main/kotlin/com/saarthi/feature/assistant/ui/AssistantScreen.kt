@@ -524,6 +524,7 @@ fun AssistantScreen(
             transcribedText = uiState.inputText,
             isListening = uiState.isListening,
             language = currentLanguage,
+            mayUseCloudSpeech = uiState.voiceMayUseCloudSpeech,
             onClose = { viewModel.closeVoiceMode(clearText = true) },
             onSend = {
                 viewModel.closeVoiceMode(clearText = false)

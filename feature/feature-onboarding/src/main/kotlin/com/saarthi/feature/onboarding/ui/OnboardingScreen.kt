@@ -65,6 +65,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.onboarding
+import com.saarthi.core.inference.engine.isInsufficientRamForModelLoad
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.model.DownloadProgress
@@ -728,16 +729,21 @@ private fun Onb4ModelPick(
                 // render-time read, not a live-updating ticker.
                 val insufficientStorage = !isDownloaded && state.deviceProfile != null &&
                     model.fileSizeMb > state.deviceProfile.availableStorageMb
-                // Same 0.70 threshold LiteRTInferenceEngine's load-time gate
-                // uses (availableRamMb < sizeMb * 0.70) — the catalog filter
-                // that decides what's OFFERED is deliberately total-RAM-based
-                // (stable, doesn't flicker as available RAM swings), but that
-                // means a device can pass the offer gate and only discover it
-                // fails the load gate after spending the time/data to
-                // download a multi-GB file. Surfacing the same threshold here
-                // gives that warning before the download, not after.
+                // Same mmap-aware resident estimate LiteRTInferenceEngine's
+                // load-time gate uses (isInsufficientRamForModelLoad /
+                // estimateResidentModelMb ≈ 60% of file size) — the catalog
+                // filter that decides what's OFFERED is deliberately
+                // total-RAM-based (stable, doesn't flicker as available RAM
+                // swings), but that means a device can pass the offer gate
+                // and only discover it fails the load gate after spending
+                // the time/data to download a multi-GB file. Surfacing the
+                // same threshold here gives that warning before the download,
+                // not after.
                 val insufficientRam = !isDownloaded && state.deviceProfile != null &&
-                    state.deviceProfile.availableRamMb < model.fileSizeMb * 0.70
+                    isInsufficientRamForModelLoad(
+                        state.deviceProfile.availableRamMb,
+                        model.fileSizeMb.toLong(),
+                    )
                 // See isLikelyCpuOnly() below for the full rationale — third
                 // state between "fine" and "may not load right now": the
                 // model WILL load, but is expected to run on CPU rather than

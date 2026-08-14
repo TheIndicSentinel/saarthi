@@ -11,9 +11,12 @@ every push to `main`; the items below are the human gates around it.
 - [ ] `versionCode` / `versionName` bumped in `app/build.gradle.kts`.
 - [ ] Release APK is signed with the release keystore (CI: `KEYSTORE_*` secrets set;
       falls back to debug-signing only when they are absent).
-- [ ] Installed and smoke-tested on a real phone (see manual smoke list below).
+- [ ] Installed and smoke-tested on a real phone (see **Release device coverage** below).
 - [ ] Model download + resume + cancel tested on a real device/network.
-- [ ] Debug log reviewed for anything sensitive that should not ship.
+- [ ] Debug log reviewed for anything sensitive that should not ship
+      (Point 9: user-sourced strings must be lengths/counts only — see
+      [LogPrivacy]; no document names, memory keys, or reminder text in
+      `saarthi_debug.log` / Support attachments).
 - [ ] No unused restricted permissions in `AndroidManifest.xml`
       (currently declared, verified 2026-07-15: INTERNET, ACCESS_NETWORK_STATE,
       RECORD_AUDIO, POST_NOTIFICATIONS, WAKE_LOCK, RECEIVE_BOOT_COMPLETED,
@@ -29,9 +32,60 @@ every push to `main`; the items below are the human gates around it.
       alarm. Don't add it back without also re-adding the "Alarms & reminders" Play
       Console declaration this checklist previously (incorrectly) told you to fill in.
 
-## Manual smoke test (no emulator/instrumentation in CI yet)
+## Release device coverage (Point 8 — one phone + free tools only)
 
-These cover the paths unit tests cannot. Do them on a real device before release:
+You are **not** expected to buy a device farm. Coverage = your physical phone +
+**free** remote/cloud options + code-level SoC gates already in the app
+(Exynos API 34+ CPU-only, RAM/compact GPU limits, crash bans). Do not claim a
+SoC class was “validated” unless that row actually passed below.
+
+### Free sources (use these; skip paid device labs)
+
+| Source | Cost | Trust for LiteRT / GPU / SIGKILL | Use for |
+|--------|------|----------------------------------|---------|
+| **Your physical phone** | Free | **High** — only full trust signal | Full manual smoke every release |
+| **Firebase Test Lab** (Spark / free daily quota) | Free tier | **Medium** — good for install + instrumented smoke; not a substitute for chat-on-your-SoC | Remote profiles you don’t own |
+| **Android Emulator (arm64 AVD)** | Free | **Low** — UI/nav only; do **not** treat as inference proof | Optional nav sanity |
+| **Closed testers / friends** (Play internal/closed) | Free | **Medium–high** if they send Support debug logs on crash | Opportunistic SoC diversity |
+
+Build Test Lab APKs (free, local):
+
+```bash
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+- App: `app/build/outputs/apk/debug/app-debug.apk`
+- Test: `app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`
+
+Upload both in [Firebase Console → Test Lab](https://console.firebase.google.com/)
+(Instrumentation) and pick **virtual or physical devices covered by the free
+quota**. The smoke test `AppPackageInstrumentedTest` asserts
+`BuildConfig.APPLICATION_ID` (`com.indicsentinel.saarthi`) — Point 7.
+
+### Pass / fail matrix (fill per release candidate)
+
+Record `versionName` / `versionCode` and date. Mark each row **Pass / Fail / Skip**
+(Skip = not available this cycle; do not invent a Pass).
+
+| # | Target | How (free) | What to verify | P/F/S |
+|---|--------|------------|----------------|-------|
+| 1 | **Your phone** (whatever you own) | Manual install of release or minified candidate | Full list in **Manual smoke** below | |
+| 2 | **Remote mid/high Android** (prefer Snapdragon 8-gen-class if listed) | Firebase Test Lab free quota | `AppPackageInstrumentedTest` green; note device model in Lab results | |
+| 3 | **Remote mid-range / other OEM** (MediaTek or similar if listed) | Firebase Test Lab free quota | Same instrumented smoke green | |
+| 4 | **Remote low-RAM or older API** (if free catalog has one) | Firebase Test Lab free quota | Same instrumented smoke green | |
+| 5 | **Friend / closed tester** (optional) | Play internal testing | They complete onboarding + one chat; crash → Support “Report a problem” | |
+
+**Ship bar (solo + free only):** Row 1 **Pass** is required. Rows 2–4: run whatever
+the free Lab catalog allows that day (aim for ≥1 remote Pass beyond your phone).
+Row 5 when available. Gaps are accepted risk — mitigated by existing SoC/RAM
+policy in code, not by buying hardware.
+
+**Do not:** use x86 emulator results as GPU/inference proof; pay for device clouds;
+block ship solely because free Lab lacked an Exynos/Unisoc slot that day.
+
+## Manual smoke (your phone — required every release)
+
+These cover the paths unit tests cannot. Do them on **your** real device before release:
 
 - [ ] Onboarding completes from a clean install.
 - [ ] Model download → resume after interruption → cancel.
@@ -40,9 +94,10 @@ These cover the paths unit tests cannot. Do them on a real device before release
 - [ ] App restart after a generation — history and the selected model persist.
 - [ ] Notification permission denied — reminders degrade gracefully, no crash.
 - [ ] Attachment → OCR/RAG path: attach a PDF, ask about it, get a grounded answer.
-- [ ] Voice: read a long reply aloud (>4000 chars) — it speaks fully (chunked TTS).
+- [ ] Voice: mic turn + read a long reply aloud (>4000 chars) — chunked TTS speaks fully.
+- [ ] Background ~1–2 min during/after load, return — no freeze; generation still works.
 - [ ] App upgrade over a previous version — chat history / memories survive
-      (Room migrations 3→4→5; destructive fallback only from dev v1/v2).
+      (Room migrations; destructive fallback only from ancient dev schemas).
 
 ## Production (Play Store) only
 
@@ -121,10 +176,12 @@ These cover the paths unit tests cannot. Do them on a real device before release
          (`SpeechRecognizer.createOnDeviceSpeechRecognizer` when the platform confirms
          a model is installed, API 33+); on devices without one, Android's standard
          speech service is used, which may send audio to its provider (typically
-         Google) for transcription. Declare audio data as "collected, shared with a
-         third party (device's speech service) for app functionality, not used for
-         any other purpose, user cannot opt out" — do NOT declare "no data collected"
-         for microphone, even though Saarthi itself has no backend to receive it.
+         Google) for transcription. Users can opt out via **Settings → On-device voice
+         only** (blocks the cloud/standard fallback). Declare audio data as
+         "collected, shared with a third party (device's speech service) for app
+         functionality, not used for any other purpose, user can opt out" — do NOT
+         declare "no data collected" for microphone, even though Saarthi itself has
+         no backend to receive it.
        - No data sold, no advertising use, no data retained by Saarthi's own
          infrastructure (there isn't any — no servers).
 5. [ ] **Foreground service** `specialUse`: three services declared, each with its

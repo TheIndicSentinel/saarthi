@@ -15,8 +15,8 @@ data class SettingsDetailStrings(
     // Privacy
     val privacyTitle: String = "Privacy",
     val privacyTopSub: String = "What stays on your device",
-    val privacyHeroTitle: String = "Nothing leaves your phone",
-    val privacyHeroBody: String = "Saarthi has no server. The AI lives on your device — questions are processed locally and never travel over the internet.",
+    val privacyHeroTitle: String = "AI stays on your phone",
+    val privacyHeroBody: String = "Saarthi has no server. Chat and the AI model run on your device. Voice input prefers on-device speech; if your phone has no on-device model, it may use the phone’s speech service (you can block that in Settings).",
     val privacyStoredHere: String = "Stored on this device only",
     val privacyChatHistory: String = "Your chat history",
     val privacyModelWeights: String = "AI model weights",
@@ -25,7 +25,7 @@ data class SettingsDetailStrings(
     val privacyRunsHardware: String = "Runs on your hardware",
     val privacyRunsHardwareSub: String = "Gemma model, Vulkan / CPU inference",
     val privacyNoAccounts: String = "No accounts, no tracking",
-    val privacyNoAccountsSub: String = "Works without internet",
+    val privacyNoAccountsSub: String = "AI works offline; voice may use phone speech",
     // About
     val aboutTitle: String = "About Saarthi",
     val aboutTagline: String = "A free, offline AI companion built for the next billion users — designed in India, for India.",
@@ -104,7 +104,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         SupportedLanguage.ENGLISH -> SettingsDetailStrings()
         SupportedLanguage.HINDI -> SettingsDetailStrings(
             privacyTitle = "गोपनीयता", privacyTopSub = "आपके फ़ोन पर क्या रहता है",
-            privacyHeroTitle = "कुछ भी फ़ोन से बाहर नहीं जाता",
+            privacyHeroTitle = "AI आपके फ़ोन पर रहता है",
             privacyHeroBody = "सारथी का कोई सर्वर नहीं है। AI आपके फ़ोन में ही रहता है — सवाल यहीं हल होते हैं और कभी इंटरनेट पर नहीं जाते।",
             privacyStoredHere = "सिर्फ़ इसी फ़ोन पर सहेजा गया",
             privacyChatHistory = "आपका चैट इतिहास", privacyModelWeights = "AI मॉडल फ़ाइलें", privacyLocal = "फ़ोन में ही",
@@ -145,7 +145,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         )
         SupportedLanguage.TAMIL -> SettingsDetailStrings(
             privacyTitle = "தனியுரிமை", privacyTopSub = "உங்கள் சாதனத்தில் என்ன இருக்கும்",
-            privacyHeroTitle = "எதுவும் தொலைபேசியை விட்டு வெளியேறாது",
+            privacyHeroTitle = "AI உங்கள் போனிலேயே இருக்கும்",
             privacyStoredHere = "இந்தச் சாதனத்தில் மட்டுமே சேமிக்கப்படும்",
             privacyChatHistory = "உங்கள் அரட்டை வரலாறு", privacyModelWeights = "AI மாடல் வெயிட்கள்", privacyLocal = "லோக்கல்",
             privacyHowWorks = "சாரதி எப்படி வேலை செய்கிறது",
@@ -173,7 +173,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         )
         SupportedLanguage.TELUGU -> SettingsDetailStrings(
             privacyTitle = "గోప్యత", privacyTopSub = "మీ పరికరంలో ఏమి ఉంటుంది",
-            privacyHeroTitle = "ఏదీ మీ ఫోన్ నుండి బయటకు వెళ్లదు",
+            privacyHeroTitle = "AI మీ ఫోన్‌లోనే ఉంటుంది",
             privacyStoredHere = "ఈ పరికరంలో మాత్రమే నిల్వ",
             privacyChatHistory = "మీ చాట్ చరిత్ర", privacyModelWeights = "AI మోడల్ వెయిట్‌లు", privacyLocal = "లోకల్",
             privacyHowWorks = "సారథి ఎలా పనిచేస్తుంది",
@@ -201,7 +201,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         )
         SupportedLanguage.BENGALI -> SettingsDetailStrings(
             privacyTitle = "গোপনীয়তা", privacyTopSub = "আপনার ডিভাইসে কী থাকে",
-            privacyHeroTitle = "কিছুই আপনার ফোন থেকে বের হয় না",
+            privacyHeroTitle = "AI আপনার ফোনেই থাকে",
             privacyStoredHere = "শুধু এই ডিভাইসে সংরক্ষিত",
             privacyChatHistory = "আপনার চ্যাট ইতিহাস", privacyModelWeights = "AI মডেল ওয়েট", privacyLocal = "লোকাল",
             privacyHowWorks = "সারথি কীভাবে কাজ করে",
@@ -229,7 +229,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         )
         SupportedLanguage.MARATHI -> SettingsDetailStrings(
             privacyTitle = "गोपनीयता", privacyTopSub = "तुमच्या डिव्हाइसवर काय राहते",
-            privacyHeroTitle = "काहीही फोनबाहेर जात नाही",
+            privacyHeroTitle = "AI तुमच्या फोनवरच राहतो",
             privacyHeroBody = "सारथीचा कोणताही सर्व्हर नाही. AI तुमच्या फोनमध्येच राहतो — प्रश्न इथेच सोडवले जातात आणि कधीही इंटरनेटवर जात नाहीत.",
             privacyStoredHere = "फक्त याच डिव्हाइसवर साठवले",
             privacyChatHistory = "तुमचा चॅट इतिहास", privacyModelWeights = "AI मॉडेल फायली", privacyLocal = "फोनमध्येच",
@@ -269,7 +269,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         )
         SupportedLanguage.KANNADA -> SettingsDetailStrings(
             privacyTitle = "ಗೌಪ್ಯತೆ", privacyTopSub = "ನಿಮ್ಮ ಸಾಧನದಲ್ಲಿ ಏನು ಉಳಿಯುತ್ತದೆ",
-            privacyHeroTitle = "ಏನೂ ನಿಮ್ಮ ಫೋನ್‌ನಿಂದ ಹೊರಹೋಗುವುದಿಲ್ಲ",
+            privacyHeroTitle = "AI ನಿಮ್ಮ ಫೋನ್‌ನಲ್ಲೇ ಇರುತ್ತದೆ",
             privacyStoredHere = "ಈ ಸಾಧನದಲ್ಲಿ ಮಾತ್ರ ಉಳಿಸಲಾಗಿದೆ",
             privacyChatHistory = "ನಿಮ್ಮ ಚಾಟ್ ಇತಿಹಾಸ", privacyModelWeights = "AI ಮಾದರಿ ವೆಯಿಟ್‌ಗಳು", privacyLocal = "ಲೋಕಲ್",
             privacyHowWorks = "ಸಾರಥಿ ಹೇಗೆ ಕೆಲಸ ಮಾಡುತ್ತದೆ",
@@ -297,7 +297,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         )
         SupportedLanguage.GUJARATI -> SettingsDetailStrings(
             privacyTitle = "ગોપનીયતા", privacyTopSub = "તમારા ડિવાઇસ પર શું રહે છે",
-            privacyHeroTitle = "કંઈ પણ ફોનની બહાર જતું નથી",
+            privacyHeroTitle = "AI તમારા ફોન પર જ રહે છે",
             privacyStoredHere = "ફક્ત આ ડિવાઇસ પર સાચવેલું",
             privacyChatHistory = "તમારો ચેટ ઇતિહાસ", privacyModelWeights = "AI મૉડલ વેઇટ્સ", privacyLocal = "લોકલ",
             privacyHowWorks = "સારથી કેવી રીતે કામ કરે છે",
@@ -325,7 +325,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         )
         SupportedLanguage.PUNJABI -> SettingsDetailStrings(
             privacyTitle = "ਪਰਦੇਦਾਰੀ", privacyTopSub = "ਤੁਹਾਡੇ ਡਿਵਾਈਸ 'ਤੇ ਕੀ ਰਹਿੰਦਾ ਹੈ",
-            privacyHeroTitle = "ਕੁਝ ਵੀ ਫ਼ੋਨ ਤੋਂ ਬਾਹਰ ਨਹੀਂ ਜਾਂਦਾ",
+            privacyHeroTitle = "AI ਤੁਹਾਡੇ ਫ਼ੋਨ 'ਤੇ ਹੀ ਰਹਿੰਦਾ ਹੈ",
             privacyStoredHere = "ਸਿਰਫ਼ ਇਸੇ ਡਿਵਾਈਸ 'ਤੇ ਸੰਭਾਲਿਆ",
             privacyChatHistory = "ਤੁਹਾਡਾ ਚੈਟ ਇਤਿਹਾਸ", privacyModelWeights = "AI ਮਾਡਲ ਵੇਟਸ", privacyLocal = "ਲੋਕਲ",
             privacyHowWorks = "ਸਾਰਥੀ ਕਿਵੇਂ ਕੰਮ ਕਰਦਾ ਹੈ",
@@ -353,7 +353,7 @@ val SupportedLanguage.settingsDetail: SettingsDetailStrings
         )
         SupportedLanguage.ODIA -> SettingsDetailStrings(
             privacyTitle = "ଗୋପନୀୟତା", privacyTopSub = "ଆପଣଙ୍କ ଡିଭାଇସରେ କ'ଣ ରହେ",
-            privacyHeroTitle = "କିଛି ବି ଫୋନରୁ ବାହାରକୁ ଯାଏ ନାହିଁ",
+            privacyHeroTitle = "AI ଆପଣଙ୍କ ଫୋନରେ ରହେ",
             privacyStoredHere = "କେବଳ ଏହି ଡିଭାଇସରେ ସଞ୍ଚିତ",
             privacyChatHistory = "ଆପଣଙ୍କ ଚାଟ ଇତିହାସ", privacyModelWeights = "AI ମଡେଲ ୱେଟ୍ସ", privacyLocal = "ଲୋକାଲ",
             privacyHowWorks = "ସାରଥୀ କିପରି କାମ କରେ",
