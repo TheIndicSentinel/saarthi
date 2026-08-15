@@ -96,6 +96,7 @@ class LiteRTInferenceEngine @Inject constructor(
     // commit()).
     private val engineLifecycleReleaseManager = EngineLifecycleReleaseManager(
         context = context,
+        totalRamMb = { deviceProfiler.profile().totalRamMb },
         isNativeGenerating = { isNativeGenerating },
         isInitInProgress = { initMutex.isLocked },
         releaseConversationOnly = { withContext(engineDispatcher) { releaseConversationOnly() } },

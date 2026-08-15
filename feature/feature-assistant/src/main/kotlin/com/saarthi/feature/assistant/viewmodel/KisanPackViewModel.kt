@@ -10,6 +10,8 @@ import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.DeviceTier
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.feature.assistant.data.KisanPackInstaller
+import com.saarthi.feature.assistant.data.PackUpdateChecker
+import com.saarthi.feature.assistant.data.PackUpdateOutcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -33,9 +35,8 @@ import javax.inject.Inject
  *    tier) — to show a "switch model for richer answers" hint when
  *    the user is currently on Gemma 1B.
  *  • a lightweight loading flag for the initial pack read.
- *
- * No HTTP / install logic lives here — that's `KisanPackInstaller` and
- * `PackUpdateWorker`. This VM is read-only over what those produce.
+ *  • the in-app refresh tap, which also runs [PackUpdateChecker] when a
+ *    manifest URL is configured (same path as PackUpdateWorker).
  */
 @HiltViewModel
 class KisanPackViewModel @Inject constructor(
@@ -43,6 +44,7 @@ class KisanPackViewModel @Inject constructor(
     private val preference: KisanPackPreference,
     private val inferenceEngine: InferenceEngine,
     private val systemPromptProvider: SystemPromptProvider,
+    private val packUpdateChecker: PackUpdateChecker,
     deviceProfiler: DeviceProfiler,
     languageManager: LanguageManager,
 ) : ViewModel() {
@@ -69,6 +71,8 @@ class KisanPackViewModel @Inject constructor(
         /** False on LOW/MINIMAL devices that can never run a bigger model. */
         val canRunBetterModel: Boolean = true,
         val activeModelName: String? = null,
+        val checkingUpdate: Boolean = false,
+        val updateMessage: String? = null,
     )
 
     private val _ui = MutableStateFlow(UiState())
@@ -108,9 +112,30 @@ class KisanPackViewModel @Inject constructor(
         loadPack()
     }
 
-    /** Re-read the pack from disk — used by the screen's refresh button. */
+    /** Re-read the pack from disk; if a remote manifest is configured, check for updates first. */
     fun refresh() {
-        loadPack()
+        viewModelScope.launch {
+            if (_ui.value.checkingUpdate) return@launch
+            if (packUpdateChecker.isRemoteConfigured) {
+                _ui.update { it.copy(checkingUpdate = true, updateMessage = null) }
+                val outcome = runCatching { packUpdateChecker.checkAndInstall() }
+                    .getOrDefault(PackUpdateOutcome.NetworkFailed)
+                _ui.update {
+                    it.copy(checkingUpdate = false, updateMessage = messageFor(outcome))
+                }
+            }
+            loadPack()
+        }
+    }
+
+    private fun messageFor(outcome: PackUpdateOutcome): String? = when (outcome) {
+        PackUpdateOutcome.UpToDate -> "Already up to date"
+        is PackUpdateOutcome.Updated -> "Updated"
+        PackUpdateOutcome.NetworkFailed,
+        PackUpdateOutcome.KeptCurrent,
+        PackUpdateOutcome.AppTooOld -> "Couldn't update"
+        PackUpdateOutcome.Unavailable,
+        PackUpdateOutcome.Busy -> null
     }
 
     private fun loadPack() {
