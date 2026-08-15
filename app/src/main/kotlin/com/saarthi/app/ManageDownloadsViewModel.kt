@@ -47,7 +47,16 @@ class ManageDownloadsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ManageDownloadsUiState())
     val uiState: StateFlow<ManageDownloadsUiState> = _uiState.asStateFlow()
 
-    init { refresh() }
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            // Same resume path as OnboardingViewModel: leftover .tmp after a
+            // kill is Range-resumed here so Settings → Manage Downloads works
+            // without opening onboarding again. Not on refresh() — delete then
+            // refresh must not restart a download of a model the user just removed.
+            downloadManager.reattachActiveDownloads(modelCatalog.allModels)
+        }
+        refresh()
+    }
 
     fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {

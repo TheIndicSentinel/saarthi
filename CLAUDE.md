@@ -42,7 +42,7 @@ gemma4/
 │   │   ├── core-rag/         ← BM25 retriever + (deprecated) embedding vector store
 │   │   ├── core-ui/          ← Cyber-Vedic design system, GlassmorphicCard, components
 │   │   ├── core-i18n/        ← SupportedLanguage (11 langs), LanguageManager, personalities
-│   │   └── core-common/      ← Result<T>, UseCase, FlowUseCase, Dispatchers
+│   │   └── core-common/      ← Dispatchers, sqliteWriteWithRetry, CrashReporter
 │   ├── build-logic/          ← Convention plugins (saarthi.android.feature, etc.)
 │   └── gradle/libs.versions.toml
 ├── Modelfile              ← Ollama Modelfile (local dev reference)

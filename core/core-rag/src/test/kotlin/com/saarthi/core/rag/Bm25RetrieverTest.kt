@@ -135,6 +135,19 @@ class Bm25RetrieverTest {
     // ── Performance ────────────────────────────────────────────────────────────
 
     @Test
+    fun `second rank of the same corpus matches the first (token cache is a memo, not a new scorer)`() {
+        val corpus = listOf(
+            "Consent must be free, informed and specific before processing data.",
+            "A data breach can attract a penalty of up to 250 crore rupees.",
+            "किसान MSP wheat mandi",
+        )
+        val first = Bm25Retriever.rank(corpus, "penalties for a breach", topK = 3)
+        val second = Bm25Retriever.rank(corpus, "penalties for a breach", topK = 3)
+        assertEquals(first.map { it.index }, second.map { it.index })
+        assertEquals(first.map { it.score }, second.map { it.score })
+    }
+
+    @Test
     fun `ranks a large corpus well within budget`() {
         // 5000 chunks of ~40 tokens — far larger than any real attached doc set.
         val corpus = (0 until 5000).map { i ->

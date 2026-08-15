@@ -197,6 +197,14 @@ class ManageDownloadsViewModelTest {
     // ── refresh() ────────────────────────────────────────────────────────────
 
     @Test
+    fun `opening the screen reattaches interrupted catalog downloads`() = runTest {
+        val models = listOf(testModel())
+        every { mockModelCatalog.allModels } returns models
+        createViewModel()
+        verify(timeout = 2_000) { mockDownloadManager.reattachActiveDownloads(models) }
+    }
+
+    @Test
     fun `refresh reports the active model name from the engine`() = runTest {
         every { mockInferenceEngine.activeModelName } returns "Whatever Is Loaded"
         val viewModel = createViewModel()
