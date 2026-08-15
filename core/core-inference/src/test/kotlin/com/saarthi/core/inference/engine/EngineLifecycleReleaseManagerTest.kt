@@ -47,12 +47,14 @@ class EngineLifecycleReleaseManagerTest {
 
     private fun manager(
         application: Application,
+        totalRamMb: Long = 12_000L, // FLAGSHIP — original 60s / 120s delays
         isNativeGenerating: () -> Boolean = { false },
         isInitInProgress: () -> Boolean = { false },
         onReleaseConversation: () -> Unit = {},
         onReleaseEngine: () -> Unit = {},
     ) = EngineLifecycleReleaseManager(
         context = application,
+        totalRamMb = { totalRamMb },
         isNativeGenerating = isNativeGenerating,
         isInitInProgress = isInitInProgress,
         releaseConversationOnly = { onReleaseConversation() },
@@ -82,6 +84,7 @@ class EngineLifecycleReleaseManagerTest {
         val plainContext = mockk<Context>(relaxed = true)
         val mgr = EngineLifecycleReleaseManager(
             context = plainContext,
+            totalRamMb = { 12_000L },
             isNativeGenerating = { false },
             isInitInProgress = { false },
             releaseConversationOnly = {},
@@ -176,5 +179,56 @@ class EngineLifecycleReleaseManagerTest {
         scheduler.runCurrent()
 
         assertEquals(false, conversationReleased)
+    }
+
+    @Test
+    fun `low-RAM devices release conversation at 30s and engine at 90s`() = runTest(testDispatcher) {
+        val (app, slot) = mockApplication()
+        var conversationReleased = false
+        var engineReleased = false
+        val mgr = manager(
+            app,
+            totalRamMb = 4_096L,
+            onReleaseConversation = { conversationReleased = true },
+            onReleaseEngine = { engineReleased = true },
+        )
+        mgr.register()
+        val callbacks = slot.captured
+
+        callbacks.onActivityStarted(mockk<Activity>())
+        callbacks.onActivityStopped(mockk<Activity>())
+
+        scheduler.advanceTimeBy(29_000)
+        scheduler.runCurrent()
+        assertEquals(false, conversationReleased)
+        assertEquals(false, engineReleased)
+
+        scheduler.advanceTimeBy(2_000)
+        scheduler.runCurrent()
+        assertEquals(true, conversationReleased)
+        assertEquals(false, engineReleased)
+
+        scheduler.advanceTimeBy(58_000)
+        scheduler.runCurrent()
+        assertEquals(false, engineReleased)
+
+        scheduler.advanceTimeBy(2_000)
+        scheduler.runCurrent()
+        assertEquals(true, engineReleased)
+    }
+
+    @Test
+    fun `delaysForTotalRamMb uses 30s-90s below 6GB and 60s-120s at or above`() {
+        val low = EngineLifecycleReleaseManager.delaysForTotalRamMb(5_999L)
+        assertEquals(30_000L, low.conversationReleaseDelayMs)
+        assertEquals(90_000L, low.engineReleaseDelayMs)
+
+        val mid = EngineLifecycleReleaseManager.delaysForTotalRamMb(6_000L)
+        assertEquals(60_000L, mid.conversationReleaseDelayMs)
+        assertEquals(120_000L, mid.engineReleaseDelayMs)
+
+        val flagship = EngineLifecycleReleaseManager.delaysForTotalRamMb(12_000L)
+        assertEquals(60_000L, flagship.conversationReleaseDelayMs)
+        assertEquals(120_000L, flagship.engineReleaseDelayMs)
     }
 }

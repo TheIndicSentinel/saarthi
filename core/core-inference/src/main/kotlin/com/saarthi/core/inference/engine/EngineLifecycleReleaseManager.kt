@@ -14,9 +14,9 @@ import kotlinx.coroutines.launch
 
 /**
  * Debounced two-stage background release scheduling for
- * [LiteRTInferenceEngine] — extracted verbatim (same delays, same guard
- * conditions, same two-stage design) as part of the C3 God-class
- * reduction.
+ * [LiteRTInferenceEngine] — extracted (same guard conditions, same
+ * two-stage design) as part of the C3 God-class reduction. Delays are
+ * RAM-tiered via [delaysForTotalRamMb].
  *
  * Previously the engine only released its native/mmap/GPU footprint under
  * actual memory-pressure signals (onTrimMemory RUNNING_CRITICAL/COMPLETE,
@@ -58,6 +58,7 @@ import kotlinx.coroutines.launch
  */
 class EngineLifecycleReleaseManager(
     private val context: Context,
+    private val totalRamMb: () -> Long,
     private val isNativeGenerating: () -> Boolean,
     private val isInitInProgress: () -> Boolean,
     private val releaseConversationOnly: suspend () -> Unit,
@@ -81,8 +82,16 @@ class EngineLifecycleReleaseManager(
         override fun onActivityStopped(activity: Activity) {
             visibleActivityCount = (visibleActivityCount - 1).coerceAtLeast(0)
             if (visibleActivityCount == 0) {
-                scheduleConversationRelease()
-                scheduleBackgroundRelease()
+                val ramMb = totalRamMb()
+                val delays = delaysForTotalRamMb(ramMb)
+                DebugLogger.log(
+                    "LITERT",
+                    "App backgrounded — scheduling two-stage release " +
+                        "(conv=${delays.conversationReleaseDelayMs / 1000}s, " +
+                        "engine=${delays.engineReleaseDelayMs / 1000}s, totalRam=${ramMb}MB)",
+                )
+                scheduleConversationRelease(delays.conversationReleaseDelayMs)
+                scheduleBackgroundRelease(delays.engineReleaseDelayMs)
             }
         }
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
@@ -107,10 +116,9 @@ class EngineLifecycleReleaseManager(
 
     /**
      * Stage 1 of 2 on backgrounding: release just the Conversation (its
-     * KV-cache) at [CONVERSATION_RELEASE_DELAY_MS], well before the full
-     * Engine release at [BACKGROUND_RELEASE_DELAY_MS] in
-     * [scheduleBackgroundRelease]. The Conversation is cheap to recreate
-     * (~30-50ms with cached shaders — generateStream()'s existing
+     * KV-cache) after [conversationDelayMs], well before the full Engine
+     * release in [scheduleBackgroundRelease]. The Conversation is cheap to
+     * recreate (~30-50ms with cached shaders — generateStream()'s existing
      * "activeConversation == null" fallback, already used for the very
      * first turn after init, does this transparently on the next
      * generation) while the mmap'd Engine (model weights) is the expensive
@@ -118,16 +126,18 @@ class EngineLifecycleReleaseManager(
      * sooner gets real memory back faster without making every return-to-
      * app pay the full reload cost the single-stage release used to.
      *
-     * Both delays here are starting points pending real-device validation,
-     * same caveat as the GPU-margin constants in gpuSafetyMarginMb().
+     * Delays are RAM-tiered via [delaysForTotalRamMb]: tighter on ≤6 GB
+     * phones so OEM killers are less likely to reclaim the process while a
+     * multi-GB mmap footprint is still resident. Foreground cancel +
+     * generation/init skip guards are unchanged.
      */
-    private fun scheduleConversationRelease() {
+    private fun scheduleConversationRelease(conversationDelayMs: Long) {
         pendingConversationRelease?.cancel()
         pendingConversationRelease = lifecycleScope.launch {
-            delay(CONVERSATION_RELEASE_DELAY_MS)
+            delay(conversationDelayMs)
             if (!isNativeGenerating() && !isInitInProgress()) {
                 DebugLogger.log("LITERT",
-                    "App backgrounded for ${CONVERSATION_RELEASE_DELAY_MS / 1000}s — releasing Conversation (KV-cache), engine stays resident")
+                    "App backgrounded for ${conversationDelayMs / 1000}s — releasing Conversation (KV-cache), engine stays resident")
                 releaseConversationOnly()
             } else {
                 DebugLogger.log("LITERT", "Conversation release skipped — generation or load still in progress")
@@ -140,15 +150,13 @@ class EngineLifecycleReleaseManager(
      * kdoc for why this is split into two stages. Debounced, not
      * immediate: a quick app-switch (checking a notification, glancing at
      * another app) shouldn't pay the ~5-10s GPU reload cost the next time
-     * the user returns. [BACKGROUND_RELEASE_DELAY_MS] is a starting point,
-     * not a validated one — same caveat as the GPU-margin constants in
-     * gpuSafetyMarginMb(): needs real-device tuning against the actual
-     * supported RAM matrix before being trusted as final.
+     * the user returns. [engineDelayMs] is RAM-tiered (see
+     * [delaysForTotalRamMb]); generation/init skip guards are unchanged.
      */
-    private fun scheduleBackgroundRelease() {
+    private fun scheduleBackgroundRelease(engineDelayMs: Long) {
         pendingBackgroundRelease?.cancel()
         pendingBackgroundRelease = lifecycleScope.launch {
-            delay(BACKGROUND_RELEASE_DELAY_MS)
+            delay(engineDelayMs)
             // Never interrupt an in-flight generation — closeInternal()'s
             // existing deferred-close path handles a concurrent close
             // safely, but a generation the user is actively waiting on
@@ -158,12 +166,12 @@ class EngineLifecycleReleaseManager(
             // equivalent deferred-close guard for that phase, so closing
             // the Engine out from under an active initialize() call could
             // race. Both are narrow windows (generation/load are seconds,
-            // this delay is minutes), so skipping this cycle and trying
-            // again on the next backgrounding (or an actual memory-pressure
-            // callback) is safe.
+            // this delay is tens of seconds), so skipping this cycle and
+            // trying again on the next backgrounding (or an actual
+            // memory-pressure callback) is safe.
             if (!isNativeGenerating() && !isInitInProgress()) {
                 DebugLogger.log("LITERT",
-                    "App backgrounded for ${BACKGROUND_RELEASE_DELAY_MS / 1000}s — releasing engine")
+                    "App backgrounded for ${engineDelayMs / 1000}s — releasing engine")
                 releaseEngine()
             } else {
                 DebugLogger.log("LITERT", "Background release skipped — generation or load still in progress")
@@ -172,7 +180,37 @@ class EngineLifecycleReleaseManager(
     }
 
     companion object {
-        private const val CONVERSATION_RELEASE_DELAY_MS = 60 * 1000L        // 1 minute
-        private const val BACKGROUND_RELEASE_DELAY_MS = 2 * 60 * 1000L      // 2 minutes
+        /** Matches [com.saarthi.core.inference.model.DeviceProfile] LOW vs MID cutoff. */
+        internal const val LOW_RAM_THRESHOLD_MB = 6_000L
+        internal const val CONVERSATION_RELEASE_DELAY_LOW_RAM_MS = 30_000L
+        internal const val ENGINE_RELEASE_DELAY_LOW_RAM_MS = 90_000L
+        internal const val CONVERSATION_RELEASE_DELAY_HIGH_RAM_MS = 60_000L
+        internal const val ENGINE_RELEASE_DELAY_HIGH_RAM_MS = 120_000L
+
+        /**
+         * Conservative two-stage delays from total RAM (stable hardware spec,
+         * not fluctuating available RAM). Phones below 6 GB shed KV-cache
+         * and the full engine sooner so OEM background killers are less
+         * likely to SIGKILL a still-resident mmap footprint. Higher-RAM
+         * devices keep the original 60s / 120s window to avoid extra reloads
+         * on brief app switches.
+         */
+        internal fun delaysForTotalRamMb(totalRamMb: Long): BackgroundReleaseDelays =
+            if (totalRamMb < LOW_RAM_THRESHOLD_MB) {
+                BackgroundReleaseDelays(
+                    conversationReleaseDelayMs = CONVERSATION_RELEASE_DELAY_LOW_RAM_MS,
+                    engineReleaseDelayMs = ENGINE_RELEASE_DELAY_LOW_RAM_MS,
+                )
+            } else {
+                BackgroundReleaseDelays(
+                    conversationReleaseDelayMs = CONVERSATION_RELEASE_DELAY_HIGH_RAM_MS,
+                    engineReleaseDelayMs = ENGINE_RELEASE_DELAY_HIGH_RAM_MS,
+                )
+            }
     }
 }
+
+internal data class BackgroundReleaseDelays(
+    val conversationReleaseDelayMs: Long,
+    val engineReleaseDelayMs: Long,
+)

@@ -3,6 +3,8 @@ package com.saarthi.feature.assistant.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saarthi.core.common.isSqliteUnusable
+import com.saarthi.core.common.sqliteWriteWithRetry
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.PackId
 import com.saarthi.core.i18n.SupportedLanguage
@@ -167,7 +169,7 @@ class PackChatViewModel @Inject constructor(
         // app is killed mid-generation.
         viewModelScope.launch {
             withContext(NonCancellable) {
-                runCatching { conversationDao.insert(userMsg.toEntity(chatSessionId)) }
+                runCatching { sqliteWriteWithRetry { conversationDao.insert(userMsg.toEntity(chatSessionId)) } }
             }
         }
 
@@ -221,8 +223,12 @@ class PackChatViewModel @Inject constructor(
                 mspGrounding
             } else {
                 val searchQuery = if (userState.isNotBlank()) "$question $userState" else question
-                val rawChunks = runCatching { ragRepository.search(packSessionId, searchQuery, topK = 5) }
-                    .getOrDefault(emptyList())
+                val searchResult = runCatching { ragRepository.search(packSessionId, searchQuery, topK = 5) }
+                if (searchResult.exceptionOrNull()?.let { isSqliteUnusable(it) } == true) {
+                    finish(streamingId, lang.dbNeedsRestart)
+                    return@launch
+                }
+                val rawChunks = searchResult.getOrDefault(emptyList())
                 // Keep every central chunk; keep a STATE-OVERLAY chunk only when
                 // it matches the user's state.
                 rawChunks.filter { c ->
@@ -315,7 +321,7 @@ class PackChatViewModel @Inject constructor(
         if (finalMsg != null) {
             viewModelScope.launch {
                 withContext(NonCancellable) {
-                    runCatching { conversationDao.insert(finalMsg.toEntity(chatSessionId)) }
+                    runCatching { sqliteWriteWithRetry { conversationDao.insert(finalMsg.toEntity(chatSessionId)) } }
                 }
             }
         }

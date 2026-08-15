@@ -39,6 +39,9 @@ class TtsManager @Inject constructor(
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
+    private val _ttsAvailable = MutableStateFlow(true)
+    val ttsAvailable: StateFlow<Boolean> = _ttsAvailable.asStateFlow()
+
     private val _activeUtteranceId = MutableStateFlow<String?>(null)
     val activeUtteranceId: StateFlow<String?> = _activeUtteranceId.asStateFlow()
 
@@ -79,6 +82,7 @@ class TtsManager @Inject constructor(
             } else {
                 DebugLogger.log("TTS", "TTS init FAILED status=$status — speak ignored")
                 pendingSpeak = null
+                _ttsAvailable.value = false
             }
         }
     }

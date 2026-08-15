@@ -1,6 +1,8 @@
 package com.saarthi.feature.assistant.data
 
 import android.content.Context
+import com.saarthi.core.common.isSqliteUnusable
+import com.saarthi.core.common.sqliteWriteWithRetry
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.DebugLogger
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
@@ -34,6 +37,9 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -215,20 +221,6 @@ class ChatRepositoryImpl @Inject constructor(
         val userMsg = ChatMessage(content = userMessage, role = MessageRole.USER, attachments = attachments)
         _history.update { it + userMsg }
         
-        scope.launch {
-            withContext(kotlinx.coroutines.NonCancellable) {
-                conversationDao.insert(userMsg.toEntity(sessionId))
-                
-                // Update session title from first user message
-                val session = chatSessionDao.getAll().find { it.id == sessionId }
-                if (session != null) {
-                    val title = if (session.title == "New Chat") graphemeSafeTake(userMessage, 40).trimEnd() else session.title
-                    chatSessionDao.updateTitleAndTimestamp(sessionId, title, System.currentTimeMillis())
-                }
-            }
-        }
-
-
         val streamingId = UUID.randomUUID().toString()
         val placeholder = ChatMessage(id = streamingId, content = "", role = MessageRole.ASSISTANT, isStreaming = true)
         _history.update { it + placeholder }
@@ -264,7 +256,18 @@ class ChatRepositoryImpl @Inject constructor(
         // BM25 search inside buildPrompt sees the chunks. Idempotent —
         // the per-session in-process cache prevents re-chunking on every
         // turn after the first.
-        val prompt = withContext(Dispatchers.IO) {
+        val prompt = try {
+            withContext(Dispatchers.IO) {
+            withContext(kotlinx.coroutines.NonCancellable) {
+                sqliteWriteWithRetry {
+                    conversationDao.insert(userMsg.toEntity(sessionId))
+                    val session = chatSessionDao.getAll().find { it.id == sessionId }
+                    if (session != null) {
+                        val title = if (session.title == "New Chat") graphemeSafeTake(userMessage, 40).trimEnd() else session.title
+                        chatSessionDao.updateTitleAndTimestamp(sessionId, title, System.currentTimeMillis())
+                    }
+                }
+            }
             if (attachments.isNotEmpty()) {
                 val indexed = indexedDocsByUri.getOrPut(sessionId) { mutableSetOf() }
                 var newCount = 0
@@ -273,7 +276,10 @@ class ChatRepositoryImpl @Inject constructor(
                     if (key in indexed) continue
                     runCatching { ragRepository.indexIfNeeded(sessionId, file) }
                         .onSuccess { indexed += key; newCount += 1 }
-                        .onFailure { DebugLogger.log("RAG", "Index failed for ${file.name}: ${it.message}") }
+                        .onFailure {
+                            DebugLogger.log("RAG", "Index failed for ${file.name}: ${it.message}")
+                            if (isSqliteUnusable(it)) throw it
+                        }
                 }
                 if (newCount > 0) DebugLogger.log("RAG", "Indexed $newCount doc(s) inline before retrieval  session=$sessionId")
                 // Set this batch as the active focus — every subsequent
@@ -283,6 +289,16 @@ class ChatRepositoryImpl @Inject constructor(
                 DebugLogger.log("RAG", "Focus set to ${attachments.size} doc(s) for session=$sessionId")
             }
             buildPrompt(userMessage, attachments)
+        }
+        } catch (e: Throwable) {
+            if (!isSqliteUnusable(e)) throw e
+            val errMsg = currentLanguage.dbNeedsRestart
+            DebugLogger.log("DB", "Chat/RAG SQLite unusable after retry: ${e.cause?.message ?: e.message}")
+            if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
+            _history.update { history ->
+                history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false) else it }
+            }
+            return@flow
         }
         DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
 
@@ -379,7 +395,15 @@ class ChatRepositoryImpl @Inject constructor(
                     val isRealReply = parsed.cleanText.isNotBlank() ||
                         (isCancelled && partial.isNotBlank())
                     if (isRealReply) {
-                        scope.launch { conversationDao.insert(finalMsg.toEntity(sessionId)) }
+                        scope.launch {
+                            runCatching {
+                                sqliteWriteWithRetry { conversationDao.insert(finalMsg.toEntity(sessionId)) }
+                            }.onFailure {
+                                if (isSqliteUnusable(it)) {
+                                    DebugLogger.log("DB", "Assistant persist failed after retry — keeping on-screen reply")
+                                }
+                            }
+                        }
                     }
 
                     // Save extracted memories. Two tiers (industry-standard):
@@ -438,6 +462,55 @@ class ChatRepositoryImpl @Inject constructor(
         chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
+    }
+
+    override suspend fun exportAllData(): File = withContext(Dispatchers.IO) {
+        val sessions = chatSessionDao.getAll()
+        val messagesBySession = conversationDao.getAll().groupBy { it.sessionId }
+        val memories = memoryRepository.observeAll().first()
+
+        val sessionsJson = JSONArray()
+        sessions.forEach { session ->
+            val messagesJson = JSONArray()
+            messagesBySession[session.id].orEmpty().forEach { msg ->
+                messagesJson.put(
+                    JSONObject()
+                        .put("role", msg.role)
+                        .put("content", msg.content)
+                        .put("timestamp", msg.timestamp),
+                )
+            }
+            sessionsJson.put(
+                JSONObject()
+                    .put("id", session.id)
+                    .put("title", session.title)
+                    .put("createdAt", session.createdAt)
+                    .put("updatedAt", session.updatedAt)
+                    .put("messages", messagesJson),
+            )
+        }
+
+        val memoriesJson = JSONArray()
+        memories.forEach { fact ->
+            memoriesJson.put(
+                JSONObject()
+                    .put("sessionId", fact.sessionId)
+                    .put("key", fact.key)
+                    .put("value", fact.value)
+                    .put("updatedAt", fact.updatedAt),
+            )
+        }
+
+        val root = JSONObject()
+            .put("exportVersion", 1)
+            .put("exportedAtMs", System.currentTimeMillis())
+            .put("sessions", sessionsJson)
+            .put("memories", memoriesJson)
+
+        val dir = File(context.filesDir, "exports").apply { mkdirs() }
+        val file = File(dir, "saarthi_export.json")
+        file.writeText(root.toString(2), Charsets.UTF_8)
+        file
     }
 
     override suspend fun deleteMessage(id: String) {
@@ -668,7 +741,8 @@ class ChatRepositoryImpl @Inject constructor(
                 restrictToDocUris = focusUris,
                 priorQuery = priorUserQuery?.takeIf { it != userMessage && it.length > 8 },
             )
-        }.getOrDefault(emptyList())
+        }.onFailure { if (isSqliteUnusable(it)) throw it }
+            .getOrDefault(emptyList())
             .let(::coherentExcerptForLowRelevance)
         val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
 

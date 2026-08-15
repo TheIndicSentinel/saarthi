@@ -35,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -271,19 +272,17 @@ class AssistantViewModel @Inject constructor(
         // history, which is what the (new) ViewModel instance reads when the
         // user navigates back.
         streamJob = chatRepository.streamResponse(text, attachments)
-            .also { job ->
-                job.invokeOnCompletion { throwable ->
-                    // A user-initiated Stop cancels the coroutine → don't
-                    // surface that as an error. Only genuine failures get a
-                    // short, professional message (never a raw stack message).
-                    val friendly = when {
-                        throwable == null -> null
-                        throwable is kotlinx.coroutines.CancellationException -> null
-                        else -> currentLanguage.value.streamFailedRetry
-                    }
-                    _uiState.update { it.copy(isStreaming = false, error = friendly) }
+            .onCompletion { throwable ->
+                val friendly = when {
+                    throwable == null -> null
+                    throwable is kotlinx.coroutines.CancellationException -> null
+                    com.saarthi.core.common.isSqliteUnusable(throwable) ->
+                        currentLanguage.value.dbNeedsRestart
+                    else -> currentLanguage.value.streamFailedRetry
                 }
+                _uiState.update { it.copy(isStreaming = false, error = friendly) }
             }
+            .launchIn(viewModelScope)
     }
 
     /**
@@ -524,7 +523,7 @@ class AssistantViewModel @Inject constructor(
             speechRecognizer = null
         }
         val recognizer = speechRecognizer ?: run {
-            val created = if (wantOnDevice) {
+            val created = if (wantOnDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             } else {
                 SpeechRecognizer.createSpeechRecognizer(context)

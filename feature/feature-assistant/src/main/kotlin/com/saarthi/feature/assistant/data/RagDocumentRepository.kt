@@ -1,5 +1,6 @@
 package com.saarthi.feature.assistant.data
 
+import com.saarthi.core.common.sqliteWriteWithRetry
 import com.saarthi.core.memory.db.RagChunkDao
 import com.saarthi.core.memory.db.RagChunkEntity
 import com.saarthi.core.rag.Bm25Retriever
@@ -153,7 +154,7 @@ class RagDocumentRepository @Inject constructor(
      */
     suspend fun indexIfNeeded(sessionId: String, file: AttachedFile) {
         val uriKey = file.uri.toString()
-        if (ragChunkDao.countByDoc(sessionId, uriKey) > 0) return
+        if (sqliteWriteWithRetry { ragChunkDao.countByDoc(sessionId, uriKey) } > 0) return
         val text = file.extractedText?.trim().orEmpty()
         if (text.isEmpty()) return
 
@@ -192,7 +193,7 @@ class RagDocumentRepository @Inject constructor(
                 )
             )
         }
-        ragChunkDao.insertAll(entities)
+        sqliteWriteWithRetry { ragChunkDao.insertAll(entities) }
         val hasOutline = entities.firstOrNull()?.chunkIndex == OUTLINE_CHUNK_INDEX
         val totalChars = entities.sumOf { it.text.length }
         // DebugLogger so it surfaces in the user-visible saarthi_debug.log
@@ -247,7 +248,7 @@ class RagDocumentRepository @Inject constructor(
          */
         priorQuery: String? = null,
     ): List<RetrievedChunk> {
-        val raw = ragChunkDao.getBySession(sessionId)
+        val raw = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
         // Defensive: if the URI restriction produces an empty set (e.g.
         // the focused doc was deleted from Room since being marked) fall
         // back to the full corpus rather than returning no context at all.

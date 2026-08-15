@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 /**
@@ -33,4 +34,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun consumeToast() = _toast.update { null }
+
+    fun exportData(onExported: (File) -> Unit, onFailed: () -> Unit) {
+        viewModelScope.launch {
+            runCatching { chatRepository.exportAllData() }
+                .onSuccess(onExported)
+                .onFailure { onFailed() }
+        }
+    }
 }

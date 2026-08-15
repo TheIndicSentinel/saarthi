@@ -529,6 +529,19 @@ enum class SupportedLanguage(
         PUNJABI  -> "ਉਹ ਜਵਾਬ ਪੂਰਾ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
         ODIA     -> "ସେହି ଉତ୍ତର ସମାପ୍ତ ହୋଇପାରିଲା ନାହିଁ। ଦୟାକରି ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।"
     }
+    /** Chat/RAG SQLite is corrupt or the disk is full — do not wipe; restart. */
+    val dbNeedsRestart: String get() = when (this) {
+        ENGLISH  -> "Restart the app"
+        HINDI    -> "ऐप को फिर से खोलें"
+        TAMIL    -> "ஆப்பை மீண்டும் திறக்கவும்"
+        TELUGU   -> "యాప్‌ను మళ్లీ తెరవండి"
+        BENGALI  -> "অ্যাপ আবার খুলুন"
+        MARATHI  -> "अॅप पुन्हा उघडा"
+        KANNADA  -> "ಅಪ್ಲಿಕೇಶನ್ ಅನ್ನು ಮತ್ತೆ ತೆರೆಯಿರಿ"
+        GUJARATI -> "એપ ફરી ખોલો"
+        PUNJABI  -> "ਐਪ ਮੁੜ ਖੋਲ੍ਹੋ"
+        ODIA     -> "ଆପ୍ ପୁଣି ଖୋଲନ୍ତୁ"
+    }
     /** Voice error: no speech detected / timed out. */
     val voiceNoMatch: String get() = when (this) {
         ENGLISH  -> "Didn't catch that — tap the mic and try again."

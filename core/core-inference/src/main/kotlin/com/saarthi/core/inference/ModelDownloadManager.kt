@@ -294,24 +294,13 @@ class ModelDownloadManager @Inject constructor(
     /**
      * Lazily verifies an already-installed model's SHA-256 against the
      * catalog's pinned hash, entirely in the background — never blocks the
-     * caller, never rejects or deletes the file. This covers every path
-     * that can mark a model "ready" WITHOUT the strict, hard-blocking check
-     * ModelDownloadService applies to a fresh current-session download
-     * (HTTP-416-resume-completion, the legacy external-tmp migration, and
-     * simple reattachment of a file installed by an older build): those
-     * files may predate the catalog's checksum pinning entirely, or may
-     * have been downloaded from a `resolve/main/...` URL before it was
-     * repinned to an immutable commit, so a hash that matches TODAY's pin
-     * isn't guaranteed even for a perfectly good, already-working install.
-     * Rejecting them outright would break existing users over a check that
-     * postdates their download — so a mismatch here is logged loudly
-     * (visible in the same debug log used for every other integrity event)
-     * but the file is left in place and still used normally.
+     * caller. Same bar as a fresh [ModelDownloadService] download: on
+     * mismatch the file is deleted and dropped from [allProgress] so the
+     * existing download UI takes over. No extra user-facing copy.
      *
-     * [ModelIntegrityStore] caches the verdict against the file's exact
-     * (size, lastModified), so this hashes a given multi-GB file at most
-     * once — not on every app launch, which is what [reattachActiveDownloads]
-     * calling this on every model would otherwise mean.
+     * [ModelIntegrityStore] caches a *matching* verdict against the file's
+     * exact (size, lastModified), so a good multi-GB file is hashed at most
+     * once per unchanged install — not on every app launch.
      */
     private fun verifyExistingFileInBackground(model: ModelEntry, file: File) {
         val expected = model.expectedSha256 ?: return
@@ -319,27 +308,29 @@ class ModelDownloadManager @Inject constructor(
             val lastModified = file.lastModified()
             val sizeBytes = file.length()
             val cached = integrityStore.cachedVerdict(file.name, sizeBytes, lastModified)
-            if (cached != null) {
-                if (!cached) {
-                    DebugLogger.log("DOWNLOAD",
-                        "Integrity: ${model.id} has a cached hash mismatch from a previous check — " +
-                            "still in use (informational only, not re-checked until the file changes)")
-                }
+            if (cached == true) return@launch
+            if (cached == false) {
+                discardMismatchedExistingFile(model, file)
                 return@launch
             }
             val actual = runCatching { StreamingSha256.hex(file) }.getOrNull() ?: return@launch
             val matched = actual.equals(expected, ignoreCase = true)
-            integrityStore.recordVerdict(file.name, sizeBytes, lastModified, matched)
             if (matched) {
+                integrityStore.recordVerdict(file.name, sizeBytes, lastModified, true)
                 DebugLogger.log("DOWNLOAD", "Integrity verified for existing install: ${model.id}")
             } else {
                 Timber.w("Integrity mismatch for already-installed model ${model.id}: " +
-                    "expected=$expected actual=$actual — file predates current checksum pinning or was " +
-                    "altered; kept in place, informational only")
-                DebugLogger.log("DOWNLOAD",
-                    "INTEGRITY WARNING for ${model.id} — hash mismatch on existing install (kept; not re-checked until the file changes)")
+                    "expected=$expected actual=$actual — discarding")
+                discardMismatchedExistingFile(model, file)
             }
         }
+    }
+
+    /** Same as [ModelDownloadService.verifyChecksum] on mismatch: delete, no extra UI. */
+    private fun discardMismatchedExistingFile(model: ModelEntry, file: File) {
+        DebugLogger.log("DOWNLOAD", "CHECKSUM MISMATCH for ${model.id} — discarding")
+        file.delete()
+        _allProgress.update { it - model.id }
     }
 
     /**

@@ -122,13 +122,28 @@ fun KisanPackScreen(
             )
             StateChip(state = userState, onClick = { showStatePicker = true })
             Spacer(Modifier.width(4.dp))
-            IconButton(onClick = { viewModel.refresh() }) {
-                Icon(
-                    Icons.Outlined.Refresh,
-                    contentDescription = "Refresh pack content",
-                    tint = SaarthiColors.Text3,
-                )
+            IconButton(onClick = { if (!ui.checkingUpdate) viewModel.refresh() }) {
+                if (ui.checkingUpdate) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = SaarthiColors.Marigold,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        Icons.Outlined.Refresh,
+                        contentDescription = "Check for pack updates",
+                        tint = SaarthiColors.Text3,
+                    )
+                }
             }
+        }
+        ui.updateMessage?.let { msg ->
+            Text(
+                text = msg,
+                style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3),
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+            )
         }
 
         when {

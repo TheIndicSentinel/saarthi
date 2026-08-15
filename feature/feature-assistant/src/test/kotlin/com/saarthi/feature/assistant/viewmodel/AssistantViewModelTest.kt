@@ -18,8 +18,9 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -110,22 +111,15 @@ class AssistantViewModelTest {
 
     @Test
     fun `sendMessage clears inputText and sets isStreaming true`() = runTest {
-        // Point 8a: streamResponse() now returns a Job directly (launched on
-        // the repository's own scope) instead of a cold Flow the ViewModel
-        // launches itself. An already-completed Job mirrors the old "empty
-        // flow, completes instantly" double — invokeOnCompletion fires
-        // synchronously for a Job that's already done.
-        every { mockChatRepository.streamResponse(any(), any()) } returns Job().apply { complete() }
+        every { mockChatRepository.streamResponse(any(), any()) } returns emptyFlow()
         val vm = createViewModel()
 
         vm.onInputChange("Hello Saarthi")
         vm.sendMessage()
 
         assertEquals("", vm.uiState.value.inputText)
-        // isStreaming may have already cleared to false because the Job
-        // completed instantly. The important contract is: it DID set
-        // isStreaming = true, then cleared. Verify streamResponse was
-        // called with the correct text.
+        // isStreaming may have already cleared because the empty flow
+        // completed instantly. Verify streamResponse was called.
         verify { mockChatRepository.streamResponse("Hello Saarthi", any()) }
     }
 
@@ -142,10 +136,8 @@ class AssistantViewModelTest {
 
     @Test
     fun `sendMessage while already streaming is a no-op`() = runTest {
-        // Incomplete Job so isStreaming stays true (mirrors the old
-        // "non-completing stream" double — see point 8a's comment above).
-        val openJob = Job()
-        every { mockChatRepository.streamResponse(any(), any()) } returns openJob
+        val openStream = MutableSharedFlow<String>()
+        every { mockChatRepository.streamResponse(any(), any()) } returns openStream
 
         val vm = createViewModel()
         vm.onInputChange("first message")
@@ -162,8 +154,8 @@ class AssistantViewModelTest {
 
     @Test
     fun `stopGeneration calls cancelGeneration and clears isStreaming`() = runTest {
-        val openJob = Job()
-        every { mockChatRepository.streamResponse(any(), any()) } returns openJob
+        val openStream = MutableSharedFlow<String>()
+        every { mockChatRepository.streamResponse(any(), any()) } returns openStream
 
         val vm = createViewModel()
         vm.onInputChange("generate something")

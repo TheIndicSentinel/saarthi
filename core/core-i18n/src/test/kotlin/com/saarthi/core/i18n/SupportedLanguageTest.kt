@@ -259,6 +259,7 @@ class SupportedLanguageTest {
     fun every_language_has_non_blank_snackbar_strings() {
         assertNonBlankForEveryLanguage("attachmentsNeedLargerModel") { attachmentsNeedLargerModel }
         assertNonBlankForEveryLanguage("streamFailedRetry") { streamFailedRetry }
+        assertNonBlankForEveryLanguage("dbNeedsRestart") { dbNeedsRestart }
         assertNonBlankForEveryLanguage("voiceNoMatch") { voiceNoMatch }
         assertNonBlankForEveryLanguage("voiceMicPermissionNeeded") { voiceMicPermissionNeeded }
         assertNonBlankForEveryLanguage("voiceServiceUnavailable") { voiceServiceUnavailable }
