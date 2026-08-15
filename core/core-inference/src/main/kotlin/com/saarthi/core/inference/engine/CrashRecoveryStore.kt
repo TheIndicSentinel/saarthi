@@ -52,11 +52,18 @@ import javax.inject.Singleton
  *     uncaught-exception handler; a JVM-side Throwable is not the engine's fault.
  */
 @Singleton
-class CrashRecoveryStore @Inject constructor(
-    @ApplicationContext private val context: Context,
+class CrashRecoveryStore private constructor(
+    private val prefs: SharedPreferences,
+    private val context: Context?,
 ) {
-    private val prefs: SharedPreferences
-        get() = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE)
+    @Inject
+    constructor(@ApplicationContext context: Context) : this(
+        prefs = context.getSharedPreferences("litert_engine_prefs", Context.MODE_PRIVATE),
+        context = context,
+    )
+
+    /** JVM unit tests — in-memory prefs, no Robolectric. */
+    internal constructor(prefs: SharedPreferences) : this(prefs, context = null)
 
     companion object {
         private const val GPU_BAN_EXPIRY_MS = 24 * 60 * 60 * 1000L          // 24 hours
@@ -117,9 +124,10 @@ class CrashRecoveryStore @Inject constructor(
      */
     fun lastExitWasConfirmedLowMemory(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        val ctx = context ?: return false
         return runCatching {
-            val am = context.getSystemService(ActivityManager::class.java)
-            val reasons = am.getHistoricalProcessExitReasons(context.packageName, 0, 1)
+            val am = ctx.getSystemService(ActivityManager::class.java)
+            val reasons = am.getHistoricalProcessExitReasons(ctx.packageName, 0, 1)
             reasons.firstOrNull()?.reason == android.app.ApplicationExitInfo.REASON_LOW_MEMORY
         }.getOrDefault(false)
     }

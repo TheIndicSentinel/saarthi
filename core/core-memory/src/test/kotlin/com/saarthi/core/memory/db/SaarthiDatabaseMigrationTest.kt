@@ -19,15 +19,10 @@ import java.sql.DriverManager
  * MIGRATION_4_5 (pure schema-add) against a REAL SQLite engine, not a
  * hand-simulated one.
  *
- * Room's own MigrationTestHelper needs Robolectric or a device/emulator to
- * run (both require a real Android SQLite implementation) — neither is
- * available in this project. Since every Migration in this file is pure
- * db.execSQL(rawSql) with no other SupportSQLiteDatabase API used, a MockK
- * SupportSQLiteDatabase whose execSQL() forwards each call to a real,
- * pure-JVM SQLite engine (org.xerial:sqlite-jdbc) exercises the ACTUAL
- * production Migration objects — not a duplicate of their SQL — as an
- * ordinary JVM unit test, runnable in the exact same `testDebugUnitTest`
- * CI step every other test in this project already uses.
+ * Room's MigrationTestHelper (Android SQLite + schema JSON) lives in
+ * SaarthiDatabaseAndroidMigrationTest. This JVM suite still forwards
+ * execSQL() to sqlite-jdbc so the same production Migration objects run in
+ * `testDebugUnitTest` without a device.
  *
  * The "before" schema for each test is copied verbatim from Room's own
  * exported schema JSON (schemas/.../3.json, 4.json — see the

@@ -6,6 +6,10 @@ plugins {
 
 android {
     namespace = "com.saarthi.core.memory"
+    sourceSets {
+        // Room MigrationTestHelper reads exported schema JSON from androidTest assets.
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
 }
 
 ksp {
@@ -24,4 +28,8 @@ dependencies {
 
     // Real SQLite engine for Migration tests — see SaarthiDatabaseMigrationTest.
     testImplementation(libs.sqlite.jdbc)
+
+    androidTestImplementation(libs.room.testing)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }
