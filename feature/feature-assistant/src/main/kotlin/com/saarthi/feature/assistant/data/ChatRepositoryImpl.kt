@@ -754,6 +754,7 @@ class ChatRepositoryImpl @Inject constructor(
                         chunkIndex = c.chunkIndex,
                         page = extractPageRange(c.text),
                         score = c.score,
+                        displayName = if (ragLogDocNames()) shortDocName(c.docName) else null,
                     ),
                 )
             }

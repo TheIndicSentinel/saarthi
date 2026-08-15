@@ -139,6 +139,20 @@ class RagDocumentRepository @Inject constructor(
             "analyse the", "analyze the",
             "analyse attached", "analyze attached",
         )
+
+        /**
+         * Why this query took the overview/meta path. Logged as meta=list etc.
+         * Tokens only — never the raw query.
+         */
+        internal fun metaRouteReason(query: String): String? {
+            val lower = query.lowercase().trim()
+            if (lower.isEmpty()) return null
+            val tokens = lower.split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
+            tokens.firstOrNull { it in META_TOKEN_TRIGGERS }?.let { return it }
+            if (isDevanagariMetaTrigger(lower)) return "devanagari"
+            if (META_QUERY_PHRASES.any { lower.contains(it) }) return "phrase"
+            return null
+        }
     }
 
     /**
@@ -292,26 +306,26 @@ class RagDocumentRepository @Inject constructor(
         val t0 = System.nanoTime()
         val all = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
         val sessionDocCount = all.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size
-        fun done(hits: List<RetrievedChunk>, path: RagSearchPath): List<RetrievedChunk> {
+        if (all.isEmpty()) {
             val searchMs = (System.nanoTime() - t0) / 1_000_000
             logRag(
                 ragSearchLogLine(
-                    docCount = sessionDocCount,
+                    docCount = 0,
                     boostCount = boostDocUris.size,
-                    path = path,
-                    hitCount = hits.size,
+                    path = RagSearchPath.empty,
+                    hitCount = 0,
                     queryLen = query.length,
                     searchMs = searchMs,
                 ),
             )
-            return hits
+            return emptyList()
         }
-        if (all.isEmpty()) return done(emptyList(), RagSearchPath.empty)
         val recencyUri = all.maxBy { it.createdAt }.docUri
         val sessionFiles = all.groupBy { it.docUri }.map { (uri, chunks) ->
             uri to chunks.first().docName
         }
         val route = routeQuery(query, sessionFiles)
+        var headingChunkCount = 0
         fun finish(hits: List<RetrievedChunk>): List<RetrievedChunk> {
             // All-zero / overview: rebuild per file (outline + contiguous
             // opening, or spaced samples for "which file"). Real BM25 hits
@@ -343,9 +357,31 @@ class RagDocumentRepository @Inject constructor(
         // rather than a generic structural sample.
         val queryTokens = query.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
         val isFollowUp = !priorQuery.isNullOrBlank() && queryTokens.take(4).any { it in FOLLOW_UP_TOKENS }
+        val metaReason = if (isFollowUp) null else metaRouteReason(query)
+        fun done(hits: List<RetrievedChunk>, path: RagSearchPath): List<RetrievedChunk> {
+            val searchMs = (System.nanoTime() - t0) / 1_000_000
+            logRag(
+                ragSearchLogLine(
+                    docCount = sessionDocCount,
+                    boostCount = boostDocUris.size,
+                    path = path,
+                    hitCount = hits.size,
+                    queryLen = query.length,
+                    searchMs = searchMs,
+                    named = route.namedDocUris.size,
+                    equalSlots = route.equalSlots,
+                    whichFile = route.whichFile,
+                    thisDocument = route.thisDocument,
+                    followUp = isFollowUp,
+                    metaReason = metaReason,
+                    headingChunks = headingChunkCount,
+                ),
+            )
+            return hits
+        }
 
-        if ((isMetaQuery(query) || route.whichFile) && !isFollowUp) {
-            val path = if (isMetaQuery(query)) RagSearchPath.meta else RagSearchPath.structural
+        if ((metaReason != null || route.whichFile) && !isFollowUp) {
+            val path = if (metaReason != null) RagSearchPath.meta else RagSearchPath.structural
             return done(finish(emptyList()), path)
         }
 
@@ -360,6 +396,7 @@ class RagDocumentRepository @Inject constructor(
         // Additive — BM25 still ranks below; this only guarantees the
         // section the user named is present and leading.
         val anchoredEntities = anchoredHeadingChunks(all, contentChunks, query)
+        headingChunkCount = anchoredEntities.size
 
         // Expand the query when following up on the prior turn.
         val effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
@@ -535,28 +572,11 @@ class RagDocumentRepository @Inject constructor(
                 ?: continue
             val section = sorted.subList(window.start, window.endExclusive)
             if (section.isEmpty()) continue
-            com.saarthi.core.inference.DebugLogger.log(
-                "RAG", "heading-anchored (headingLen=${heading.length}) → ${section.size} chunk(s)"
-            )
+            val headingBit = if (ragLogDocNames()) " heading=${heading.take(40)}" else ""
+            logRag("heading-anchored headingLen=${heading.length}$headingBit → ${section.size} chunk(s)")
             return section
         }
         return emptyList()
-    }
-
-    private fun isMetaQuery(query: String): Boolean {
-        val lower = query.lowercase().trim()
-        if (lower.isEmpty()) return false
-        // 1. Token-level: split on non-letter/digit so "Summarise document content"
-        //    decomposes to {"summarise", "document", "content"} and "summarise"
-        //    matches the trigger. Substring matching missed this — that was the
-        //    02:38:24 production miss where ragChunks=1 instead of the structural
-        //    sample.
-        val tokens = lower.split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
-        if (tokens.any { it in META_TOKEN_TRIGGERS }) return true
-        // 2. Devanagari script regex (whitespace-free morphology).
-        if (isDevanagariMetaTrigger(lower)) return true
-        // 3. Multi-word phrase fallback.
-        return META_QUERY_PHRASES.any { lower.contains(it) }
     }
 
     /**

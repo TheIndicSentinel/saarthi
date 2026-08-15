@@ -32,15 +32,21 @@ android {
             ?: System.getenv("HF_APP_TOKEN")
             ?: ""
         buildConfigField("String", "HF_APP_TOKEN", "\"$hfAppToken\"")
+    }
 
-        // Debug log → public Downloads gate. The append-only saarthi_debug.log
-        // contains prompts, attachment filenames, model names, errors and device
-        // info — fine for beta (where the user shares it for support) but a
-        // privacy leak in a public release. Defaults FALSE (app-private storage);
-        // pass -Psaarthi.publicLog=true only for an explicit beta build where the
-        // user is meant to share the log for support.
-        val publicLog = (project.findProperty("saarthi.publicLog") as String?)?.toBoolean() ?: false
-        buildConfigField("boolean", "PUBLIC_DEBUG_LOG", "$publicLog")
+    // Debug log → public Downloads. saarthi_debug.log is how we diagnose RAG
+    // (path, boost, heading, scores) on a physical phone. Debug APKs write it
+    // to Downloads by default; Play/release keeps it app-private. Override
+    // either way with -Psaarthi.publicLog=true|false.
+    buildTypes {
+        named("debug") {
+            val publicLog = (project.findProperty("saarthi.publicLog") as String?)?.toBoolean() ?: true
+            buildConfigField("boolean", "PUBLIC_DEBUG_LOG", "$publicLog")
+        }
+        named("release") {
+            val publicLog = (project.findProperty("saarthi.publicLog") as String?)?.toBoolean() ?: false
+            buildConfigField("boolean", "PUBLIC_DEBUG_LOG", "$publicLog")
+        }
     }
 }
 

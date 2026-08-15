@@ -8,7 +8,7 @@ import org.junit.Test
 class RagObservabilityTest {
 
     @Test
-    fun `search line has path and timings without query text`() {
+    fun `search line has path timings and route without query text`() {
         val line = ragSearchLogLine(
             docCount = 2,
             boostCount = 1,
@@ -16,10 +16,25 @@ class RagObservabilityTest {
             hitCount = 4,
             queryLen = 18,
             searchMs = 12,
+            named = 1,
+            metaReason = "list",
+            headingChunks = 3,
         )
-        assertEquals("docs=2 boost=1 path=bm25 hits=4 queryLen=18 searchMs=12", line)
+        assertEquals(
+            "docs=2 boost=1 path=bm25 hits=4 queryLen=18 searchMs=12 named=1 equal=0 whichFile=0 thisDoc=0 followUp=0 meta=list headingChunks=3",
+            line,
+        )
         assertFalse(line.contains("penalty"))
         assertFalse(line.contains("content://"))
+        assertFalse(line.contains("Offices"))
+    }
+
+    @Test
+    fun `offices list query is tagged meta list not the question text`() {
+        assertEquals("list", RagDocumentRepository.metaRouteReason("Offices ke list do"))
+        assertEquals("overview", RagDocumentRepository.metaRouteReason("Document content ka overview do"))
+        assertEquals(null, RagDocumentRepository.metaRouteReason("Pune office ka address do"))
+        assertEquals(null, RagDocumentRepository.metaRouteReason("What is journey to compliance"))
     }
 
     @Test
