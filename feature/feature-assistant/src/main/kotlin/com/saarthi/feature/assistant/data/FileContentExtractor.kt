@@ -33,13 +33,8 @@ class FileContentExtractor @Inject constructor(
         const val MAX_EXTRACTED_CHARS = 100_000          // ~25k tokens worth of text
         const val MAX_PDF_PAGES = 25                     // raised from 5; bounded by char cap
 
-        // Below this many chars, treat the PDF's text layer as "effectively
-        // empty" (a scanned/image PDF, or a cover page with only a title) and
-        // fall back to OCR. Small enough not to skip a genuinely short doc.
-        const val MIN_TEXT_LAYER_CHARS = 24
-
-        // Small-file fast-path used by the prompt builder to skip BM25
-        // and emit the whole file when it comfortably fits.
+        // Small-file fast-path: prompt/search injects the whole body when
+        // indexed text is ≤ this many characters (see expandWholeSmallFiles).
         const val WHOLE_FILE_CHARS = 3_000
 
         private val TEXT_MIME_TYPES = setOf(
@@ -105,13 +100,20 @@ class FileContentExtractor @Inject constructor(
             else -> null
         }
 
+        val failure = extractedText?.let { extractionFailureMessage(it) }
+            ?: if (isImage && extractedText.isNullOrBlank()) {
+                "No text detected in this image."
+            } else {
+                null
+            }
         return AttachedFile(
             uri = uri,
             name = name,
             mimeType = mime,
             sizeBytes = size,
-            extractedText = extractedText,
+            extractedText = if (failure != null) null else extractedText,
             isImage = isImage,
+            error = failure,
         )
     }
 
@@ -149,36 +151,50 @@ class FileContentExtractor @Inject constructor(
      *     PDF works just like an English one. This is what the previous
      *     OCR-only path could not do (it rasterised every page and ran a
      *     Latin-only recognizer, so any non-English PDF came back empty).
-     *  2. OCR FALLBACK — only when the text layer is empty/near-empty (a
-     *     scanned or photographed PDF with no real text). Unchanged behaviour.
+     *  2. OCR FALLBACK — when the text layer is missing or too thin to be a
+     *     real document (junk 24–35 char layers used to skip OCR). Latin OCR
+     *     with the same white-bitmap path as before. If OCR is still thin,
+     *     a sentinel error is returned (not indexed).
      *
      * English digital PDFs now come back via stage 1 (better + faster); scanned
      * PDFs still hit the exact same OCR code as before. No regression.
      */
     private suspend fun extractPdfText(uri: Uri): String = withContext(Dispatchers.Default) {
         val textLayer = extractPdfTextLayer(uri)
-        if (!textLayer.isNullOrBlank() && textLayer.length >= MIN_TEXT_LAYER_CHARS) {
-            Timber.d("PDF text-layer: extracted ${textLayer.length} chars (no OCR needed)")
+        if (pdfExtractLooksUsable(textLayer)) {
+            Timber.d("PDF text-layer: extracted ${textLayer!!.length} chars (no OCR needed)")
             return@withContext textLayer.take(MAX_EXTRACTED_CHARS)
         }
         Timber.d("PDF text-layer empty/thin (${textLayer?.length ?: 0} chars) — falling back to OCR")
-        extractPdfViaOcr(uri)
+        val ocr = extractPdfViaOcr(uri)
+        if (pdfExtractLooksUsable(ocr)) return@withContext ocr.take(MAX_EXTRACTED_CHARS)
+        if (ocr.startsWith("[PDF:")) return@withContext ocr
+        "[PDF: Scan had little readable text]"
     }
 
     /**
-     * Stage 1: read the PDF's embedded text layer via PdfBox. Returns null on
-     * any failure (encrypted, corrupt, or no text layer) so the caller falls
-     * back to OCR. Runs off the main thread (called from Dispatchers.Default).
+     * Stage 1: read the PDF's embedded text layer via PdfBox, one page at a
+     * time, so citation headers can show p.X the same way OCR already does.
+     * Returns null on failure (encrypted, corrupt, or no text layer).
      */
     private fun extractPdfTextLayer(uri: Uri): String? = runCatching {
         com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
         context.contentResolver.openInputStream(uri)?.use { input ->
             com.tom_roush.pdfbox.pdmodel.PDDocument.load(input).use { doc ->
-                val stripper = com.tom_roush.pdfbox.text.PDFTextStripper().apply {
-                    // Bound work on huge PDFs the same way the OCR path is capped.
-                    endPage = minOf(doc.numberOfPages, MAX_PDF_PAGES)
+                val last = minOf(doc.numberOfPages, MAX_PDF_PAGES)
+                if (last <= 0) return@use ""
+                val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+                val out = StringBuilder()
+                for (page in 1..last) {
+                    stripper.startPage = page
+                    stripper.endPage = page
+                    val pageText = stripper.getText(doc).trim()
+                    if (pageText.isEmpty()) continue
+                    if (out.isNotEmpty()) out.appendLine()
+                    out.appendLine("--- Page $page ---")
+                    out.append(pageText)
                 }
-                stripper.getText(doc).trim()
+                out.toString().trim()
             }
         }
     }.onFailure { Timber.w(it, "PDF text-layer extraction failed — will try OCR") }.getOrNull()
@@ -377,7 +393,7 @@ class FileContentExtractor @Inject constructor(
         return if (cleaned.length > MAX_EXTRACTED_CHARS) cleaned.take(MAX_EXTRACTED_CHARS) else cleaned
     }
 
-    private suspend fun extractImageText(uri: Uri): String? = runCatching {
+    private suspend fun extractImageText(uri: Uri): String = runCatching {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val image = InputImage.fromFilePath(context, uri)
         val result = suspendCancellableCoroutine { cont ->
@@ -391,10 +407,64 @@ class FileContentExtractor @Inject constructor(
             "[Image: No text detected in this image]"
         }
     }.onFailure { Timber.e(it, "OCR failed") }.getOrNull()
+        ?: "[Image: No text detected in this image]"
 
     private fun String.endsWithAny(vararg suffixes: String) =
         suffixes.any { this.lowercase().endsWith(it) }
 }
+
+/**
+ * True when extracted PDF text is substantial enough to skip OCR (or to
+ * keep OCR output). A 24–35 character junk layer ("Page 1", a date) must
+ * not count — that was the Account Statement miss. Number-heavy statements
+ * still pass via digit count or overall length.
+ */
+internal fun pdfExtractLooksUsable(text: String?): Boolean {
+    val t = text?.trim().orEmpty()
+    if (t.isEmpty()) return false
+    val body = PAGE_MARKER_STRIP.replace(t, " ")
+    val letters = body.count { it.isLetter() }
+    val digits = body.count { it.isDigit() }
+    if (letters >= 80) return true
+    if (letters + digits >= 80 && body.length >= 80) return true
+    if (body.length >= 400) return true
+    return false
+}
+
+private val PAGE_MARKER_STRIP = Regex("---\\s*Page\\s+\\d+\\s*---", RegexOption.IGNORE_CASE)
+
+/**
+ * Extractor failure strings used to be stored as [AttachedFile.extractedText]
+ * and indexed as if they were document content. Map them to a user-facing
+ * [AttachedFile.error] instead. Returns null when [text] is real content.
+ */
+internal fun extractionFailureMessage(text: String): String? {
+    val t = text.trim()
+    if (t.isEmpty()) return "No readable text found."
+    return when {
+        t.startsWith("[PDF: No readable text found]") ->
+            "No readable text found in this PDF."
+        t.startsWith("[PDF: Scan had little readable text]") ->
+            "This PDF looks like a scan. On-device OCR is Latin-only and found little text. Try a digital (selectable-text) PDF if the pages are in Hindi or another Indic script."
+        t.startsWith("[PDF: Could not open file descriptor]") ->
+            "Could not open this PDF."
+        t.startsWith("[PDF: Could not read file contents]") ->
+            "Could not read this PDF."
+        t.startsWith("[Word document: could not locate document body") ->
+            "Could not read this Word document (file may be corrupt)."
+        t.startsWith("[Word document: could not open file]") ->
+            "Could not open this Word document."
+        t.startsWith("[Word document: could not read contents]") ->
+            "Could not read this Word document."
+        t.startsWith("[Image: No text detected") ->
+            "No text detected in this image."
+        else -> null
+    }
+}
+
+/** Prompt unreadable list: errors and empty extracts, including blank images. */
+internal fun isUnreadableThisTurn(error: String?, extractedText: String?): Boolean =
+    error != null || extractedText.isNullOrBlank()
 
 private val OCR_LIST_ITEM = Regex("^([-*•]\\s+|\\d+[.)]\\s+).*")
 

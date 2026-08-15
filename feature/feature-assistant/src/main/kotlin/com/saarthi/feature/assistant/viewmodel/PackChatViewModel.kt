@@ -228,7 +228,14 @@ class PackChatViewModel @Inject constructor(
                 mspGrounding
             } else {
                 val searchQuery = if (userState.isNotBlank()) "$question $userState" else question
-                val searchResult = runCatching { ragRepository.search(packSessionId, searchQuery, topK = 5) }
+                val searchResult = runCatching {
+                    ragRepository.search(
+                        packSessionId,
+                        searchQuery,
+                        topK = 5,
+                        expandSmallFiles = false,
+                    )
+                }
                 if (searchResult.exceptionOrNull()?.let { isSqliteUnusable(it) } == true) {
                     finish(streamingId, lang.dbNeedsRestart)
                     return@launch

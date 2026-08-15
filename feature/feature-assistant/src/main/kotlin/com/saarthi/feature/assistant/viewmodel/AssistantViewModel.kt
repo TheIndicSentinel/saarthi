@@ -374,8 +374,12 @@ class AssistantViewModel @Inject constructor(
         }
     }
 
-    fun removeAttachment(file: AttachedFile) =
+    fun removeAttachment(file: AttachedFile) {
         _uiState.update { it.copy(pendingAttachments = it.pendingAttachments - file) }
+        viewModelScope.launch {
+            chatRepository.removeIndexedDocument(file.uri.toString())
+        }
+    }
 
     /**
      * One-tap "Try the document assistant" demo: attaches a bundled sample

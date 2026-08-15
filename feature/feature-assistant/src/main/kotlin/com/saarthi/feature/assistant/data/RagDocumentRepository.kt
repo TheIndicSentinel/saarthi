@@ -5,7 +5,6 @@ import com.saarthi.core.memory.db.RagChunkDao
 import com.saarthi.core.memory.db.RagChunkEntity
 import com.saarthi.core.rag.Bm25Retriever
 import com.saarthi.feature.assistant.domain.AttachedFile
-import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -68,6 +67,8 @@ class RagDocumentRepository @Inject constructor(
         // bump; the < 0 index is the only thing that distinguishes it
         // from a regular content chunk.
         private const val OUTLINE_CHUNK_INDEX = -1
+        /** sizeBytes:textChars stamp so a changed re-attach can replace stale chunks. */
+        private const val FINGERPRINT_CHUNK_INDEX = -2
 
         // Token triggers — if ANY of these tokens appears as a standalone
         // word in the query, route to structural sampling instead of BM25.
@@ -100,9 +101,8 @@ class RagDocumentRepository @Inject constructor(
         )
 
         // Structural terms whose content sits near the END of most documents.
-        // When these appear in a meta-query, pickTailSamples() is used instead
-        // of the default evenly-spaced sampling — the glossary of a phone-repair
-        // manual is in the last 5 % of the doc, not the middle.
+        // When these appear in a meta-query, the zero-score fallback takes
+        // the last chunks of each file instead of the opening excerpt.
         private val TAIL_STRUCTURE_TOKENS = setOf(
             "glossary", "glossaries",
             "appendix", "appendices", "annexure", "annexures",
@@ -120,9 +120,8 @@ class RagDocumentRepository @Inject constructor(
             "elaborate", "expand",
         )
 
-        // Devanagari triggers — match as substring because Devanagari
-        // morphology often glues these to suffixes without whitespace.
-        private val META_DEVANAGARI_PATTERN = Regex("(अनुक्रम|सारांश|विषयसूची|सार)")
+        // Devanagari triggers live in [META_DEVANAGARI_PATTERN] (file-level).
+        // Bare "सार" is excluded — it is a substring of ordinary words.
 
         // Multi-word phrase triggers — catch turns of phrase the token
         // list can't ("what is this document about", "tell me about this
@@ -153,15 +152,34 @@ class RagDocumentRepository @Inject constructor(
      * the prompt builder notes their presence separately.
      */
     suspend fun indexIfNeeded(sessionId: String, file: AttachedFile) {
-        val uriKey = file.uri.toString()
-        if (sqliteWriteWithRetry { ragChunkDao.countByDoc(sessionId, uriKey) } > 0) return
+        if (file.error != null) return
         val text = file.extractedText?.trim().orEmpty()
-        if (text.isEmpty()) return
+        if (text.isEmpty() || extractionFailureMessage(text) != null) return
+
+        val t0 = System.nanoTime()
+        val uriKey = file.uri.toString()
+        val stamp = contentStamp(file.sizeBytes, text.length)
+        val existing = sqliteWriteWithRetry { ragChunkDao.getByDoc(sessionId, uriKey) }
+        if (existing.isNotEmpty()) {
+            val stored = existing.firstOrNull { it.chunkIndex == FINGERPRINT_CHUNK_INDEX }?.text
+            if (!shouldReplaceIndex(stored, stamp)) return
+            sqliteWriteWithRetry { ragChunkDao.deleteByDoc(sessionId, uriKey) }
+        }
 
         val chunks = chunkText(text)
         if (chunks.isEmpty()) return
 
-        val entities = ArrayList<RagChunkEntity>(chunks.size + 1)
+        val entities = ArrayList<RagChunkEntity>(chunks.size + 2)
+        entities.add(
+            RagChunkEntity(
+                sessionId = sessionId,
+                docUri = uriKey,
+                docName = file.name,
+                mimeType = file.mimeType,
+                chunkIndex = FINGERPRINT_CHUNK_INDEX,
+                text = stamp,
+            )
+        )
 
         // Outline (auto-detected headings) — saved as a virtual chunk at
         // chunkIndex = -1 so the table doesn't need a new column. Meta
@@ -194,19 +212,34 @@ class RagDocumentRepository @Inject constructor(
             )
         }
         sqliteWriteWithRetry { ragChunkDao.insertAll(entities) }
-        val hasOutline = entities.firstOrNull()?.chunkIndex == OUTLINE_CHUNK_INDEX
-        val totalChars = entities.sumOf { it.text.length }
-        // DebugLogger so it surfaces in the user-visible saarthi_debug.log
-        // — Timber alone is invisible in production captures.
-        com.saarthi.core.inference.DebugLogger.log(
-            "RAG",
-            "indexed ${entities.size} chunks (${totalChars}c, outline=$hasOutline) for ${com.saarthi.core.inference.LogPrivacy.nameLen(file.name)} (sessionIdLen=${sessionId.length})"
+        val hasOutline = entities.any { it.chunkIndex == OUTLINE_CHUNK_INDEX }
+        val totalChars = entities.filter { it.chunkIndex >= 0 }.sumOf { it.text.length }
+        val indexMs = (System.nanoTime() - t0) / 1_000_000
+        logRag(
+            ragIndexLogLine(
+                chunkCount = entities.size,
+                chars = totalChars,
+                hasOutline = hasOutline,
+                nameLen = file.name.length,
+                sessionIdLen = sessionId.length,
+                indexMs = indexMs,
+            ),
         )
-        // Same lengths-only contract as DebugLogger (Point 9) — Timber can
-        // reach logcat on debug builds; never echo the user filename.
-        Timber.d(
-            "RAG: indexed ${entities.size} chunks (${totalChars}c, outline=$hasOutline) for ${com.saarthi.core.inference.LogPrivacy.nameLen(file.name)}",
-        )
+    }
+
+    /**
+     * Distinct documents indexed under [sessionId], oldest first.
+     * Used for the prompt manifest ("Documents in this chat: …").
+     */
+    suspend fun listSessionDocuments(sessionId: String): List<SessionRagDocument> {
+        val rows = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
+        if (rows.isEmpty()) return emptyList()
+        return rows.groupBy { it.docUri }
+            .map { (uri, chunks) ->
+                val newest = chunks.maxBy { it.createdAt }
+                SessionRagDocument(uri = uri, name = newest.docName, lastIndexedAt = newest.createdAt)
+            }
+            .sortedBy { it.lastIndexedAt }
     }
 
     /**
@@ -232,9 +265,10 @@ class RagDocumentRepository @Inject constructor(
         query: String,
         topK: Int = DEFAULT_TOP_K,
         /**
-         * Restricts retrieval to chunks belonging to these document URIs.
+         * Files attached on this turn. Ranked higher but never used as a
+         * hard filter — every indexed file in the session stays searchable.
          */
-        restrictToDocUris: Set<String>? = null,
+        boostDocUris: Set<String> = emptySet(),
         /**
          * The last completed user question from the conversation history.
          * Used for two purposes:
@@ -247,15 +281,59 @@ class RagDocumentRepository @Inject constructor(
          * Pass null (or blank) to disable both behaviours.
          */
         priorQuery: String? = null,
+        /**
+         * When true (user chat), files whose indexed body is ≤
+         * [FileContentExtractor.WHOLE_FILE_CHARS] are returned in full
+         * document order instead of a BM25 subset. Pack search leaves this
+         * false so Kisan top-K is unchanged.
+         */
+        expandSmallFiles: Boolean = true,
     ): List<RetrievedChunk> {
-        val raw = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
-        // Defensive: if the URI restriction produces an empty set (e.g.
-        // the focused doc was deleted from Room since being marked) fall
-        // back to the full corpus rather than returning no context at all.
-        val all = if (!restrictToDocUris.isNullOrEmpty()) {
-            raw.filter { it.docUri in restrictToDocUris }.ifEmpty { raw }
-        } else raw
-        if (all.isEmpty()) return emptyList()
+        val t0 = System.nanoTime()
+        val all = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
+        val sessionDocCount = all.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size
+        fun done(hits: List<RetrievedChunk>, path: RagSearchPath): List<RetrievedChunk> {
+            val searchMs = (System.nanoTime() - t0) / 1_000_000
+            logRag(
+                ragSearchLogLine(
+                    docCount = sessionDocCount,
+                    boostCount = boostDocUris.size,
+                    path = path,
+                    hitCount = hits.size,
+                    queryLen = query.length,
+                    searchMs = searchMs,
+                ),
+            )
+            return hits
+        }
+        if (all.isEmpty()) return done(emptyList(), RagSearchPath.empty)
+        val recencyUri = all.maxBy { it.createdAt }.docUri
+        val sessionFiles = all.groupBy { it.docUri }.map { (uri, chunks) ->
+            uri to chunks.first().docName
+        }
+        val route = routeQuery(query, sessionFiles)
+        fun finish(hits: List<RetrievedChunk>): List<RetrievedChunk> {
+            // All-zero / overview: rebuild per file (outline + contiguous
+            // opening, or spaced samples for "which file"). Real BM25 hits
+            // (body score > 0) are left as ranked.
+            val resolved = if (hasPositiveBodyHit(hits)) hits
+                else structuralSample(all, topK, query, spaced = route.whichFile)
+            val docCount = resolved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size.coerceAtLeast(1)
+            val minSlots = if (route.equalSlots) (topK / docCount).coerceAtLeast(1) else 1
+            val allocated = allocatePerDocSlots(
+                applySessionBoost(resolved, boostDocUris, recencyUri, route.namedDocUris),
+                topK,
+                minSlots,
+            )
+            if (!expandSmallFiles) return allocated
+            val fullByUri = all
+                .filter { it.chunkIndex >= 0 }
+                .groupBy { it.docUri }
+                .mapValues { (_, chunks) ->
+                    chunks.sortedBy { it.chunkIndex }.map { it.toRetrieved(1.0) }
+                }
+            return expandWholeSmallFiles(allocated, fullByUri)
+        }
 
         // Follow-up detection: if the query STARTS with a continuation
         // token AND we have context from the prior turn, bypass meta-routing
@@ -266,15 +344,16 @@ class RagDocumentRepository @Inject constructor(
         val queryTokens = query.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
         val isFollowUp = !priorQuery.isNullOrBlank() && queryTokens.take(4).any { it in FOLLOW_UP_TOKENS }
 
-        if (isMetaQuery(query) && !isFollowUp) {
-            return structuralSample(all, topK, query)
+        if ((isMetaQuery(query) || route.whichFile) && !isFollowUp) {
+            val path = if (isMetaQuery(query)) RagSearchPath.meta else RagSearchPath.structural
+            return done(finish(emptyList()), path)
         }
 
         // BM25 sees only content chunks. The outline chunk is curated
         // meta, not evidence, so it should not be ranked against the
         // user's actual question.
         val contentChunks = all.filter { it.chunkIndex >= 0 }
-        if (contentChunks.isEmpty()) return emptyList()
+        if (contentChunks.isEmpty()) return done(emptyList(), RagSearchPath.empty)
 
         // Heading-anchored retrieval: if the query closely matches a
         // detected outline heading, surface that section's chunks first.
@@ -284,12 +363,14 @@ class RagDocumentRepository @Inject constructor(
 
         // Expand the query when following up on the prior turn.
         val effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
-            "${priorQuery.take(150)} $query"
+            "${priorQuery.take(150)} ${route.expandedQuery}"
         } else {
-            query
+            route.expandedQuery
         }
 
-        val ranked = Bm25Retriever.rank(contentChunks.map { it.text }, effectiveQuery, topK)
+        val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
+        val rankK = (topK * uniqueDocs).coerceAtMost(contentChunks.size).coerceAtLeast(topK)
+        val ranked = Bm25Retriever.rank(contentChunks.map { it.text }, effectiveQuery, rankK)
 
         // Neighbor expansion: for the top BM25 hits, also include the
         // *next* chunk in the same document. Answers often straddle a
@@ -301,42 +382,39 @@ class RagDocumentRepository @Inject constructor(
         val docChunksByUri = contentChunks.groupBy { it.docUri }
             .mapValues { (_, list) -> list.sortedBy { it.chunkIndex } }
 
+        val orderedIdsByDoc = docChunksByUri.mapValues { (_, list) -> list.map { it.id } }
         val usedIds = LinkedHashSet<Long>()
         val bm25Hits = mutableListOf<RetrievedChunk>()
         // Seed with the anchored section chunks so BM25 dedupes against them
         // and they lead the final result.
         for (e in anchoredEntities) {
             if (usedIds.add(e.id)) {
-                bm25Hits.add(RetrievedChunk(e.text, e.docName, HEADING_ANCHOR_SCORE, e.chunkIndex))
+                bm25Hits.add(e.toRetrieved(HEADING_ANCHOR_SCORE))
             }
         }
         for ((rank, scored) in ranked.withIndex()) {
             val entity = contentChunks[scored.index]
             if (usedIds.add(entity.id)) {
-                bm25Hits.add(RetrievedChunk(entity.text, entity.docName, scored.score, entity.chunkIndex))
+                bm25Hits.add(entity.toRetrieved(scored.score))
             }
             // Only the top-2 hits get neighbor expansion — beyond that
             // BM25 itself is probably surfacing the relevant chunks.
             if (rank < 2) {
-                val docChunks = docChunksByUri[entity.docUri] ?: continue
-                val posInDoc = docChunks.indexOfFirst { it.id == entity.id }
-                docChunks.getOrNull(posInDoc + 1)?.let { neighbor ->
-                    if (usedIds.add(neighbor.id)) {
-                        bm25Hits.add(
-                            RetrievedChunk(
-                                neighbor.text, neighbor.docName,
-                                score = scored.score * 0.5,    // half-credit; neighbour, not exact match
-                                chunkIndex = neighbor.chunkIndex,
-                            )
-                        )
-                    }
+                val neighborId = nextSameDocNeighborId(entity.id, entity.docUri, orderedIdsByDoc)
+                    ?: continue
+                val neighbor = docChunksByUri[entity.docUri]?.firstOrNull { it.id == neighborId }
+                    ?: continue
+                if (usedIds.add(neighbor.id)) {
+                    bm25Hits.add(neighbor.toRetrieved(scored.score * 0.5))
                 }
             }
         }
 
-        // If BM25 + neighbors fully populated the slot, return as-is —
-        // adding structural padding here would dilute strong signal.
-        if (bm25Hits.size >= topK) return bm25Hits.take(topK)
+        // If BM25 + neighbors fully populated the slot, still run per-doc
+        // allocation so a large first file cannot occupy every top-K seat.
+        // All-zero never comes from BM25.rank (zeros are dropped); finish()
+        // still rebuilds if only padding/outline remains.
+        if (bm25Hits.size >= topK) return done(finish(bm25Hits), RagSearchPath.bm25)
 
         // Zero-hit retry with prior query: if the current query alone had no
         // BM25 vocabulary match (e.g. "Also list meaning of each" without
@@ -345,30 +423,28 @@ class RagDocumentRepository @Inject constructor(
         // evidence region. Half-score marks these as context rather than
         // exact matches. Skipped when we already expanded above (isFollowUp).
         if (bm25Hits.isEmpty() && !priorQuery.isNullOrBlank() && !isFollowUp) {
-            val retryRanked = Bm25Retriever.rank(contentChunks.map { it.text }, priorQuery.take(150), topK)
+            val retryRanked = Bm25Retriever.rank(contentChunks.map { it.text }, priorQuery.take(150), rankK)
             for (scored in retryRanked) {
                 val entity = contentChunks[scored.index]
                 if (usedIds.add(entity.id)) {
-                    bm25Hits.add(
-                        RetrievedChunk(entity.text, entity.docName, scored.score * 0.5, entity.chunkIndex)
-                    )
+                    bm25Hits.add(entity.toRetrieved(scored.score * 0.5))
                 }
-                if (bm25Hits.size >= topK) break
             }
-            if (bm25Hits.size >= topK) return bm25Hits.take(topK)
+            if (bm25Hits.size >= topK) return done(finish(bm25Hits), RagSearchPath.bm25)
         }
 
-        // BM25 (+ neighbors) under-covered the query. Pad with
-        // structural context — outline first, then first/middle/last
-        // per doc — so the model has surrounding evidence to reason
-        // against. Reuses `usedIds` populated by the neighbor-expansion
-        // pass above so we never re-emit the same chunk.
+        // No lexical body hit: per-file contiguous (or spaced) fallback
+        // instead of first/middle/last scatter. finish() builds it.
+        if (!hasPositiveBodyHit(bm25Hits)) return done(finish(emptyList()), RagSearchPath.structural)
+
+        // BM25 (+ neighbors) under-covered the query. Pad remaining slots
+        // with structural context. Real hits are kept; padding is extra.
         val padding = mutableListOf<RetrievedChunk>()
 
         // Outline (if extracted at index time) is the highest-value
         // padding item — gives the model a structural map of the doc.
         all.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX }?.let { o ->
-            padding.add(RetrievedChunk(o.text, o.docName, 0.0, OUTLINE_CHUNK_INDEX))
+            padding.add(o.toRetrieved(0.0))
         }
 
         // Then structural samples per doc, skipping anything BM25
@@ -380,18 +456,18 @@ class RagDocumentRepository @Inject constructor(
             val perDoc = ((topK - bm25Hits.size - padding.size + docCount - 1) / docCount).coerceAtLeast(2)
             for (s in pickStructuralSamples(sorted, perDoc)) {
                 if (s.id in usedIds) continue
-                padding.add(RetrievedChunk(s.text, s.docName, 0.0, s.chunkIndex))
+                padding.add(s.toRetrieved(0.0))
                 usedIds.add(s.id)
                 if (bm25Hits.size + padding.size >= topK) break
             }
             if (bm25Hits.size + padding.size >= topK) break
         }
-        return bm25Hits + padding
+        return done(finish(bm25Hits + padding), RagSearchPath.bm25)
     }
 
     /**
-     * Evenly-spaced sample including first and last. Used for general
-     * meta-query structural sampling and BM25 padding.
+     * Evenly-spaced sample including first and last. Used to pad remaining
+     * slots when BM25 already has at least one real hit.
      */
     private fun pickStructuralSamples(sorted: List<RagChunkEntity>, count: Int): List<RagChunkEntity> {
         if (sorted.size <= count) return sorted
@@ -402,72 +478,67 @@ class RagDocumentRepository @Inject constructor(
     }
 
     /**
-     * Last [count] chunks, in document order. Used for tail-structure
-     * meta-queries (glossary, appendix, bibliography, answer keys) whose
-     * content sits near the END of most documents — evenly-spaced sampling
-     * misses these sections because they represent only ~5–10 % of the doc.
-     */
-    private fun pickTailSamples(sorted: List<RagChunkEntity>, count: Int): List<RagChunkEntity> {
-        return if (sorted.size <= count) sorted else sorted.takeLast(count)
-    }
-
-    /**
-     * Outline + content samples per document. Used for meta queries
-     * (structural overview, glossary, appendix, etc.).
+     * Outline + content samples per document. Used for meta/overview and
+     * all-zero BM25 fallback. Never sorts chunkIndex across files.
      *
-     * When [query] contains a tail-structure term (glossary, appendix,
-     * answers, bibliography), content samples are taken from the END of the
-     * document rather than evenly-spaced — these sections are always near
-     * the end and evenly-spaced sampling reliably misses them.
+     * Tail queries (glossary, appendix) take the end. "Which file" takes
+     * first/middle/last so each file is identifiable. Overviews and
+     * zero-score questions take a contiguous opening excerpt.
      */
-    private fun structuralSample(all: List<RagChunkEntity>, topK: Int, query: String = ""): List<RetrievedChunk> {
+    private fun structuralSample(
+        all: List<RagChunkEntity>,
+        topK: Int,
+        query: String = "",
+        spaced: Boolean = false,
+    ): List<RetrievedChunk> {
         val queryLower = query.lowercase()
         val isTailQuery = TAIL_STRUCTURE_TOKENS.any { queryLower.contains(it) }
+        val mode = when {
+            isTailQuery -> ZeroScorePick.TAIL
+            spaced -> ZeroScorePick.SPACED
+            else -> ZeroScorePick.CONTIGUOUS
+        }
         val byDoc = all.groupBy { it.docUri }
         val perDoc = (topK / byDoc.size).coerceAtLeast(2)
         val result = mutableListOf<RetrievedChunk>()
         for ((_, docChunks) in byDoc) {
             docChunks.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX }?.let { o ->
-                result.add(RetrievedChunk(o.text, o.docName, 1.0, OUTLINE_CHUNK_INDEX))
+                result.add(o.toRetrieved(1.0))
             }
             val content = docChunks.filter { it.chunkIndex >= 0 }.sortedBy { it.chunkIndex }
             if (content.isEmpty()) continue
-            val samples = if (isTailQuery) pickTailSamples(content, perDoc)
-                          else pickStructuralSamples(content, perDoc)
-            samples.forEach { result.add(RetrievedChunk(it.text, it.docName, 0.0, it.chunkIndex)) }
+            val indices = pickZeroScoreBodyIndices(content.size, perDoc, mode)
+            indices.forEach { i -> result.add(content[i].toRetrieved(0.0)) }
         }
         return result
     }
 
     /**
-     * If [query] strongly matches a heading in the auto-extracted outline,
-     * return that section's leading chunks (the chunk containing the heading
-     * plus the next few in document order) so they lead the result. Returns
-     * empty when there's no outline, no heading match, or the heading text
-     * couldn't be located in any chunk (e.g. it straddled a chunk boundary) —
-     * in every such case retrieval falls back cleanly to BM25.
+     * If [query] strongly matches a heading in a document outline, return
+     * that section's leading chunks so they lead the result. When the heading
+     * string is missing from the body (OCR / chunk split), still take a
+     * contiguous window using the next outline heading as the end marker,
+     * or token overlap. Empty → BM25 only.
      */
     private fun anchoredHeadingChunks(
         all: List<RagChunkEntity>,
         contentChunks: List<RagChunkEntity>,
         query: String,
     ): List<RagChunkEntity> {
-        val outline = all.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX } ?: return emptyList()
-        val heading = matchHeading(query, parseOutlineHeadings(outline.text)) ?: return emptyList()
-
-        // Locate the section in document order, then take it + the following
-        // chunks (the section body). Search per-doc so the index sequence is
-        // contiguous within one document.
-        for ((_, docChunks) in contentChunks.groupBy { it.docUri }) {
+        val outlinesByDoc = all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.associateBy { it.docUri }
+        for ((uri, docChunks) in contentChunks.groupBy { it.docUri }) {
+            val outline = outlinesByDoc[uri] ?: continue
+            val headings = parseOutlineHeadings(outline.text)
+            val heading = matchHeading(query, headings) ?: continue
             val sorted = docChunks.sortedBy { it.chunkIndex }
-            val pos = sorted.indexOfFirst { it.text.contains(heading, ignoreCase = true) }
-            if (pos >= 0) {
-                val section = sorted.subList(pos, minOf(pos + HEADING_ANCHOR_MAX, sorted.size)).toList()
-                com.saarthi.core.inference.DebugLogger.log(
-                    "RAG", "heading-anchored (headingLen=${heading.length}) → ${section.size} chunk(s)"
-                )
-                return section
-            }
+            val window = headingAnchorWindow(sorted.map { it.text }, heading, headings, HEADING_ANCHOR_MAX)
+                ?: continue
+            val section = sorted.subList(window.start, window.endExclusive)
+            if (section.isEmpty()) continue
+            com.saarthi.core.inference.DebugLogger.log(
+                "RAG", "heading-anchored (headingLen=${heading.length}) → ${section.size} chunk(s)"
+            )
+            return section
         }
         return emptyList()
     }
@@ -483,7 +554,7 @@ class RagDocumentRepository @Inject constructor(
         val tokens = lower.split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
         if (tokens.any { it in META_TOKEN_TRIGGERS }) return true
         // 2. Devanagari script regex (whitespace-free morphology).
-        if (META_DEVANAGARI_PATTERN.containsMatchIn(lower)) return true
+        if (isDevanagariMetaTrigger(lower)) return true
         // 3. Multi-word phrase fallback.
         return META_QUERY_PHRASES.any { lower.contains(it) }
     }
@@ -559,6 +630,11 @@ class RagDocumentRepository @Inject constructor(
         ragChunkDao.deleteBySession(sessionId)
     }
 
+    /** Drop one file's chunks. No-op if it was never indexed. */
+    suspend fun deleteByDoc(sessionId: String, docUri: String) {
+        ragChunkDao.deleteByDoc(sessionId, docUri)
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────
 
     /**
@@ -592,7 +668,205 @@ data class RetrievedChunk(
      * ("part 3 of 12") instead of just `[N]`.
      */
     val chunkIndex: Int = 0,
+    /** Source document URI; empty for pack/synthetic chunks. */
+    val docUri: String = "",
 )
+
+/** Distinct file indexed under a chat session, for the prompt manifest. */
+data class SessionRagDocument(
+    val uri: String,
+    val name: String,
+    val lastIndexedAt: Long,
+)
+
+private fun RagChunkEntity.toRetrieved(score: Double) = RetrievedChunk(
+    text = text,
+    docName = docName,
+    score = score,
+    chunkIndex = chunkIndex,
+    docUri = docUri,
+)
+
+/** This-turn attach — score bump only; other session files stay in the pool. */
+internal const val THIS_TURN_BOOST = 1.35
+
+/** After a restart (no this-turn URIs), mild bump for the most recently indexed file. */
+internal const val RECENCY_BOOST = 1.15
+
+internal fun contentStamp(sizeBytes: Long, textChars: Int): String = "$sizeBytes:$textChars"
+
+/** Legacy rows have no stamp — leave them. Re-index only when a stamp exists and differs. */
+internal fun shouldReplaceIndex(storedStamp: String?, newStamp: String): Boolean =
+    storedStamp != null && storedStamp != newStamp
+
+/** At least one excerpt per file so a large first doc cannot fill top-K alone. */
+private const val MIN_SLOTS_PER_DOC = 1
+
+/**
+ * Post-rank boost: this-turn attaches (1.35), else named filename
+ * matches (1.25), else recency when neither set (1.15). Does not drop hits.
+ */
+internal const val FILENAME_BOOST = 1.25
+
+internal fun applySessionBoost(
+    hits: List<RetrievedChunk>,
+    boostDocUris: Set<String>,
+    recencyUri: String,
+    namedDocUris: Set<String> = emptySet(),
+): List<RetrievedChunk> {
+    if (hits.isEmpty()) return hits
+    return hits.map { hit ->
+        val multiplier = when {
+            boostDocUris.isNotEmpty() && hit.docUri in boostDocUris -> THIS_TURN_BOOST
+            namedDocUris.isNotEmpty() && hit.docUri in namedDocUris -> FILENAME_BOOST
+            boostDocUris.isEmpty() && namedDocUris.isEmpty() && hit.docUri == recencyUri -> RECENCY_BOOST
+            else -> 1.0
+        }
+        if (multiplier == 1.0) hit else hit.copy(score = hit.score * multiplier)
+    }
+}
+
+/**
+ * Fill [topK] so every document in [hits] gets at least [MIN_SLOTS_PER_DOC]
+ * chunk (capped by topK), then remaining seats go to the highest scores.
+ */
+internal fun allocatePerDocSlots(
+    hits: List<RetrievedChunk>,
+    topK: Int,
+    minPerDoc: Int = MIN_SLOTS_PER_DOC,
+): List<RetrievedChunk> {
+    if (hits.isEmpty() || topK <= 0) return emptyList()
+    val sorted = hits.sortedByDescending { it.score }
+    val byDoc = sorted.groupBy { it.docUri }
+    if (byDoc.size <= 1) return sorted.take(topK)
+
+    val min = minPerDoc.coerceAtLeast(1)
+    val picked = LinkedHashSet<RetrievedChunk>()
+    val docsByBest = byDoc.entries.sortedByDescending { (_, chunks) -> chunks.maxOf { it.score } }
+    for ((_, chunks) in docsByBest) {
+        if (picked.size >= topK) break
+        repeat(min) { slot ->
+            if (picked.size >= topK) return@repeat
+            chunks.getOrNull(slot)?.let { picked.add(it) }
+        }
+    }
+    for (h in sorted) {
+        if (picked.size >= topK) break
+        picked.add(h)
+    }
+    return picked.sortedByDescending { it.score }
+}
+
+internal enum class ZeroScorePick { CONTIGUOUS, SPACED, TAIL }
+
+internal fun hasPositiveBodyHit(hits: List<RetrievedChunk>): Boolean =
+    hits.any { it.chunkIndex >= 0 && it.score > 0.0 }
+
+/**
+ * Body indices for one document. CONTIGUOUS = opening window (overviews /
+ * all-zero BM25). SPACED = first/middle/last ("which file"). TAIL = last
+ * window (glossary / appendix). Never crosses documents.
+ */
+internal fun pickZeroScoreBodyIndices(size: Int, count: Int, mode: ZeroScorePick): List<Int> {
+    if (size <= 0 || count <= 0) return emptyList()
+    if (size <= count) return (0 until size).toList()
+    return when (mode) {
+        ZeroScorePick.CONTIGUOUS -> (0 until count).toList()
+        ZeroScorePick.TAIL -> ((size - count) until size).toList()
+        ZeroScorePick.SPACED -> (0 until count).map { i ->
+            ((i.toDouble() / (count - 1).coerceAtLeast(1)) * (size - 1)).toInt()
+        }.distinct()
+    }
+}
+
+internal fun keepOrFallback(
+    hits: List<RetrievedChunk>,
+    fallback: List<RetrievedChunk>,
+): List<RetrievedChunk> = if (hasPositiveBodyHit(hits)) hits else fallback
+
+/**
+ * Replace BM25 scatter with every content chunk of a file whose body is
+ * ≤ [wholeFileChars]. Larger files keep [retrieved] as ranked. Document
+ * order is preserved; the prompt builder still drops whole chunks that
+ * do not fit the remaining budget.
+ */
+internal fun expandWholeSmallFiles(
+    retrieved: List<RetrievedChunk>,
+    fullContentByUri: Map<String, List<RetrievedChunk>>,
+    wholeFileChars: Int = FileContentExtractor.WHOLE_FILE_CHARS,
+): List<RetrievedChunk> {
+    if (retrieved.isEmpty() || wholeFileChars <= 0) return retrieved
+    val docOrder = retrieved.map { it.docUri }.filter { it.isNotEmpty() }.distinct()
+    val result = ArrayList<RetrievedChunk>()
+    for (uri in docOrder) {
+        val full = fullContentByUri[uri].orEmpty()
+            .filter { it.chunkIndex >= 0 }
+            .sortedBy { it.chunkIndex }
+        val chars = full.sumOf { it.text.length }
+        result += if (full.isNotEmpty() && chars <= wholeFileChars) full
+            else retrieved.filter { it.docUri == uri }
+    }
+    result += retrieved.filter { it.docUri.isEmpty() }
+    return result
+}
+
+internal data class HeadingWindow(val start: Int, val endExclusive: Int)
+
+/** Next content chunk in the same document only — never another file. */
+internal fun nextSameDocNeighborId(
+    hitId: Long,
+    hitDocUri: String,
+    orderedIdsByDoc: Map<String, List<Long>>,
+): Long? {
+    if (hitDocUri.isEmpty()) return null
+    val ordered = orderedIdsByDoc[hitDocUri] ?: return null
+    val pos = ordered.indexOf(hitId)
+    if (pos < 0) return null
+    return ordered.getOrNull(pos + 1)
+}
+
+/**
+ * Substring match on glued Devanagari morphology. Bare "सार" is omitted
+ * because it appears inside ordinary words (संसार, प्रसार).
+ */
+internal val META_DEVANAGARI_PATTERN = Regex("(अनुक्रम|सारांश|विषयसूची|अवलोकन|संक्षेप)")
+
+internal fun isDevanagariMetaTrigger(query: String): Boolean =
+    META_DEVANAGARI_PATTERN.containsMatchIn(query)
+
+internal fun locateHeadingInChunks(chunkTexts: List<String>, heading: String): Int {
+    val exact = chunkTexts.indexOfFirst { it.contains(heading, ignoreCase = true) }
+    if (exact >= 0) return exact
+    val tokens = headingTokens(heading).filter { it.length >= 4 }
+    if (tokens.isEmpty()) return -1
+    return chunkTexts.indexOfFirst { chunk ->
+        val ct = headingTokens(chunk)
+        tokens.all { it in ct }
+    }
+}
+
+/**
+ * Contiguous section window for an outline heading. If the heading text is
+ * not in any body chunk, use the next outline heading as the end marker.
+ */
+internal fun headingAnchorWindow(
+    chunkTexts: List<String>,
+    heading: String,
+    headingsInOrder: List<String>,
+    maxChunks: Int,
+): HeadingWindow? {
+    if (chunkTexts.isEmpty() || maxChunks <= 0) return null
+    val start = locateHeadingInChunks(chunkTexts, heading)
+    if (start >= 0) {
+        return HeadingWindow(start, minOf(start + maxChunks, chunkTexts.size))
+    }
+    val hi = headingsInOrder.indexOfFirst { it.equals(heading, ignoreCase = true) }
+    val nextHeading = headingsInOrder.getOrNull(hi + 1) ?: return null
+    val nextStart = locateHeadingInChunks(chunkTexts, nextHeading)
+    if (nextStart <= 0) return null
+    val from = (nextStart - maxChunks).coerceAtLeast(0)
+    return HeadingWindow(from, nextStart)
+}
 
 // ── Heading-anchored retrieval (pure, testable) ─────────────────────────────────
 

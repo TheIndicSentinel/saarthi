@@ -29,6 +29,9 @@ interface RagChunkDao {
     @Query("SELECT COUNT(*) FROM rag_chunks WHERE sessionId = :sessionId AND docUri = :docUri")
     suspend fun countByDoc(sessionId: String, docUri: String): Int
 
+    @Query("SELECT * FROM rag_chunks WHERE sessionId = :sessionId AND docUri = :docUri")
+    suspend fun getByDoc(sessionId: String, docUri: String): List<RagChunkEntity>
+
     /** Distinct documents indexed under a chat (for "what's attached here" listings). */
     @Query("SELECT DISTINCT docUri FROM rag_chunks WHERE sessionId = :sessionId")
     suspend fun listDocUris(sessionId: String): List<String>

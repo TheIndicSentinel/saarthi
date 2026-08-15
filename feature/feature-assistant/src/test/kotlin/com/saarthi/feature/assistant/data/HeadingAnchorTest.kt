@@ -1,7 +1,9 @@
 package com.saarthi.feature.assistant.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -102,5 +104,53 @@ class HeadingAnchorTest {
             "THE DATA PROTECTION BOARD OF INDIA",
             matchHeading("about the data protection board of india", hs),
         )
+    }
+
+    @Test
+    fun `token overlap finds a heading the body never repeats verbatim`() {
+        val chunks = listOf(
+            "Opening remarks about the act.",
+            "This chapter covers penalties and adjudication for breaches.",
+            "Later miscellaneous rules.",
+        )
+        assertEquals(1, locateHeadingInChunks(chunks, "PENALTIES AND ADJUDICATION"))
+    }
+
+    @Test
+    fun `missing heading still takes the window before the next heading`() {
+        val headings = listOf("SPECIAL PROVISIONS", "PENALTIES AND ADJUDICATION")
+        val chunks = listOf(
+            "Intro a.",
+            "Intro b.",
+            "Body of special rules without the title line.",
+            "More special-rule body.",
+            "Still special-rule body.",
+            "PENALTIES AND ADJUDICATION start here.",
+        )
+        val window = headingAnchorWindow(chunks, "SPECIAL PROVISIONS", headings, maxChunks = 3)!!
+        assertEquals(HeadingWindow(start = 2, endExclusive = 5), window)
+    }
+
+    @Test
+    fun `neighbor stays in the same document`() {
+        val byDoc = mapOf(
+            "nda" to listOf(1L, 2L, 3L),
+            "log" to listOf(10L, 11L),
+        )
+        assertEquals(3L, nextSameDocNeighborId(2L, "nda", byDoc))
+        assertEquals(null, nextSameDocNeighborId(3L, "nda", byDoc))
+        assertEquals(11L, nextSameDocNeighborId(10L, "log", byDoc))
+        assertEquals(null, nextSameDocNeighborId(2L, "log", byDoc))
+    }
+
+    @Test
+    fun `devanagari overview words trigger meta but sar substring does not`() {
+        assertTrue(isDevanagariMetaTrigger("इसका सारांश दो"))
+        assertTrue(isDevanagariMetaTrigger("विषयसूची दिखाओ"))
+        assertTrue(isDevanagariMetaTrigger("संक्षेप में बताओ"))
+        assertTrue(isDevanagariMetaTrigger("अवलोकन"))
+        assertFalse(isDevanagariMetaTrigger("प्रसार कितना है"))
+        assertFalse(isDevanagariMetaTrigger("संसार के नियम"))
+        assertFalse(isDevanagariMetaTrigger("what is the penalty"))
     }
 }

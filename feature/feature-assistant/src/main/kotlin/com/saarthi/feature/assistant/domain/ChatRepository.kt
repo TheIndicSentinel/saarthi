@@ -16,4 +16,6 @@ interface ChatRepository {
     suspend fun exportAllData(): File
     suspend fun deleteMessage(id: String)
     fun getTokensPerSecond(): Flow<Float>
+    /** Drop Room chunks for one attachment URI in the current session. */
+    suspend fun removeIndexedDocument(docUri: String)
 }

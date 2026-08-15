@@ -127,13 +127,8 @@ class ChatRepositoryImpl @Inject constructor(
     // after the first turn that attached the file.
     private val indexedDocsByUri: MutableMap<String, MutableSet<String>> = mutableMapOf()
 
-    // The doc URIs the user MOST RECENTLY attached in each session — these
-    // become the "focus" set: subsequent RAG searches restrict to these
-    // until the user attaches a different batch. Without this, attaching
-    // a second PDF and asking "Give overview" pulled chunks from the FIRST
-    // PDF because they were still indexed under the same session.
-    // Memory-only by design — fresh chat / fresh launch resets focus.
-    private val focusedDocsBySession: MutableMap<String, Set<String>> = mutableMapOf()
+    @Volatile
+    private var sessionHasIndexedDocs: Boolean = false
 
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
@@ -162,6 +157,7 @@ class ChatRepositoryImpl @Inject constructor(
                 ConversationDao.UI_HISTORY_LIMIT,
             )
             if (saved.isNotEmpty()) _history.value = saved.map { it.toChatMessage() }
+            sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         }
     }
 
@@ -189,6 +185,7 @@ class ChatRepositoryImpl @Inject constructor(
             ConversationDao.UI_HISTORY_LIMIT,
         )
         _history.value = messages.map { it.toChatMessage() }
+        sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         // Reset engine session to prevent stale KV cache from previous chat
         runCatching { inferenceEngine.resetSession() }
     }
@@ -202,7 +199,7 @@ class ChatRepositoryImpl @Inject constructor(
         memoryRepository.deleteForSession(sessionId)
         ragRepository.deleteForSession(sessionId)
         indexedDocsByUri.remove(sessionId)
-        focusedDocsBySession.remove(sessionId)
+        sessionHasIndexedDocs = false
         chatSessionDao.deleteById(sessionId)
         if (_currentSessionId.value == sessionId) {
             val remaining = chatSessionDao.getAll()
@@ -275,24 +272,19 @@ class ChatRepositoryImpl @Inject constructor(
                 }
             }
             if (attachments.isNotEmpty()) {
-                val indexed = indexedDocsByUri.getOrPut(sessionId) { mutableSetOf() }
                 var newCount = 0
                 for (file in attachments) {
-                    val key = file.uri.toString()
-                    if (key in indexed) continue
                     runCatching { ragRepository.indexIfNeeded(sessionId, file) }
-                        .onSuccess { indexed += key; newCount += 1 }
+                        .onSuccess {
+                            indexedDocsByUri.getOrPut(sessionId) { mutableSetOf() } += file.uri.toString()
+                            newCount += 1
+                        }
                         .onFailure {
-                            DebugLogger.log("RAG", "Index failed for ${file.name}: ${it.message}")
+                            logRag(ragIndexFailLogLine(file.name.length, it::class.java.simpleName))
                             if (isSqliteUnusable(it)) throw it
                         }
                 }
-                if (newCount > 0) DebugLogger.log("RAG", "Indexed $newCount doc(s) inline before retrieval  session=$sessionId")
-                // Set this batch as the active focus — every subsequent
-                // turn searches only inside these docs until the user
-                // attaches a different set or clears the chat.
-                focusedDocsBySession[sessionId] = attachments.map { it.uri.toString() }.toSet()
-                DebugLogger.log("RAG", "Focus set to ${attachments.size} doc(s) for session=$sessionId")
+                if (newCount > 0) logRag("indexedDocs=$newCount sessionIdLen=${sessionId.length}")
             }
             buildPrompt(userMessage, attachments)
         }
@@ -464,7 +456,7 @@ class ChatRepositoryImpl @Inject constructor(
         memoryRepository.deleteForSession(sessionId)
         ragRepository.deleteForSession(sessionId)
         indexedDocsByUri.remove(sessionId)
-        focusedDocsBySession.remove(sessionId)
+        sessionHasIndexedDocs = false
         chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
@@ -524,6 +516,13 @@ class ChatRepositoryImpl @Inject constructor(
         conversationDao.deleteById(id)
     }
 
+    override suspend fun removeIndexedDocument(docUri: String) {
+        val sessionId = _currentSessionId.value
+        ragRepository.deleteByDoc(sessionId, docUri)
+        indexedDocsByUri[sessionId]?.remove(docUri)
+        sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
+    }
+
     // ── Prompt builder ────────────────────────────────────────────────────────
     // Always called on IO thread from streamResponse.
 
@@ -562,7 +561,8 @@ class ChatRepositoryImpl @Inject constructor(
             // Visible in the production log at 21:48:16 as
             // `ragBudget=0 ragChars=0`, after which the model responded
             // about the time-context line because it had no doc context.
-            val hasDocs = indexedDocsByUri[_currentSessionId.value]?.isNotEmpty() == true
+            val hasDocs = sessionHasIndexedDocs ||
+                indexedDocsByUri[_currentSessionId.value]?.isNotEmpty() == true
             val charBudget = if (!hasDocs) {
                 baseBudget
             } else {
@@ -663,34 +663,9 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
-    /**
-     * Low-relevance retrieval guard (anti repetition-loop).
-     *
-     * For a generic "give an overview / summarise this" query, BM25 has nothing
-     * to lexically match, so it returns the document outline (score 1.0) plus a
-     * SCATTERED set of body chunks that ALL score ~0 (e.g. parts 1, 3, 5, 7, 9…).
-     * Feeding a small model 8–9 disjoint fragments reliably induces a repetition
-     * loop (seen in the log as "[REP] Loop detected" on doc overviews). When no
-     * body chunk has a real lexical hit, keep the outline + the first few chunks
-     * in DOCUMENT ORDER — a coherent opening excerpt the model can actually
-     * summarise — instead of the scattered selection.
-     *
-     * Untouched (no degradation) when ANY body chunk scored > 0 (a real,
-     * relevant question) or when there are already few chunks.
-     */
-    private fun coherentExcerptForLowRelevance(
-        retrieved: List<RetrievedChunk>,
-    ): List<RetrievedChunk> {
-        if (retrieved.size <= 4) return retrieved
-        val body = retrieved.filter { it.chunkIndex >= 0 }
-        val anyRelevant = body.any { it.score > 0.0 }
-        if (anyRelevant) return retrieved   // real lexical match — leave ranking as-is
-        val outline = retrieved.filter { it.chunkIndex < 0 }
-        val firstInOrder = body.sortedBy { it.chunkIndex }.take(4)
-        return outline + firstInOrder
-    }
-
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
+        val promptT0 = System.nanoTime()
+        fun promptMs(): Long = (System.nanoTime() - promptT0) / 1_000_000
         val isFresh = inferenceEngine.isFreshConversation
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
         val sessionId = _currentSessionId.value
@@ -705,7 +680,7 @@ class ChatRepositoryImpl @Inject constructor(
         ) {
             val lang = currentLanguage
             val langLine = lang.systemPromptInstruction()
-            DebugLogger.log("PROMPT", "Identity question → grounded identity answer  lang=${lang.code}")
+            DebugLogger.log("PROMPT", "Identity question lang=${lang.code} promptMs=${promptMs()}")
             return buildString {
                 if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
                 append("The user is asking who or what you are. Reply naturally and warmly in the user's language, conveying exactly this and nothing else. Never call yourself a language model, LLM, AI model, or name any company or technology:\n")
@@ -721,8 +696,17 @@ class ChatRepositoryImpl @Inject constructor(
         // "what's the salary" all pull different chunks of the same PDF.
         // Files attached on THIS turn are surfaced as error/unindexable
         // notes (binary, oversize) so the model knows they exist even
-        // when there is no text to retrieve.
-        val focusUris = focusedDocsBySession[sessionId]
+        // when there is no text to retrieve. This-turn URIs boost ranking
+        // but never hard-filter the session corpus.
+        val boostDocUris = if (attachments.isNotEmpty()) {
+            attachments.map { it.uri.toString() }.toSet()
+        } else {
+            emptySet()
+        }
+        val sessionDocs = runCatching { ragRepository.listSessionDocuments(sessionId) }
+            .onFailure { if (isSqliteUnusable(it)) throw it }
+            .getOrDefault(emptyList())
+        sessionHasIndexedDocs = sessionDocs.isNotEmpty()
         // NOTE: knowledge packs (Kisan etc.) are intentionally NOT merged
         // into the main chat here. Packs are a fully separate, modular
         // subsystem with their own Q&A surface (PackChatScreen) — wiring
@@ -744,13 +728,16 @@ class ChatRepositoryImpl @Inject constructor(
             ragRepository.search(
                 sessionId = sessionId,
                 query = userMessage,
-                restrictToDocUris = focusUris,
-                priorQuery = priorUserQuery?.takeIf { it != userMessage && it.length > 8 },
+                boostDocUris = boostDocUris,
+                priorQuery = priorUserQuery?.takeIf {
+                    attachments.isEmpty() && it != userMessage && it.length > 8
+                },
             )
         }.onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
-            .let(::coherentExcerptForLowRelevance)
-        val unreadableThisTurn = attachments.filter { it.error != null || (it.extractedText.isNullOrBlank() && !it.isImage) }
+        val unreadableThisTurn = attachments.filter {
+            isUnreadableThisTurn(it.error, it.extractedText)
+        }
 
         // Per-chunk retrieval log — names + chunk index + BM25 score +
         // page range. Metadata only (no query/chunk text — that's user
@@ -758,11 +745,17 @@ class ChatRepositoryImpl @Inject constructor(
         // without having to rerun the session: the log shows exactly which
         // chunks the model was given on each turn.
         if (retrieved.isNotEmpty()) {
-            DebugLogger.log("RAG", "retrieved ${retrieved.size} chunk(s) for queryLen=${userMessage.length}")
+            logRag("retrieved ${retrieved.size} chunk(s) queryLen=${userMessage.length}")
             retrieved.forEachIndexed { i, c ->
-                val ref = if (c.chunkIndex < 0) "outline" else "part ${c.chunkIndex + 1}"
-                val pages = extractPageRange(c.text)?.let { " · $it" } ?: ""
-                DebugLogger.log("RAG", "  [${i + 1}] ${c.docName} · $ref$pages  score=${"%.2f".format(c.score)}")
+                logRag(
+                    ragChunkLogLine(
+                        index1Based = i + 1,
+                        nameLen = c.docName.length,
+                        chunkIndex = c.chunkIndex,
+                        page = extractPageRange(c.text),
+                        score = c.score,
+                    ),
+                )
             }
         }
 
@@ -804,16 +797,18 @@ class ChatRepositoryImpl @Inject constructor(
             val identity = "You are Saarthi, a private on-device assistant for India. " +
                 "Answer the user's question directly in a warm, simple tone — short and clear. " +
                 "If you are unsure, say so instead of guessing."
-            val recap = buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
-            // Compute the budget left for RAG after identity / recap / user /
-            // scaffolding — pass it to the block builder so chunks are dropped
-            // at boundaries rather than sliced mid-text by trimPrompt.
+            val recap = if (attachments.isNotEmpty()) ""
+                else buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
             val scaffolding = identity.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
+            val fileContext = buildRagPromptBlock(
+                retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
+                newThisTurnNames = attachments.map { shortDocName(it.name) },
+            )
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
             val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
+            DebugLogger.log("PROMPT", "COMPACT turn ragChars=${fileContext.length} ragBudget=$ragBudget promptMs=${promptMs()}")
             return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = "User: $userMessage\nSaarthi:")
         }
 
@@ -845,14 +840,11 @@ class ChatRepositoryImpl @Inject constructor(
             // room for the recent-questions recap, which lets the model treat
             // follow-ups as a continuing conversation instead of restarting.
             val docsPinned = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty()
-            // Full multi-turn context — user questions AND Saarthi's prior
-            // answers — so follow-ups ("explain more", "the second one", "why?")
-            // resolve against what was actually said. The KV cache is recycled
-            // every turn on this hardware (a second sendMessageAsync on a live
-            // Conversation SIGKILLs the process — see LiteRTInferenceEngine), so
-            // the prompt is the ONLY carrier of continuity. STANDARD/LARGE get
-            // the real transcript; COMPACT (1B) gets nothing (it parrots).
-            val priorTurns = buildConversationContext(grounded = docsPinned)
+            // New attach this turn: drop document recap so file A's Q&A cannot
+            // answer for file B. Name/facts still come from memory injection.
+            // Same-file follow-ups (no attachments) keep full recap.
+            val priorTurns = if (attachments.isNotEmpty()) ""
+                else buildConversationContext(grounded = docsPinned)
             // On doc-grounded turns swap the full ~4423c persona/tools/reminders
             // prompt for a compact instruction set. The verbose prompt alone is
             // ~1370 tokens — larger than E4B's entire 1536-token window once RAM
@@ -878,8 +870,11 @@ class ChatRepositoryImpl @Inject constructor(
                 // saved 80 c is exactly enough for one extra chunk.
                 80                                                    // safety margin
             val ragBudget = (budget - systemPlusMargin).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
-            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()}")
+            val fileContext = buildRagPromptBlock(
+                retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
+                newThisTurnNames = attachments.map { shortDocName(it.name) },
+            )
+            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} promptMs=${promptMs()}")
             buildString {
                 // Only emit the system block if non-blank — Compact tier
                 // returns empty (see SystemPromptProvider) and leading
@@ -919,7 +914,7 @@ class ChatRepositoryImpl @Inject constructor(
                 val pinnedTail = if (fileContext.isEmpty() && criticalTail.isNotBlank())
                     "$criticalTail\n\n$userMessage" else userMessage
                 val finalPrompt = trimPrompt(prompt, budget, pinnedTail = pinnedTail)
-                DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget")
+                DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget promptMs=${promptMs()}")
                 finalPrompt
             }
         } else {
@@ -928,8 +923,11 @@ class ChatRepositoryImpl @Inject constructor(
             // budget is available for RAG, minus the user message.
             val budget = maxPromptChars
             val ragBudget = (budget - userMessage.length - 80).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlock(retrieved, unreadableThisTurn, tier, ragBudget)
-            DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  (KV cache holds prior history)")
+            val fileContext = buildRagPromptBlock(
+                retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
+                newThisTurnNames = attachments.map { shortDocName(it.name) },
+            )
+            DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} promptMs=${promptMs()}")
             buildString {
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
@@ -938,69 +936,9 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Human-readable document name for use in citations.
-     *
-     * Strips file extensions (handles double-extensions like ".log.txt"),
-     * replaces underscores/hyphens/dashes with spaces, removes leading
-     * year-or-timestamp number prefixes (e.g. "2015 " or "20260603 "),
-     * and caps at 28 chars on a word boundary.
-     *
-     * Examples:
-     *   "2015_Douglas_Repair-Maintenance-Mobile-Cell-Phones.pdf" → "Douglas Repair Maintenance"
-     *   "Python AI Engineer – Technical Screening Test.docx"    → "Python AI Engineer Technical"
-     *   "doc20251117695301.pdf"                                 → "doc20251117695301"
-     *   "saarthi_debug.log.txt"                                → "saarthi debug"
-     *   "Dpdpact.pdf"                                          → "Dpdpact"
-     */
-    private fun shortDocName(rawName: String): String {
-        val knownExts = listOf(".pdf", ".docx", ".doc", ".txt", ".log", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
-        var stem = rawName
-        var stripped = true
-        while (stripped) {
-            val low = stem.lowercase()
-            stripped = false
-            for (ext in knownExts) {
-                if (low.endsWith(ext)) { stem = stem.dropLast(ext.length); stripped = true; break }
-            }
-        }
-        val cleaned = stem
-            .replace('_', ' ').replace('-', ' ')
-            .replace('–', ' ').replace('—', ' ')   // en-dash, em-dash
-            .replace(Regex("[^\\p{L}\\p{N} ]+"), " ")   // anything else → space
-            .replace(Regex("^[\\d ]+(?=\\p{L})"), "")   // strip leading digit-only prefix
-            .replace(Regex("\\s{2,}"), " ")
-            .trim()
-        if (cleaned.isBlank()) return stem.take(28)
-        if (cleaned.length <= 28) return cleaned
-        val truncated = cleaned.take(28).trimEnd()
-        val lastSpace = truncated.lastIndexOf(' ')
-        return if (lastSpace > 10) truncated.substring(0, lastSpace) else truncated
-    }
-
-    /**
-     * Inline `--- Page X ---` markers come from `FileContentExtractor.extractPdfText`
-     * — when a chunk straddles one or more pages, this surfaces the page
-     * range so the citation header can read "pp.5-7" instead of just
-     * "part 3". The model sees the page numbers in the chunk text anyway;
-     * lifting them into the header makes the cite [N, p.X] pattern
-     * trivial to follow.
-     */
-    private val PAGE_MARKER_REGEX = Regex("---\\s*Page\\s+(\\d+)\\s*---", RegexOption.IGNORE_CASE)
-    private fun extractPageRange(text: String): String? {
-        val pages = PAGE_MARKER_REGEX.findAll(text)
-            .mapNotNull { it.groupValues[1].toIntOrNull() }
-            .toList()
-        if (pages.isEmpty()) return null
-        val lo = pages.min()
-        val hi = pages.max()
-        return if (lo == hi) "p.$lo" else "pp.$lo-$hi"
-    }
-
-    /**
-     * Strict-mode RAG block. Renders BM25-retrieved chunks (and any
-     * unreadable attachments) as a numbered source list with hard rules:
-     * answer ONLY from excerpts, cite [N], reply with the exact
-     * "not in documents" line otherwise.
+     * Strict-mode RAG block. Numbered excerpts with a citation contract:
+     * answer from these files, cite (Name, p.X) matching headers, never
+     * cite unread files or an "In general:" fallback.
      *
      * Budget-aware — the caller passes [charBudget] computed as
      * `totalPromptBudget − systemPromptLen − userMessageLen − safety`,
@@ -1012,14 +950,15 @@ class ChatRepositoryImpl @Inject constructor(
      *
      * COMPACT (Gemma 3 1B) gets a one-liner rule header — the 1B model
      * can't carry the full rule list inside its 512-tok budget without
-     * crowding out the actual chunks. Larger tiers get a tighter, single-
-     * sentence rule header (was 5 lines / ~470c; now ~200c).
+     * crowding out the actual chunks.
      */
     private fun buildRagPromptBlock(
         retrieved: List<com.saarthi.feature.assistant.data.RetrievedChunk>,
         unreadableThisTurn: List<AttachedFile>,
         tier: SystemPromptProvider.ModelTier,
         charBudget: Int,
+        sessionDocs: List<SessionRagDocument> = emptyList(),
+        newThisTurnNames: List<String> = emptyList(),
     ): String {
         if (retrieved.isEmpty() && unreadableThisTurn.isEmpty()) return ""
         // If there is literally no room for even the rule header + one
@@ -1027,35 +966,13 @@ class ChatRepositoryImpl @Inject constructor(
         // header-only fragment that wastes tokens.
         if (charBudget < 200) return ""
 
-        // Human-readable citation + smart fallback rules.
-        // COMPACT gets a single short line; LARGE/STANDARD gets the full
-        // three-bullet version with a worked example so the model has a
-        // pattern to mirror rather than infer.
-        val rulesHeader = if (tier == SystemPromptProvider.ModelTier.COMPACT) {
-            "Attached excerpts — answer from these. After each claim write the source in parentheses: (Doc Name, p.X). " +
-                "If the answer isn't in the excerpts, say so briefly, then add a short general answer prefixed 'In general:'.\n\n"
-        } else {
-            // ~360c — keeps chunks from being crowded out while giving the
-            // model a clear citation pattern to mirror (worked example) AND
-            // a smart fallback so "not found" turns are still helpful.
-            "ATTACHED EXCERPTS — answer from these WHEN the user's message is about the document.\n" +
-                "• If the user's message is NOT about the document (a greeting, something personal like " +
-                "\"I'm stressed\", feelings, small talk), IGNORE these excerpts entirely and reply " +
-                "normally to the user — do not mention the document at all.\n" +
-                "• Cite each claim as (Name, p.X) using the document name from the [N] header below; " +
-                "include the page only when shown. Example: 'Consent is required (DPDP Act, p.3).'\n" +
-                "• If the answer is not in the excerpts, say so in one sentence, then give a brief " +
-                "general answer prefixed 'In general:' so the user still gets useful context.\n" +
-                "• Do not invent facts from the excerpts or repeat these instructions.\n\n"
-        }
+        val rulesHeader = ragCitationRules(
+            compact = tier == SystemPromptProvider.ModelTier.COMPACT,
+        )
 
-        // Unreadable-file notes are short, high-signal, and small. Reserve
-        // their length upfront so we don't drop them in favour of one more
-        // chunk — the model needs to know which files were unreadable to
-        // explain itself.
         val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {
             buildString {
-                appendLine("Files attached this turn that could NOT be read (do not pretend to know their contents):")
+                appendLine(UNREADABLE_FILES_INTRO)
                 unreadableThisTurn.forEach { f ->
                     val why = f.error ?: "unsupported format — Saarthi cannot read binary files yet"
                     appendLine("  - ${f.name}: $why")
@@ -1063,18 +980,15 @@ class ChatRepositoryImpl @Inject constructor(
             }.trimEnd() + "\n\n"
         } else ""
 
-        var remaining = charBudget - rulesHeader.length - unreadableBlock.length
+        val manifestLine = sessionManifestLine(sessionDocs.map { it.name })
+        val newFilesLine = newFilesThisTurnNotice(newThisTurnNames)
+
+        var remaining = charBudget - rulesHeader.length - unreadableBlock.length -
+            manifestLine.length - newFilesLine.length
         val chunksBlock = buildString {
             for ((i, chunk) in retrieved.withIndex()) {
                 val text = chunk.text.trim()
-                // Human-readable header: [N] ShortDocName · p.X
-                // The short name (≤28 chars) is what the model uses when
-                // it writes the inline citation "(ShortDocName, p.X)".
-                // The [N] prefix lets the model count sources without
-                // printing the number in its reply.
-                val shortName = shortDocName(chunk.docName)
-                val pageRef = extractPageRange(text)?.let { " · $it" } ?: ""
-                val header = "[${i + 1}] $shortName$pageRef\n"
+                val header = formatExcerptHeader(i + 1, chunk.docName, text, chunk.chunkIndex)
                 val total = header.length + text.length + 2  // +2 for trailing "\n\n"
                 if (total > remaining) break  // never half-emit a chunk
                 append(header)
@@ -1085,12 +999,11 @@ class ChatRepositoryImpl @Inject constructor(
         }
 
         // If the budget was so tight that not a single chunk fit, drop
-        // the whole RAG block — emitting "ATTACHED EXCERPTS — answer ONLY
-        // from these" with no excerpts puts the model into refusal mode
-        // on every question. Better to fall back to the general prompt.
+        // the whole RAG block — emitting rules with no excerpts puts the
+        // model into refusal mode on every question.
         if (chunksBlock.isEmpty() && unreadableBlock.isEmpty()) return ""
 
-        return (rulesHeader + chunksBlock + unreadableBlock).trimEnd()
+        return (rulesHeader + manifestLine + newFilesLine + chunksBlock + unreadableBlock).trimEnd()
     }
 
     /**
@@ -1571,6 +1484,13 @@ class ChatRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
+}
+
+/** Prompt line so a new attach is not answered from the previous file's recap. */
+internal fun newFilesThisTurnNotice(shortNames: List<String>): String {
+    if (shortNames.isEmpty()) return ""
+    return "New files this turn: " + shortNames.joinToString("; ") +
+        ". Answer from these files; do not reuse answers about earlier documents.\n\n"
 }
 
 /**
