@@ -22,7 +22,7 @@ app
 ├── core:core-memory      ← Room: memory, conversations, sessions, rag_chunks
 ├── core:core-i18n        ← Language manager, SupportedLanguage, personalities
 ├── core:core-rag         ← Embedding/VectorStore + BM25 retriever
-└── core:core-common      ← Result<T>, UseCase, FlowUseCase, Dispatchers
+└── core:core-common      ← Dispatchers, sqliteWriteWithRetry, CrashReporter
 ```
 
 > The earlier per-pack feature modules (`feature-money`, `feature-kisan`,
@@ -52,7 +52,7 @@ app
 ```
 Presentation (Composable + ViewModel)
     ↓ only knows domain models
-Domain (UseCases, Repository interfaces, Domain models)
+Domain (Repository interfaces, Domain models)
     ↓ only knows domain
 Data (Repository impl, Room DAOs, LiteRT-LM engine, DataStore)
 ```

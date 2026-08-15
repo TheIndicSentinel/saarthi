@@ -106,7 +106,12 @@ class PackChatViewModel @Inject constructor(
         // Restore the persisted pack conversation so "go back and return"
         // shows the prior chat (the gap the user reported).
         viewModelScope.launch {
-            val saved = runCatching { conversationDao.getBySession(chatSessionId) }.getOrDefault(emptyList())
+            val saved = runCatching {
+                conversationDao.getRecentBySession(
+                    chatSessionId,
+                    ConversationDao.UI_HISTORY_LIMIT,
+                )
+            }.getOrDefault(emptyList())
             if (saved.isNotEmpty()) {
                 _messages.value = saved.map { it.toChatMessage() }
             }

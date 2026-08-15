@@ -157,7 +157,10 @@ class ChatRepositoryImpl @Inject constructor(
                 "default"
             }
             _currentSessionId.value = sessionId
-            val saved = conversationDao.getBySession(sessionId)
+            val saved = conversationDao.getRecentBySession(
+                sessionId,
+                ConversationDao.UI_HISTORY_LIMIT,
+            )
             if (saved.isNotEmpty()) _history.value = saved.map { it.toChatMessage() }
         }
     }
@@ -181,7 +184,10 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun switchSession(sessionId: String) {
         _currentSessionId.value = sessionId
-        val messages = conversationDao.getBySession(sessionId)
+        val messages = conversationDao.getRecentBySession(
+            sessionId,
+            ConversationDao.UI_HISTORY_LIMIT,
+        )
         _history.value = messages.map { it.toChatMessage() }
         // Reset engine session to prevent stale KV cache from previous chat
         runCatching { inferenceEngine.resetSession() }

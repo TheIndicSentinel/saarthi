@@ -62,7 +62,7 @@ saarthi/
 │   ├── core-rag/              BM25 retriever
 │   ├── core-ui/               Cyber-Vedic design system
 │   ├── core-i18n/             Languages, personalities, pack entitlements
-│   └── core-common/           Result, UseCase, dispatchers
+│   └── core-common/           Dispatchers, sqliteWriteWithRetry, CrashReporter
 ├── build-logic/               Gradle convention plugins
 └── gradle/libs.versions.toml
 ```

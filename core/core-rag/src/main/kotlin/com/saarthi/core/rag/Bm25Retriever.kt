@@ -17,11 +17,11 @@ import kotlin.math.max
  *  • Length normalisation (b) — long chunks are not favoured just for
  *    being long; matters when one document dwarfs another in the corpus.
  *
- * Stateless: the ranker holds no index. Pass the corpus + query, get
- * back the top-K (index, score) pairs. For Saarthi's corpus sizes (a
- * handful of attached files per chat → tens of chunks) the per-call
- * tokenisation cost is negligible and is easier to reason about than
- * maintaining an on-disk inverted index.
+ * Holds no on-disk index. Pass the corpus + query, get back the top-K
+ * (index, score) pairs. Chunk token lists are memoized in-process keyed
+ * by the chunk *text* (LRU) so a second search of the same Kisan/user
+ * corpus does not split the same strings again. Ranking math is unchanged.
+ * Query tokenisation is not cached (short, unique per turn).
  *
  * Devanagari / Tamil / Bengali / Latin all work because tokenisation
  * splits on Unicode non-letter-or-digit (`\p{L}\p{N}`), not ASCII.
@@ -30,6 +30,14 @@ object Bm25Retriever {
 
     private const val K1 = 1.2
     private const val B = 0.75
+    /** Fits a Kisan pack or a large first-file RAG; eldest texts drop. */
+    private const val TOKEN_CACHE_MAX = 4096
+    private val tokenSplit = Regex("[^\\p{L}\\p{N}]+")
+    private val tokenCacheLock = Any()
+    private val tokenCache = object : LinkedHashMap<String, List<String>>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>): Boolean =
+            size > TOKEN_CACHE_MAX
+    }
 
     data class Scored(val index: Int, val score: Double)
 
@@ -42,7 +50,7 @@ object Bm25Retriever {
     fun rank(corpus: List<String>, query: String, topK: Int): List<Scored> {
         if (corpus.isEmpty() || query.isBlank() || topK <= 0) return emptyList()
 
-        val tokenisedDocs = corpus.map(::tokenise)
+        val tokenisedDocs = corpus.map(::tokeniseCached)
         val docLens = tokenisedDocs.map { it.size }
         val avgDl = if (docLens.isEmpty()) 0.0 else docLens.average()
         val n = corpus.size
@@ -94,9 +102,20 @@ object Bm25Retriever {
      * keep tokens ≥ 2 chars. Devanagari, Tamil, Bengali, Latin, digits —
      * all preserved because we use `\p{L}\p{N}`, not `[A-Za-z0-9]`.
      */
+    private fun tokeniseCached(text: String): List<String> {
+        synchronized(tokenCacheLock) {
+            tokenCache[text]?.let { return it }
+        }
+        val tokens = tokenise(text)
+        synchronized(tokenCacheLock) {
+            tokenCache.putIfAbsent(text, tokens)
+            return tokenCache[text]!!
+        }
+    }
+
     private fun tokenise(text: String): List<String> =
         text.lowercase()
-            .split(Regex("[^\\p{L}\\p{N}]+"))
+            .split(tokenSplit)
             .filter { it.length >= 2 }
 
     /**
