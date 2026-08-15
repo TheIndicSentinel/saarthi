@@ -1,14 +1,16 @@
 # Saarthi Release Checklist
 
-Run through this before publishing any build. CI (`.github/workflows/build_apk.yml`)
-already runs unit tests, a non-blocking lint, and a signed `assembleRelease` on
-every push to `main`; the items below are the human gates around it.
+Run through this before publishing any build. PRs run `.github/workflows/ci.yml`
+(`testDebugUnitTest` + `lintDebug`). Pushes to `main` run `.github/workflows/build_apk.yml`
+(same tests/lint plus a debug APK). Store `.aab` is `.github/workflows/release_aab.yml` on a `v*` tag.
+The items below are the human gates around that.
 
 ## Every build (beta or production)
 
 - [ ] `./gradlew test` passes locally and in CI (green check on the commit).
 - [ ] Lint report reviewed (CI artifact `lint-report`) — no new Error-level findings.
 - [ ] `versionCode` / `versionName` bumped in `app/build.gradle.kts`.
+      Store tag must be `v` + `versionName` (`release_aab.yml` fails otherwise).
 - [ ] Release APK is signed with the release keystore (CI: `KEYSTORE_*` secrets set;
       falls back to debug-signing only when they are absent).
 - [ ] Installed and smoke-tested on a real phone (see **Release device coverage** below).
@@ -59,8 +61,14 @@ Build Test Lab APKs (free, local):
 
 Upload both in [Firebase Console → Test Lab](https://console.firebase.google.com/)
 (Instrumentation) and pick **virtual or physical devices covered by the free
-quota**. The smoke test `AppPackageInstrumentedTest` asserts
-`BuildConfig.APPLICATION_ID` (`com.indicsentinel.saarthi`) — Point 7.
+quota**. `AppPackageInstrumentedTest` covers Play `applicationId`, `SaarthiApp`,
+FileProvider, and leftover SMS/storage permissions — it does not launch chat.
+
+Optional CI: Actions → **Firebase Test Lab** → Run workflow. Needs secret
+`FIREBASE_SERVICE_ACCOUNT_JSON` (GCP/Firebase service account that can start
+Test Lab). Unset secret → the job **skips** (green); this is not a merge gate.
+The workflow uses one Spark virtual device and that smoke class only. Room
+migration androidTests stay in `core-memory` and are not part of this Lab run.
 
 ### Pass / fail matrix (fill per release candidate)
 
@@ -203,5 +211,6 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
 10. [ ] Promote Internal → Closed → **Production**.
 
 **Future store updates (hands-off):** bump `versionCode`/`versionName` → `git tag vX.Y.Z`
+(tag must match `versionName`; `release_aab.yml` fails on mismatch)
 → push → `release_aab.yml` builds the signed AAB (and auto-publishes to the internal
 track once `PLAY_SERVICE_ACCOUNT_JSON` is set and the upload step is uncommented).

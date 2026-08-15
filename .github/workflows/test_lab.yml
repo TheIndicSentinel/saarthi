@@ -1,0 +1,87 @@
+name: Firebase Test Lab
+
+# Optional: run AppPackageInstrumentedTest on one Spark virtual device.
+# Not a PR or main gate — start it from Actions → Run workflow.
+#
+# One-time setup (GitHub → Settings → Secrets and variables → Actions):
+#   FIREBASE_SERVICE_ACCOUNT_JSON  GCP/Firebase service-account JSON that
+#       can create Test Lab runs on the Firebase project (Cloud Testing).
+# If the secret is unset the job succeeds with a skip so this never fails
+# main CI. Manual Console upload in docs/RELEASE_CHECKLIST.md still works.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: test-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  instrumented-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check Test Lab credentials
+        id: creds
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "${FIREBASE_SERVICE_ACCOUNT_JSON}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "FIREBASE_SERVICE_ACCOUNT_JSON is not set. Skipping Test Lab (not a failure)."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.creds.outputs.present == 'true'
+
+      - name: Set up JDK 17
+        if: steps.creds.outputs.present == 'true'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        if: steps.creds.outputs.present == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Write local.properties
+        if: steps.creds.outputs.present == 'true'
+        run: |
+          echo "sdk.dir=$ANDROID_HOME"                     > local.properties
+          echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}" >> local.properties
+
+      - name: Build debug + androidTest APKs
+        if: steps.creds.outputs.present == 'true'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+
+      - name: Authenticate to Google Cloud
+        if: steps.creds.outputs.present == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+
+      - name: Set up gcloud
+        if: steps.creds.outputs.present == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run instrumentation on one virtual device
+        if: steps.creds.outputs.present == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          PROJECT_ID=$(python3 -c 'import json,os; print(json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT_JSON"])["project_id"])')
+          gcloud --quiet firebase test android run \
+            --type instrumentation \
+            --app app/build/outputs/apk/debug/app-debug.apk \
+            --test app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait \
+            --timeout 10m \
+            --test-targets "class com.saarthi.app.AppPackageInstrumentedTest" \
+            --project "${PROJECT_ID}"
