@@ -69,6 +69,28 @@ class QueryRoutingTest {
     }
 
     @Test
+    fun `native-script compare phrases set compare`() {
+        assertTrue(isCompareQuery("இரண்டும் ஒப்பிடு"))   // Tamil both/compare
+        assertTrue(isCompareQuery("দুটো তুলনা করো"))       // Bengali
+        assertTrue(isCompareQuery("ಎರಡೂ ಹೋಲಿಕೆ"))          // Kannada
+        assertFalse(isCompareQuery("சம்பளம் என்ன"))        // Tamil "what is salary"
+    }
+
+    @Test
+    fun `native-script which-file and this-document phrases detected`() {
+        assertTrue(isWhichFileQuery("எந்த கோப்பு சம்பளம் சொல்கிறது")) // Tamil which file
+        assertTrue(isWhichFileQuery("কোন ফাইল"))                        // Bengali
+        assertTrue(isThisDocumentQuery("এই নথি"))                       // Bengali this document
+        assertTrue(isThisDocumentQuery("ఈ ఫైల్"))                        // Telugu this file
+    }
+
+    @Test
+    fun `romanized khata query matches the english-named account file`() {
+        val named = matchNamedDocs("khata ka detail batao", docs)
+        assertEquals(setOf("content://stmt"), named)
+    }
+
+    @Test
     fun `hindi query expands with english hints and filename stems`() {
         val expanded = expandRetrievalQuery("इसमें जुर्माना क्या है", listOf("NDA Agreement.pdf"))
         assertTrue(expanded.contains("agreement"))

@@ -38,6 +38,17 @@ class RagObservabilityTest {
     }
 
     @Test
+    fun `native-script summary queries route via the indic meta path`() {
+        assertEquals("indic", RagDocumentRepository.metaRouteReason("இந்த ஆவணத்தின் சுருக்கம் தரவும்")) // Tamil
+        assertEquals("indic", RagDocumentRepository.metaRouteReason("সারাংশ দাও")) // Bengali
+        assertEquals("indic", RagDocumentRepository.metaRouteReason("ఈ పత్రం సారాంశం")) // Telugu
+        assertEquals("indic", RagDocumentRepository.metaRouteReason("ಈ ದಾಖಲೆಯ ಸಾರಾಂಶ")) // Kannada
+        // Devanagari path is unchanged; a plain question is still not meta.
+        assertEquals("devanagari", RagDocumentRepository.metaRouteReason("दस्तावेज़ का सारांश दो"))
+        assertEquals(null, RagDocumentRepository.metaRouteReason("சம்பளம் எவ்வளவு")) // Tamil "what is the salary"
+    }
+
+    @Test
     fun `chunk line uses nameLen not the filename`() {
         val line = ragChunkLogLine(1, nameLen = 24, chunkIndex = 2, page = "p.4", score = 1.5)
         assertEquals("  [1] nameLen=24 · part 3 · p.4  score=1.50", line)

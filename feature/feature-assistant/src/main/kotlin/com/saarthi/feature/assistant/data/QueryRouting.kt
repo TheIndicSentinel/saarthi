@@ -58,14 +58,44 @@ internal val ROMANIZED_INDIC_HINTS: Map<String, List<String>> = mapOf(
 )
 
 private val COMPARE_TOKENS = setOf("compare", "both", "versus", "vs")
-private val COMPARE_PHRASES = listOf("दोनों", "तुलना", "each of")
+private val COMPARE_PHRASES = listOf(
+    "each of",
+    // Devanagari (Hindi/Marathi)
+    "दोनों", "तुलना", "दोन्ही",
+    // Tamil / Telugu / Bengali / Kannada / Gujarati / Punjabi / Odia
+    "இரண்டும்", "ஒப்பிடு", "ஒப்பிட்டு",
+    "రెండూ", "పోల్చు", "పోలిక",
+    "দুটো", "তুলনা", "উভয়",
+    "ಎರಡೂ", "ಹೋಲಿಕೆ", "ಹೋಲಿಸು",
+    "બંને", "સરખામણી",
+    "ਦੋਵੇਂ", "ਤੁਲਨਾ",
+    "ଦୁଇଟି", "ତୁଳନା", "ଉଭୟ",
+)
 private val WHICH_FILE_PHRASES = listOf(
     "which file", "which document", "which pdf", "which one",
+    // Devanagari
     "कौन सी फ़ाइल", "कौन सी फाइल", "कौन सा", "किस फ़ाइल", "किस फाइल",
+    // Tamil / Telugu / Bengali / Kannada / Gujarati / Punjabi / Odia
+    "எந்த கோப்பு", "எந்த ஆவணம்",
+    "ఏ ఫైల్", "ఏ పత్రం",
+    "কোন ফাইল", "কোন নথি",
+    "ಯಾವ ಫೈಲ್", "ಯಾವ ದಾಖಲೆ",
+    "કઈ ફાઇલ", "કયો દસ્તાવેજ",
+    "ਕਿਹੜੀ ਫਾਈਲ", "ਕਿਹੜਾ ਦਸਤਾਵੇਜ਼",
+    "କେଉଁ ଫାଇଲ", "କେଉଁ ଦଲିଲ",
 )
 private val THIS_DOC_PHRASES = listOf(
     "this document", "this pdf", "the pdf", "this file",
+    // Devanagari
     "इस दस्तावेज़", "इस दस्तावेज", "इस फाइल", "इस फ़ाइल", "ये वाली",
+    // Tamil / Telugu / Bengali / Kannada / Gujarati / Punjabi / Odia
+    "இந்த ஆவணம்", "இந்த கோப்பு",
+    "ఈ పత్రం", "ఈ ఫైల్",
+    "এই নথি", "এই ফাইল",
+    "ಈ ದಾಖಲೆ", "ಈ ಫೈಲ್",
+    "આ દસ્તાવેજ", "આ ફાઇલ",
+    "ਇਹ ਦਸਤਾਵੇਜ਼", "ਇਹ ਫਾਈਲ",
+    "ଏହି ଦଲିଲ", "ଏହି ଫାଇଲ",
 )
 
 internal fun filenameTokens(name: String): Set<String> {
@@ -96,9 +126,20 @@ internal fun isThisDocumentQuery(query: String): Boolean {
 }
 
 internal fun matchNamedDocs(query: String, docs: List<Pair<String, String>>): Set<String> {
-    val qTokens = query.lowercase().split(QUERY_SPLIT)
-        .filter { it.length >= 4 && it !in FILENAME_STOPWORDS }
-        .toSet()
+    val baseTokens = query.lowercase().split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    val qTokens = buildSet {
+        for (t in baseTokens) {
+            if (t.length >= 4 && t !in FILENAME_STOPWORDS) add(t)
+            // Cross-script bridge: a romanized-Indic query term ("khata",
+            // "jurmana") also matches an English-named file ("account…",
+            // "penalty…"). Only the ASCII expansions are used here — a
+            // Devanagari gloss can't match a Latin filename, and same-script
+            // filename tokens are already covered by the raw query tokens.
+            ROMANIZED_INDIC_HINTS[t]?.forEach { hint ->
+                if (hint.length >= 4 && hint.all { c -> c.code < 128 }) add(hint)
+            }
+        }
+    }
     if (qTokens.isEmpty()) return emptySet()
     val matched = mutableSetOf<String>()
     for ((uri, name) in docs) {

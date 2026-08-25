@@ -154,6 +154,7 @@ class RagDocumentRepository @Inject constructor(
             val tokens = lower.split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
             tokens.firstOrNull { it in META_TOKEN_TRIGGERS }?.let { return it }
             if (isDevanagariMetaTrigger(lower)) return "devanagari"
+            if (isIndicMetaTrigger(lower)) return "indic"
             if (META_QUERY_PHRASES.any { lower.contains(it) }) return "phrase"
             return null
         }
@@ -982,6 +983,36 @@ internal val META_DEVANAGARI_PATTERN = Regex("(अनुक्रम|सार�
 
 internal fun isDevanagariMetaTrigger(query: String): Boolean =
     META_DEVANAGARI_PATTERN.containsMatchIn(query)
+
+/**
+ * Overview / summary / table-of-contents triggers in the non-Devanagari Indic
+ * scripts the app offers — Tamil, Telugu, Bengali, Kannada, Gujarati, Gurmukhi
+ * (Punjabi) and Odia. Substring-matched like the Devanagari pattern; each term
+ * is a distinctive multi-syllable "meta" word (summary/overview/contents/brief)
+ * chosen to avoid matching inside ordinary words. Stems are used where a suffix
+ * varies (e.g. Telugu సారాంశ matches సారాంశం / సారాంశము).
+ */
+internal val META_INDIC_PATTERN = Regex(
+    "(" +
+        // Tamil
+        "சுருக்கம்|மேலோட்டம்|பொருளடக்கம்|சாராம்சம்|" +
+        // Telugu
+        "సారాంశ|అవలోకన|విషయసూచిక|సంక్షిప్త|" +
+        // Bengali
+        "সারাংশ|সংক্ষিপ্তসার|সূচিপত্র|সারসংক্ষেপ|" +
+        // Kannada
+        "ಸಾರಾಂಶ|ಅವಲೋಕನ|ಪರಿವಿಡಿ|ಸಂಕ್ಷಿಪ್ತ|" +
+        // Gujarati
+        "સારાંશ|અવલોકન|અનુક્રમણિકા|સંક્ષિપ્ત|" +
+        // Gurmukhi (Punjabi)
+        "ਸੰਖੇਪ|ਸਾਰਾਂਸ਼|ਤਤਕਰਾ|" +
+        // Odia
+        "ସାରାଂଶ|ସୂଚୀପତ୍ର|ସଂକ୍ଷିପ୍ତ|ଅବଲୋକନ" +
+        ")",
+)
+
+internal fun isIndicMetaTrigger(query: String): Boolean =
+    META_INDIC_PATTERN.containsMatchIn(query)
 
 internal fun locateHeadingInChunks(chunkTexts: List<String>, heading: String): Int {
     val exact = chunkTexts.indexOfFirst { it.contains(heading, ignoreCase = true) }
