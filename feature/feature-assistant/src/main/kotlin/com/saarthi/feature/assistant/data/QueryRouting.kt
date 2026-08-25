@@ -18,7 +18,8 @@ private val QUERY_SPLIT = Regex("[^\\p{L}\\p{N}]+")
 
 private val FILENAME_STOPWORDS = setOf(
     "the", "this", "that", "document", "documents", "file", "files",
-    "pdf", "txt", "log", "docx", "doc", "attachment", "attached",
+    "pdf", "txt", "log", "docx", "doc", "csv", "xlsx", "xls", "pptx", "ppt",
+    "attachment", "attached",
 )
 
 /**
@@ -100,7 +101,7 @@ private val THIS_DOC_PHRASES = listOf(
 
 internal fun filenameTokens(name: String): Set<String> {
     var stem = name.lowercase()
-    for (ext in listOf(".pdf", ".docx", ".doc", ".txt", ".log")) {
+    for (ext in listOf(".pdf", ".docx", ".doc", ".txt", ".log", ".csv", ".xlsx", ".xls", ".pptx", ".ppt")) {
         if (stem.endsWith(ext)) stem = stem.dropLast(ext.length)
     }
     return stem.split(QUERY_SPLIT)

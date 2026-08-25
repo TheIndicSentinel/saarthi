@@ -52,4 +52,16 @@ class ExtractionFailureTest {
             !isUnreadableThisTurn(error = null, extractedText = "[Extracted from image]:\nINVOICE 42"),
         )
     }
+
+    @Test
+    fun `empty spreadsheet and presentation sentinels are errors`() {
+        assertEquals(
+            "No readable cells found in this spreadsheet.",
+            extractionFailureMessage("[Spreadsheet: No readable cells found]"),
+        )
+        assertEquals(
+            "No readable text found in this presentation.",
+            extractionFailureMessage("[Presentation: No readable text found]"),
+        )
+    }
 }

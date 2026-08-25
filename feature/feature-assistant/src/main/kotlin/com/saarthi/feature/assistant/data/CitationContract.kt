@@ -17,6 +17,7 @@ private val PAGE_MARKER_REGEX = Regex("---\\s*Page\\s+(\\d+)\\s*---", RegexOptio
 internal fun shortDocName(rawName: String): String {
     val knownExts = listOf(
         ".pdf", ".docx", ".doc", ".txt", ".log",
+        ".csv", ".xlsx", ".xls", ".pptx", ".ppt",
         ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
     )
     var stem = rawName

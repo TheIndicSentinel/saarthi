@@ -652,33 +652,8 @@ class RagDocumentRepository @Inject constructor(
     }
 
     private fun isLikelyHeading(line: String, lines: List<String>, idx: Int): Boolean {
-        // Skip the page markers FileContentExtractor injects during PDF OCR —
-        // they look heading-shaped but tell the model nothing useful.
-        if (line.matches(Regex("^---\\s*Page\\s+\\d+\\s*---$", RegexOption.IGNORE_CASE))) return false
-
-        // 1. "Chapter N", "Section N", etc.
-        if (line.matches(Regex("(?i)^(chapter|section|part|appendix|annexure|article|unit)\\s+[\\w\\d.]+.*"))) return true
-
-        // 2. All-caps short line with at least one letter.
-        if (line == line.uppercase() && line.any { it.isLetter() } && line.length <= 60) return true
-
-        // 3. Numbered heading: "1. Intro", "1.2 Background", "2.1.3 Methods".
-        //    Requires the content after the number to start with a letter
-        //    (Latin or Devanagari) so we don't match bare list-numbered
-        //    body text like "1. then we walked to the bus stop".
-        if (line.matches(Regex("^\\d+(\\.\\d+)*[\\s.:]+[A-Z\\u0900-\\u097F].{2,}$"))) return true
-
-        // 4. Short title-case-ish line followed by blank — common for
-        //    body-text-author headings that lack other formatting cues.
-        val words = line.split(Regex("\\s+"))
-        if (words.size in 1..7 && !line.endsWith(".") && !line.endsWith(",")) {
-            val titleCase = words.all { w ->
-                w.isEmpty() || w[0].isUpperCase() || w[0].isDigit() || !w[0].isLetter()
-            }
-            val nextBlank = idx + 1 < lines.size && lines[idx + 1].trim().isBlank()
-            if (titleCase && nextBlank) return true
-        }
-        return false
+        val nextBlank = idx + 1 < lines.size && lines[idx + 1].trim().isBlank()
+        return isLikelyHeadingLine(line, nextBlank)
     }
 
     /** Distinct documents indexed under [sessionId] — for the "is this chat RAG-augmented?" gate. */
@@ -1104,6 +1079,53 @@ internal fun headingTokens(s: String): Set<String> =
         .filter { it !in HEADING_STOPWORDS }
         .map { if (it.length > 3 && it.endsWith("s")) it.dropLast(1) else it }
         .toSet()
+
+/**
+ * True when [line] looks like a document heading. Structural ingest markers
+ * (Page / Slide / Sheet / CSV / Rows) are never headings.
+ *
+ * Numbered and short-line rules accept any Indic letter, not just Devanagari,
+ * so a Tamil/Bengali DOCX outline is detected the same way as Hindi.
+ * Latin all-caps is restricted to lines that actually contain A–Z — Indic
+ * scripts have no case, so `uppercase()` would otherwise flag every short
+ * body line as a heading.
+ */
+internal fun isLikelyHeadingLine(line: String, nextLineBlank: Boolean): Boolean {
+    if (line.length < 3 || line.length > 80) return false
+    if (line.startsWith("---") && line.endsWith("---")) return false
+
+    if (line.matches(Regex("(?i)^(chapter|section|part|appendix|annexure|article|unit)\\s+[\\w\\d.]+.*"))) {
+        return true
+    }
+
+    val hasLatinUpper = line.any { it in 'A'..'Z' }
+    if (hasLatinUpper && line == line.uppercase() && line.length <= 60) return true
+
+    val numbered = Regex("^\\d+(\\.\\d+)*[\\s.:]+(.+)$").matchEntire(line)
+    if (numbered != null) {
+        val rest = numbered.groupValues[2].trim()
+        val firstLetter = rest.firstOrNull { it.isLetter() }
+        if (firstLetter != null && rest.length >= 3 &&
+            (firstLetter.isUpperCase() || isIndicLetter(firstLetter))
+        ) {
+            return true
+        }
+    }
+
+    val words = line.split(Regex("\\s+"))
+    if (words.size in 1..7 &&
+        !line.endsWith(".") && !line.endsWith(",") &&
+        line.last() != '।' && line.last() != '॥'
+    ) {
+        val headingShaped = words.all { w ->
+            if (w.isEmpty()) return@all true
+            val c = w.firstOrNull { it.isLetter() } ?: return@all true
+            c.isUpperCase() || c.isDigit() || isIndicLetter(c)
+        }
+        if (headingShaped && nextLineBlank && line.any { it.isLetter() }) return true
+    }
+    return false
+}
 
 /** Heading lines ("- …") parsed out of the auto-extracted outline chunk. */
 internal fun parseOutlineHeadings(outlineText: String): List<String> =

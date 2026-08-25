@@ -153,4 +153,26 @@ class HeadingAnchorTest {
         assertFalse(isDevanagariMetaTrigger("संसार के नियम"))
         assertFalse(isDevanagariMetaTrigger("what is the penalty"))
     }
+
+    @Test
+    fun `tamil and bengali numbered headings are detected`() {
+        assertTrue(isLikelyHeadingLine("1. அறிமுகம்", nextLineBlank = false))
+        assertTrue(isLikelyHeadingLine("2. অধ্যায় পরিচিতি", nextLineBlank = false))
+        assertTrue(isLikelyHeadingLine("1. परिचय", nextLineBlank = false))
+        assertFalse(isLikelyHeadingLine("1. then we walked to the bus stop", nextLineBlank = false))
+    }
+
+    @Test
+    fun `indic short title followed by a blank is a heading`() {
+        assertTrue(isLikelyHeadingLine("தமிழ் அறிமுகம்", nextLineBlank = true))
+        assertFalse(isLikelyHeadingLine("தமிழ் அறிமுகம்", nextLineBlank = false))
+    }
+
+    @Test
+    fun `latin all-caps still headings and ingest markers are not`() {
+        assertTrue(isLikelyHeadingLine("INTRODUCTION", nextLineBlank = false))
+        assertFalse(isLikelyHeadingLine("--- Slide 3 ---", nextLineBlank = false))
+        assertFalse(isLikelyHeadingLine("--- Sheet: Sales ---", nextLineBlank = false))
+        assertFalse(isLikelyHeadingLine("--- Rows 1-25 ---", nextLineBlank = false))
+    }
 }

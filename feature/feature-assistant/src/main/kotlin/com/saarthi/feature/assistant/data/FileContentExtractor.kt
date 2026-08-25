@@ -78,9 +78,23 @@ class FileContentExtractor @Inject constructor(
         }
 
         val lowerName = name.lowercase()
-        val isText = TEXT_MIME_TYPES.any { mime.startsWith(it) } ||
-                name.endsWithAny(".txt", ".md", ".csv", ".json", ".xml", ".kt", ".py",
+        val isCsv = mime == "text/csv" || mime == "application/csv" ||
+            mime == "text/comma-separated-values" || lowerName.endsWith(".csv")
+        val isXlsx = mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+            lowerName.endsWith(".xlsx")
+        val isPptx = mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+            lowerName.endsWith(".pptx")
+        val isLegacyXls = !isXlsx && (
+            mime == "application/vnd.ms-excel" || lowerName.endsWith(".xls")
+        )
+        val isLegacyPpt = !isPptx && (
+            mime == "application/vnd.ms-powerpoint" || lowerName.endsWith(".ppt")
+        )
+        val isText = !isCsv && (
+            TEXT_MIME_TYPES.any { mime.startsWith(it) } ||
+                name.endsWithAny(".txt", ".md", ".json", ".xml", ".kt", ".py",
                     ".js", ".ts", ".yaml", ".yml", ".html", ".log")
+        )
         // .docx — modern Word documents are ZIP archives containing
         // word/document.xml. Native parsing keeps it dep-free (no
         // Apache POI / +5 MB APK).
@@ -105,7 +119,33 @@ class FileContentExtractor @Inject constructor(
             )
         }
 
+        if (isLegacyXls) {
+            return AttachedFile(
+                uri = uri,
+                name = name,
+                mimeType = mime,
+                sizeBytes = size,
+                extractedText = null,
+                isImage = false,
+                error = "Legacy .xls isn't supported yet. Save the file as .xlsx (Excel → Save As → Excel Workbook) and re-attach.",
+            )
+        }
+        if (isLegacyPpt) {
+            return AttachedFile(
+                uri = uri,
+                name = name,
+                mimeType = mime,
+                sizeBytes = size,
+                extractedText = null,
+                isImage = false,
+                error = "Legacy .ppt isn't supported yet. Save the file as .pptx (File → Save As → PowerPoint Presentation) and re-attach.",
+            )
+        }
+
         val extractedText = when {
+            isCsv -> extractCsvText(uri)
+            isXlsx -> extractXlsxText(uri)
+            isPptx -> extractPptxText(uri)
             isText -> readTextContent(uri, MAX_EXTRACTED_CHARS)
             mime == "application/pdf" -> extractPdfText(uri)
             isDocx -> extractDocxText(uri)
@@ -369,7 +409,7 @@ class FileContentExtractor @Inject constructor(
                                 total += take
                                 n = zis.read(buf)
                             }
-                            return@runCatching parseDocxXml(out.toString(Charsets.UTF_8.name()))
+                            return@runCatching parseDocxXml(out.toString(Charsets.UTF_8.name()), MAX_EXTRACTED_CHARS)
                         }
                         entry = zis.nextEntry
                     }
@@ -382,26 +422,60 @@ class FileContentExtractor @Inject constructor(
         }
     }
 
-    /** Convert OOXML body to plain text, preserving paragraph breaks. */
-    private fun parseDocxXml(xml: String): String {
-        val withBreaks = xml
-            .replace("</w:p>", "\n")
-            .replace("</w:tr>", "\n")
-            .replace(Regex("<w:tab[^/]*/>"), "\t")
-            .replace(Regex("<w:br[^/]*/>"), "\n")
-        val stripped = Regex("<[^>]+>").replace(withBreaks, "")
-        val decoded = stripped
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&apos;", "'")
-        val cleaned = decoded
-            .replace(Regex("[ \\t]+"), " ")
-            .replace(Regex("\\n[ \\t]+"), "\n")
-            .replace(Regex("\\n{3,}"), "\n\n")
-            .trim()
-        return if (cleaned.length > MAX_EXTRACTED_CHARS) cleaned.take(MAX_EXTRACTED_CHARS) else cleaned
+    private suspend fun extractCsvText(uri: Uri): String = withContext(Dispatchers.IO) {
+        val raw = readTextContent(uri, MAX_EXTRACTED_CHARS) ?: return@withContext "[Spreadsheet: Could not open file]"
+        val formatted = formatCsvDocument(raw, MAX_EXTRACTED_CHARS)
+        formatted.ifBlank { "[Spreadsheet: No readable cells found]" }
+    }
+
+    private suspend fun extractXlsxText(uri: Uri): String = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val xmlCap = MAX_EXTRACTED_CHARS * 6
+                val entries = readZipUtf8Entries(input, { name ->
+                    name == "xl/sharedStrings.xml" ||
+                        name == "xl/workbook.xml" ||
+                        name.startsWith("xl/worksheets/sheet") && name.endsWith(".xml")
+                }, xmlCap)
+                val shared = entries["xl/sharedStrings.xml"].orEmpty()
+                val workbook = entries["xl/workbook.xml"].orEmpty()
+                val sheets = entries.entries
+                    .filter { it.key.startsWith("xl/worksheets/sheet") }
+                    .sortedBy { key ->
+                        Regex("sheet(\\d+)").find(key.key)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    }
+                    .map { (path, xml) ->
+                        val n = Regex("sheet(\\d+)").find(path)?.groupValues?.get(1) ?: "?"
+                        "Sheet $n" to xml
+                    }
+                val text = formatXlsxDocument(shared, workbook, sheets, MAX_EXTRACTED_CHARS)
+                if (text.isBlank()) "[Spreadsheet: No readable cells found]" else text
+            } ?: "[Spreadsheet: Could not open file]"
+        }.getOrElse { e ->
+            Timber.e(e, "XLSX extract failed")
+            "[Spreadsheet: Could not read contents]"
+        }
+    }
+
+    private suspend fun extractPptxText(uri: Uri): String = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val xmlCap = MAX_EXTRACTED_CHARS * 6
+                val entries = readZipUtf8Entries(input, { name ->
+                    name.startsWith("ppt/slides/slide") && name.endsWith(".xml") && !name.contains("/_")
+                }, xmlCap)
+                val slides = entries.entries
+                    .sortedBy { (path, _) ->
+                        Regex("slide(\\d+)").find(path)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    }
+                    .map { it.value }
+                val text = formatPptxDocument(slides, MAX_EXTRACTED_CHARS)
+                if (text.isBlank()) "[Presentation: No readable text found]" else text
+            } ?: "[Presentation: Could not open file]"
+        }.getOrElse { e ->
+            Timber.e(e, "PPTX extract failed")
+            "[Presentation: Could not read contents]"
+        }
     }
 
     private suspend fun extractImageText(uri: Uri): String? = runCatching {
@@ -580,6 +654,18 @@ internal fun extractionFailureMessage(text: String): String? {
             "Could not read this Word document."
         t.startsWith("[Image: No text detected") ->
             "No text detected in this image."
+        t.startsWith("[Spreadsheet: No readable cells found]") ->
+            "No readable cells found in this spreadsheet."
+        t.startsWith("[Spreadsheet: Could not open file]") ->
+            "Could not open this spreadsheet."
+        t.startsWith("[Spreadsheet: Could not read contents]") ->
+            "Could not read this spreadsheet."
+        t.startsWith("[Presentation: No readable text found]") ->
+            "No readable text found in this presentation."
+        t.startsWith("[Presentation: Could not open file]") ->
+            "Could not open this presentation."
+        t.startsWith("[Presentation: Could not read contents]") ->
+            "Could not read this presentation."
         else -> null
     }
 }

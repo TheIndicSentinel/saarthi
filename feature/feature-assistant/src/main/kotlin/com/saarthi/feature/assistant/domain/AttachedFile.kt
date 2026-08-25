@@ -28,7 +28,9 @@ data class AttachedFile(
         isImage -> "🖼️"
         mimeType == "application/pdf" -> "📄"
         mimeType.startsWith("text/") -> "📝"
-        mimeType.contains("spreadsheet") || name.endsWith(".csv") -> "📊"
+        mimeType.contains("spreadsheet") || name.endsWith(".csv") || name.endsWith(".xlsx") || name.endsWith(".xls") -> "📊"
+        mimeType.contains("presentation") || name.endsWith(".pptx") || name.endsWith(".ppt") -> "📽"
+        mimeType.contains("word") || name.endsWith(".docx") || name.endsWith(".doc") -> "📄"
         mimeType.contains("json") -> "{ }"
         else -> "📎"
     }

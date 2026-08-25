@@ -118,5 +118,7 @@ class CitationContractTest {
         )
         assertEquals("saarthi debug", shortDocName("saarthi_debug.log.txt"))
         assertEquals("Dpdpact", shortDocName("Dpdpact.pdf"))
+        assertEquals("MSP rates", shortDocName("MSP_rates.xlsx"))
+        assertEquals("Kharif slides", shortDocName("Kharif_slides.pptx"))
     }
 }
