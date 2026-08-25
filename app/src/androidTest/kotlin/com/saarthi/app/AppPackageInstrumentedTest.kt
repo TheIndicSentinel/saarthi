@@ -82,4 +82,18 @@ class AppPackageInstrumentedTest {
             present.isEmpty(),
         )
     }
+
+    @Test
+    fun attach_demo_document_penalty_question_retrieves_a_hit() {
+        val hits = com.saarthi.core.rag.Bm25Retriever.rank(
+            listOf(com.saarthi.feature.assistant.data.DemoDocument.TEXT),
+            com.saarthi.feature.assistant.data.DemoDocument.SUGGESTED_QUESTIONS.first(),
+            3,
+        )
+        assertTrue("demo DPDP sample must BM25-match its suggested penalty question", hits.isNotEmpty())
+        assertTrue(hits.first().score > 0.0)
+        assertTrue(
+            com.saarthi.feature.assistant.data.DemoDocument.TEXT.contains("250"),
+        )
+    }
 }

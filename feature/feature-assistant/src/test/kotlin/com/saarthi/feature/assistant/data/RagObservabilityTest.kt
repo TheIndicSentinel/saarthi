@@ -73,4 +73,51 @@ class RagObservabilityTest {
         assertTrue(line.contains("nameLen=12"))
         assertFalse(line.contains("Agreement"))
     }
+
+    @Test
+    fun `raw preview collapses whitespace and caps at 200c`() {
+        val raw = "Please  ask\n\nthe question. " + "x".repeat(300)
+        val preview = ragRawModelPreview(raw)
+        assertEquals(RAG_RAW_PREVIEW_CHARS, preview.length)
+        assertFalse(preview.contains("\n"))
+        assertTrue(preview.startsWith("Please ask the question."))
+    }
+
+    @Test
+    fun `generation line omits preview and document text by default`() {
+        val line = ragGenerationLogLine(
+            rawChars = 38,
+            priorTurnsChars = 120,
+            uriLens = listOf(14, 22),
+        )
+        assertEquals(
+            "gen rawChars=38 priorTurnsChars=120 promptDocs=2 uriLens=14,22",
+            line,
+        )
+        assertFalse(line.contains("content://"))
+        assertFalse(line.contains("कृपया"))
+    }
+
+    @Test
+    fun `generation debug preview is appended without URIs`() {
+        val line = ragGenerationLogLine(
+            rawChars = 12,
+            priorTurnsChars = 0,
+            uriLens = listOf(8),
+            preview = "I am not sure",
+        )
+        assertTrue(line.contains("preview=I am not sure"))
+        assertTrue(line.contains("promptDocs=1"))
+        assertFalse(line.contains("content://"))
+    }
+
+    @Test
+    fun `FTS5 is not warranted at current session scale`() {
+        assertFalse(fts5IsWarranted(chunkCount = 40, searchMs = 12))
+        assertTrue(fts5IsWarranted(chunkCount = 501, searchMs = 12))
+        assertTrue(fts5IsWarranted(chunkCount = 40, searchMs = 51))
+        val line = ragFts5CandidateLogLine(520, 60)
+        assertEquals("fts5-candidate chunks=520 searchMs=60", line)
+        assertFalse(line.contains("content://"))
+    }
 }

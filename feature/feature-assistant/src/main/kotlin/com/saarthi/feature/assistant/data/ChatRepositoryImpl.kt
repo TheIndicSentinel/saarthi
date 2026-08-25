@@ -131,6 +131,12 @@ class ChatRepositoryImpl @Inject constructor(
     @Volatile
     private var sessionHasIndexedDocs: Boolean = false
 
+    /** Last prompt's recap size + retrieved URI lengths (G9, no document text). */
+    @Volatile
+    private var lastPromptUriLens: List<Int> = emptyList()
+    @Volatile
+    private var lastPriorTurnsChars: Int = 0
+
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
     private val currentLanguage: SupportedLanguage
@@ -358,7 +364,16 @@ class ChatRepositoryImpl @Inject constructor(
                     _tokensPerSecond.value = 0f
 
                     // Parse markers out of the raw accumulated text
-                    val parsed = ResponseMarkerParser.parse(accumulated.toString())
+                    val raw = accumulated.toString()
+                    val parsed = ResponseMarkerParser.parse(raw)
+                    logRag(
+                        ragGenerationLogLine(
+                            rawChars = raw.length,
+                            priorTurnsChars = lastPriorTurnsChars,
+                            uriLens = lastPromptUriLens,
+                            preview = if (ragLogDocNames()) ragRawModelPreview(raw) else null,
+                        ),
+                    )
 
                     // Reliability guard: a small model under device memory
                     // pressure can finish with empty / near-empty output (seen
@@ -751,6 +766,8 @@ class ChatRepositoryImpl @Inject constructor(
         val unreadableThisTurn = attachments.filter {
             isUnreadableThisTurn(it.error, it.extractedText)
         }
+        lastPromptUriLens = retrieved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().map { it.length }
+        lastPriorTurnsChars = 0
 
         // Per-chunk retrieval log — names + chunk index + BM25 score +
         // page range. Metadata only (no query/chunk text — that's user
@@ -813,6 +830,7 @@ class ChatRepositoryImpl @Inject constructor(
                 "If you are unsure, say so instead of guessing."
             val recap = if (attachments.isNotEmpty()) ""
                 else buildPriorTurnsRecap().let { r -> if (r.isNotBlank()) "\n\n$r" else "" }
+            lastPriorTurnsChars = recap.length
             val scaffolding = identity.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
@@ -870,6 +888,7 @@ class ChatRepositoryImpl @Inject constructor(
                 docsPinned -> buildPriorTurnsRecap()
                 else -> buildConversationContext(grounded = false)
             }
+            lastPriorTurnsChars = priorTurns.length
             // On doc-grounded turns swap the full ~4423c persona/tools/reminders
             // prompt for a compact instruction set. The verbose prompt alone is
             // ~1370 tokens — larger than E4B's entire 1536-token window once RAM
@@ -899,7 +918,7 @@ class ChatRepositoryImpl @Inject constructor(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = attachments.map { shortDocName(it.name) },
             )
-            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} promptMs=${promptMs()}")
+            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
             buildString {
                 // Only emit the system block if non-blank — Compact tier
                 // returns empty (see SystemPromptProvider) and leading

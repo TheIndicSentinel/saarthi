@@ -456,6 +456,10 @@ class RagDocumentRepository @Inject constructor(
                     headingChunks = headingChunkCount,
                 ),
             )
+            val chunkCount = all.count { it.chunkIndex >= 0 }
+            if (fts5IsWarranted(chunkCount, searchMs)) {
+                logRag(ragFts5CandidateLogLine(chunkCount, searchMs))
+            }
             return hits
         }
 

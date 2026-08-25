@@ -66,6 +66,50 @@ internal fun ragIndexLogLine(
 internal fun ragIndexFailLogLine(nameLen: Int, exceptionName: String): String =
     "index failed nameLen=$nameLen ex=$exceptionName"
 
+/** First ~200c of raw model text, whitespace-collapsed. Debug APKs only. */
+internal const val RAG_RAW_PREVIEW_CHARS = 200
+
+internal fun ragRawModelPreview(raw: String, maxChars: Int = RAG_RAW_PREVIEW_CHARS): String =
+    raw.replace(Regex("\\s+"), " ").trim().take(maxChars)
+
+/**
+ * Prompt-side correlators without document text: recap size and each
+ * retrieved URI's length (full content:// paths stay off the log).
+ */
+internal fun ragPromptObsLogLine(priorTurnsChars: Int, uriLens: List<Int>): String {
+    val lens = if (uriLens.isEmpty()) "-" else uriLens.joinToString(",")
+    return "priorTurnsChars=$priorTurnsChars promptDocs=${uriLens.size} uriLens=$lens"
+}
+
+/**
+ * End-of-turn line so a Downloads log can show whether the model deflected
+ * without re-running. [preview] is the collapsed raw prefix (debug only);
+ * release callers pass null.
+ */
+internal fun ragGenerationLogLine(
+    rawChars: Int,
+    priorTurnsChars: Int,
+    uriLens: List<Int>,
+    preview: String? = null,
+): String = buildString {
+    append("gen rawChars=$rawChars ")
+    append(ragPromptObsLogLine(priorTurnsChars, uriLens))
+    if (!preview.isNullOrEmpty()) {
+        append(" preview=")
+        append(preview)
+    }
+}
+
+/** R24 — FTS5 only when a session is actually slow or huge. Never schema-bump speculatively. */
+internal const val FTS5_CHUNK_THRESHOLD = 500
+internal const val FTS5_SEARCH_MS_THRESHOLD = 50L
+
+internal fun fts5IsWarranted(chunkCount: Int, searchMs: Long): Boolean =
+    chunkCount > FTS5_CHUNK_THRESHOLD || searchMs > FTS5_SEARCH_MS_THRESHOLD
+
+internal fun ragFts5CandidateLogLine(chunkCount: Int, searchMs: Long): String =
+    "fts5-candidate chunks=$chunkCount searchMs=$searchMs"
+
 internal fun logRag(line: String) {
     DebugLogger.log("RAG", line)
     Timber.d("RAG: $line")
