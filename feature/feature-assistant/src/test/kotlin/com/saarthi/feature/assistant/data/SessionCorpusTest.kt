@@ -97,4 +97,43 @@ class SessionCorpusTest {
         assertEquals(4, allocated.count { it.docUri == "docA" })
         assertEquals(4, allocated.count { it.docUri == "docB" })
     }
+
+    @Test
+    fun `interleave represents every file before any file's second excerpt`() {
+        val hits = listOf(
+            chunk("A", 9.0, index = 0), chunk("A", 8.0, index = 1), chunk("A", 7.0, index = 2),
+            chunk("B", 6.0, index = 0), chunk("B", 5.0, index = 1),
+        )
+        val out = interleaveExcerptsByDoc(hits)
+        assertEquals(setOf("A", "B"), out.take(2).map { it.docUri }.toSet())
+        // Within-doc reading order is preserved.
+        assertEquals(listOf(0, 1, 2), out.filter { it.docUri == "A" }.map { it.chunkIndex })
+    }
+
+    @Test
+    fun `interleave leaves a single-file turn untouched`() {
+        val hits = (0 until 4).map { chunk("A", 4.0 - it, index = it) }
+        assertEquals(hits, interleaveExcerptsByDoc(hits))
+    }
+
+    @Test
+    fun `interleave keeps zero-score padding trailing after real hits`() {
+        val hits = listOf(
+            chunk("A", 9.0, index = 0),
+            chunk("B", 0.0, index = 0), // off-topic padding
+            chunk("A", 8.0, index = 1),
+        )
+        val out = interleaveExcerptsByDoc(hits)
+        assertEquals("B", out.last().docUri)
+        assertEquals(0.0, out.last().score, 1e-9)
+        // Both real A hits come before the padding.
+        assertEquals(listOf(0, 1), out.filter { it.score > 0.0 }.map { it.chunkIndex })
+    }
+
+    @Test
+    fun `retry scope unions this-turn, named and recency`() {
+        assertEquals(setOf("a", "b", "c"), retryDocScope(setOf("a"), setOf("b"), "c"))
+        assertEquals(setOf("b", "c"), retryDocScope(emptySet(), setOf("b"), "c"))
+        assertEquals(setOf("c"), retryDocScope(emptySet(), emptySet(), "c"))
+    }
 }

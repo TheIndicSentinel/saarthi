@@ -734,6 +734,11 @@ class ChatRepositoryImpl @Inject constructor(
                 sessionId = sessionId,
                 query = userMessage,
                 boostDocUris = boostDocUris,
+                // Attach turn → restrict retrieval to the just-attached files
+                // (G1). Prevents the new file's overview from being answered
+                // out of the earlier documents' excerpts. Empty on ordinary
+                // turns, so the full session corpus stays searchable.
+                restrictDocUris = boostDocUris,
                 priorQuery = priorUserQuery?.takeIf {
                     attachments.isEmpty() && it != userMessage && it.length > 8
                 },
@@ -846,11 +851,22 @@ class ChatRepositoryImpl @Inject constructor(
             // room for the recent-questions recap, which lets the model treat
             // follow-ups as a continuing conversation instead of restarting.
             val docsPinned = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty()
-            // New attach this turn: drop document recap so file A's Q&A cannot
-            // answer for file B. Name/facts still come from memory injection.
-            // Same-file follow-ups (no attachments) keep full recap.
-            val priorTurns = if (attachments.isNotEmpty()) ""
-                else buildConversationContext(grounded = docsPinned)
+            // Recap policy per turn type:
+            //  • New attach this turn → NO recap, so file A's Q&A cannot
+            //    answer for file B. Name/facts still come from memory.
+            //  • Grounded follow-up (docs pinned, no attach) → user QUESTIONS
+            //    only (buildPriorTurnsRecap). Re-injecting Saarthi's own prior
+            //    long answer here was destabilising grounded follow-ups into
+            //    deflection (G3); the document excerpts already carry the
+            //    substance, so the model only needs the earlier questions for
+            //    topical continuity, not a transcript of its own replies.
+            //  • Plain chat (no docs) → full transcript recap, which needs the
+            //    prior answers to resolve "explain more"-style follow-ups.
+            val priorTurns = when {
+                attachments.isNotEmpty() -> ""
+                docsPinned -> buildPriorTurnsRecap()
+                else -> buildConversationContext(grounded = false)
+            }
             // On doc-grounded turns swap the full ~4423c persona/tools/reminders
             // prompt for a compact instruction set. The verbose prompt alone is
             // ~1370 tokens — larger than E4B's entire 1536-token window once RAM
@@ -972,8 +988,14 @@ class ChatRepositoryImpl @Inject constructor(
         // header-only fragment that wastes tokens.
         if (charBudget < 200) return ""
 
+        // Relevance gate (G2/G5): a confident lexical hit on a real content
+        // chunk means the excerpts are on-topic, so the rules answer from
+        // them without the "ignore the document" escape hatch. Heading
+        // anchors (score 50) and boosted this-turn hits also clear the bar.
+        val strongMatch = retrieved.any { it.chunkIndex >= 0 && it.score >= STRONG_RAG_MATCH_SCORE }
         val rulesHeader = ragCitationRules(
             compact = tier == SystemPromptProvider.ModelTier.COMPACT,
+            strongMatch = strongMatch,
         )
 
         val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {
@@ -991,8 +1013,12 @@ class ChatRepositoryImpl @Inject constructor(
 
         var remaining = charBudget - rulesHeader.length - unreadableBlock.length -
             manifestLine.length - newFilesLine.length
+        // Fair multi-file ordering (R7/G7): interleave positive hits across
+        // documents so a second file is not starved by a high-scoring first
+        // file when the budget runs out. No-op for single-document turns.
+        val ordered = interleaveExcerptsByDoc(retrieved)
         val chunksBlock = buildString {
-            for ((i, chunk) in retrieved.withIndex()) {
+            for ((i, chunk) in ordered.withIndex()) {
                 val text = chunk.text.trim()
                 val header = formatExcerptHeader(i + 1, chunk.docName, text, chunk.chunkIndex)
                 val total = header.length + text.length + 2  // +2 for trailing "\n\n"

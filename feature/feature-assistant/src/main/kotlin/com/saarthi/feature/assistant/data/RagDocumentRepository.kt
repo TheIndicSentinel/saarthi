@@ -288,6 +288,21 @@ class RagDocumentRepository @Inject constructor(
          */
         boostDocUris: Set<String> = emptySet(),
         /**
+         * Hard filter (NOT a boost). When non-empty, retrieval is restricted
+         * to ONLY these document URIs — every other indexed file in the
+         * session is excluded from the corpus for this turn. Used on an
+         * attach turn so a brand-new file's "give an overview" question is
+         * answered from that file alone, never mixed with excerpts of the
+         * documents attached earlier in the chat (the multi-file attach
+         * deflection, G1). Empty on ordinary turns → full session corpus,
+         * exactly as before. If the restricted set has no indexed chunks
+         * (e.g. the attached file was an unreadable image), the search
+         * returns empty and the caller surfaces it via the unreadable note
+         * — we deliberately do NOT fall back to the full corpus, which would
+         * reintroduce the cross-file mixing this filter exists to prevent.
+         */
+        restrictDocUris: Set<String> = emptySet(),
+        /**
          * The last completed user question from the conversation history.
          * Used for two purposes:
          *  1. Follow-up expansion: when [query] starts with a continuation
@@ -308,7 +323,16 @@ class RagDocumentRepository @Inject constructor(
         expandSmallFiles: Boolean = true,
     ): List<RetrievedChunk> {
         val t0 = System.nanoTime()
-        val all = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
+        val sessionRows = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
+        // Attach-turn scoping (G1): restrict the corpus to the just-attached
+        // files so their overview/summary is not answered from a mix of the
+        // earlier documents' excerpts. No fall-back to the full corpus on an
+        // empty result — see restrictDocUris kdoc.
+        val all = if (restrictDocUris.isNotEmpty()) {
+            sessionRows.filter { it.docUri in restrictDocUris }
+        } else {
+            sessionRows
+        }
         val sessionDocCount = all.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size
         if (all.isEmpty()) {
             val searchMs = (System.nanoTime() - t0) / 1_000_000
@@ -468,9 +492,16 @@ class RagDocumentRepository @Inject constructor(
         // evidence region. Half-score marks these as context rather than
         // exact matches. Skipped when we already expanded above (isFollowUp).
         if (bm25Hits.isEmpty() && !priorQuery.isNullOrBlank() && !isFollowUp) {
-            val retryRanked = rankContentChunks(contentChunks, sessionId, priorQuery.take(150), rankK)
+            // R6: scope the prior-query retry to the docs relevant to this turn
+            // (this-turn attaches, filename-named docs, most-recent file) rather
+            // than the whole session, so a prior question can't surface an
+            // unrelated older document. Falls back to the full pool if scoping
+            // somehow empties it.
+            val scope = retryDocScope(boostDocUris, route.namedDocUris, recencyUri)
+            val retryPool = contentChunks.filter { it.docUri in scope }.ifEmpty { contentChunks }
+            val retryRanked = rankContentChunks(retryPool, sessionId, priorQuery.take(150), rankK)
             for (scored in retryRanked) {
-                val entity = contentChunks[scored.index]
+                val entity = retryPool[scored.index]
                 if (usedIds.add(entity.id)) {
                     bm25Hits.add(entity.toRetrieved(scored.score * 0.5))
                 }
@@ -742,6 +773,23 @@ private fun RagChunkEntity.toRetrieved(score: Double) = RetrievedChunk(
     docUri = docUri,
 )
 
+/**
+ * R6 — documents a prior-query retry should be scoped to: this-turn attaches,
+ * filename-named docs, and the most-recently-indexed file. Restricting the
+ * zero-hit retry to these instead of the whole session stops a prior question
+ * from dredging up an unrelated older document's chunks. recencyUri anchors it
+ * so the set is never empty when the session has any document.
+ */
+internal fun retryDocScope(
+    boostDocUris: Set<String>,
+    namedDocUris: Set<String>,
+    recencyUri: String,
+): Set<String> = buildSet {
+    addAll(boostDocUris)
+    addAll(namedDocUris)
+    if (recencyUri.isNotEmpty()) add(recencyUri)
+}
+
 /** This-turn attach — score bump only; other session files stay in the pool. */
 internal const val THIS_TURN_BOOST = 1.35
 
@@ -810,6 +858,52 @@ internal fun allocatePerDocSlots(
         picked.add(h)
     }
     return picked.sortedByDescending { it.score }
+}
+
+/**
+ * R7 / G7 — fair multi-file excerpt ordering for the prompt block.
+ *
+ * When a turn's retrieved set spans two or more documents, emit them
+ * round-robin so EVERY file with a real (positive-score) hit contributes one
+ * excerpt before any file contributes a second. This fixes the "only the first
+ * attached file was answered" behaviour: previously the block emitted in pure
+ * score order and a single high-scoring file could consume the whole char
+ * budget, starving the others.
+ *
+ * Rules that keep this safe:
+ *  • A single-document turn is returned unchanged (round-robin of one queue is
+ *    a no-op) — the common follow-up / whole-small-file path is untouched.
+ *  • Only positive-score hits are interleaved. Zero-score structural padding
+ *    keeps its original order and trails at the end, so an off-topic file's
+ *    filler can never displace another file's genuine hit.
+ *  • Order WITHIN each document is preserved (already score / document order),
+ *    so whole-small-file expansions stay in reading order.
+ *
+ * The overall char budget is still enforced by the caller; this only changes
+ * the ORDER chunks are offered in, never which chunks exist.
+ */
+internal fun interleaveExcerptsByDoc(retrieved: List<RetrievedChunk>): List<RetrievedChunk> {
+    if (retrieved.isEmpty()) return retrieved
+    if (retrieved.map { it.docUri }.distinct().size <= 1) return retrieved
+
+    val positive = retrieved.filter { it.score > 0.0 }
+    val rest = retrieved.filter { it.score <= 0.0 }
+    if (positive.isEmpty()) return retrieved
+
+    val byDoc = LinkedHashMap<String, ArrayDeque<RetrievedChunk>>()
+    for (c in positive) byDoc.getOrPut(c.docUri) { ArrayDeque() }.add(c)
+
+    val interleaved = ArrayList<RetrievedChunk>(positive.size)
+    var added = true
+    while (added) {
+        added = false
+        for (queue in byDoc.values) {
+            val next = queue.removeFirstOrNull() ?: continue
+            interleaved.add(next)
+            added = true
+        }
+    }
+    return interleaved + rest
 }
 
 internal enum class ZeroScorePick { CONTIGUOUS, SPACED, TAIL }

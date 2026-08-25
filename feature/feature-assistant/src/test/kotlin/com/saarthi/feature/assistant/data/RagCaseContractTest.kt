@@ -96,6 +96,14 @@ class RagCaseContractTest {
     }
 
     @Test
+    fun `single-doc compare query does not set equal slots`() {
+        // G4: one document in the session → no equal-slot compare split even
+        // if the query carries a compare token.
+        val route = routeQuery("compare both", listOf(nda))
+        assertFalse(route.equalSlots)
+    }
+
+    @Test
     fun `unreadable B is an error and must not be cited`() {
         val msg = extractionFailureMessage("[PDF: Scan had little readable text]")
         assertNotNull(msg)

@@ -35,6 +35,15 @@ class QueryRoutingTest {
     }
 
     @Test
+    fun `compare token on a single doc does not set equal slots`() {
+        // G4: a stray "vs"/"compare" token must not force compare mode when
+        // there is only one document in the session to compare against.
+        val single = listOf("content://only" to "Godrej.pdf")
+        assertTrue(isCompareQuery("Godrej vs the rules"))
+        assertFalse(routeQuery("Godrej vs the rules", single).equalSlots)
+    }
+
+    @Test
     fun `statement matches the bank file not the log`() {
         val named = matchNamedDocs("what is in the statement", docs)
         assertEquals(setOf("content://stmt"), named)
@@ -72,5 +81,26 @@ class QueryRoutingTest {
         val expanded = expandRetrievalQuery("what is the term", listOf("NDA Agreement.pdf"))
         assertTrue(expanded.contains("agreement"))
         assertFalse(expanded.contains("penalty"))
+    }
+
+    @Test
+    fun `non-devanagari indic query still gets english hints`() {
+        // Tamil: "ஒப்பந்தத்தில் அபராதம் என்ன" (what is the penalty in the agreement)
+        val q = "ஒப்பந்தத்தில் அபராதம் என்ன"
+        assertTrue(queryHasIndicScript(q))
+        assertFalse(queryHasDevanagari(q))
+        assertTrue(expandRetrievalQuery(q, listOf("NDA Agreement.pdf")).contains("penalty"))
+    }
+
+    @Test
+    fun `hinglish romanized term bridges to english and devanagari`() {
+        val expanded = expandRetrievalQuery("is agreement me jurmana kitna hai", listOf("x.pdf"))
+        assertTrue(expanded.contains("penalty"))
+        assertTrue(expanded.contains("जुर्माना"))
+    }
+
+    @Test
+    fun `plain english query is not indic`() {
+        assertFalse(queryHasIndicScript("what is the penalty"))
     }
 }
