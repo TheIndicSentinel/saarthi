@@ -75,6 +75,123 @@ class Bm25RetrieverTest {
         assertEquals(1, ranked.first().index)
     }
 
+    // ── Indic query-side stemming (C2 fix) ──────────────────────────────────────
+    // Each case: corpus has the base noun form only; the query uses an
+    // oblique/plural/case-marked form of the SAME word. Before the fix these
+    // scored zero overlap (indicStem() returned non-ASCII tokens unchanged).
+    // See Bm25Retriever.indicStem's kdoc for scope — full R5 validation corpus
+    // lives in IndicStemValidationTest.
+
+    @Test
+    fun `tokeniser keeps a word and its combining vowel signs together, not split into fragments`() {
+        // Regression guard for a pre-existing tokenizer bug found while
+        // building the Indic stemming tests below: an EXACT query/corpus
+        // match on the plain word "मूल्य" ("price") — no suffix stripping
+        // involved at all — scored zero overlap before \p{M} was added to
+        // the tokeniser's character class, because every dependent vowel
+        // sign in the word was treated as a word-boundary delimiter,
+        // fragmenting it into single characters the length>=2 filter then
+        // dropped. See tokenise()'s kdoc for the full explanation.
+        val ranked = Bm25Retriever.rank(listOf("मूल्य के बारे में जानकारी"), "मूल्य", topK = 1)
+        assertTrue("Exact Devanagari token match must not be empty", ranked.isNotEmpty())
+    }
+
+    // Single-word queries, deliberately — isolates the stemming behavior
+    // being tested from any coincidental second shared word, matching the
+    // style of `plural query matches a singular corpus term` above. Corpus
+    // chunk 1 contains ONLY the base word as anything query-overlapping,
+    // so a pass here can only be explained by indicStem's suffix strip.
+
+    @Test
+    fun `Hindi oblique-plural query matches singular corpus term`() {
+        val corpus = listOf(
+            "आज मौसम अच्छा है।",                       // 0 — weather, no overlap
+            "किसान अपने खेत में काम कर रहा है।",          // 1 — farmer, base form only
+        )
+        val ranked = Bm25Retriever.rank(corpus, "किसानों", topK = 2)
+        assertEquals("किसानों (oblique plural) must match किसान", 1, ranked.first().index)
+    }
+
+    @Test
+    fun `Hindi feminine plural oblique query matches base scheme noun`() {
+        val corpus = listOf(
+            "मौसम की जानकारी।",
+            "PM-Kisan योजना के लिए आवेदन करें।",
+        )
+        val ranked = Bm25Retriever.rank(corpus, "योजनाओं", topK = 2)
+        assertEquals("योजनाओं must match योजना", 1, ranked.first().index)
+    }
+
+    @Test
+    fun `Bengali dative-plural query matches base corpus term`() {
+        val corpus = listOf(
+            "আজ আবহাওয়া ভালো।",                        // 0 — weather, no overlap
+            "কৃষক তার জমিতে কাজ করছে।",                  // 1 — farmer, base form only
+        )
+        val ranked = Bm25Retriever.rank(corpus, "কৃষকদের", topK = 2)
+        assertEquals("কৃষকদের must match কৃষক", 1, ranked.first().index)
+    }
+
+    @Test
+    fun `Gujarati locative-plural query matches base corpus term`() {
+        val corpus = listOf(
+            "આજે હવામાન સારું છે.",                      // 0 — weather, no overlap
+            "ખેતર માં કપાસ વાવ્યો છે.",                   // 1 — field, base form only
+        )
+        val ranked = Bm25Retriever.rank(corpus, "ખેતરોમાં", topK = 2)
+        assertEquals("ખેતરોમાં must match ખેતર", 1, ranked.first().index)
+    }
+
+    @Test
+    fun `Punjabi oblique-plural query matches base corpus term`() {
+        val corpus = listOf(
+            "ਅੱਜ ਮੌਸਮ ਚੰਗਾ ਹੈ।",                          // 0 — weather, no overlap
+            "ਕਿਸਾਨ ਆਪਣੇ ਖੇਤ ਵਿੱਚ ਕੰਮ ਕਰ ਰਿਹਾ ਹੈ।",         // 1 — farmer, base form only
+        )
+        val ranked = Bm25Retriever.rank(corpus, "ਕਿਸਾਨਾਂ", topK = 2)
+        assertEquals("ਕਿਸਾਨਾਂ must match ਕਿਸਾਨ", 1, ranked.first().index)
+    }
+
+    @Test
+    fun `Odia plural-genitive query matches base corpus term`() {
+        val corpus = listOf(
+            "ଆଜି ପାଣିପାଗ ଭଲ ଅଛି।",                       // 0 — weather, no overlap
+            "କୃଷକ ନିଜ ଜମିରେ କାମ କରୁଛନ୍ତି।",               // 1 — farmer, base form only
+        )
+        val ranked = Bm25Retriever.rank(corpus, "କୃଷକମାନଙ୍କ", topK = 2)
+        assertEquals("କୃଷକମାନଙ୍କ must match କୃଷକ", 1, ranked.first().index)
+    }
+
+    @Test
+    fun `Tamil dative-case query matches base corpus term`() {
+        val corpus = listOf(
+            "இன்று வானிலை நன்றாக உள்ளது.",                // 0 — weather, no overlap
+            "விவசாயி தன் நிலத்தில் வேலை செய்கிறார்.",       // 1 — farmer, base form only
+        )
+        val ranked = Bm25Retriever.rank(corpus, "விவசாயிக்கு", topK = 2)
+        assertEquals("விவசாயிக்கு must match விவசாயி", 1, ranked.first().index)
+    }
+
+    @Test
+    fun `Telugu dative-case query matches base corpus term`() {
+        val corpus = listOf(
+            "ఈ రోజు వాతావరణం బాగుంది.",                   // 0 — weather, no overlap
+            "రైతు తన పొలంలో పని చేస్తున్నాడు.",             // 1 — farmer, base form only
+        )
+        val ranked = Bm25Retriever.rank(corpus, "రైతుకి", topK = 2)
+        assertEquals("రైతుకి must match రైతు", 1, ranked.first().index)
+    }
+
+    @Test
+    fun `Kannada dative-case query matches base corpus term`() {
+        val corpus = listOf(
+            "ಇಂದು ಹವಾಮಾನ ಚೆನ್ನಾಗಿದೆ.",                    // 0 — weather, no overlap
+            "ರೈತ ತನ್ನ ಹೊಲದಲ್ಲಿ ಕೆಲಸ ಮಾಡುತ್ತಿದ್ದಾನೆ.",       // 1 — farmer, base form only
+        )
+        val ranked = Bm25Retriever.rank(corpus, "ರೈತಗೆ", topK = 2)
+        assertEquals("ರೈತಗೆ must match ರೈತ", 1, ranked.first().index)
+    }
+
     // ── Multilingual ───────────────────────────────────────────────────────────
 
     @Test
@@ -135,16 +252,19 @@ class Bm25RetrieverTest {
     // ── Performance ────────────────────────────────────────────────────────────
 
     @Test
-    fun `second rank of the same corpus matches the first (token cache is a memo, not a new scorer)`() {
+    fun `rankTokenised matches rank on the same corpus`() {
         val corpus = listOf(
             "Consent must be free, informed and specific before processing data.",
             "A data breach can attract a penalty of up to 250 crore rupees.",
-            "किसान MSP wheat mandi",
         )
-        val first = Bm25Retriever.rank(corpus, "penalties for a breach", topK = 3)
-        val second = Bm25Retriever.rank(corpus, "penalties for a breach", topK = 3)
-        assertEquals(first.map { it.index }, second.map { it.index })
-        assertEquals(first.map { it.score }, second.map { it.score })
+        val query = "penalty for breach"
+        val direct = Bm25Retriever.rank(corpus, query, topK = 2)
+        val tokenised = corpus.map(Bm25Retriever::tokeniseDocument)
+        val cached = Bm25Retriever.rankTokenised(tokenised, query, topK = 2)
+        assertEquals(direct.map { it.index }, cached.map { it.index })
+        direct.zip(cached).forEach { (a, b) ->
+            assertEquals(a.score, b.score, 0.0001)
+        }
     }
 
     @Test
@@ -158,9 +278,7 @@ class Bm25RetrieverTest {
         val ranked = Bm25Retriever.rank(corpus, "penalty for a data breach", topK = 8)
         val elapsedMs = (System.nanoTime() - start) / 1_000_000
         assertTrue("Must return topK", ranked.size <= 8 && ranked.isNotEmpty())
-        // Generous ceiling for CI and shared-CPU noise; real corpora are 100x smaller.
-        // 2000ms was tight enough to flake on a loaded laptop (~2.5s) without a
-        // ranking bug — keep this as a hang/regression tripwire, not a bench.
-        assertTrue("Ranking 5000 chunks took ${elapsedMs}ms (budget 8000ms)", elapsedMs < 8000)
+        // Generous ceiling for CI noise; real corpora are 100x smaller.
+        assertTrue("Ranking 5000 chunks took ${elapsedMs}ms (budget 2000ms)", elapsedMs < 2000)
     }
 }

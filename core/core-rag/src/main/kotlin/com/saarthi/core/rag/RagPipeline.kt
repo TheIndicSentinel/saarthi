@@ -2,7 +2,6 @@ package com.saarthi.core.rag
 
 import com.saarthi.core.rag.embedding.EmbeddingModel
 import com.saarthi.core.rag.vectorstore.VectorStore
-import javax.inject.Inject
 
 /**
  * @deprecated Not used in production. The live RAG path is
@@ -10,14 +9,15 @@ import javax.inject.Inject
  * BM25 retrieval, sentence/word-boundary aware chunking, structural sampling,
  * neighbor expansion, and Room-persisted chunks. This class predates that
  * implementation and is retained only because [RagPipelineTest] documents the
- * vector-store + embedding-model contract. Do not add new call sites here.
+ * vector-store + embedding-model contract. Not Hilt-wired — construct manually
+ * in tests only. Do not add new call sites here.
  */
 @Deprecated(
     message = "Production RAG is in RagDocumentRepository (BM25 + Room). " +
               "This class is dead code kept for its unit-test contract.",
     level = DeprecationLevel.WARNING,
 )
-class RagPipeline @Inject constructor(
+class RagPipeline(
     private val embeddingModel: EmbeddingModel,
     private val vectorStore: VectorStore,
 ) {

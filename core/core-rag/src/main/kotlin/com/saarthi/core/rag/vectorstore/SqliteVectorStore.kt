@@ -2,18 +2,17 @@ package com.saarthi.core.rag.vectorstore
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import javax.inject.Inject
 import kotlin.math.sqrt
 
 // SQLite-based cosine-similarity vector store.
 // For production, load the sqlite-vss extension (.so) from assets.
-class SqliteVectorStore @Inject constructor(
-    @ApplicationContext private val context: Context,
+// Not Hilt-wired — legacy reference implementation only.
+class SqliteVectorStore(
+    private val context: Context,
 ) : VectorStore {
 
     private val db: SQLiteDatabase by lazy {

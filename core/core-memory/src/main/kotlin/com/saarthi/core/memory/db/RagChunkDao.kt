@@ -17,9 +17,10 @@ interface RagChunkDao {
     suspend fun getBySession(sessionId: String): List<RagChunkEntity>
 
     /**
-     * Every chunk across multiple sessions — used when a persona-packaged
-     * knowledge bundle ([PackId] sentinel sessions like `global_pack_kisan`)
-     * needs to be merged into the user's current chat corpus before BM25.
+     * Every chunk across multiple sessions — optional hook for callers that
+     * need a multi-session corpus in one query. Not used on the main assistant
+     * and are retrieved only from the dedicated pack chat surface, not merged
+     * into the user's chat session before BM25.
      * The composite (sessionId, docUri) index covers the WHERE clause.
      */
     @Query("SELECT * FROM rag_chunks WHERE sessionId IN (:sessionIds) ORDER BY sessionId ASC, id ASC")

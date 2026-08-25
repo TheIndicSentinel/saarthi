@@ -36,6 +36,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,9 +86,24 @@ fun PackChatScreen(
         )
     }
 
-    // Keep the latest message in view as tokens stream in.
-    LaunchedEffect(messages.size, messages.lastOrNull()?.content) {
+    // Stick-to-bottom while streaming — only follow when the user hasn't scrolled up.
+    val isAtBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
+            last.index >= info.totalItemsCount - 1
+        }
+    }
+
+    LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
+
+    val streamingContent = messages.lastOrNull()?.takeIf { it.isStreaming }?.content
+    LaunchedEffect(streamingContent) {
+        if (streamingContent != null && isAtBottom && messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
     }
 
     Column(

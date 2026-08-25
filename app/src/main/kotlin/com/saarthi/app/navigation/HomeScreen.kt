@@ -74,10 +74,9 @@ fun HomeScreen(
     onChangeLanguage: (SupportedLanguage) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     /**
-     * Kisan tile does more than navigate — it also pre-selects the
-     * Kisan persona so the curated farming pack auto-merges into RAG
-     * the moment the chat opens. Handled in [SaarthiNavHost] where the
-     * persona ViewModel is in scope.
+     * Opens the Kisan pack landing page ([Route.KisanPack]). Pack-grounded
+     * RAG runs only in [Route.PackChat] — not in the main assistant chat.
+     * Wired in [SaarthiNavHost] where navigation is in scope.
      */
     onKisanTap: () -> Unit = { onNavigate(Route.KisanSaathi) },
     /** Called when a home-screen suggestion chip is tapped. Opens the chat with the chip text pre-filled. */
@@ -682,14 +681,14 @@ private fun LanguagePickerDialog(
 // ── Placeholder destinations (Kisan / Knowledge / Field) ─────────────────────
 
 // ── Pack landing placeholders ─────────────────────────────────────────
-// Kisan is LIVE — its tile opens AssistantScreen with the Kisan persona
-// pre-selected (see SaarthiNavHost.onKisanTap). The legacy
-// `KisanSaathiPlaceholder` route is kept as a defensive fallback for
-// any deep-link / cached intent that still points there.
+// Kisan is LIVE — its tile opens the Kisan pack landing page (see
+// SaarthiNavHost.onKisanTap). Grounded pack answers come from PackChatScreen,
+// not the main assistant. The legacy `KisanSaathiPlaceholder` route is kept
+// as a defensive fallback for any deep-link / cached intent that still points there.
 @Composable
 fun KisanSaathiPlaceholder(onBack: () -> Unit) = PackPlaceholder(
     name = "Kisan Saathi",
-    sub = "Tap the Kisan tile on Home to start a farming chat — the curated pack auto-loads.",
+    sub = "Tap the Kisan tile on Home to browse the pack, then open Kisan chat for grounded answers.",
     accent = SaarthiColors.Jade,
     onBack = onBack,
 )

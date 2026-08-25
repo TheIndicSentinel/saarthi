@@ -36,9 +36,8 @@ sealed class Route(val path: String) {
     data object Onboarding   : Route("onboarding")
     data object Home         : Route("home")
     data object Assistant    : Route("assistant")
-    // Specialist-pack routes. Kisan tile bypasses its placeholder route
-    // and opens AssistantScreen directly with the Kisan persona pre-
-    // selected (so the curated farming pack auto-merges into RAG).
+    // Specialist-pack routes. Kisan tile opens the pack landing page;
+    // grounded pack RAG runs in PackChatScreen, not the main assistant.
     // The placeholder route below stays as a defensive fallback for
     // anything that still navigates to it (e.g. deep links).
     data object KisanSaathi  : Route("kisan_saathi")
@@ -179,8 +178,8 @@ fun SaarthiNavHost(
                 // for what is, by design, a paid pack — users can see
                 // the curated topics, the Govt-data sources, and the
                 // suggested questions BEFORE deciding to send a message.
-                // The "Open Kisan chat" CTA on that page is what does
-                // the persona-select + chat navigation.
+                // The "Open Kisan chat" CTA on that page navigates to
+                // PackChatScreen (self-contained pack RAG, not main assistant).
                 onKisanTap = {
                     navController.navigate(Route.KisanPack.path)
                 },

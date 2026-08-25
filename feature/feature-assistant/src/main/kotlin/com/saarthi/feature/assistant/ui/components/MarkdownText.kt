@@ -27,9 +27,9 @@ import androidx.compose.ui.unit.sp
  *  - `1. numbered` (kept as-is)
  *  - Triple-backtick fenced code blocks (treated as inline code styling)
  *
- * Pure Compose (no AndroidView/Markwon) — fast enough that re-rendering on every
- * streamed token is cheap. Mid-stream half-tokens like `**bo` simply don't get
- * styled until the closing `**` arrives, which gracefully degrades to plain text.
+ * Pure Compose (no AndroidView/Markwon). Used for completed assistant turns only;
+ * [MessageBubble] shows plain [Text] while `isStreaming` so low-end devices are
+ * not re-parsing markdown on every coalesced UI flush (~12/sec max).
  */
 @Composable
 fun MarkdownText(

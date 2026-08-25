@@ -5,6 +5,7 @@ import com.saarthi.core.memory.db.RagChunkDao
 import com.saarthi.core.memory.db.RagChunkEntity
 import com.saarthi.core.rag.Bm25Retriever
 import com.saarthi.feature.assistant.domain.AttachedFile
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,6 +30,9 @@ import javax.inject.Singleton
 class RagDocumentRepository @Inject constructor(
     private val ragChunkDao: RagChunkDao,
 ) {
+    /** R1 — per-chunk token cache; invalidated when a session's chunks are deleted. */
+    private val chunkTokenCache = ConcurrentHashMap<Long, List<String>>()
+    private val cachedChunkIdsBySession = ConcurrentHashMap<String, MutableSet<Long>>()
 
     companion object {
         // 600 chars ≈ 150 tokens. Small enough that 4-6 chunks fit
@@ -44,7 +48,7 @@ class RagDocumentRepository @Inject constructor(
         // that the LARGE-tier ragBudget is ~2650c (was ~1050c) — the
         // larger chunk space can hold 4-5 full chunks, so retrieving 8
         // gives BM25 more candidates and structural sampling a wider net.
-        private const val DEFAULT_TOP_K = 8
+        const val DEFAULT_TOP_K = 8
 
         // Heading-anchored retrieval. When a query strongly matches a
         // detected outline heading (e.g. "what are special provisions"
@@ -339,14 +343,18 @@ class RagDocumentRepository @Inject constructor(
                 topK,
                 minSlots,
             )
-            if (!expandSmallFiles) return allocated
-            val fullByUri = all
-                .filter { it.chunkIndex >= 0 }
+            val contentEntities = all.filter { it.chunkIndex >= 0 }
+            val excerpted = coherentExcerptForLowRelevance(allocated, contentEntities)
+            if (!expandSmallFiles) return excerpted
+            val fullByUri = contentEntities
                 .groupBy { it.docUri }
                 .mapValues { (_, chunks) ->
                     chunks.sortedBy { it.chunkIndex }.map { it.toRetrieved(1.0) }
                 }
-            return expandWholeSmallFiles(allocated, fullByUri)
+            return coherentExcerptForLowRelevance(
+                expandWholeSmallFiles(excerpted, fullByUri),
+                contentEntities,
+            )
         }
 
         // Follow-up detection: if the query STARTS with a continuation
@@ -407,7 +415,7 @@ class RagDocumentRepository @Inject constructor(
 
         val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
         val rankK = (topK * uniqueDocs).coerceAtMost(contentChunks.size).coerceAtLeast(topK)
-        val ranked = Bm25Retriever.rank(contentChunks.map { it.text }, effectiveQuery, rankK)
+        val ranked = rankContentChunks(contentChunks, sessionId, effectiveQuery, rankK)
 
         // Neighbor expansion: for the top BM25 hits, also include the
         // *next* chunk in the same document. Answers often straddle a
@@ -460,7 +468,7 @@ class RagDocumentRepository @Inject constructor(
         // evidence region. Half-score marks these as context rather than
         // exact matches. Skipped when we already expanded above (isFollowUp).
         if (bm25Hits.isEmpty() && !priorQuery.isNullOrBlank() && !isFollowUp) {
-            val retryRanked = Bm25Retriever.rank(contentChunks.map { it.text }, priorQuery.take(150), rankK)
+            val retryRanked = rankContentChunks(contentChunks, sessionId, priorQuery.take(150), rankK)
             for (scored in retryRanked) {
                 val entity = contentChunks[scored.index]
                 if (usedIds.add(entity.id)) {
@@ -647,12 +655,39 @@ class RagDocumentRepository @Inject constructor(
 
     /** Wipe all indexed chunks for [sessionId]. Called on session-delete and clear-history. */
     suspend fun deleteForSession(sessionId: String) {
+        invalidateTokenCache(sessionId)
         ragChunkDao.deleteBySession(sessionId)
     }
 
     /** Drop one file's chunks. No-op if it was never indexed. */
     suspend fun deleteByDoc(sessionId: String, docUri: String) {
+        invalidateTokenCache(sessionId)
         ragChunkDao.deleteByDoc(sessionId, docUri)
+    }
+
+    // ── BM25 token cache (R1) ───────────────────────────────────────────────
+
+    private fun rankContentChunks(
+        chunks: List<RagChunkEntity>,
+        sessionId: String,
+        query: String,
+        topK: Int,
+    ): List<Bm25Retriever.Scored> {
+        if (chunks.isEmpty()) return emptyList()
+        val tokenised = chunks.map { cachedTokensFor(sessionId, it) }
+        return Bm25Retriever.rankTokenised(tokenised, query, topK)
+    }
+
+    private fun cachedTokensFor(sessionId: String, chunk: RagChunkEntity): List<String> =
+        chunkTokenCache.getOrPut(chunk.id) {
+            cachedChunkIdsBySession
+                .computeIfAbsent(sessionId) { ConcurrentHashMap.newKeySet() }
+                .add(chunk.id)
+            Bm25Retriever.tokeniseDocument(chunk.text)
+        }
+
+    private fun invalidateTokenCache(sessionId: String) {
+        cachedChunkIdsBySession.remove(sessionId)?.forEach { chunkTokenCache.remove(it) }
     }
 
     // ── Internal ─────────────────────────────────────────────────────────
@@ -886,6 +921,31 @@ internal fun headingAnchorWindow(
     if (nextStart <= 0) return null
     val from = (nextStart - maxChunks).coerceAtLeast(0)
     return HeadingWindow(from, nextStart)
+}
+
+/**
+ * R6 — When every body chunk scores 0 (no lexical hit), replace scattered
+ * padding with the first chunks in document order so overview-style queries
+ * get a coherent opening excerpt.
+ */
+internal fun coherentExcerptForLowRelevance(
+    retrieved: List<RetrievedChunk>,
+    documentContent: List<RagChunkEntity> = emptyList(),
+): List<RetrievedChunk> {
+    if (retrieved.size <= 4) return retrieved
+    val body = retrieved.filter { it.chunkIndex >= 0 }
+    val anyRelevant = body.any { it.score > 0.0 }
+    if (anyRelevant) return retrieved
+    val outline = retrieved.filter { it.chunkIndex < 0 }
+    val firstInOrder = if (documentContent.isNotEmpty()) {
+        documentContent
+            .sortedBy { it.chunkIndex }
+            .take(4)
+            .map { e -> RetrievedChunk(e.text, e.docName, 0.0, e.chunkIndex) }
+    } else {
+        body.sortedBy { it.chunkIndex }.take(4)
+    }
+    return outline + firstInOrder
 }
 
 // ── Heading-anchored retrieval (pure, testable) ─────────────────────────────────

@@ -20,6 +20,7 @@ import com.saarthi.feature.assistant.data.ResponseMarkerParser
 import com.saarthi.feature.assistant.data.RetrievedChunk
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.MessageRole
+import com.saarthi.feature.assistant.streaming.StreamingUiCoalescer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.NonCancellable
@@ -232,7 +233,7 @@ class PackChatViewModel @Inject constructor(
                     ragRepository.search(
                         packSessionId,
                         searchQuery,
-                        topK = 5,
+                        topK = RagDocumentRepository.DEFAULT_TOP_K,
                         expandSmallFiles = false,
                     )
                 }
@@ -269,6 +270,7 @@ class PackChatViewModel @Inject constructor(
 
             InferenceService.startGenerating(context)
             val acc = StringBuilder()
+            val streamCoalescer = StreamingUiCoalescer()
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
                     if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
@@ -282,7 +284,10 @@ class PackChatViewModel @Inject constructor(
                     // Strip control tags LIVE so [GENERAL] / [SAARTHI_*] never
                     // flash in the bubble while streaming (streaming=true also
                     // holds back a partial marker still mid-stream).
-                    updateStreaming(streamingId, ResponseMarkerParser.stripForDisplay(acc.toString(), streaming = true))
+                    val visible = ResponseMarkerParser.stripForDisplay(acc.toString(), streaming = true)
+                    streamCoalescer.onToken(visible) { flushed ->
+                        updateStreaming(streamingId, flushed)
+                    }
                 }
                 .onCompletion { throwable ->
                     if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)

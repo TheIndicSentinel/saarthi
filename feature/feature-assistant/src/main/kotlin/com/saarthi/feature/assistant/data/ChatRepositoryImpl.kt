@@ -21,6 +21,7 @@ import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.ChatRepository
 import com.saarthi.feature.assistant.domain.ChatSession
 import com.saarthi.feature.assistant.domain.MessageRole
+import com.saarthi.feature.assistant.streaming.StreamingUiCoalescer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -303,6 +304,8 @@ class ChatRepositoryImpl @Inject constructor(
         val startTime = System.currentTimeMillis()
         var tokenCount = 0
         val accumulated = StringBuilder()
+        // Coalesce stream→UI updates (~80ms) so _history is not copied on every token.
+        val streamCoalescer = StreamingUiCoalescer()
 
             inferenceEngine.generateStream(prompt, PackType.BASE)
                 .catch { e ->
@@ -335,11 +338,13 @@ class ChatRepositoryImpl @Inject constructor(
                     // streaming=true holds back any in-progress identity leak
                     // ("I am Gem…") until it can be rewritten in full.
                     val visible = ResponseMarkerParser.stripForDisplay(accumulated.toString(), streaming = true)
-                    _history.update { history ->
-                        history.map { msg ->
-                            if (msg.id == streamingId)
-                                msg.copy(content = visible, tokenCount = tokenCount)
-                            else msg
+                    streamCoalescer.onToken(visible) { flushed ->
+                        _history.update { history ->
+                            history.map { msg ->
+                                if (msg.id == streamingId)
+                                    msg.copy(content = flushed, tokenCount = tokenCount)
+                                else msg
+                            }
                         }
                     }
                     emit(token)

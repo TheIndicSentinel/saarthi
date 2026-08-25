@@ -5,11 +5,13 @@ package com.saarthi.core.i18n
  * Personality Pal modes (Kisan, Money Mentor, Knowledge Expert, etc.).
  *
  * Each pack's chunks live under a RESERVED global session id inside
- * the regular `rag_chunks` Room table — when the active persona matches
- * a pack, `RagDocumentRepository.search` merges the pack's chunks into
- * the current session's corpus before BM25 ranking. This reuses the
- * full RAG plumbing (chunking, BM25 scoring, neighbor expansion,
- * structural sampling, page-aware citations) without a schema change.
+ * the regular `rag_chunks` Room table (e.g. `global_pack_kisan`). They
+ * are retrieved only from the dedicated pack chat surface
+ * ([com.saarthi.feature.assistant.viewmodel.PackChatViewModel]) — the
+ * main assistant chat intentionally does NOT merge pack chunks into its
+ * BM25 corpus (see [com.saarthi.feature.assistant.data.ConversationContextAssembler]).
+ * Reusing the same Room table avoids a schema change while keeping pack
+ * Q&A modular and separate from user-attached documents.
  *
  * The sessionId namespace is `global_pack_*` so it can't collide with
  * user chat sessionIds (which are UUIDs or the literal "default").
@@ -43,8 +45,8 @@ enum class PackId(
         displayName = "Kisan Knowledge",
         minimumModelTier = MinimumTier.STANDARD,
     );
-    // MONEY / KNOWLEDGE / FIELD_EXPERT slots can be added later — the
-    // RAG search merge already handles "any number of pack sessions".
+    // MONEY / KNOWLEDGE / FIELD_EXPERT slots can be added later — each
+    // gets its own `global_pack_*` session and dedicated pack chat surface.
 
     /**
      * Decoupled from [com.saarthi.core.inference.prompt.SystemPromptProvider.ModelTier]

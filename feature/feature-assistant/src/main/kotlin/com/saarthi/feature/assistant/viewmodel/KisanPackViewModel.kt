@@ -66,7 +66,7 @@ class KisanPackViewModel @Inject constructor(
     data class UiState(
         val loading: Boolean = true,
         val pack: KisanPackInstaller.InstalledPack? = null,
-        /** False on Gemma 1B (COMPACT) — pack chunks won't merge into RAG. */
+        /** False on Gemma 1B (COMPACT) — pack chat is browse-only; grounded pack RAG needs a larger model. */
         val packSupportedOnCurrentModel: Boolean = true,
         /** False on LOW/MINIMAL devices that can never run a bigger model. */
         val canRunBetterModel: Boolean = true,

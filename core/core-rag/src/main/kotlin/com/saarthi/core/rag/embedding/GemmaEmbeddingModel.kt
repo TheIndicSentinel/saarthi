@@ -1,15 +1,13 @@
 package com.saarthi.core.rag.embedding
 
 import com.saarthi.core.inference.engine.InferenceEngine
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.sqrt
 
 // Uses base Gemma to produce token-averaged embeddings.
 // Replace with a dedicated MiniLM ONNX model for production quality.
-@Singleton
-class GemmaEmbeddingModel @Inject constructor(
-    private val engine: InferenceEngine,
+// Not Hilt-wired — legacy reference implementation only.
+class GemmaEmbeddingModel(
+    @Suppress("unused") private val engine: InferenceEngine,
 ) : EmbeddingModel {
 
     override val dimensions: Int = 384

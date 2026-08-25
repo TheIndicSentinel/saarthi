@@ -156,6 +156,14 @@ fun MessageBubble(
                             style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 22.sp),
                             color = SaarthiColors.TextPrimary,
                         )
+                    } else if (message.isStreaming) {
+                        // Plain text while tokens arrive — full markdown parse (O(n)
+                        // per update) runs once when streaming finishes.
+                        Text(
+                            text = message.content,
+                            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 22.sp),
+                            color = SaarthiColors.TextPrimary,
+                        )
                     } else {
                         // Assistant output is markdown — render bold/italic/lists/code.
                         MarkdownText(

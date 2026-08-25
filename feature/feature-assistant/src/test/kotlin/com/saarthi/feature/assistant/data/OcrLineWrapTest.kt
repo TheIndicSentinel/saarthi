@@ -61,4 +61,24 @@ class OcrLineWrapTest {
         assertFalse(isOcrLineWrap("", "something"))
         assertFalse(isOcrLineWrap("something", ""))
     }
+
+    @Test
+    fun `devanagari mid-sentence wrap joins`() {
+        assertTrue(isOcrLineWrap("डेटा उल्लंघन पर", "जुर्माना दो सौ पचास"))
+    }
+
+    @Test
+    fun `danda ends sentence and does not join`() {
+        assertFalse(isOcrLineWrap("सहमति कभी भी वापस ली जा सकती है।", "अगला वाक्य यहाँ"))
+    }
+
+    @Test
+    fun `bengali mid-sentence wrap joins`() {
+        assertTrue(isOcrLineWrap("ডেটা লঙ্ঘনের জন্য", "জরিমানা দুই শত"))
+    }
+
+    @Test
+    fun `tamil sentence end does not join next line`() {
+        assertFalse(isOcrLineWrap("ஒப்புதலை எப்போது வேண்டுமானாலும் திரும்பப் பெறலாம்.", "அடுத்த வாக்கியம்"))
+    }
 }

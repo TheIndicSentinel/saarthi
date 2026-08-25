@@ -9,7 +9,10 @@ import android.provider.OpenableColumns
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.saarthi.core.i18n.LanguageManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -23,6 +26,8 @@ import javax.inject.Singleton
 @Singleton
 class FileContentExtractor @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val languageManager: LanguageManager,
+    private val regionalTesseractOcr: RegionalTesseractOcr,
 ) {
     companion object {
         // Hard caps surfaced to the user. Bigger files are rejected with
@@ -42,6 +47,14 @@ class FileContentExtractor @Inject constructor(
             "text/xml", "application/json", "application/xml",
             "application/javascript", "text/x-python", "text/x-kotlin",
         )
+    }
+
+    /** Reused across pages in one extract call — ML Kit clients are not free to construct. */
+    private val latinOcr by lazy {
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
+    private val devanagariOcr by lazy {
+        TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
     }
 
     suspend fun extract(uri: Uri): AttachedFile {
@@ -206,7 +219,6 @@ class FileContentExtractor @Inject constructor(
                     val pagesToScan = minOf(renderer.pageCount, MAX_PDF_PAGES)
                     if (pagesToScan == 0) throw IllegalStateException("PDF has no pages")
 
-                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                     val extracted = StringBuilder()
 
                     // Cap rendered bitmap to ~16 MP / ~64 MB so a high-DPI
@@ -244,17 +256,11 @@ class FileContentExtractor @Inject constructor(
                                     android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
                                 )
 
-                                val result = suspendCancellableCoroutine<com.google.mlkit.vision.text.Text> { cont ->
-                                    val image = InputImage.fromBitmap(bitmap, 0)
-                                    recognizer.process(image)
-                                        .addOnSuccessListener { cont.resume(it) }
-                                        .addOnFailureListener { cont.resumeWithException(it) }
-                                }
-
-                                if (result.text.isNotBlank()) {
+                                val pageText = ocrBitmap(bitmap)
+                                if (pageText.isNotBlank()) {
                                     if (extracted.isNotEmpty()) extracted.appendLine()
                                     extracted.appendLine("--- Page ${pageIndex + 1} ---")
-                                    extracted.append(cleanOcrPageText(result.text))
+                                    extracted.append(cleanOcrPageText(pageText))
                                 }
                             } finally {
                                 // Free native bitmap memory immediately — at
@@ -393,21 +399,76 @@ class FileContentExtractor @Inject constructor(
         return if (cleaned.length > MAX_EXTRACTED_CHARS) cleaned.take(MAX_EXTRACTED_CHARS) else cleaned
     }
 
-    private suspend fun extractImageText(uri: Uri): String = runCatching {
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private suspend fun extractImageText(uri: Uri): String? = runCatching {
         val image = InputImage.fromFilePath(context, uri)
-        val result = suspendCancellableCoroutine { cont ->
-            recognizer.process(image)
-                .addOnSuccessListener { cont.resume(it) }
-                .addOnFailureListener { cont.resumeWithException(it) }
+        val bitmap = decodeBitmapForOcr(uri)
+        val text = try {
+            ocrWithMlKitAndRegionalFallback(image, bitmap)
+        } finally {
+            bitmap?.recycle()
         }
-        if (result.text.isNotBlank()) {
-            "[Extracted from image]:\n${result.text.take(WHOLE_FILE_CHARS)}"
+        if (text.isNotBlank()) {
+            "[Extracted from image]:\n${text.take(WHOLE_FILE_CHARS)}"
         } else {
             "[Image: No text detected in this image]"
         }
     }.onFailure { Timber.e(it, "OCR failed") }.getOrNull()
-        ?: "[Image: No text detected in this image]"
+
+    /** Decode a display-sized bitmap for Tesseract (ML Kit uses [InputImage] directly). */
+    private fun decodeBitmapForOcr(uri: Uri): Bitmap? = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+            val maxDim = 4096
+            val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / maxDim)
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            context.contentResolver.openInputStream(uri)?.use { s ->
+                android.graphics.BitmapFactory.decodeStream(s, null, opts)
+            }
+        }
+    }.onFailure { Timber.w(it, "Could not decode image for regional OCR") }.getOrNull()
+
+    /**
+     * R4 + R4 follow-up — ML Kit (Latin + Devanagari) plus Tesseract for regional
+     * scripts when ML Kit output is too weak for the user's language.
+     */
+    private suspend fun ocrBitmap(bitmap: Bitmap): String {
+        val image = InputImage.fromBitmap(bitmap, 0)
+        return ocrWithMlKitAndRegionalFallback(image, bitmap)
+    }
+
+    private suspend fun ocrWithMlKitAndRegionalFallback(image: InputImage, bitmap: Bitmap?): String {
+        val latin = runCatching { recognizeText(latinOcr, image) }
+            .getOrElse { e ->
+                Timber.w(e, "Latin OCR failed on page")
+                ""
+            }
+        val devanagari = runCatching { recognizeText(devanagariOcr, image) }
+            .getOrElse { e ->
+                Timber.w(e, "Devanagari OCR failed on page")
+                ""
+            }
+        val mlKit = IndicOcrMerger.merge(latin, devanagari)
+
+        val userLang = languageManager.selectedLanguage.value
+        if (bitmap == null || !IndicOcrPolicy.needsRegionalTesseractPass(mlKit, userLang)) {
+            return mlKit
+        }
+
+        val tessLangs = IndicOcrPolicy.tesseractLanguages(userLang)
+        val regional = regionalTesseractOcr.recognize(bitmap, tessLangs)
+        if (regional.isBlank()) return mlKit
+        return IndicOcrMerger.mergeAll(listOf(mlKit, regional))
+    }
+
+    private suspend fun recognizeText(
+        recognizer: TextRecognizer,
+        image: InputImage,
+    ): String = suspendCancellableCoroutine { cont ->
+        recognizer.process(image)
+            .addOnSuccessListener { cont.resume(it.text) }
+            .addOnFailureListener { cont.resumeWithException(it) }
+    }
 
     private fun String.endsWithAny(vararg suffixes: String) =
         suffixes.any { this.lowercase().endsWith(it) }
@@ -479,12 +540,18 @@ private val OCR_LIST_ITEM = Regex("^([-*•]\\s+|\\d+[.)]\\s+).*")
  */
 internal fun isOcrLineWrap(current: String, next: String): Boolean {
     if (current.isEmpty() || next.isEmpty()) return false
-    // Sentence/clause end, or a hyphen we won't space-join → keep the break.
-    if (current.last() in ".!?:;-»\")]") return false
+    // Sentence/clause end — Latin and Indic (danda) punctuation.
+    if (current.last() in ".!?:;-»\")]" || current.last() == '।' || current.last() == '॥') return false
     val first = next.first()
-    // Next must look like a continuation: a lowercase word or a bare number.
-    if (!(first.isLowerCase() || first.isDigit())) return false
-    // A bulleted / numbered list item on the next line is an intentional break.
-    if (next.matches(OCR_LIST_ITEM)) return false
-    return true
+    // Latin continuation: lowercase word or number.
+    if (first.isLowerCase() || first.isDigit()) {
+        if (next.matches(OCR_LIST_ITEM)) return false
+        return true
+    }
+    // Indic continuation: no case distinction — mid-sentence wraps start with another letter.
+    if (isIndicLetter(first)) {
+        if (next.matches(OCR_LIST_ITEM)) return false
+        return true
+    }
+    return false
 }

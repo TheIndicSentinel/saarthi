@@ -12,6 +12,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://jitpack.io") }
     }
     // gradle/libs.versions.toml is auto-discovered by Gradle 8+ as the "libs" catalog.
     // Explicitly calling from() here would invoke it twice and fail.
