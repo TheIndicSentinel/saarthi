@@ -1,6 +1,7 @@
 package com.saarthi.feature.assistant.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -10,7 +11,9 @@ class ExtractionFailureTest {
 
     @Test
     fun `scan little-text sentinel is an error not content`() {
-        assertNotNull(extractionFailureMessage("[PDF: Scan had little readable text]"))
+        val msg = extractionFailureMessage("[PDF: Scan had little readable text]")
+        assertNotNull(msg)
+        assertFalse(msg!!.contains("Latin-only"))
     }
 
     @Test

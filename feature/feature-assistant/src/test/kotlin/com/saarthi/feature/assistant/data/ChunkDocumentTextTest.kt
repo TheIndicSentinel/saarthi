@@ -95,4 +95,18 @@ class ChunkDocumentTextTest {
         assertEquals(1, chunks.size)
         assertEquals(giant, chunks.first())
     }
+
+    @Test
+    fun `contiguous statement rows stay together and are not split mid-row`() {
+        val rows = (1..12).joinToString("\n") { i ->
+            "%02d/03/2026  UPI merchant $i  1,%03d.00".format(i, i * 10)
+        }
+        val chunks = chunkDocumentText(rows, SIZE, OVERLAP)
+        assertTrue(chunks.isNotEmpty())
+        val datedInFirst = chunks.first().lines().count { DATE_TOKEN.containsMatchIn(it) }
+        assertTrue("First chunk should keep several statement rows together ($datedInFirst)", datedInFirst >= 2)
+        val end = findTableBlockEnd(rows, 0, SIZE)
+        assertTrue("Table block should snap to a row end", end > 0)
+        assertTrue(end == rows.length || rows.getOrNull(end - 1) == '\n')
+    }
 }

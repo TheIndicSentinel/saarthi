@@ -174,11 +174,16 @@ class FileContentExtractor @Inject constructor(
      */
     private suspend fun extractPdfText(uri: Uri): String = withContext(Dispatchers.Default) {
         val textLayer = extractPdfTextLayer(uri)
-        if (pdfExtractLooksUsable(textLayer)) {
+        val garbled = looksGarbledTextLayer(textLayer)
+        if (pdfExtractLooksUsable(textLayer) && !garbled) {
             Timber.d("PDF text-layer: extracted ${textLayer!!.length} chars (no OCR needed)")
             return@withContext textLayer.take(MAX_EXTRACTED_CHARS)
         }
-        Timber.d("PDF text-layer empty/thin (${textLayer?.length ?: 0} chars) — falling back to OCR")
+        if (garbled) {
+            Timber.d("PDF text-layer garbled (${textLayer?.length ?: 0} chars) — forcing OCR")
+        } else {
+            Timber.d("PDF text-layer empty/thin (${textLayer?.length ?: 0} chars) — falling back to OCR")
+        }
         val ocr = extractPdfViaOcr(uri)
         if (pdfExtractLooksUsable(ocr)) return@withContext ocr.take(MAX_EXTRACTED_CHARS)
         if (ocr.startsWith("[PDF:")) return@withContext ocr
@@ -455,7 +460,7 @@ class FileContentExtractor @Inject constructor(
             return mlKit
         }
 
-        val tessLangs = IndicOcrPolicy.tesseractLanguages(userLang)
+        val tessLangs = IndicOcrPolicy.tesseractLanguages(userLang, mlKit)
         val regional = regionalTesseractOcr.recognize(bitmap, tessLangs)
         if (regional.isBlank()) return mlKit
         return IndicOcrMerger.mergeAll(listOf(mlKit, regional))
@@ -478,12 +483,16 @@ class FileContentExtractor @Inject constructor(
  * True when extracted PDF text is substantial enough to skip OCR (or to
  * keep OCR output). A 24–35 character junk layer ("Page 1", a date) must
  * not count — that was the Account Statement miss. Number-heavy statements
- * still pass via digit count or overall length.
+ * still pass via digit count, statement shape, or overall length.
  */
 internal fun pdfExtractLooksUsable(text: String?): Boolean {
     val t = text?.trim().orEmpty()
     if (t.isEmpty()) return false
     val body = PAGE_MARKER_STRIP.replace(t, " ")
+    // A short bank/statement page can be all numbers with only a few letters,
+    // so the letter/length thresholds below would wrongly drop it. Accept it
+    // when it has the shape of a statement (several dated money rows).
+    if (looksLikeStatement(body)) return true
     val letters = body.count { it.isLetter() }
     val digits = body.count { it.isDigit() }
     if (letters >= 80) return true
@@ -493,6 +502,58 @@ internal fun pdfExtractLooksUsable(text: String?): Boolean {
 }
 
 private val PAGE_MARKER_STRIP = Regex("---\\s*Page\\s+\\d+\\s*---", RegexOption.IGNORE_CASE)
+
+/** DD/MM/YYYY, D-M-YY, DD.MM.YYYY, or ISO YYYY-MM-DD — the dates a statement row carries. */
+internal val DATE_TOKEN = Regex("""\b(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}|\d{4}-\d{2}-\d{2})\b""")
+
+/**
+ * Money amounts: Indian rupee prefixes (₹ / Rs / INR), grouped thousands
+ * including lakh-style (1,20,000), or a plain decimal (1200.50).
+ */
+internal val AMOUNT_TOKEN = Regex(
+    """(?:₹|Rs\.?|INR)\s*\d[\d,]*(?:\.\d{1,2})?""" +
+        """|\b\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?\b""" +
+        """|\b\d+\.\d{2}\b""",
+)
+
+/**
+ * True when [body] has the shape of a bank/account statement: at least two
+ * dates AND three money amounts. Indian statements are often number-heavy
+ * with few prose letters, so the generic letter/length gates in
+ * [pdfExtractLooksUsable] can drop a perfectly real short statement page.
+ * The two-date + three-amount floor keeps a lone "Page 1 / 01/08/2026 / HDFC"
+ * junk layer from qualifying.
+ */
+internal fun looksLikeStatement(body: String): Boolean {
+    if (DATE_TOKEN.findAll(body).count() < 2) return false
+    return AMOUNT_TOKEN.findAll(body).count() >= 3
+}
+
+/**
+ * True when a PDF's embedded text layer decoded to garbage and must be
+ * ignored in favour of OCR. Many Indian bank statements ship a CID / no-
+ * ToUnicode font whose "text layer" is present (so it passes length gates)
+ * but decodes to replacement chars, control bytes, private-use code points,
+ * or one unbroken run with no spaces. Forcing OCR on those recovers the
+ * real content instead of indexing mojibake.
+ *
+ * Deliberately conservative: a clean digital PDF (English or any Indic
+ * script) has ~0% of these signals, so a good text layer is never discarded
+ * (OCR would be strictly worse for digital Indic text).
+ */
+internal fun looksGarbledTextLayer(text: String?): Boolean {
+    val body = PAGE_MARKER_STRIP.replace(text?.trim().orEmpty(), " ")
+    if (body.length < 40) return false
+    val n = body.length.toDouble()
+    if (body.count { it == '\uFFFD' } / n > 0.10) return true
+    val control = body.count { it.code < 0x20 && it != '\n' && it != '\r' && it != '\t' }
+    if (control / n > 0.05) return true
+    if (body.count { it.code in 0xE000..0xF8FF } / n > 0.10) return true
+    // A long letter-bearing run with zero whitespace is a kerning-collapsed
+    // / scrambled layer — real text of this length always has word breaks.
+    if (body.length >= 200 && body.any { it.isLetter() } && body.none { it.isWhitespace() }) return true
+    return false
+}
 
 /**
  * Extractor failure strings used to be stored as [AttachedFile.extractedText]
@@ -506,7 +567,7 @@ internal fun extractionFailureMessage(text: String): String? {
         t.startsWith("[PDF: No readable text found]") ->
             "No readable text found in this PDF."
         t.startsWith("[PDF: Scan had little readable text]") ->
-            "This PDF looks like a scan. On-device OCR is Latin-only and found little text. Try a digital (selectable-text) PDF if the pages are in Hindi or another Indic script."
+            "This PDF looks like a scan. On-device OCR found little readable text. Try a digital (selectable-text) PDF."
         t.startsWith("[PDF: Could not open file descriptor]") ->
             "Could not open this PDF."
         t.startsWith("[PDF: Could not read file contents]") ->
@@ -530,6 +591,21 @@ internal fun isUnreadableThisTurn(error: String?, extractedText: String?): Boole
 private val OCR_LIST_ITEM = Regex("^([-*•]\\s+|\\d+[.)]\\s+).*")
 
 /**
+ * True when a line reads like a statement/table record rather than flowing
+ * prose: it carries a date, or it is a multi-column row whose last column is
+ * a money amount ("Grocery store    1,200.00"). Used to stop OCR line-unwrap
+ * from gluing consecutive records together. Conservative — prose lines that
+ * merely start with a number ("250 crore rupees.") are not matched.
+ */
+internal fun looksLikeTableRow(line: String): Boolean {
+    val t = line.trim()
+    if (t.isEmpty()) return false
+    if (DATE_TOKEN.containsMatchIn(t)) return true
+    val tokens = t.split(Regex("\\s+"))
+    return tokens.size >= 3 && AMOUNT_TOKEN.containsMatchIn(tokens.last())
+}
+
+/**
  * True when an OCR'd line [current] is a WRAPPED continuation that should be
  * joined to [next] with a space (reconstructing a paragraph), rather than left
  * as a separate line. Conservative — only joins when [current] clearly does not
@@ -540,6 +616,11 @@ private val OCR_LIST_ITEM = Regex("^([-*•]\\s+|\\d+[.)]\\s+).*")
  */
 internal fun isOcrLineWrap(current: String, next: String): Boolean {
     if (current.isEmpty() || next.isEmpty()) return false
+    // Statement / table rows must stay on their own line: a row ending in an
+    // amount followed by the next dated row would otherwise be joined (the row
+    // starts with a digit → "continuation"), collapsing two records into one
+    // and wrecking BM25 + readability. Keep each record separate.
+    if (looksLikeTableRow(current) || looksLikeTableRow(next)) return false
     // Sentence/clause end — Latin and Indic (danda) punctuation.
     if (current.last() in ".!?:;-»\")]" || current.last() == '।' || current.last() == '॥') return false
     val first = next.first()

@@ -33,4 +33,30 @@ class PdfExtractUsableTest {
         assertFalse(pdfExtractLooksUsable(null))
         assertFalse(pdfExtractLooksUsable("   "))
     }
+
+    @Test
+    fun `indian rupee statement rows are usable`() {
+        val body = """
+            12/03/2026  UPI grocery  ₹1,250.00
+            13/03/2026  NEFT salary  Rs 34,000.00
+            14/03/2026  ATM cash     INR 2,000.00
+        """.trimIndent()
+        assertTrue(looksLikeStatement(body))
+        assertTrue(pdfExtractLooksUsable(body))
+    }
+
+    @Test
+    fun `one date and a bank name is still junk`() {
+        assertFalse(looksLikeStatement("Page 1\n01/08/2026\nHDFC"))
+    }
+
+    @Test
+    fun `garbled CID text layer is detected`() {
+        val junk = "\uFFFD".repeat(20) + "xxxx".repeat(10)
+        assertTrue(looksGarbledTextLayer(junk))
+        val clean = "This nondisclosure agreement is entered into by the parties. ".repeat(4)
+        assertFalse(looksGarbledTextLayer(clean))
+        val hindi = "यह एक वैध हिंदी दस्तावेज़ है जिसमें पर्याप्त पाठ है। ".repeat(4)
+        assertFalse(looksGarbledTextLayer(hindi))
+    }
 }

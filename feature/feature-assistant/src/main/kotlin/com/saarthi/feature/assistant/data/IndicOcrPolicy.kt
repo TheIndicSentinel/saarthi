@@ -37,18 +37,49 @@ internal object IndicOcrPolicy {
         return true
     }
 
-    private fun hasAnyRegionalScript(text: String, minChars: Int): Boolean =
-        listOf(
-            SupportedLanguage.BENGALI,
-            SupportedLanguage.TAMIL,
-            SupportedLanguage.TELUGU,
-            SupportedLanguage.KANNADA,
-            SupportedLanguage.GUJARATI,
-            SupportedLanguage.PUNJABI,
-            SupportedLanguage.ODIA,
-        ).any { countScriptLetters(text, it) >= minChars }
-
     /** Language pack(s) for the Tesseract pass on this page. */
-    fun tesseractLanguages(userLang: SupportedLanguage): String =
-        userLang.tesseractCode() ?: COMBINED_REGIONAL_LANGS
+    fun tesseractLanguages(userLang: SupportedLanguage, documentHint: String = ""): String {
+        val detected = detectRegionalTesseractCodes(documentHint)
+        if (detected.isNotEmpty()) return detected.joinToString("+")
+        // Script unknown (empty / Latin-only ML Kit). Prefer the UI language
+        // first, then the rest of the combined pack, so a Tamil-UI user
+        // attaching a Bengali scan still gets Bengali — and a Tamil scan still
+        // tries Tamil first.
+        return preferUserThenCombined(userLang.tesseractCode())
+    }
+
+    /**
+     * Tesseract codes for regional scripts actually present in [text].
+     * Empty when ML Kit recovered no regional script (or only Devanagari,
+     * which Tesseract is not used for).
+     */
+    fun detectRegionalTesseractCodes(text: String): List<String> {
+        if (text.isBlank()) return emptyList()
+        val out = ArrayList<String>(4)
+        for (lang in REGIONAL_LANGUAGES) {
+            if (countScriptLetters(text, lang) >= MIN_SCRIPT_CHARS) {
+                lang.tesseractCode()?.let { out.add(it) }
+            }
+        }
+        return out
+    }
+
+    private fun preferUserThenCombined(preferred: String?): String {
+        if (preferred == null) return COMBINED_REGIONAL_LANGS
+        val rest = COMBINED_REGIONAL_LANGS.split('+').filter { it != preferred }
+        return (listOf(preferred) + rest).joinToString("+")
+    }
+
+    private val REGIONAL_LANGUAGES = listOf(
+        SupportedLanguage.BENGALI,
+        SupportedLanguage.TAMIL,
+        SupportedLanguage.TELUGU,
+        SupportedLanguage.KANNADA,
+        SupportedLanguage.GUJARATI,
+        SupportedLanguage.PUNJABI,
+        SupportedLanguage.ODIA,
+    )
+
+    private fun hasAnyRegionalScript(text: String, minChars: Int): Boolean =
+        REGIONAL_LANGUAGES.any { countScriptLetters(text, it) >= minChars }
 }

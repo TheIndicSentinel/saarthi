@@ -81,4 +81,15 @@ class OcrLineWrapTest {
     fun `tamil sentence end does not join next line`() {
         assertFalse(isOcrLineWrap("ஒப்புதலை எப்போது வேண்டுமானாலும் திரும்பப் பெறலாம்.", "அடுத்த வாக்கியம்"))
     }
+
+    @Test
+    fun `statement table rows stay on their own line`() {
+        assertTrue(looksLikeTableRow("12/03/2026  Grocery store  1,200.00"))
+        assertFalse(
+            isOcrLineWrap(
+                "12/03/2026  Grocery store  1,200.00",
+                "13/03/2026  Salary credit   34,000.00",
+            ),
+        )
+    }
 }

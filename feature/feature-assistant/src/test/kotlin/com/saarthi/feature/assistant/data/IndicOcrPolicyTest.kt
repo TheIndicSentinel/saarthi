@@ -52,16 +52,30 @@ class IndicOcrPolicyTest {
     }
 
     @Test
-    fun `tesseractLanguages uses user language code when regional`() {
-        assertEquals("ben", IndicOcrPolicy.tesseractLanguages(SupportedLanguage.BENGALI))
-        assertEquals("tam", IndicOcrPolicy.tesseractLanguages(SupportedLanguage.TAMIL))
+    fun `tesseractLanguages uses detected document script not UI language`() {
+        val bengali = "আবেদনপত্র নাম তারিখ দিন"
+        assertEquals("ben", IndicOcrPolicy.tesseractLanguages(SupportedLanguage.TAMIL, bengali))
+        assertEquals("ben", IndicOcrPolicy.tesseractLanguages(SupportedLanguage.ENGLISH, bengali))
+        assertEquals(
+            listOf("ben"),
+            IndicOcrPolicy.detectRegionalTesseractCodes(bengali),
+        )
     }
 
     @Test
-    fun `tesseractLanguages falls back to combined pack for English UI`() {
+    fun `unknown script prefers UI language then the combined pack`() {
+        val unknown = IndicOcrPolicy.tesseractLanguages(SupportedLanguage.TAMIL, "Application Form")
+        assertTrue(unknown.startsWith("tam+"))
+        assertTrue(unknown.contains("ben"))
         assertEquals(
             IndicOcrPolicy.COMBINED_REGIONAL_LANGS,
-            IndicOcrPolicy.tesseractLanguages(SupportedLanguage.ENGLISH),
+            IndicOcrPolicy.tesseractLanguages(SupportedLanguage.ENGLISH, ""),
         )
+    }
+
+    @Test
+    fun `truncated tessdata is not plausible`() {
+        assertFalse(isPlausibleTessdataSize("tam.traineddata", 50_000L))
+        assertTrue(isPlausibleTessdataSize("tam.traineddata", 2_600_000L))
     }
 }

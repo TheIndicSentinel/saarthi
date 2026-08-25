@@ -1172,9 +1172,17 @@ internal fun chunkDocumentText(text: String, chunkSize: Int, overlap: Int): List
         val end = when {
             hardEnd >= cleaned.length -> hardEnd
             else -> {
-                val sentenceEnd = findSentenceBoundary(cleaned, start + chunkSize / 2, hardEnd)
-                if (sentenceEnd > 0) sentenceEnd
-                else findWordBoundary(cleaned, hardEnd)
+                // Statement / table rows: snap to a complete row and keep a
+                // contiguous run together instead of cutting mid-row or mixing
+                // the last row into the following prose sentence.
+                val tableEnd = findTableBlockEnd(cleaned, start, hardEnd)
+                if (tableEnd > start) {
+                    tableEnd
+                } else {
+                    val sentenceEnd = findSentenceBoundary(cleaned, start + chunkSize / 2, hardEnd)
+                    if (sentenceEnd > 0) sentenceEnd
+                    else findWordBoundary(cleaned, hardEnd)
+                }
             }
         }
 
@@ -1186,6 +1194,44 @@ internal fun chunkDocumentText(text: String, chunkSize: Int, overlap: Int): List
         start = skipToWordStart(cleaned, overlapAnchor)
     }
     return chunks
+}
+
+/**
+ * If [start] sits in a contiguous run of table/statement rows, return the
+ * exclusive end of the last complete row that fits in [hardEnd]. Never cuts
+ * mid-row. Returns 0 when the window is not a table block so prose chunking
+ * is unchanged.
+ */
+internal fun findTableBlockEnd(text: String, start: Int, hardEnd: Int): Int {
+    if (start >= hardEnd || start >= text.length) return 0
+    var lineStart = start
+    while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--
+
+    val rowEnds = ArrayList<Int>(8)
+    var i = lineStart
+    while (i < text.length) {
+        val nl = text.indexOf('\n', i)
+        val lineEnd = if (nl < 0) text.length else nl + 1
+        val line = text.substring(i, minOf(lineEnd, text.length)).trim()
+        if (line.isEmpty()) {
+            if (rowEnds.size >= 2) break
+            if (rowEnds.isEmpty()) {
+                i = lineEnd
+                continue
+            }
+            break
+        }
+        if (!looksLikeTableRow(line)) {
+            if (rowEnds.size >= 2) break
+            return 0
+        }
+        rowEnds.add(lineEnd)
+        i = lineEnd
+        if (lineEnd >= hardEnd) break
+    }
+    if (rowEnds.size < 2) return 0
+    val fitted = rowEnds.lastOrNull { it <= hardEnd } ?: rowEnds.first()
+    return fitted.coerceAtMost(text.length)
 }
 
 /** Latest position in `[lo, hi)` that ends a sentence (returns char AFTER the terminator), or 0 if none. */
