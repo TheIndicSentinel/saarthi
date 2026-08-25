@@ -708,6 +708,9 @@ class ChatRepositoryImpl @Inject constructor(
         } else {
             emptySet()
         }
+        val attachmentUris = attachments.map { it.uri.toString() }
+        val ragQuery = attachTurnQuery(userMessage, attachments.isNotEmpty())
+        val restrictDocUris = restrictUrisForAttachTurn(ragQuery, attachmentUris)
         val sessionDocs = runCatching { ragRepository.listSessionDocuments(sessionId) }
             .onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
@@ -732,16 +735,16 @@ class ChatRepositoryImpl @Inject constructor(
         val retrieved = runCatching {
             ragRepository.search(
                 sessionId = sessionId,
-                query = userMessage,
+                query = ragQuery,
                 boostDocUris = boostDocUris,
                 // Attach turn → restrict retrieval to the just-attached files
-                // (G1). Prevents the new file's overview from being answered
-                // out of the earlier documents' excerpts. Empty on ordinary
-                // turns, so the full session corpus stays searchable.
-                restrictDocUris = boostDocUris,
+                // (G1). Blank/overview quick-action further scopes to the newest
+                // file so a repeated overview tap cannot mix earlier docs (G8).
+                restrictDocUris = restrictDocUris,
                 priorQuery = priorUserQuery?.takeIf {
-                    attachments.isEmpty() && it != userMessage && it.length > 8
+                    attachments.isEmpty() && it != ragQuery && it.length > 8
                 },
+                wholeFileChars = wholeFileCharBudget(maxPromptChars),
             )
         }.onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
@@ -755,7 +758,7 @@ class ChatRepositoryImpl @Inject constructor(
         // without having to rerun the session: the log shows exactly which
         // chunks the model was given on each turn.
         if (retrieved.isNotEmpty()) {
-            logRag("retrieved ${retrieved.size} chunk(s) queryLen=${userMessage.length}")
+            logRag("retrieved ${retrieved.size} chunk(s) queryLen=${ragQuery.length}")
             retrieved.forEachIndexed { i, c ->
                 logRag(
                     ragChunkLogLine(

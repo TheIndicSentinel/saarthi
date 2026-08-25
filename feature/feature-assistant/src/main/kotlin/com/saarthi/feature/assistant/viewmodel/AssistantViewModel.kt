@@ -17,6 +17,8 @@ import com.saarthi.core.inference.FunnelEvent
 import com.saarthi.core.inference.FunnelTracker
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.feature.assistant.data.FileContentExtractor
+import com.saarthi.feature.assistant.data.attachTurnQuery
+import com.saarthi.feature.assistant.data.isDuplicateTurn
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.ChatRepository
@@ -100,6 +102,10 @@ class AssistantViewModel @Inject constructor(
     // the chat changes. The bundled demo document does NOT count — it's the free
     // trial showcase.
     private var docsThisSession = 0
+
+    /** Last sent retrieval query + URIs — drops identical attach-overview taps. */
+    private var lastTurnQuery: String? = null
+    private var lastTurnUris: Set<String> = emptySet()
 
     /**
      * Whether the user may attach another document right now. Pro → always.
@@ -253,9 +259,15 @@ class AssistantViewModel @Inject constructor(
     private var streamJob: kotlinx.coroutines.Job? = null
 
     fun sendMessage() {
-        val text = _uiState.value.inputText.trim()
+        val raw = _uiState.value.inputText.trim()
         val attachments = _uiState.value.pendingAttachments
-        if ((text.isBlank() && attachments.isEmpty()) || _uiState.value.isStreaming) return
+        if ((raw.isBlank() && attachments.isEmpty()) || _uiState.value.isStreaming) return
+        if (attachments.any { it.indexing }) return
+        val text = attachTurnQuery(raw, attachments.isNotEmpty())
+        val uris = attachments.map { it.uri.toString() }.toSet()
+        if (isDuplicateTurn(lastTurnQuery, lastTurnUris, text, uris)) return
+        lastTurnQuery = text
+        lastTurnUris = uris
         funnel.trackOnce(FunnelEvent.FIRST_CHAT_SENT)
 
         _uiState.update { it.copy(inputText = "", pendingAttachments = emptyList(), isStreaming = true, error = null) }
@@ -337,20 +349,39 @@ class AssistantViewModel @Inject constructor(
 
     // ── Attachments ───────────────────────────────────────────────────────────
     fun onAttachmentsPicked(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         viewModelScope.launch {
-            val files = uris.mapNotNull { uri ->
-                runCatching { fileExtractor.extract(uri) }.getOrNull()
+            val placeholders = uris.map { uri ->
+                AttachedFile(
+                    uri = uri,
+                    name = "…",
+                    mimeType = "application/octet-stream",
+                    sizeBytes = 0,
+                    indexing = true,
+                )
             }
-            if (files.isEmpty()) return@launch
+            _uiState.update { it.copy(pendingAttachments = it.pendingAttachments + placeholders) }
+
+            val extracted = uris.map { uri ->
+                runCatching { fileExtractor.extract(uri) }.getOrElse { err ->
+                    AttachedFile(
+                        uri = uri,
+                        name = uri.lastPathSegment ?: "Attachment",
+                        mimeType = "application/octet-stream",
+                        sizeBytes = 0,
+                        error = err.message?.takeIf { it.isNotBlank() } ?: "Could not read this file.",
+                    )
+                }
+            }
             funnel.trackOnce(FunnelEvent.FIRST_DOC_ATTACHED)
 
             // Pro gate: cap how many documents a free user can attach per chat.
             // Images are not the paid RAG feature, so they're never gated.
             val isPro = entitlements.isPro.value
-            val docFiles = files.filter { !it.isImage }
+            val docFiles = extracted.filter { !it.isImage && it.error == null }
             val accepted: List<AttachedFile>
             if (isPro || docFiles.isEmpty()) {
-                accepted = files
+                accepted = extracted
             } else {
                 val remaining =
                     (com.saarthi.core.i18n.Entitlements.maxDocuments(isPro = false) - docsThisSession)
@@ -365,11 +396,14 @@ class AssistantViewModel @Inject constructor(
                         )
                     }
                 }
-                accepted = files.filter { it.isImage } + acceptedDocs
+                val acceptedDocUris = acceptedDocs.map { it.uri }.toSet()
+                accepted = extracted.filter { it.isImage || it.error != null || it.uri in acceptedDocUris }
             }
-            docsThisSession += accepted.count { !it.isImage }
-            if (accepted.isNotEmpty()) {
-                _uiState.update { it.copy(pendingAttachments = it.pendingAttachments + accepted) }
+            docsThisSession += accepted.count { !it.isImage && it.error == null }
+            val picked = uris.toSet()
+            _uiState.update { state ->
+                val withoutPlaceholders = state.pendingAttachments.filter { it.uri !in picked }
+                state.copy(pendingAttachments = withoutPlaceholders + accepted)
             }
         }
     }
@@ -579,6 +613,8 @@ class AssistantViewModel @Inject constructor(
     fun clearChat() = viewModelScope.launch {
         chatRepository.clearHistory()
         docsThisSession = 0
+        lastTurnQuery = null
+        lastTurnUris = emptySet()
         _uiState.update { it.copy(showClearDialog = false) }
     }
 
@@ -591,12 +627,16 @@ class AssistantViewModel @Inject constructor(
     fun newChat() = viewModelScope.launch {
         chatRepository.createSession()
         docsThisSession = 0
+        lastTurnQuery = null
+        lastTurnUris = emptySet()
         _uiState.update { it.copy(showDrawer = false) }
     }
 
     fun switchSession(sessionId: String) = viewModelScope.launch {
         chatRepository.switchSession(sessionId)
         docsThisSession = 0
+        lastTurnQuery = null
+        lastTurnUris = emptySet()
         _uiState.update { it.copy(showDrawer = false) }
     }
 

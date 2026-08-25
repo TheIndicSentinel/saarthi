@@ -71,8 +71,6 @@ class RagDocumentRepository @Inject constructor(
         // bump; the < 0 index is the only thing that distinguishes it
         // from a regular content chunk.
         private const val OUTLINE_CHUNK_INDEX = -1
-        /** sizeBytes:textChars stamp so a changed re-attach can replace stale chunks. */
-        private const val FINGERPRINT_CHUNK_INDEX = -2
 
         // Token triggers — if ANY of these tokens appears as a standalone
         // word in the query, route to structural sampling instead of BM25.
@@ -183,6 +181,40 @@ class RagDocumentRepository @Inject constructor(
             val stored = existing.firstOrNull { it.chunkIndex == FINGERPRINT_CHUNK_INDEX }?.text
             if (!shouldReplaceIndex(stored, stamp)) return
             sqliteWriteWithRetry { ragChunkDao.deleteByDoc(sessionId, uriKey) }
+            invalidateTokenCache(sessionId)
+        }
+
+        val sessionRows = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
+        val fingerprints = sessionRows
+            .filter { it.chunkIndex == FINGERPRINT_CHUNK_INDEX }
+            .map { it.docUri to it.text }
+        val aliasOf = existingUriWithStamp(fingerprints, uriKey, stamp)
+        if (aliasOf != null) {
+            sqliteWriteWithRetry {
+                ragChunkDao.insertAll(
+                    listOf(
+                        RagChunkEntity(
+                            sessionId = sessionId,
+                            docUri = uriKey,
+                            docName = file.name,
+                            mimeType = file.mimeType,
+                            chunkIndex = FINGERPRINT_CHUNK_INDEX,
+                            text = stamp,
+                        ),
+                    ),
+                )
+            }
+            logRag("index-alias nameLen=${file.name.length} sessionIdLen=${sessionId.length}")
+            return
+        }
+
+        val evict = urisToEvictForSessionCap(sessionDocUsages(sessionRows), uriKey, text.length)
+        if (evict.isNotEmpty()) {
+            invalidateTokenCache(sessionId)
+            for (u in evict) {
+                sqliteWriteWithRetry { ragChunkDao.deleteByDoc(sessionId, u) }
+            }
+            logRag("index-evict count=${evict.size} sessionIdLen=${sessionId.length}")
         }
 
         val chunks = chunkText(text)
@@ -254,6 +286,7 @@ class RagDocumentRepository @Inject constructor(
         val rows = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
         if (rows.isEmpty()) return emptyList()
         return rows.groupBy { it.docUri }
+            .filter { (_, chunks) -> chunks.any { it.chunkIndex >= 0 } }
             .map { (uri, chunks) ->
                 val newest = chunks.maxBy { it.createdAt }
                 SessionRagDocument(uri = uri, name = newest.docName, lastIndexedAt = newest.createdAt)
@@ -317,23 +350,36 @@ class RagDocumentRepository @Inject constructor(
         priorQuery: String? = null,
         /**
          * When true (user chat), files whose indexed body is ≤
-         * [FileContentExtractor.WHOLE_FILE_CHARS] are returned in full
-         * document order instead of a BM25 subset. Pack search leaves this
-         * false so Kisan top-K is unchanged.
+         * [wholeFileChars] are returned in full document order instead of
+         * a BM25 subset. Pack search leaves this false so Kisan top-K is
+         * unchanged.
          */
         expandSmallFiles: Boolean = true,
+        /**
+         * Whole-file expansion cap. LARGE-tier prompts use a higher budget
+         * so a 4–5k note still arrives intact; COMPACT stays tighter.
+         */
+        wholeFileChars: Int = FileContentExtractor.WHOLE_FILE_CHARS,
     ): List<RetrievedChunk> {
         val t0 = System.nanoTime()
         val sessionRows = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
         // Attach-turn scoping (G1): restrict the corpus to the just-attached
         // files so their overview/summary is not answered from a mix of the
-        // earlier documents' excerpts. No fall-back to the full corpus on an
-        // empty result — see restrictDocUris kdoc.
-        val all = if (restrictDocUris.isNotEmpty()) {
-            sessionRows.filter { it.docUri in restrictDocUris }
+        // earlier documents' excerpts. Same-stamp aliases (re-shared URI)
+        // expand the restrict set so the original content chunks are found.
+        // Fingerprint rows are dropped so alias-only URIs cannot inflate
+        // per-doc slot counts. No fall-back to the full corpus on an empty
+        // result — see restrictDocUris kdoc.
+        val fingerprints = sessionRows
+            .filter { it.chunkIndex == FINGERPRINT_CHUNK_INDEX }
+            .map { it.docUri to it.text }
+        val expandedRestrict = expandRestrictUrisByStamp(fingerprints, restrictDocUris)
+        val scoped = if (expandedRestrict.isNotEmpty()) {
+            sessionRows.filter { it.docUri in expandedRestrict }
         } else {
             sessionRows
         }
+        val all = scoped.filter { it.chunkIndex != FINGERPRINT_CHUNK_INDEX }
         val sessionDocCount = all.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size
         if (all.isEmpty()) {
             val searchMs = (System.nanoTime() - t0) / 1_000_000
@@ -377,7 +423,7 @@ class RagDocumentRepository @Inject constructor(
                     chunks.sortedBy { it.chunkIndex }.map { it.toRetrieved(1.0) }
                 }
             return coherentExcerptForLowRelevance(
-                expandWholeSmallFiles(excerpted, fullByUri),
+                expandWholeSmallFiles(excerpted, fullByUri, wholeFileChars),
                 contentEntities,
             )
         }
@@ -685,13 +731,24 @@ class RagDocumentRepository @Inject constructor(
         return Bm25Retriever.rankTokenised(tokenised, query, topK)
     }
 
-    private fun cachedTokensFor(sessionId: String, chunk: RagChunkEntity): List<String> =
-        chunkTokenCache.getOrPut(chunk.id) {
+    private fun cachedTokensFor(sessionId: String, chunk: RagChunkEntity): List<String> {
+        val tokens = chunkTokenCache.getOrPut(chunk.id) {
             cachedChunkIdsBySession
                 .computeIfAbsent(sessionId) { ConcurrentHashMap.newKeySet() }
                 .add(chunk.id)
             Bm25Retriever.tokeniseDocument(chunk.text)
         }
+        trimTokenCache(keepSession = sessionId)
+        return tokens
+    }
+
+    private fun trimTokenCache(keepSession: String) {
+        if (chunkTokenCache.size <= TOKEN_CACHE_MAX_CHUNKS) return
+        val counts = cachedChunkIdsBySession.mapValues { it.value.size }
+        for (sid in sessionsToEvictForTokenCache(counts, keepSession, chunkTokenCache.size)) {
+            invalidateTokenCache(sid)
+        }
+    }
 
     private fun invalidateTokenCache(sessionId: String) {
         cachedChunkIdsBySession.remove(sessionId)?.forEach { chunkTokenCache.remove(it) }
@@ -773,6 +830,117 @@ internal const val THIS_TURN_BOOST = 1.35
 internal const val RECENCY_BOOST = 1.15
 
 internal fun contentStamp(sizeBytes: Long, textChars: Int): String = "$sizeBytes:$textChars"
+
+/** sizeBytes:textChars stamp so a changed re-attach can replace stale chunks. */
+internal const val FINGERPRINT_CHUNK_INDEX = -2
+
+/** Device-side cap even for Pro — BM25 + token cache stay bounded on-phone. */
+internal const val MAX_SESSION_RAG_DOCS = 12
+
+/** ~2.5× the per-file extract cap, so a handful of large PDFs still fit. */
+internal const val MAX_SESSION_INDEX_CHARS = 250_000
+
+/** Drop idle sessions' tokenised chunks before the active chat is evicted. */
+internal const val TOKEN_CACHE_MAX_CHUNKS = 800
+
+internal data class SessionDocUsage(
+    val uri: String,
+    val contentChars: Int,
+    val firstIndexedAt: Long,
+)
+
+internal fun sessionDocUsages(rows: List<RagChunkEntity>): List<SessionDocUsage> =
+    rows.groupBy { it.docUri }
+        .map { (uri, chunks) ->
+            SessionDocUsage(
+                uri = uri,
+                contentChars = chunks.filter { it.chunkIndex >= 0 }.sumOf { it.text.length },
+                firstIndexedAt = chunks.minOf { it.createdAt },
+            )
+        }
+        .filter { it.contentChars > 0 }
+        .sortedBy { it.firstIndexedAt }
+
+/**
+ * Oldest content docs to drop so [incomingUri] can be indexed without
+ * exceeding [maxDocs] / [maxChars]. Never evicts the incoming URI.
+ */
+internal fun urisToEvictForSessionCap(
+    existing: List<SessionDocUsage>,
+    incomingUri: String,
+    incomingChars: Int,
+    maxDocs: Int = MAX_SESSION_RAG_DOCS,
+    maxChars: Int = MAX_SESSION_INDEX_CHARS,
+): List<String> {
+    val others = existing.filter { it.uri != incomingUri }
+    var docs = others.size + 1
+    var chars = others.sumOf { it.contentChars } + incomingChars
+    if (docs <= maxDocs && chars <= maxChars) return emptyList()
+    val evict = ArrayList<String>()
+    for (doc in others) {
+        if (docs <= maxDocs && chars <= maxChars) break
+        evict += doc.uri
+        docs -= 1
+        chars -= doc.contentChars
+    }
+    return evict
+}
+
+/**
+ * Other sessions whose cached tokens should be dropped so [currentSize]
+ * can fall under [maxChunks]. Never evicts [keepSession].
+ */
+internal fun sessionsToEvictForTokenCache(
+    countsBySession: Map<String, Int>,
+    keepSession: String,
+    currentSize: Int,
+    maxChunks: Int = TOKEN_CACHE_MAX_CHUNKS,
+): List<String> {
+    if (currentSize <= maxChunks) return emptyList()
+    var remaining = currentSize
+    val evict = ArrayList<String>()
+    for ((sid, n) in countsBySession) {
+        if (sid == keepSession) continue
+        evict += sid
+        remaining -= n
+        if (remaining <= maxChunks) break
+    }
+    return evict
+}
+
+/** Another URI in this session already indexed this exact size:chars stamp. */
+internal fun existingUriWithStamp(
+    fingerprints: List<Pair<String, String>>,
+    uri: String,
+    stamp: String,
+): String? = fingerprints.firstOrNull { it.first != uri && it.second == stamp }?.first
+
+/**
+ * When [restrictUris] is non-empty, include every URI that shares a stamp
+ * with a restricted file so a re-shared content URI still retrieves the
+ * original chunks. Empty restrict → empty (caller uses the full corpus).
+ */
+internal fun expandRestrictUrisByStamp(
+    fingerprints: List<Pair<String, String>>,
+    restrictUris: Set<String>,
+): Set<String> {
+    if (restrictUris.isEmpty()) return emptySet()
+    val stampByUri = fingerprints.toMap()
+    val stamps = restrictUris.mapNotNull { stampByUri[it] }.toSet()
+    if (stamps.isEmpty()) return restrictUris
+    return restrictUris + fingerprints.filter { it.second in stamps }.map { it.first }
+}
+
+/**
+ * LARGE (roomy ≥7000c) can carry a 5k note whole; STANDARD stays at the
+ * historical 3k; COMPACT is tighter so a whole file cannot crowd the 1.5k
+ * prompt.
+ */
+internal fun wholeFileCharBudget(maxPromptChars: Int): Int = when {
+    maxPromptChars >= 7000 -> 5_000
+    maxPromptChars >= 4500 -> FileContentExtractor.WHOLE_FILE_CHARS
+    else -> 1_500
+}
 
 /** Legacy rows have no stamp — leave them. Re-index only when a stamp exists and differs. */
 internal fun shouldReplaceIndex(storedStamp: String?, newStamp: String): Boolean =

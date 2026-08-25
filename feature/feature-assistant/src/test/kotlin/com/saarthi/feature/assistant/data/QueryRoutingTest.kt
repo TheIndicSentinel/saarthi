@@ -125,4 +125,29 @@ class QueryRoutingTest {
     fun `plain english query is not indic`() {
         assertFalse(queryHasIndicScript("what is the penalty"))
     }
+
+    @Test
+    fun `blank attach send becomes overview query`() {
+        assertEquals(ATTACH_OVERVIEW_QUERY, attachTurnQuery("", hasAttachments = true))
+        assertEquals("", attachTurnQuery("  ", hasAttachments = false))
+        assertEquals("what is the penalty", attachTurnQuery("what is the penalty", hasAttachments = true))
+    }
+
+    @Test
+    fun `overview quick-action restricts to the newest attachment`() {
+        val uris = listOf("content://a", "content://b")
+        assertEquals(setOf("content://b"), restrictUrisForAttachTurn("", uris))
+        assertEquals(setOf("content://b"), restrictUrisForAttachTurn(ATTACH_OVERVIEW_QUERY, uris))
+        assertEquals(uris.toSet(), restrictUrisForAttachTurn("what is the penalty", uris))
+        assertTrue(restrictUrisForAttachTurn("give an overview", emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `identical consecutive attach queries are duplicates`() {
+        val uris = setOf("content://a")
+        assertTrue(isDuplicateTurn("give an overview", uris, "Give an overview", uris))
+        assertFalse(isDuplicateTurn("give an overview", uris, "give an overview", setOf("content://b")))
+        assertFalse(isDuplicateTurn(null, emptySet(), "give an overview", uris))
+        assertFalse(isDuplicateTurn("give an overview", uris, "what is the penalty", uris))
+    }
 }

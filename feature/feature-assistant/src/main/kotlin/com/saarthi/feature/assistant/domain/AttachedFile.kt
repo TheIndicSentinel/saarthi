@@ -18,7 +18,17 @@ data class AttachedFile(
      * the file as RAG context.
      */
     val error: String? = null,
+    /** True while extract is in flight — chip shows indexing, send is blocked. */
+    val indexing: Boolean = false,
 ) {
+    val indexState: AttachmentIndexState
+        get() = when {
+            error != null -> AttachmentIndexState.UNREADABLE
+            indexing -> AttachmentIndexState.INDEXING
+            extractedText != null -> AttachmentIndexState.READY
+            else -> AttachmentIndexState.UNREADABLE
+        }
+
     val displaySize: String get() {
         val kb = sizeBytes / 1024
         return if (kb < 1024) "${kb} KB" else "${"%.1f".format(kb / 1024f)} MB"
@@ -35,3 +45,5 @@ data class AttachedFile(
         else -> "📎"
     }
 }
+
+enum class AttachmentIndexState { INDEXING, READY, UNREADABLE }

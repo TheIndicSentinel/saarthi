@@ -67,4 +67,24 @@ class WholeSmallFileTest {
         val full = listOf(chunk("a.txt", 0, "hi"))
         assertTrue(expandWholeSmallFiles(emptyList(), mapOf("a.txt" to full)).isEmpty())
     }
+
+    @Test
+    fun `LARGE budget expands a file that STANDARD would keep as BM25 hits`() {
+        val full = (0..4).map { i -> chunk("note.txt", i, "x".repeat(800)) }
+        val retrieved = listOf(full[3].copy(score = 2.0))
+        val chars = full.sumOf { it.text.length }
+        assertTrue(chars > 3_000)
+        assertTrue(chars <= 5_000)
+        val standard = expandWholeSmallFiles(retrieved, mapOf("note.txt" to full), wholeFileChars = 3_000)
+        val large = expandWholeSmallFiles(retrieved, mapOf("note.txt" to full), wholeFileChars = 5_000)
+        assertEquals(listOf(3), standard.map { it.chunkIndex })
+        assertEquals(listOf(0, 1, 2, 3, 4), large.map { it.chunkIndex })
+    }
+
+    @Test
+    fun `whole-file budget follows prompt room`() {
+        assertEquals(5_000, wholeFileCharBudget(8_000))
+        assertEquals(3_000, wholeFileCharBudget(5_000))
+        assertEquals(1_500, wholeFileCharBudget(1_500))
+    }
 }

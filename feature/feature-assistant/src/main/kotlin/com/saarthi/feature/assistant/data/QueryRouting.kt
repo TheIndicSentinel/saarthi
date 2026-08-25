@@ -196,3 +196,40 @@ internal fun routeQuery(query: String, docs: List<Pair<String, String>>): QueryR
         expandedQuery = expandRetrievalQuery(query, docs.map { it.second }),
     )
 }
+
+/** Implicit attach-turn question so blank send still hits the meta/overview path. */
+internal const val ATTACH_OVERVIEW_QUERY = "give an overview"
+
+internal fun attachTurnQuery(userText: String, hasAttachments: Boolean): String {
+    val trimmed = userText.trim()
+    if (trimmed.isNotEmpty()) return trimmed
+    return if (hasAttachments) ATTACH_OVERVIEW_QUERY else ""
+}
+
+/**
+ * Attach-turn hard filter. A blank send (or the overview quick-action) scopes
+ * to the newest file in the batch so a repeated "overview" tap cannot mix
+ * earlier files. Any other typed question still includes every this-turn URI
+ * (G1).
+ */
+internal fun restrictUrisForAttachTurn(
+    retrievalQuery: String,
+    attachmentUris: List<String>,
+): Set<String> {
+    if (attachmentUris.isEmpty()) return emptySet()
+    val q = retrievalQuery.trim()
+    if (q.isEmpty() || q.equals(ATTACH_OVERVIEW_QUERY, ignoreCase = true)) {
+        return setOf(attachmentUris.last())
+    }
+    return attachmentUris.toSet()
+}
+
+internal fun isDuplicateTurn(
+    lastQuery: String?,
+    lastUris: Set<String>,
+    newQuery: String,
+    newUris: Set<String>,
+): Boolean {
+    if (lastQuery == null || newQuery.isEmpty()) return false
+    return lastQuery.equals(newQuery, ignoreCase = true) && lastUris == newUris
+}

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.saarthi.core.ui.theme.SaarthiColors
 import com.saarthi.feature.assistant.domain.AttachedFile
+import com.saarthi.feature.assistant.domain.AttachmentIndexState
 
 @Composable
 fun AttachmentChip(
@@ -58,10 +59,25 @@ fun AttachmentChip(
             maxLines = 1,
         )
         Text(
-            text = file.displaySize,
+            text = when (file.indexState) {
+                AttachmentIndexState.INDEXING -> "…"
+                AttachmentIndexState.READY -> "✓"
+                AttachmentIndexState.UNREADABLE -> "✗"
+            },
             style = MaterialTheme.typography.labelMedium,
-            color = SaarthiColors.TextMuted,
+            color = when (file.indexState) {
+                AttachmentIndexState.INDEXING -> SaarthiColors.TextMuted
+                AttachmentIndexState.READY -> SaarthiColors.Success
+                AttachmentIndexState.UNREADABLE -> SaarthiColors.Error
+            },
         )
+        if (!file.indexing && file.sizeBytes > 0) {
+            Text(
+                text = file.displaySize,
+                style = MaterialTheme.typography.labelMedium,
+                color = SaarthiColors.TextMuted,
+            )
+        }
         IconButton(onClick = onRemove, modifier = Modifier.size(20.dp)) {
             Icon(
                 Icons.Default.Close, contentDescription = "Remove",

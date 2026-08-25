@@ -86,7 +86,8 @@ fun ChatInputBar(
     )
 
     val hasText = inputText.isNotBlank() || pendingAttachments.isNotEmpty()
-    val canSend = hasText && !isStreaming
+    val indexing = pendingAttachments.any { it.indexing }
+    val canSend = hasText && !isStreaming && !indexing
 
     // Parent chat column already applies the union of navigationBars + ime
     // insets, so this component should add NO bottom system inset of its own —
