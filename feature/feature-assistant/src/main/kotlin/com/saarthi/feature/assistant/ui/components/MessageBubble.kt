@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saarthi.core.ui.theme.SaarthiColors
+import com.saarthi.feature.assistant.data.parseAssistantMessageForDisplay
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.MessageRole
@@ -165,11 +166,19 @@ fun MessageBubble(
                             color = SaarthiColors.TextPrimary,
                         )
                     } else {
-                        // Assistant output is markdown — render bold/italic/lists/code.
+                        val parsed = remember(message.content) {
+                            parseAssistantMessageForDisplay(message.content)
+                        }
                         MarkdownText(
-                            text = message.content,
+                            text = parsed.body,
                             color = SaarthiColors.TextPrimary,
                         )
+                        if (parsed.sources.isNotEmpty() && parsed.sourcesHeader != null) {
+                            SourcesChipsRow(
+                                header = parsed.sourcesHeader,
+                                sources = parsed.sources,
+                            )
+                        }
                     }
                 }
 

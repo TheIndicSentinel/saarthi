@@ -97,3 +97,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         rulesExampleDocTitle = "ଡିଜିଟାଲ୍ ବ୍ୟକ୍ତିଗତ ଡାଟା ସୁରକ୍ଷା ଆଇନ 2023",
     )
 }
+
+/** All localized Sources block headers — used for parsing and stripping footers (A5). */
+fun allCitationSourcesHeaders(): List<String> =
+    SupportedLanguage.entries.map { it.citationDisplayLabels().sourcesHeader }.distinct()
