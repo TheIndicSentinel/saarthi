@@ -49,4 +49,13 @@ class CitationDisplayLabelsTest {
             assertTrue(labels.circularRolePrefix.isNotBlank())
         }
     }
+
+    @Test
+    fun `every language has excerpt-only grounding rules B3-3`() {
+        for (lang in SupportedLanguage.entries) {
+            val labels = lang.citationDisplayLabels()
+            assertTrue(labels.excerptOnlyRule.isNotBlank())
+            assertTrue(labels.excerptOnlyRuleCompact.isNotBlank())
+        }
+    }
 }

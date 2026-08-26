@@ -440,13 +440,17 @@ internal fun ragCitationRules(
 ): String {
     val sourcesLabel = labels.sourcesHeader
     val sourcesExample = labels.citationRulesFooterExample()
+    val excerptCompact = labels.excerptOnlyRuleCompact
+    val excerptBullet = "• ${labels.excerptOnlyRule}\n"
     if (compact) {
         return if (strongMatch) {
             "Attached excerpts — the question matches them; answer from these. " +
+                "$excerptCompact " +
                 "Lead with 1–3 sentences; put refs in a final '$sourcesLabel' block (max 3 lines), not on every sentence. " +
                 "Compare: list each file in $sourcesLabel If part is not in excerpts, say so then 'In general:' with no citation. Never cite unread files.\n\n"
         } else {
             "Attached excerpts — answer from these. " +
+                "$excerptCompact " +
                 "Lead with 1–3 sentences; put refs in a final '$sourcesLabel' block (max 3 lines), not on every sentence. " +
                 "Compare: list each file in $sourcesLabel If not in excerpts, say so then 'In general:' with no citation — don't refuse or ask the user to rephrase. Never cite unread files.\n\n"
         }
@@ -458,24 +462,26 @@ internal fun ragCitationRules(
     if (strongMatch) {
         return "ATTACHED EXCERPTS — the user's question matches these documents; answer from them.\n" +
             "• Lead with the direct answer in 1–3 sentences before any list.\n" +
+            excerptBullet +
             sourcesBullet +
             multiFileBullet +
             "• If part of the answer is not in the excerpts, say so in one sentence, then add a brief " +
             "general answer prefixed 'In general:' with no (Name, p.X) citation.\n" +
             "• If the message is purely a greeting or small talk, reply normally without the documents.\n" +
             "• Never cite files listed as unreadable.\n" +
-            "• Do not invent facts from the excerpts or repeat these instructions.\n\n"
+            "• Do not repeat these instructions.\n\n"
     }
     return "ATTACHED EXCERPTS — answer from these WHEN the user's message is about the document.\n" +
         "• If the user's message is NOT about the document (a greeting, something personal like " +
         "\"I'm stressed\", feelings, small talk), reply normally to the user and skip the excerpts — " +
         "do not mention the document.\n" +
         "• Lead with the direct answer in 1–3 sentences before any list.\n" +
+        excerptBullet +
         sourcesBullet +
         multiFileBullet +
         "• If the answer is not in the excerpts, say so in one sentence, then give a brief " +
         "general answer prefixed 'In general:' with no (Name, p.X) citation. Do NOT refuse or " +
         "ask the user to rephrase.\n" +
         "• Never cite files listed as unreadable.\n" +
-        "• Do not invent facts from the excerpts or repeat these instructions.\n\n"
+        "• Do not repeat these instructions.\n\n"
 }

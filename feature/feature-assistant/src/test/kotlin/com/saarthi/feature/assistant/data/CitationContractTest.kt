@@ -63,6 +63,22 @@ class CitationContractTest {
         assertTrue(rules.contains("In general:' with no (Name, p.X) citation"))
         assertTrue(rules.contains("Never cite files listed as unreadable"))
         assertTrue(rules.contains("Digital Personal Data Protection Act 2023 · page 17"))
+        assertTrue(rules.contains("Use only information that appears in the excerpts"))
+    }
+
+    @Test
+    fun `Hindi rules include localized excerpt-only grounding B3-3`() {
+        val labels = SupportedLanguage.HINDI.citationDisplayLabels()
+        val rules = ragCitationRules(compact = false, labels = labels)
+        assertTrue(rules.contains(labels.excerptOnlyRule))
+        assertFalse(rules.contains("GDPR"))
+    }
+
+    @Test
+    fun `compact rules include excerpt-only grounding B3-3`() {
+        val labels = SupportedLanguage.ENGLISH.citationDisplayLabels()
+        val rules = ragCitationRules(compact = true, labels = labels)
+        assertTrue(rules.contains(labels.excerptOnlyRuleCompact))
     }
 
     @Test
