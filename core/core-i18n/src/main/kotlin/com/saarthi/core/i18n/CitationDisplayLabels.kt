@@ -11,6 +11,11 @@ data class CitationDisplayLabels(
     val rulesExampleDocTitle: String,
     /** Short label for multi-file title collisions (A6): "File" → "File 1: Title · page". */
     val fileLabelWord: String,
+    /** B3-2 — prefix before document title when role is summary / guide / sample / circular. */
+    val summaryRolePrefix: String,
+    val guideRolePrefix: String,
+    val sampleRolePrefix: String,
+    val circularRolePrefix: String,
 ) {
     /** Full multi-line example matching deterministic footer shape: header + one file line. */
     fun citationRulesFooterExample(): String =
@@ -28,6 +33,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "location not marked in file",
         rulesExampleDocTitle = "Digital Personal Data Protection Act 2023",
         fileLabelWord = "File",
+        summaryRolePrefix = "Summary:",
+        guideRolePrefix = "Guide:",
+        sampleRolePrefix = "Sample:",
+        circularRolePrefix = "Circular:",
     )
     SupportedLanguage.HINDI -> CitationDisplayLabels(
         sourcesHeader = "स्रोत:",
@@ -37,6 +46,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "फ़ाइल में पृष्ठ अंकित नहीं",
         rulesExampleDocTitle = "डिजिटल पर्सनल डेटा प्रोटेक्शन अधिनियम 2023",
         fileLabelWord = "फ़ाइल",
+        summaryRolePrefix = "सारांश:",
+        guideRolePrefix = "मार्गदर्शिका:",
+        sampleRolePrefix = "नमूना:",
+        circularRolePrefix = "परिपत्र:",
     )
     SupportedLanguage.TAMIL -> CitationDisplayLabels(
         sourcesHeader = "மூலம்:",
@@ -46,6 +59,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "கோப்பில் பக்கம் குறிக்கப்படவில்லை",
         rulesExampleDocTitle = "டிஜிட்டல் தனிப்பட்ட தரவு பாதுகாப்பு சட்டம் 2023",
         fileLabelWord = "கோப்பு",
+        summaryRolePrefix = "சுருக்கம்:",
+        guideRolePrefix = "வழிகாட்டி:",
+        sampleRolePrefix = "மாதிரி:",
+        circularRolePrefix = "சுற்றறிக்கை:",
     )
     SupportedLanguage.TELUGU -> CitationDisplayLabels(
         sourcesHeader = "మూలాలు:",
@@ -55,6 +72,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "ఫైల్‌లో పేజీ గుర్తించబడలేదు",
         rulesExampleDocTitle = "డిజిటల్ వ్యక్తిగత డేటా రక్షణ చట్టం 2023",
         fileLabelWord = "ఫైల్",
+        summaryRolePrefix = "సారాంశం:",
+        guideRolePrefix = "గైడ్:",
+        sampleRolePrefix = "నమూనా:",
+        circularRolePrefix = "పరిపత్ర:",
     )
     SupportedLanguage.BENGALI -> CitationDisplayLabels(
         sourcesHeader = "সূত্র:",
@@ -64,6 +85,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "ফাইলে পৃষ্ঠা চিহ্নিত নেই",
         rulesExampleDocTitle = "ডিজিটাল ব্যক্তিগত ডেটা সুরক্ষা আইন 2023",
         fileLabelWord = "ফাইল",
+        summaryRolePrefix = "সারাংশ:",
+        guideRolePrefix = "গাইড:",
+        sampleRolePrefix = "নমুনা:",
+        circularRolePrefix = "পরিপত্র:",
     )
     SupportedLanguage.MARATHI -> CitationDisplayLabels(
         sourcesHeader = "स्त्रोत:",
@@ -73,6 +98,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "फाइलमध्ये पृष्ठ चिन्हांकित नाही",
         rulesExampleDocTitle = "डिजिटल वैयक्तिक डेटा संरक्षण अधिनियम 2023",
         fileLabelWord = "फाइल",
+        summaryRolePrefix = "सारांश:",
+        guideRolePrefix = "मार्गदर्शिका:",
+        sampleRolePrefix = "नमुना:",
+        circularRolePrefix = "परिपत्र:",
     )
     SupportedLanguage.KANNADA -> CitationDisplayLabels(
         sourcesHeader = "ಮೂಲಗಳು:",
@@ -82,6 +111,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "ಫೈಲ್‌ನಲ್ಲಿ ಪುಟ ಗುರುತಿಸಲಾಗಿಲ್ಲ",
         rulesExampleDocTitle = "ಡಿಜಿಟಲ್ ವೈಯಕ್ತಿಕ ಡೇಟಾ ರಕ್ಷಣಾ ಕಾಯಿದೆ 2023",
         fileLabelWord = "ಫೈಲ್",
+        summaryRolePrefix = "ಸಾರಾಂಶ:",
+        guideRolePrefix = "ಮಾರ್ಗದರ್ಶಿ:",
+        sampleRolePrefix = "ಮಾದರಿ:",
+        circularRolePrefix = "ಪರಿಪತ್ರ:",
     )
     SupportedLanguage.GUJARATI -> CitationDisplayLabels(
         sourcesHeader = "સ્રોત:",
@@ -91,6 +124,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "ફાઇલમાં પૃષ્ઠ ચિહ્નિત નથી",
         rulesExampleDocTitle = "ડિજિટલ વ્યક્તિગત ડેટા સંરક્ષણ અધિનિયમ 2023",
         fileLabelWord = "ફાઇલ",
+        summaryRolePrefix = "સારાંશ:",
+        guideRolePrefix = "માર્ગદર્શિકા:",
+        sampleRolePrefix = "નમૂના:",
+        circularRolePrefix = "પરિપત્ર:",
     )
     SupportedLanguage.PUNJABI -> CitationDisplayLabels(
         sourcesHeader = "ਸਰੋਤ:",
@@ -100,6 +137,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "ਫਾਈਲ ਵਿੱਚ ਪੰਨਾ ਨਹੀਂ ਦਰਸਾਇਆ",
         rulesExampleDocTitle = "ਡਿਜਿਟਲ ਨਿੱਜੀ ਡਾਟਾ ਸੁਰੱਖਿਆ ਐਕਟ 2023",
         fileLabelWord = "ਫਾਈਲ",
+        summaryRolePrefix = "ਸਾਰਾਂਸ਼:",
+        guideRolePrefix = "ਗਾਈਡ:",
+        sampleRolePrefix = "ਨਮੂਨਾ:",
+        circularRolePrefix = "ਪਰਿਪੱਤਰ:",
     )
     SupportedLanguage.ODIA -> CitationDisplayLabels(
         sourcesHeader = "ସୂତ୍ର:",
@@ -109,6 +150,10 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         locationUnknown = "ଫାଇଲରେ ପୃଷ୍ଠା ଚିହ୍ନିତ ନାହିଁ",
         rulesExampleDocTitle = "ଡିଜିଟାଲ୍ ବ୍ୟକ୍ତିଗତ ଡାଟା ସୁରକ୍ଷା ଆଇନ 2023",
         fileLabelWord = "ଫାଇଲ୍",
+        summaryRolePrefix = "ସାରାଂଶ:",
+        guideRolePrefix = "ଗାଇଡ୍:",
+        sampleRolePrefix = "ନମୁନା:",
+        circularRolePrefix = "ପରିପତ୍ର:",
     )
 }
 

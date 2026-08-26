@@ -178,6 +178,33 @@ class DeterministicSourcesFooterTest {
     }
 
     @Test
+    fun `formatUserCitationLine prefixes Guide for guide filenames`() {
+        val line = formatUserCitationLine(
+            chunk("--- Page 2 ---\nPenalty overview", "EY_India_DPDP_Guide.pdf", chunkIndex = 1),
+            emptyMap(),
+            englishLabels,
+        )
+        assertTrue(line.startsWith("Guide:"))
+        assertTrue(line.contains("page 2"))
+    }
+
+    @Test
+    fun `buildDeterministicSourcesFooter includes guide prefix`() {
+        val footer = buildDeterministicSourcesFooter(
+            listOf(
+                chunk(
+                    "--- Page 2 ---\nNotes",
+                    "EY_India_DPDP_Guide.pdf",
+                    chunkIndex = 1,
+                ),
+            ),
+            emptyMap(),
+            englishLabels,
+        )
+        assertTrue(footer.contains("Guide:"))
+    }
+
+    @Test
     fun `buildDeterministicSourcesFooter dedupes and caps`() {
         val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
         val outline = mapOf(hash to "Digital Personal Data Protection Act, 2023")

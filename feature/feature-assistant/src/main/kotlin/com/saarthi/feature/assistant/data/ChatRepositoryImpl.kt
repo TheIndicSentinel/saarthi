@@ -806,8 +806,15 @@ class ChatRepositoryImpl @Inject constructor(
         val outlineByDocName = retrieved
             .filter { it.chunkIndex < 0 }
             .associate { it.docName to it.text }
+        val citationLabels = currentLanguage.citationDisplayLabels()
         val newAttachDisplayNames = attachments.map { file ->
-            displayDocName(file.name, outlineByDocName[file.name], file.extractedText)
+            displayCitationDocName(
+                file.name,
+                outlineByDocName[file.name],
+                file.extractedText,
+                file.extractedText?.length,
+                citationLabels,
+            )
         }
         val multiFileFairSources = shouldFairMultiFileSources(retrievalRoute.equalSlots, retrieved)
 
@@ -827,7 +834,13 @@ class ChatRepositoryImpl @Inject constructor(
                         page = extractPageRange(c.text),
                         score = c.score,
                         displayName = if (ragLogDocNames()) {
-                            displayDocName(c.docName, outlineByDocName[c.docName], c.text)
+                            displayCitationDocName(
+                                c.docName,
+                                outlineByDocName[c.docName],
+                                c.text,
+                                c.text.length,
+                                citationLabels,
+                            )
                         } else {
                             null
                         },
@@ -1136,7 +1149,20 @@ class ChatRepositoryImpl @Inject constructor(
             .associate { it.docName to it.text }
 
         val manifestLine = sessionManifestLine(
-            sessionDocs.map { displayDocName(it.name, outlineByDocName[it.name]) },
+            sessionDocs.map { doc ->
+                val outline = outlineByDocName[doc.name]
+                val bodyHint = retrieved.firstOrNull {
+                    it.docName == doc.name && it.chunkIndex >= 0
+                }?.text
+                val charEst = retrieved.filter { it.docName == doc.name }.sumOf { it.text.length }
+                displayCitationDocName(
+                    doc.name,
+                    outline,
+                    bodyHint,
+                    charEst.takeIf { it > 0 },
+                    citationLabels,
+                )
+            },
         )
         val newFilesLine = newFilesThisTurnNotice(newThisTurnNames)
 
@@ -1156,6 +1182,7 @@ class ChatRepositoryImpl @Inject constructor(
                     text,
                     chunk.chunkIndex,
                     outlineByDocName[chunk.docName],
+                    citationLabels,
                 )
                 val total = header.length + text.length + 2  // +2 for trailing "\n\n"
                 if (total > remaining) break  // never half-emit a chunk

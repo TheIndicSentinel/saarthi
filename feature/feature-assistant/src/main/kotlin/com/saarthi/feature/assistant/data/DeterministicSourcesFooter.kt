@@ -80,10 +80,12 @@ internal fun formatUserCitationLine(
     outlineByDocName: Map<String, String>,
     labels: CitationDisplayLabels,
 ): String {
-    val name = displayDocName(
+    val name = displayCitationDocName(
         chunk.docName,
         outlineByDocName[chunk.docName],
         chunk.text,
+        chunk.text.length,
+        labels,
     )
     val location = formatCitationLocation(chunk, labels)
     return "$name · $location"

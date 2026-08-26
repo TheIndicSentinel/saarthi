@@ -38,4 +38,15 @@ class CitationDisplayLabelsTest {
             assertTrue(labels.citationRulesFooterExample().contains(labels.sourcesHeader))
         }
     }
+
+    @Test
+    fun `every language has document role prefixes B3-2`() {
+        for (lang in SupportedLanguage.entries) {
+            val labels = lang.citationDisplayLabels()
+            assertTrue(labels.summaryRolePrefix.isNotBlank())
+            assertTrue(labels.guideRolePrefix.isNotBlank())
+            assertTrue(labels.sampleRolePrefix.isNotBlank())
+            assertTrue(labels.circularRolePrefix.isNotBlank())
+        }
+    }
 }

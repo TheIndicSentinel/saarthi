@@ -278,4 +278,49 @@ class CitationContractTest {
             ),
         )
     }
+
+    @Test
+    fun `displayCitationDocName adds localized Guide prefix`() {
+        val labels = SupportedLanguage.ENGLISH.citationDisplayLabels()
+        val name = displayCitationDocName(
+            "EY_India_DPDP_Guide.pdf",
+            labels = labels,
+        )
+        assertTrue(name.startsWith("Guide:"))
+        assertTrue(name.contains("EY India DPDP Guide") || name.contains("EY India"))
+    }
+
+    @Test
+    fun `displayCitationDocName adds Hindi summary prefix`() {
+        val labels = SupportedLanguage.HINDI.citationDisplayLabels()
+        val name = displayCitationDocName(
+            "DPDP_one_page_summary.pdf",
+            labels = labels,
+        )
+        assertTrue(name.startsWith("सारांश:"))
+    }
+
+    @Test
+    fun `displayCitationDocName leaves primary act without prefix`() {
+        val labels = SupportedLanguage.ENGLISH.citationDisplayLabels()
+        val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val body = "--- Page 1 ---\nTHE DIGITAL PERSONAL DATA PROTECTION ACT, 2023"
+        val name = displayCitationDocName(hash, null, body, 80_000, labels)
+        assertFalse(name.startsWith("Summary:"))
+        assertFalse(name.startsWith("Guide:"))
+        assertTrue(name.contains("Digital Personal Data"))
+    }
+
+    @Test
+    fun `formatExcerptHeader includes role prefix when labels provided`() {
+        val labels = SupportedLanguage.ENGLISH.citationDisplayLabels()
+        val header = formatExcerptHeader(
+            1,
+            DemoDocument.NAME,
+            DemoDocument.TEXT,
+            chunkIndex = 0,
+            labels = labels,
+        )
+        assertTrue(header.contains("Sample:"))
+    }
 }

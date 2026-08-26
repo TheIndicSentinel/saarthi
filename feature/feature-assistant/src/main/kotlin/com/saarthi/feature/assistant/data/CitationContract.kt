@@ -306,6 +306,32 @@ internal fun displayDocName(
     return if (looksLikeInternalCitationLabel(stem)) FALLBACK_ATTACHED_DOC_LABEL else stem
 }
 
+/** B3-2 — localized role prefix for commentary documents (Summary:, Guide:, …). */
+internal fun CitationDisplayLabels.rolePrefixFor(role: DocumentRoleLabel): String = when (role) {
+    DocumentRoleLabel.SUMMARY -> summaryRolePrefix
+    DocumentRoleLabel.GUIDE -> guideRolePrefix
+    DocumentRoleLabel.SAMPLE -> sampleRolePrefix
+    DocumentRoleLabel.CIRCULAR -> circularRolePrefix
+}
+
+/**
+ * B3-2 — user-visible citation title with optional role prefix from [documentRoleLabel].
+ * Primary documents keep the plain [displayDocName] title.
+ */
+internal fun displayCitationDocName(
+    rawName: String,
+    outlineText: String? = null,
+    contentHint: String? = null,
+    contentCharCount: Int? = null,
+    labels: CitationDisplayLabels? = null,
+): String {
+    val base = displayDocName(rawName, outlineText, contentHint)
+    if (labels == null) return base
+    val role = documentRoleLabel(rawName, contentHint, contentCharCount)
+    if (role == null) return base
+    return "${labels.rolePrefixFor(role)} $base"
+}
+
 internal fun extractPageRange(text: String): String? {
     val pages = PAGE_MARKER_REGEX.findAll(text)
         .mapNotNull { it.groupValues[1].toIntOrNull() }
@@ -327,8 +353,15 @@ internal fun formatExcerptHeader(
     text: String,
     chunkIndex: Int,
     outlineText: String? = null,
+    labels: CitationDisplayLabels? = null,
 ): String {
-    val name = displayDocName(docName, outlineText, text)
+    val name = displayCitationDocName(
+        docName,
+        outlineText,
+        text,
+        text.length,
+        labels,
+    )
     val page = if (chunkIndex < 0) null else extractPageRange(text)
     val pageRef = page?.let { " · $it" } ?: ""
     return "[$index1Based] $name$pageRef\n"
