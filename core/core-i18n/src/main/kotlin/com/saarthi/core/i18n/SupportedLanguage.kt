@@ -763,6 +763,20 @@ enum class SupportedLanguage(
         ODIA     -> "ଯେକୌଣସି କିଛି ପଚାରନ୍ତୁ…"
     }
 
+    /** Quick chip when a document is attached — sends a brief overview query. */
+    val attachBriefOverview: String get() = when (this) {
+        ENGLISH  -> "Brief overview"
+        HINDI    -> "संक्षिप्त अवलोकन"
+        TAMIL    -> "சுருக்கமான மேலோட்டம்"
+        TELUGU   -> "సంక్షిప్త అవలోకనం"
+        BENGALI  -> "সংক্ষিপ্ত সারাংশ"
+        MARATHI  -> "थोडक्यात आढावा"
+        KANNADA  -> "ಸಂಕ್ಷಿಪ್ತ ಅವಲೋಕನ"
+        GUJARATI -> "ટૂંકું અવલોકન"
+        PUNJABI  -> "ਛੋਟਾ ਜਾਣ-ਪਛਾਣ"
+        ODIA     -> "ସଂକ୍ଷିପ୍ତ ସାରାଂଶ"
+    }
+
     /** "New Chat" button label. */
     val newChat: String get() = when (this) {
         ENGLISH  -> "New Chat"

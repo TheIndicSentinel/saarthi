@@ -17,6 +17,7 @@ import com.saarthi.core.inference.FunnelEvent
 import com.saarthi.core.inference.FunnelTracker
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.feature.assistant.data.FileContentExtractor
+import com.saarthi.feature.assistant.data.ATTACH_BRIEF_OVERVIEW_QUERY
 import com.saarthi.feature.assistant.data.attachTurnQuery
 import com.saarthi.feature.assistant.data.isDuplicateTurn
 import com.saarthi.feature.assistant.domain.AttachedFile
@@ -264,6 +265,18 @@ class AssistantViewModel @Inject constructor(
         if ((raw.isBlank() && attachments.isEmpty()) || _uiState.value.isStreaming) return
         if (attachments.any { it.indexing }) return
         val text = attachTurnQuery(raw, attachments.isNotEmpty())
+        dispatchUserMessage(text, attachments)
+    }
+
+    /** P2 — one-tap brief overview for the attached file(s). */
+    fun sendBriefOverview() {
+        val attachments = _uiState.value.pendingAttachments
+        if (attachments.isEmpty() || _uiState.value.isStreaming) return
+        if (attachments.any { it.indexing }) return
+        dispatchUserMessage(ATTACH_BRIEF_OVERVIEW_QUERY, attachments)
+    }
+
+    private fun dispatchUserMessage(text: String, attachments: List<AttachedFile>) {
         val uris = attachments.map { it.uri.toString() }.toSet()
         if (isDuplicateTurn(lastTurnQuery, lastTurnUris, text, uris)) return
         lastTurnQuery = text

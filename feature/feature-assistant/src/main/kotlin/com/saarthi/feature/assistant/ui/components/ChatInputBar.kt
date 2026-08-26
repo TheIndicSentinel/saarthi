@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +65,8 @@ fun ChatInputBar(
     onStopStreaming: () -> Unit,
     pendingAttachments: List<AttachedFile>,
     onRemoveAttachment: (AttachedFile) -> Unit,
+    attachBriefOverviewLabel: String = "Brief overview",
+    onBriefOverviewClick: () -> Unit = {},
     isStreaming: Boolean,
     isListening: Boolean,
     modifier: Modifier = Modifier,
@@ -110,6 +113,24 @@ fun ChatInputBar(
             ) {
                 pendingAttachments.forEach { file ->
                     AttachmentChip(file = file, onRemove = { onRemoveAttachment(file) })
+                }
+            }
+            if (!isStreaming && !indexing) {
+                Box(
+                    modifier = Modifier
+                        .padding(bottom = 8.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(SaarthiColors.NavyLight)
+                        .border(1.dp, SaarthiColors.GlassBorder, RoundedCornerShape(14.dp))
+                        .clickable(onClick = onBriefOverviewClick)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = attachBriefOverviewLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = SaarthiColors.TextSecondary,
+                        maxLines = 1,
+                    )
                 }
             }
         }

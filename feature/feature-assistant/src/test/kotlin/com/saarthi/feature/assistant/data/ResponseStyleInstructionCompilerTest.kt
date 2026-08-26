@@ -144,11 +144,30 @@ class ResponseStyleInstructionCompilerTest {
     }
 
     @Test
-    fun `grounded turns skip the length constraint entirely`() {
+    fun `grounded short length asks for concise document answers without dropping exact quotes`() {
         val result = compiler.compile(
             ResponseStyle(length = ReplyLength.SHORT), SupportedLanguage.ENGLISH, grounded = true,
         )
-        assertFalse("length must not fight a grounded turn's own quoting instruction: $result", result.contains("short"))
+        assertTrue(result.contains("concise"))
+        assertTrue(result.contains("exactly from the excerpts"))
+    }
+
+    @Test
+    fun `grounded long length allows fuller detail but stays focused`() {
+        val result = compiler.compile(
+            ResponseStyle(length = ReplyLength.LONG), SupportedLanguage.ENGLISH, grounded = true,
+        )
+        assertTrue(result.contains("fuller detail"))
+        assertTrue(result.contains("do not recap the whole document"))
+        assertTrue(result.contains("quote excerpts exactly"))
+    }
+
+    @Test
+    fun `grounded medium length produces no extra instruction`() {
+        val result = compiler.compile(
+            ResponseStyle(length = ReplyLength.MEDIUM), SupportedLanguage.ENGLISH, grounded = true,
+        )
+        assertEquals("", result)
     }
 
     @Test

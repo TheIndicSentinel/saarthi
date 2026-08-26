@@ -258,6 +258,7 @@ class SupportedLanguageTest {
     @Test
     fun every_language_has_non_blank_snackbar_strings() {
         assertNonBlankForEveryLanguage("attachmentsNeedLargerModel") { attachmentsNeedLargerModel }
+        assertNonBlankForEveryLanguage("attachBriefOverview") { attachBriefOverview }
         assertNonBlankForEveryLanguage("streamFailedRetry") { streamFailedRetry }
         assertNonBlankForEveryLanguage("dbNeedsRestart") { dbNeedsRestart }
         assertNonBlankForEveryLanguage("voiceNoMatch") { voiceNoMatch }

@@ -45,6 +45,21 @@ class AttachAskSmokeTest {
     }
 
     @Test
+    fun `brief attach overview query is scoped to newest file`() {
+        assertEquals(
+            ATTACH_BRIEF_OVERVIEW_QUERY,
+            "give an overview in short",
+        )
+        assertEquals(
+            setOf(DemoDocument.URI),
+            restrictUrisForAttachTurn(
+                ATTACH_BRIEF_OVERVIEW_QUERY,
+                listOf("content://old", DemoDocument.URI),
+            ),
+        )
+    }
+
+    @Test
     fun `blank attach send is an overview of the newest file`() {
         assertEquals(ATTACH_OVERVIEW_QUERY, attachTurnQuery("", hasAttachments = true))
         assertEquals(

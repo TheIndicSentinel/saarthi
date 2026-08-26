@@ -208,6 +208,24 @@ class QueryRoutingTest {
     }
 
     @Test
+    fun `brief overview quick-action restricts to the newest attachment`() {
+        val uris = listOf("content://a", "content://b")
+        assertEquals(setOf("content://b"), restrictUrisForAttachTurn(ATTACH_BRIEF_OVERVIEW_QUERY, uris))
+    }
+
+    @Test
+    fun `reply length short nudges overview shape to OVERVIEW_SHORT`() {
+        assertEquals(
+            RagAnswerShape.OVERVIEW_SHORT,
+            applyReplyLengthToAnswerShape(RagAnswerShape.OVERVIEW, com.saarthi.core.i18n.ReplyLength.SHORT),
+        )
+        assertEquals(
+            RagAnswerShape.NARROW_QA,
+            applyReplyLengthToAnswerShape(RagAnswerShape.LIST, com.saarthi.core.i18n.ReplyLength.SHORT),
+        )
+    }
+
+    @Test
     fun `filterRankedByScoreGap drops weak tail hits`() {
         val ranked = listOf(
             Bm25Retriever.Scored(0, 10.0),

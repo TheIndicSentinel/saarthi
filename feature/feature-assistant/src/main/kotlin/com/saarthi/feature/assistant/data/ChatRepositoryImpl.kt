@@ -729,9 +729,12 @@ class ChatRepositoryImpl @Inject constructor(
         val sessionDocs = runCatching { ragRepository.listSessionDocuments(sessionId) }
             .onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
-        val ragAnswerShape = detectRagAnswerShape(
-            userMessage,
-            RagDocumentRepository.metaRouteReason(ragQuery) != null,
+        val ragAnswerShape = applyReplyLengthToAnswerShape(
+            detectRagAnswerShape(
+                userMessage,
+                RagDocumentRepository.metaRouteReason(ragQuery) != null,
+            ),
+            responseStyleManager.style.value.length,
         )
         val retrievalRoute = routeQuery(
             ragQuery,

@@ -469,6 +469,8 @@ fun AssistantScreen(
                     onStopStreaming = viewModel::stopGeneration,
                     pendingAttachments = uiState.pendingAttachments,
                     onRemoveAttachment = viewModel::removeAttachment,
+                    attachBriefOverviewLabel = currentLanguage.attachBriefOverview,
+                    onBriefOverviewClick = viewModel::sendBriefOverview,
                     isStreaming = uiState.isStreaming,
                     isListening = uiState.isListening,
                     hint = currentLanguage.inputHint,

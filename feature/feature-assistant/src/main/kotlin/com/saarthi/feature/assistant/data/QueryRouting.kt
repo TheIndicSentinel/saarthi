@@ -200,6 +200,9 @@ internal fun routeQuery(query: String, docs: List<Pair<String, String>>): QueryR
 /** Implicit attach-turn question so blank send still hits the meta/overview path. */
 internal const val ATTACH_OVERVIEW_QUERY = "give an overview"
 
+/** Attach quick-action: brief overview (P2 chip + routing). */
+internal const val ATTACH_BRIEF_OVERVIEW_QUERY = "give an overview in short"
+
 internal fun attachTurnQuery(userText: String, hasAttachments: Boolean): String {
     val trimmed = userText.trim()
     if (trimmed.isNotEmpty()) return trimmed
@@ -218,7 +221,10 @@ internal fun restrictUrisForAttachTurn(
 ): Set<String> {
     if (attachmentUris.isEmpty()) return emptySet()
     val q = retrievalQuery.trim()
-    if (q.isEmpty() || q.equals(ATTACH_OVERVIEW_QUERY, ignoreCase = true)) {
+    if (q.isEmpty() ||
+        q.equals(ATTACH_OVERVIEW_QUERY, ignoreCase = true) ||
+        q.equals(ATTACH_BRIEF_OVERVIEW_QUERY, ignoreCase = true)
+    ) {
         return setOf(attachmentUris.last())
     }
     return attachmentUris.toSet()
@@ -314,4 +320,19 @@ internal fun topKForAnswerShape(shape: RagAnswerShape, equalSlots: Boolean): Int
     shape == RagAnswerShape.OVERVIEW -> 6
     shape == RagAnswerShape.LIST -> 6
     else -> 4
+}
+
+/** Nudge P0 answer shape when Settings → Reply length is Short/Long (P2 #11). */
+internal fun applyReplyLengthToAnswerShape(
+    shape: RagAnswerShape,
+    length: com.saarthi.core.i18n.ReplyLength,
+): RagAnswerShape = when (length) {
+    com.saarthi.core.i18n.ReplyLength.SHORT -> when (shape) {
+        RagAnswerShape.OVERVIEW -> RagAnswerShape.OVERVIEW_SHORT
+        RagAnswerShape.LIST -> RagAnswerShape.NARROW_QA
+        else -> shape
+    }
+    com.saarthi.core.i18n.ReplyLength.LONG,
+    com.saarthi.core.i18n.ReplyLength.MEDIUM,
+    -> shape
 }

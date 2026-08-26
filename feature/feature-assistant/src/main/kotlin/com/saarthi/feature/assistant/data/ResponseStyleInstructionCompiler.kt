@@ -27,9 +27,9 @@ import javax.inject.Singleton
  * disabling it had no legitimate cosmetic use case).
  *
  * Priority order when preferences could conflict (highest first):
- *  1. Factual/task requirements — a grounded (document/Kisan) turn's own
- *     "quote verbatim, don't invent" instruction always wins, so [length] is
- *     skipped entirely on grounded turns rather than fighting it.
+ *  1. Factual/task requirements — grounded turns still honour length, but
+ *     with document-safe wording (concise vs fuller detail) that never
+ *     overrides "quote names/numbers exactly from excerpts".
  *  2. Language — code-switching preference, relative to whatever output
  *     language [language] resolves to elsewhere in the prompt
  *     (SupportedLanguage.systemPromptInstruction).
@@ -84,6 +84,14 @@ class ResponseStyleInstructionCompiler @Inject constructor() {
                 ReplyLength.SHORT -> lines += "Keep replies short (1–2 sentences)."
                 ReplyLength.LONG -> lines += "Give detailed, thorough replies."
                 ReplyLength.MEDIUM -> { /* no extra instruction */ }
+            }
+        } else {
+            when (style.length) {
+                ReplyLength.SHORT -> lines +=
+                    "Keep document answers concise: lead with 1–2 sentences; use bullets only when the user asked for a list. Still quote names, numbers, and dates exactly from the excerpts."
+                ReplyLength.LONG -> lines +=
+                    "You may give fuller detail when the question warrants it, but answer only what was asked — do not recap the whole document. Still quote excerpts exactly and cite in Sources."
+                ReplyLength.MEDIUM -> { /* P0 answer-shape defaults */ }
             }
         }
 
