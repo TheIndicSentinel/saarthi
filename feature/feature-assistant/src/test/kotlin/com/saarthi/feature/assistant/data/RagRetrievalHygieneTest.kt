@@ -48,7 +48,7 @@ class RagRetrievalHygieneTest {
   fun `locateSectionInChunks finds section marker in body`() {
     val chunks = listOf(
         "Earlier text.",
-        "15. Duties of Data Principal\n(a) comply with laws.",
+        "Section 15. Duties of Data Principal\n(a) comply with laws.",
         "Later penalties.",
     )
     val idx = locateSectionInChunks(chunks, SectionRef("section", "15"))
