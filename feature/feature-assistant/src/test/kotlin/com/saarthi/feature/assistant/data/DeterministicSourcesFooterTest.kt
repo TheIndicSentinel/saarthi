@@ -56,6 +56,17 @@ class DeterministicSourcesFooterTest {
     }
 
     @Test
+    fun `parseAssistantMessageForDisplay preserves File N disambiguation in chips`() {
+        val body = "Compared both documents."
+        val full = "$body\n\nSources:\nFile 1: Attached document · page 1\nFile 2: Attached document · page 5"
+        val parsed = parseAssistantMessageForDisplay(full)
+        assertEquals(body, parsed.body)
+        assertEquals(2, parsed.sources.size)
+        assertTrue(parsed.sources[0].docTitle.startsWith("File 1:"))
+        assertTrue(parsed.sources[1].docTitle.startsWith("File 2:"))
+    }
+
+    @Test
     fun `shouldFairMultiFileSources enabled for compare equalSlots`() {
         assertTrue(shouldFairMultiFileSources(equalSlots = true, chunks = emptyList()))
     }
@@ -68,6 +79,46 @@ class DeterministicSourcesFooterTest {
         )
         assertTrue(shouldFairMultiFileSources(equalSlots = false, chunks = chunks))
         assertFalse(shouldFairMultiFileSources(equalSlots = false, chunks = listOf(chunks[0])))
+    }
+
+    @Test
+    fun `title collision adds File N prefix for duplicate display titles`() {
+        val hash1 = "aaa2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val hash2 = "bbb2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val chunks = listOf(
+            chunk("--- Page 1 ---\na", hash1, score = 10.0, chunkIndex = 1, docUri = "uri-1"),
+            chunk("--- Page 5 ---\nb", hash2, score = 9.0, chunkIndex = 2, docUri = "uri-2"),
+        )
+        val footer = buildDeterministicSourcesFooter(
+            chunks,
+            emptyMap(),
+            englishLabels,
+            maxSources = 2,
+            multiFileFairSources = true,
+        )
+        assertTrue(footer.contains("File 1: Attached document"))
+        assertTrue(footer.contains("File 2: Attached document"))
+    }
+
+    @Test
+    fun `distinct titles skip File N prefix`() {
+        val nda = "aaa2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val stmt = "bbb2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val outline = mapOf(nda to "NDA Agreement", stmt to "Account Statement")
+        val chunks = listOf(
+            chunk("--- Page 1 ---\na", nda, score = 10.0, chunkIndex = 1, docUri = "uri-nda"),
+            chunk("--- Page 10 ---\nb", stmt, score = 9.0, chunkIndex = 5, docUri = "uri-stmt"),
+        )
+        val footer = buildDeterministicSourcesFooter(
+            chunks,
+            outline,
+            englishLabels,
+            maxSources = 2,
+            multiFileFairSources = true,
+        )
+        assertTrue(footer.contains("NDA"))
+        assertTrue(footer.contains("Account"))
+        assertFalse(footer.contains("File 1:"))
     }
 
     @Test

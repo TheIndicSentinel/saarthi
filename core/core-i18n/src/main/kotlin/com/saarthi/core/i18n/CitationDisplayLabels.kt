@@ -9,10 +9,14 @@ data class CitationDisplayLabels(
     val locationUnknown: String,
     /** Locale-specific document title for the worked Sources footer example in RAG prompts (A4). */
     val rulesExampleDocTitle: String,
+    /** Short label for multi-file title collisions (A6): "File" → "File 1: Title · page". */
+    val fileLabelWord: String,
 ) {
     /** Full multi-line example matching deterministic footer shape: header + one file line. */
     fun citationRulesFooterExample(): String =
         "${sourcesHeader}\n$rulesExampleDocTitle · $pageSingle 17"
+
+    fun fileDisambigLabel(index1Based: Int): String = "$fileLabelWord $index1Based"
 }
 
 fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (this) {
@@ -23,6 +27,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "overview",
         locationUnknown = "location not marked in file",
         rulesExampleDocTitle = "Digital Personal Data Protection Act 2023",
+        fileLabelWord = "File",
     )
     SupportedLanguage.HINDI -> CitationDisplayLabels(
         sourcesHeader = "स्रोत:",
@@ -31,6 +36,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "अवलोकन",
         locationUnknown = "फ़ाइल में पृष्ठ अंकित नहीं",
         rulesExampleDocTitle = "डिजिटल पर्सनल डेटा प्रोटेक्शन अधिनियम 2023",
+        fileLabelWord = "फ़ाइल",
     )
     SupportedLanguage.TAMIL -> CitationDisplayLabels(
         sourcesHeader = "மூலம்:",
@@ -39,6 +45,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "மேலோட்டம்",
         locationUnknown = "கோப்பில் பக்கம் குறிக்கப்படவில்லை",
         rulesExampleDocTitle = "டிஜிட்டல் தனிப்பட்ட தரவு பாதுகாப்பு சட்டம் 2023",
+        fileLabelWord = "கோப்பு",
     )
     SupportedLanguage.TELUGU -> CitationDisplayLabels(
         sourcesHeader = "మూలాలు:",
@@ -47,6 +54,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "అవలోకనం",
         locationUnknown = "ఫైల్‌లో పేజీ గుర్తించబడలేదు",
         rulesExampleDocTitle = "డిజిటల్ వ్యక్తిగత డేటా రక్షణ చట్టం 2023",
+        fileLabelWord = "ఫైల్",
     )
     SupportedLanguage.BENGALI -> CitationDisplayLabels(
         sourcesHeader = "সূত্র:",
@@ -55,6 +63,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "সারাংশ",
         locationUnknown = "ফাইলে পৃষ্ঠা চিহ্নিত নেই",
         rulesExampleDocTitle = "ডিজিটাল ব্যক্তিগত ডেটা সুরক্ষা আইন 2023",
+        fileLabelWord = "ফাইল",
     )
     SupportedLanguage.MARATHI -> CitationDisplayLabels(
         sourcesHeader = "स्त्रोत:",
@@ -63,6 +72,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "आढावा",
         locationUnknown = "फाइलमध्ये पृष्ठ चिन्हांकित नाही",
         rulesExampleDocTitle = "डिजिटल वैयक्तिक डेटा संरक्षण अधिनियम 2023",
+        fileLabelWord = "फाइल",
     )
     SupportedLanguage.KANNADA -> CitationDisplayLabels(
         sourcesHeader = "ಮೂಲಗಳು:",
@@ -71,6 +81,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "ಅವಲೋಕನ",
         locationUnknown = "ಫೈಲ್‌ನಲ್ಲಿ ಪುಟ ಗುರುತಿಸಲಾಗಿಲ್ಲ",
         rulesExampleDocTitle = "ಡಿಜಿಟಲ್ ವೈಯಕ್ತಿಕ ಡೇಟಾ ರಕ್ಷಣಾ ಕಾಯಿದೆ 2023",
+        fileLabelWord = "ಫೈಲ್",
     )
     SupportedLanguage.GUJARATI -> CitationDisplayLabels(
         sourcesHeader = "સ્રોત:",
@@ -79,6 +90,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "અવલોકન",
         locationUnknown = "ફાઇલમાં પૃષ્ઠ ચિહ્નિત નથી",
         rulesExampleDocTitle = "ડિજિટલ વ્યક્તિગત ડેટા સંરક્ષણ અધિનિયમ 2023",
+        fileLabelWord = "ફાઇલ",
     )
     SupportedLanguage.PUNJABI -> CitationDisplayLabels(
         sourcesHeader = "ਸਰੋਤ:",
@@ -87,6 +99,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "ਜਾਣ-ਪਛਾਣ",
         locationUnknown = "ਫਾਈਲ ਵਿੱਚ ਪੰਨਾ ਨਹੀਂ ਦਰਸਾਇਆ",
         rulesExampleDocTitle = "ਡਿਜਿਟਲ ਨਿੱਜੀ ਡਾਟਾ ਸੁਰੱਖਿਆ ਐਕਟ 2023",
+        fileLabelWord = "ਫਾਈਲ",
     )
     SupportedLanguage.ODIA -> CitationDisplayLabels(
         sourcesHeader = "ସୂତ୍ର:",
@@ -95,6 +108,7 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         overview = "ସାରାଂଶ",
         locationUnknown = "ଫାଇଲରେ ପୃଷ୍ଠା ଚିହ୍ନିତ ନାହିଁ",
         rulesExampleDocTitle = "ଡିଜିଟାଲ୍ ବ୍ୟକ୍ତିଗତ ଡାଟା ସୁରକ୍ଷା ଆଇନ 2023",
+        fileLabelWord = "ଫାଇଲ୍",
     )
 }
 

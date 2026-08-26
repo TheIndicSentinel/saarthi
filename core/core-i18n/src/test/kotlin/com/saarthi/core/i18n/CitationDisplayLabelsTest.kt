@@ -12,6 +12,7 @@ class CitationDisplayLabelsTest {
         assertEquals("स्रोत:", labels.sourcesHeader)
         assertEquals("पृष्ठ", labels.pageSingle)
         assertEquals("अवलोकन", labels.overview)
+        assertEquals("फ़ाइल 2", labels.fileDisambigLabel(2))
     }
 
     @Test

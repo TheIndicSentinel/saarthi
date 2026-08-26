@@ -89,6 +89,38 @@ internal fun formatUserCitationLine(
     return "$name · $location"
 }
 
+private fun citationLineTitle(line: String): String = line.substringBefore('·').trim()
+
+private fun citationLineLocation(line: String): String =
+    line.substringAfter('·', missingDelimiterValue = "").trim()
+
+/**
+ * A6 point 2 — when two files share the same short title, prefix "File 1:" / "फ़ाइल 1:" etc.
+ */
+internal fun applyTitleCollisionDisambiguation(
+    entries: List<Pair<RetrievedChunk, String>>,
+    labels: CitationDisplayLabels,
+    docOrder: List<String>,
+): List<String> {
+    if (entries.size < 2) return entries.map { it.second }
+    val titleGroups = entries.groupBy { (_, line) -> citationLineTitle(line) }
+    val collidingTitles = titleGroups.filter { (_, group) ->
+        group.size >= 2 && group.map { citationChunkDocKey(it.first) }.distinct().size >= 2
+    }.keys
+    if (collidingTitles.isEmpty()) return entries.map { it.second }
+    val docFileNumber = docOrder.withIndex().associate { it.value to it.index + 1 }
+    return entries.map { (chunk, line) ->
+        val title = citationLineTitle(line)
+        if (title !in collidingTitles) {
+            line
+        } else {
+            val location = citationLineLocation(line)
+            val fileNum = docFileNumber[citationChunkDocKey(chunk)] ?: 1
+            "${labels.fileDisambigLabel(fileNum)}: $title · $location"
+        }
+    }
+}
+
 internal fun buildDeterministicSourcesFooter(
     chunks: List<RetrievedChunk>,
     outlineByDocName: Map<String, String>,
@@ -98,12 +130,13 @@ internal fun buildDeterministicSourcesFooter(
 ): String {
     if (chunks.isEmpty() || maxSources <= 0) return ""
     val ordered = interleaveExcerptsByDoc(chunks)
-    val lines = ArrayList<String>(maxSources)
+    val entries = ArrayList<Pair<RetrievedChunk, String>>(maxSources)
     val seenLines = LinkedHashSet<String>()
+    val docOrder = ordered.map { citationChunkDocKey(it) }.distinct()
 
     fun lineFor(chunk: RetrievedChunk): String? {
         val line = formatUserCitationLine(chunk, outlineByDocName, labels)
-        val label = line.substringBefore('·').trim()
+        val label = citationLineTitle(line)
         if (looksLikeInternalCitationLabel(label)) return null
         return line
     }
@@ -112,16 +145,16 @@ internal fun buildDeterministicSourcesFooter(
         val line = lineFor(chunk) ?: return false
         if (line in seenLines) return false
         seenLines += line
-        lines += line
+        entries += chunk to line
         return true
     }
 
-    val distinctDocs = ordered.map { citationChunkDocKey(it) }.distinct()
+    val distinctDocs = docOrder
     val multiFile = multiFileFairSources && distinctDocs.size >= 2
 
     if (multiFile) {
         for (docKey in distinctDocs) {
-            if (lines.size >= maxSources) break
+            if (entries.size >= maxSources) break
             val reserveChunk = ordered.firstOrNull { citationChunkDocKey(it) == docKey && it.score > 0.0 }
                 ?: ordered.firstOrNull { citationChunkDocKey(it) == docKey }
             if (reserveChunk != null) tryAdd(reserveChunk)
@@ -129,10 +162,11 @@ internal fun buildDeterministicSourcesFooter(
     }
 
     for (chunk in ordered) {
-        if (lines.size >= maxSources) break
+        if (entries.size >= maxSources) break
         tryAdd(chunk)
     }
 
+    val lines = applyTitleCollisionDisambiguation(entries, labels, docOrder)
     if (lines.isEmpty()) return ""
     return buildString {
         append(labels.sourcesHeader)
