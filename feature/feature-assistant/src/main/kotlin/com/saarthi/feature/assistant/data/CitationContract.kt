@@ -1,5 +1,7 @@
 package com.saarthi.feature.assistant.data
 
+import java.util.Locale
+
 /**
  * Point 7 — citation contract. Pure helpers so header names, page labels,
  * and prompt rules stay unit-testable without constructing ChatRepositoryImpl.
@@ -57,21 +59,100 @@ internal fun looksLikeContentStamp(rawName: String): Boolean {
     return stem.length >= 28 && stem.none { it.isLetter() || it in '\u0900'..'\u0D7F' }
 }
 
+/** Internal outline chunk prefix — never show as a user-facing document title. */
+internal fun isOutlineBoilerplateLine(line: String): Boolean {
+    val norm = line.trim().lowercase()
+    return norm.startsWith("document outline") || norm.contains("auto-detected heading")
+}
+
+/** Labels that must not appear in Sources, manifest, or excerpt headers. */
+internal fun looksLikeInternalCitationLabel(label: String): Boolean {
+    val trimmed = label.trim()
+    if (trimmed.isEmpty()) return true
+    return isOutlineBoilerplateLine(trimmed) ||
+        looksLikeContentStamp(trimmed)
+}
+
+internal const val FALLBACK_ATTACHED_DOC_LABEL = "Attached document"
+
+private val DOCUMENT_TITLE_THE_LINE = Regex(
+    """^THE\s+(.{10,120})$""",
+    setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE),
+)
+
 /**
- * Citation/manifest name: human outline title when the filename is a hash stamp.
+ * Pull a human title from document body (acts, circulars, notices).
+ * Scans only the opening — cheap and safe at index + citation time.
  */
-internal fun displayDocName(rawName: String, outlineText: String? = null): String {
-    if (!looksLikeContentStamp(rawName)) return shortDocName(rawName)
-    val heading = outlineText
-        ?.lineSequence()
-        ?.map { it.trim() }
-        ?.firstOrNull { line ->
-            line.isNotBlank() && !PAGE_MARKER_REGEX.containsMatchIn(line)
+internal fun extractDocumentTitle(text: String?): String? {
+    if (text.isNullOrBlank()) return null
+    val sample = PAGE_MARKER_REGEX.replace(text.take(5000), "")
+    for (raw in sample.lineSequence()) {
+        val line = raw.trim()
+        if (line.length < 10) continue
+        if (isOutlineBoilerplateLine(line)) continue
+        if (line.startsWith("THE ", ignoreCase = true)) {
+            return line.removePrefix("THE ").removePrefix("The ").trim()
+        }
+    }
+    DOCUMENT_TITLE_THE_LINE.find(sample)?.let { match ->
+        return match.value.trim()
+            .removePrefix("THE ")
+            .removePrefix("The ")
+            .trim()
+    }
+    for (raw in sample.lineSequence()) {
+        val line = raw.trim()
+        if (line.length !in 10..80) continue
+        if (!line.any { it.isLetter() }) continue
+        if (isOutlineBoilerplateLine(line)) continue
+        if (line == line.uppercase(Locale.ENGLISH) && line.any { it.isUpperCase() }) {
+            return line
+        }
+    }
+    // Plain title line (e.g. outline chunk prefixed with act name at index time).
+    val firstContent = sample.lineSequence()
+        .map { it.trim() }
+        .firstOrNull { line ->
+            line.length in 12..120 &&
+                line.any { it.isLetter() } &&
+                !isOutlineBoilerplateLine(line) &&
+                !line.startsWith("-")
+        }
+    return firstContent?.removePrefix("THE ").removePrefix("The ").trim()
+}
+
+/** First real heading line from an outline chunk (skips internal boilerplate). */
+internal fun outlineHeadingFromText(outlineText: String?): String? {
+    if (outlineText.isNullOrBlank()) return null
+    return outlineText.lineSequence()
+        .map { it.trim().removePrefix("- ").trim() }
+        .firstOrNull { line ->
+            line.isNotBlank() &&
+                !PAGE_MARKER_REGEX.containsMatchIn(line) &&
+                !isOutlineBoilerplateLine(line)
         }
         ?.removePrefix("THE ")
         ?.removePrefix("The ")
         ?.trim()
-    return if (heading != null) shortDocName(heading) else shortDocName(rawName)
+}
+
+/**
+ * User-visible document title for citations, manifest, and attach notices.
+ * Hash filenames → title from body, outline heading, or a safe fallback.
+ */
+internal fun displayDocName(
+    rawName: String,
+    outlineText: String? = null,
+    contentHint: String? = null,
+): String {
+    if (!looksLikeContentStamp(rawName)) return shortDocName(rawName)
+    val fromTitle = extractDocumentTitle(contentHint) ?: extractDocumentTitle(outlineText)
+    if (fromTitle != null) return shortDocName(fromTitle)
+    val fromOutline = outlineHeadingFromText(outlineText)
+    if (fromOutline != null) return shortDocName(fromOutline)
+    val stem = shortDocName(rawName)
+    return if (looksLikeInternalCitationLabel(stem)) FALLBACK_ATTACHED_DOC_LABEL else stem
 }
 
 internal fun extractPageRange(text: String): String? {
@@ -96,7 +177,7 @@ internal fun formatExcerptHeader(
     chunkIndex: Int,
     outlineText: String? = null,
 ): String {
-    val name = displayDocName(docName, outlineText)
+    val name = displayDocName(docName, outlineText, text)
     val page = if (chunkIndex < 0) null else extractPageRange(text)
     val pageRef = page?.let { " · $it" } ?: ""
     return "[$index1Based] $name$pageRef\n"

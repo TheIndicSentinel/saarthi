@@ -137,6 +137,14 @@ class ChatRepositoryImpl @Inject constructor(
     @Volatile
     private var lastPriorTurnsChars: Int = 0
 
+    /** A1 — retrieval metadata for deterministic Sources footer on the last grounded turn. */
+    @Volatile
+    private var lastCitationGrounded: Boolean = false
+    @Volatile
+    private var lastCitationChunks: List<RetrievedChunk> = emptyList()
+    @Volatile
+    private var lastCitationOutlineByDoc: Map<String, String> = emptyMap()
+
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
     private val currentLanguage: SupportedLanguage
@@ -366,12 +374,21 @@ class ChatRepositoryImpl @Inject constructor(
                     // Parse markers out of the raw accumulated text
                     val raw = accumulated.toString()
                     val parsed = ResponseMarkerParser.parse(raw)
+                    val groundedText = if (lastCitationGrounded && lastCitationChunks.isNotEmpty()) {
+                        applyDeterministicSourcesFooter(
+                            parsed.cleanText,
+                            lastCitationChunks,
+                            lastCitationOutlineByDoc,
+                        )
+                    } else {
+                        parsed.cleanText
+                    }
                     logRag(
                         ragGenerationLogLine(
                             rawChars = raw.length,
                             priorTurnsChars = lastPriorTurnsChars,
                             uriLens = lastPromptUriLens,
-                            preview = if (ragLogDocNames()) ragRawModelPreview(raw) else null,
+                            preview = if (ragLogDocNames()) ragRawModelPreview(groundedText) else null,
                         ),
                     )
 
@@ -388,7 +405,7 @@ class ChatRepositoryImpl @Inject constructor(
                     val partial = _history.value.firstOrNull { it.id == streamingId }?.content.orEmpty()
                     val lang = currentLanguage
                     val finalContent = resolveAssistantReply(
-                        cleanedText = parsed.cleanText,
+                        cleanedText = groundedText,
                         isCancelled = isCancelled,
                         isError = isError,
                         partialVisible = partial,
@@ -781,6 +798,12 @@ class ChatRepositoryImpl @Inject constructor(
         }
         lastPromptUriLens = retrieved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().map { it.length }
         lastPriorTurnsChars = 0
+        val outlineByDocName = retrieved
+            .filter { it.chunkIndex < 0 }
+            .associate { it.docName to it.text }
+        val newAttachDisplayNames = attachments.map { file ->
+            displayDocName(file.name, outlineByDocName[file.name], file.extractedText)
+        }
 
         // Per-chunk retrieval log — names + chunk index + BM25 score +
         // page range. Metadata only (no query/chunk text — that's user
@@ -797,7 +820,11 @@ class ChatRepositoryImpl @Inject constructor(
                         chunkIndex = c.chunkIndex,
                         page = extractPageRange(c.text),
                         score = c.score,
-                        displayName = if (ragLogDocNames()) shortDocName(c.docName) else null,
+                        displayName = if (ragLogDocNames()) {
+                            displayDocName(c.docName, outlineByDocName[c.docName], c.text)
+                        } else {
+                            null
+                        },
                     ),
                 )
             }
@@ -847,9 +874,9 @@ class ChatRepositoryImpl @Inject constructor(
             val scaffolding = identity.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlock(
+            val fileContext = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
-                newThisTurnNames = attachments.map { shortDocName(it.name) },
+                newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
             )
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
@@ -928,9 +955,9 @@ class ChatRepositoryImpl @Inject constructor(
                 // saved 80 c is exactly enough for one extra chunk.
                 80                                                    // safety margin
             val ragBudget = (budget - systemPlusMargin).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlock(
+            val fileContext = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
-                newThisTurnNames = attachments.map { shortDocName(it.name) },
+                newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
             )
             DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
@@ -982,9 +1009,9 @@ class ChatRepositoryImpl @Inject constructor(
             // budget is available for RAG, minus the user message.
             val budget = maxPromptChars
             val ragBudget = (budget - userMessage.length - 80).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlock(
+            val fileContext = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
-                newThisTurnNames = attachments.map { shortDocName(it.name) },
+                newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
             )
             DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} shape=$ragAnswerShape promptMs=${promptMs()}")
@@ -1012,6 +1039,42 @@ class ChatRepositoryImpl @Inject constructor(
      * can't carry the full rule list inside its 512-tok budget without
      * crowding out the actual chunks.
      */
+    private fun buildRagPromptBlockAndTrackCitation(
+        retrieved: List<RetrievedChunk>,
+        unreadableThisTurn: List<AttachedFile>,
+        tier: SystemPromptProvider.ModelTier,
+        charBudget: Int,
+        sessionDocs: List<SessionRagDocument> = emptyList(),
+        newThisTurnNames: List<String> = emptyList(),
+        answerShape: RagAnswerShape = RagAnswerShape.NARROW_QA,
+    ): String {
+        val block = buildRagPromptBlock(
+            retrieved,
+            unreadableThisTurn,
+            tier,
+            charBudget,
+            sessionDocs,
+            newThisTurnNames,
+            answerShape,
+        )
+        updateCitationContext(retrieved, block)
+        return block
+    }
+
+    private fun updateCitationContext(retrieved: List<RetrievedChunk>, ragBlock: String) {
+        if (ragBlock.isEmpty() || retrieved.isEmpty()) {
+            lastCitationGrounded = false
+            lastCitationChunks = emptyList()
+            lastCitationOutlineByDoc = emptyMap()
+            return
+        }
+        lastCitationGrounded = true
+        lastCitationChunks = interleaveExcerptsByDoc(retrieved)
+        lastCitationOutlineByDoc = retrieved
+            .filter { it.chunkIndex < 0 }
+            .associate { it.docName to it.text }
+    }
+
     private fun buildRagPromptBlock(
         retrieved: List<com.saarthi.feature.assistant.data.RetrievedChunk>,
         unreadableThisTurn: List<AttachedFile>,

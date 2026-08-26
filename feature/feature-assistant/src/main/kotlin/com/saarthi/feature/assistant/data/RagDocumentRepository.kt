@@ -242,7 +242,14 @@ class RagDocumentRepository @Inject constructor(
         // queries surface it first; normal BM25 ignores it because we
         // filter to chunkIndex >= 0 before ranking. Doc with no detectable
         // headings → no outline chunk, no behaviour change.
-        extractOutline(text)?.let { outlineText ->
+        extractOutline(text)?.let { outlineBody ->
+            val outlineText = buildString {
+                extractDocumentTitle(text)?.let { title ->
+                    append(title)
+                    append('\n')
+                }
+                append(outlineBody)
+            }.trimEnd()
             entities.add(
                 RagChunkEntity(
                     sessionId = sessionId,

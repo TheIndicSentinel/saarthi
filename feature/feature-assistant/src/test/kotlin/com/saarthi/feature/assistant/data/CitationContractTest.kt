@@ -110,6 +110,39 @@ class CitationContractTest {
     }
 
     @Test
+    fun `displayDocName skips outline boilerplate and uses act title`() {
+        val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val outline = "Document outline (auto-detected headings):\n- CHAPTER I\n- PRELIMINARY"
+        val body = "--- Page 1 ---\nTHE DIGITAL PERSONAL DATA PROTECTION ACT, 2023"
+        assertEquals(
+            "Digital Personal Data",
+            displayDocName(hash, outline, body),
+        )
+        assertFalse(displayDocName(hash, outline, body).lowercase().contains("outline"))
+    }
+
+    @Test
+    fun `displayDocName falls back to Attached document for bare hash`() {
+        val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        assertEquals(FALLBACK_ATTACHED_DOC_LABEL, displayDocName(hash, null, null))
+    }
+
+    @Test
+    fun `looksLikeInternalCitationLabel flags outline auto label`() {
+        assertTrue(looksLikeInternalCitationLabel("Document outline auto"))
+        assertTrue(looksLikeInternalCitationLabel("bf1f0e9f04e6fb4f8fef35e82c42"))
+        assertFalse(looksLikeInternalCitationLabel("Account Statement"))
+    }
+
+    @Test
+    fun `extractDocumentTitle finds THE ACT line`() {
+        val title = extractDocumentTitle(
+            "--- Page 1 ---\nTHE DIGITAL PERSONAL DATA PROTECTION ACT, 2023\nSection 1.",
+        )
+        assertTrue(title != null && title.contains("DIGITAL PERSONAL DATA"))
+    }
+
+    @Test
     fun `displayDocName uses outline heading for hash filenames`() {
         val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
         assertTrue(looksLikeContentStamp(hash))
