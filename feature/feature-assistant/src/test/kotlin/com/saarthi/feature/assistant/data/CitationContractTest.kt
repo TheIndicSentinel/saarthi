@@ -12,7 +12,7 @@ class CitationContractTest {
         val raw = "Mallikarjuna Rao_NDA Agreement.pdf"
         val name = shortDocName(raw)
         val header = formatExcerptHeader(1, raw, "Term is 24 months.", chunkIndex = 0)
-        val manifest = sessionManifestLine(listOf(raw))
+        val manifest = sessionManifestLine(listOf(name))
         assertTrue(header.startsWith("[1] $name"))
         assertTrue(manifest.contains(name))
         assertFalse(header.contains(".pdf"))
@@ -54,22 +54,22 @@ class CitationContractTest {
     }
 
     @Test
-    fun `standard rules cover compare, no cite on In general, unread`() {
+    fun `standard rules use Sources footer not per-claim cites`() {
         val rules = ragCitationRules(compact = false)
-        assertTrue(rules.contains("cite each file that contributed"))
+        assertTrue(rules.contains("Sources:"))
+        assertTrue(rules.contains("Do NOT put (Name, p.X) on every bullet"))
         assertTrue(rules.contains("In general:' with no (Name, p.X) citation"))
         assertTrue(rules.contains("Never cite files listed as unreadable"))
-        assertTrue(rules.contains("Consent is required (DPDP Act, p.3)."))
     }
 
     @Test
-    fun `compact rules stay one paragraph and still ban unread and In general cites`() {
+    fun `compact rules stay one paragraph and use Sources footer`() {
         val rules = ragCitationRules(compact = true)
         assertEquals(0, rules.trim().count { it == '\n' })
+        assertTrue(rules.contains("Sources:"))
         assertTrue(rules.contains("In general:"))
         assertTrue(rules.contains("no citation"))
         assertTrue(rules.contains("Never cite unread"))
-        assertTrue(rules.contains("cite each file"))
         assertFalse(rules.contains("• "))
     }
 
@@ -82,9 +82,8 @@ class CitationContractTest {
         assertTrue(rules.contains("matches these documents"))
         assertFalse(rules.contains("IGNORE"))
         assertFalse(rules.contains("NOT about the document"))
-        assertTrue(rules.contains("cite each file that contributed"))
+        assertTrue(rules.contains("Sources:"))
         assertTrue(rules.contains("Never cite files listed as unreadable"))
-        assertTrue(rules.contains("Consent is required (DPDP Act, p.3)."))
     }
 
     @Test
@@ -108,6 +107,24 @@ class CitationContractTest {
     @Test
     fun `unreadable intro forbids citing those files`() {
         assertTrue(UNREADABLE_FILES_INTRO.contains("do not cite them"))
+    }
+
+    @Test
+    fun `displayDocName uses outline heading for hash filenames`() {
+        val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        assertTrue(looksLikeContentStamp(hash))
+        assertEquals(
+            "Digital Personal Data",
+            displayDocName(hash, "Digital Personal Data Protection Act, 2023"),
+        )
+        val header = formatExcerptHeader(
+            1,
+            hash,
+            "Consent is required.",
+            chunkIndex = 2,
+            outlineText = "Digital Personal Data Protection Act, 2023",
+        )
+        assertTrue(header.startsWith("[1] Digital Personal Data"))
     }
 
     @Test

@@ -490,7 +490,10 @@ class RagDocumentRepository @Inject constructor(
 
         val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
         val rankK = (topK * uniqueDocs).coerceAtMost(contentChunks.size).coerceAtLeast(topK)
-        val ranked = rankContentChunks(contentChunks, sessionId, effectiveQuery, rankK)
+        val ranked = filterRankedByScoreGap(
+            rankContentChunks(contentChunks, sessionId, effectiveQuery, rankK),
+            topK,
+        )
 
         // Neighbor expansion: for the top BM25 hits, also include the
         // *next* chunk in the same document. Answers often straddle a
@@ -550,7 +553,10 @@ class RagDocumentRepository @Inject constructor(
             // somehow empties it.
             val scope = retryDocScope(boostDocUris, route.namedDocUris, recencyUri)
             val retryPool = contentChunks.filter { it.docUri in scope }.ifEmpty { contentChunks }
-            val retryRanked = rankContentChunks(retryPool, sessionId, priorQuery.take(150), rankK)
+            val retryRanked = filterRankedByScoreGap(
+                rankContentChunks(retryPool, sessionId, priorQuery.take(150), rankK),
+                topK,
+            )
             for (scored in retryRanked) {
                 val entity = retryPool[scored.index]
                 if (usedIds.add(entity.id)) {
@@ -1130,6 +1136,22 @@ internal val META_DEVANAGARI_PATTERN = Regex("(अनुक्रम|सार�
 
 internal fun isDevanagariMetaTrigger(query: String): Boolean =
     META_DEVANAGARI_PATTERN.containsMatchIn(query)
+
+/**
+ * After BM25 ranking, drop tail hits far below the top score so narrow QA
+ * does not pack every weakly related chunk (P0 #2).
+ */
+internal fun filterRankedByScoreGap(
+    ranked: List<Bm25Retriever.Scored>,
+    maxKeep: Int,
+    gapRatio: Double = 0.35,
+): List<Bm25Retriever.Scored> {
+    if (ranked.isEmpty()) return ranked
+    val top = ranked.first().score
+    if (top <= 0.0) return ranked.take(maxKeep)
+    val threshold = top * gapRatio
+    return ranked.filter { it.score >= threshold }.take(maxKeep.coerceAtLeast(1))
+}
 
 /**
  * Overview / summary / table-of-contents triggers in the non-Devanagari Indic

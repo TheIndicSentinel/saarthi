@@ -1,5 +1,6 @@
 package com.saarthi.feature.assistant.data
 
+import com.saarthi.core.rag.Bm25Retriever
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -149,5 +150,74 @@ class QueryRoutingTest {
         assertFalse(isDuplicateTurn("give an overview", uris, "give an overview", setOf("content://b")))
         assertFalse(isDuplicateTurn(null, emptySet(), "give an overview", uris))
         assertFalse(isDuplicateTurn("give an overview", uris, "what is the penalty", uris))
+    }
+
+    @Test
+    fun `brief overview requests map to OVERVIEW_SHORT`() {
+        assertEquals(
+            RagAnswerShape.OVERVIEW_SHORT,
+            detectRagAnswerShape("Give Document content overview in short", metaOverview = true),
+        )
+        assertEquals(
+            RagAnswerShape.OVERVIEW_SHORT,
+            detectRagAnswerShape("Document content ka overview do संक्षिप्त में", metaOverview = true),
+        )
+        assertEquals(
+            RagAnswerShape.OVERVIEW,
+            detectRagAnswerShape("Document content ka overview do", metaOverview = true),
+        )
+    }
+
+    @Test
+    fun `narrow factual questions map to NARROW_QA`() {
+        assertEquals(RagAnswerShape.NARROW_QA, detectRagAnswerShape("Penalties kya hai?", metaOverview = false))
+        assertEquals(RagAnswerShape.NARROW_QA, detectRagAnswerShape("What is data protection board", metaOverview = false))
+    }
+
+    @Test
+    fun `explicit list requests map to LIST`() {
+        assertEquals(RagAnswerShape.LIST, detectRagAnswerShape("list all penalties in the act", metaOverview = false))
+        assertEquals(RagAnswerShape.LIST, detectRagAnswerShape("list the rights", metaOverview = false))
+    }
+
+    @Test
+    fun `isBriefRequest detects english and devanagari`() {
+        assertTrue(isBriefRequest("overview in short"))
+        assertTrue(isBriefRequest("संक्षिप्त अवलोकन"))
+        assertFalse(isBriefRequest("what are penalties"))
+    }
+
+    @Test
+    fun `overview english without meta route still maps to OVERVIEW`() {
+        assertEquals(
+            RagAnswerShape.OVERVIEW,
+            detectRagAnswerShape("give me an overview of this document", metaOverview = false),
+        )
+    }
+
+    @Test
+    fun `topK scales with answer shape`() {
+        assertEquals(4, topKForAnswerShape(RagAnswerShape.NARROW_QA, equalSlots = false))
+        assertEquals(5, topKForAnswerShape(RagAnswerShape.OVERVIEW_SHORT, equalSlots = false))
+        assertEquals(6, topKForAnswerShape(RagAnswerShape.OVERVIEW, equalSlots = false))
+        assertEquals(6, topKForAnswerShape(RagAnswerShape.LIST, equalSlots = false))
+        assertEquals(
+            RagDocumentRepository.DEFAULT_TOP_K,
+            topKForAnswerShape(RagAnswerShape.NARROW_QA, equalSlots = true),
+        )
+    }
+
+    @Test
+    fun `filterRankedByScoreGap drops weak tail hits`() {
+        val ranked = listOf(
+            Bm25Retriever.Scored(0, 10.0),
+            Bm25Retriever.Scored(1, 8.0),
+            Bm25Retriever.Scored(2, 2.0),
+            Bm25Retriever.Scored(3, 1.0),
+        )
+        val out = filterRankedByScoreGap(ranked, maxKeep = 4)
+        assertEquals(2, out.size)
+        assertEquals(0, out[0].index)
+        assertEquals(1, out[1].index)
     }
 }

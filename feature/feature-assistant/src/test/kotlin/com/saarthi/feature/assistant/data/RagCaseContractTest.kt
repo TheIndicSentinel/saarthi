@@ -89,10 +89,12 @@ class RagCaseContractTest {
         val allocated = allocatePerDocSlots(hits, topK = 8, minPerDoc = 4)
         assertEquals(4, allocated.count { it.docUri == nda.first })
         assertEquals(4, allocated.count { it.docUri == stmt.first })
-        val manifest = sessionManifestLine(listOf(nda.second, stmt.second))
+        val manifest = sessionManifestLine(
+            listOf(shortDocName(nda.second), shortDocName(stmt.second)),
+        )
         assertTrue(manifest.contains(shortDocName(nda.second)))
         assertTrue(manifest.contains(shortDocName(stmt.second)))
-        assertTrue(ragCitationRules(compact = false).contains("cite each file that contributed"))
+        assertTrue(ragCitationRules(compact = false).contains("Sources:"))
     }
 
     @Test
@@ -126,7 +128,7 @@ class RagCaseContractTest {
         val raw = nda.second
         val name = shortDocName(raw)
         val header = formatExcerptHeader(1, raw, "--- Page 3 ---\nTerm", chunkIndex = 0)
-        val manifest = sessionManifestLine(listOf(raw, stmt.second))
+        val manifest = sessionManifestLine(listOf(name, shortDocName(stmt.second)))
         assertEquals("[1] $name · p.3\n", header)
         assertTrue(manifest.contains(name))
         assertTrue(manifest.contains(shortDocName(stmt.second)))

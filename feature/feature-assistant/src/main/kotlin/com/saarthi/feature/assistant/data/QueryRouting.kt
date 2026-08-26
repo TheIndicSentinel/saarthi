@@ -233,3 +233,85 @@ internal fun isDuplicateTurn(
     if (lastQuery == null || newQuery.isEmpty()) return false
     return lastQuery.equals(newQuery, ignoreCase = true) && lastUris == newUris
 }
+
+/** How the model should shape a grounded reply for this turn (P0 answer focus). */
+internal enum class RagAnswerShape {
+    OVERVIEW_SHORT,
+    OVERVIEW,
+    NARROW_QA,
+    LIST,
+}
+
+private val BRIEF_EN_TOKENS = setOf(
+    "short", "brief", "briefly", "tldr", "quick", "concise", "summary",
+)
+
+/** Brief / short overview or answer — English + Indic scripts the app offers. */
+internal val BRIEF_REQUEST_PATTERN = Regex(
+    "(" +
+        "in short|quick summary|" +
+        // Devanagari (Hindi/Marathi)
+        "संक्षिप्त|सक्षिप्त|संक्षेप|छोटा|छोटे|" +
+        // Tamil / Telugu / Bengali / Kannada / Gujarati / Punjabi / Odia
+        "சுருக்க|குறுகிய|" +
+        "సంక్షిప్త|చిన్న|" +
+        "সংক্ষিপ্ত|ছোট|" +
+        "ಸಂಕ್ಷಿಪ್ತ|ಚಿಕ್ಕ|" +
+        "સંક્ષિપ્ત|ટૂંકું|" +
+        "ਸੰਖੇਪ|ਛੋਟਾ|" +
+        "ସଂକ୍ଷିପ୍ତ|ଛୋଟ" +
+        ")",
+)
+
+internal fun isBriefRequest(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.contains("in short")) return true
+    if (BRIEF_REQUEST_PATTERN.containsMatchIn(query)) return true
+    val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    return tokens.any { it in BRIEF_EN_TOKENS }
+}
+
+internal fun isListRequest(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.contains("list all") || lower.contains("list the") ||
+        lower.contains("list of") || lower.contains("enumerate")
+    ) {
+        return true
+    }
+    val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    if (tokens.any { it == "list" || it == "lists" }) return true
+  // Devanagari list cues
+    if (lower.contains("सूची") || lower.contains("सूचि") || lower.contains("सभी")) {
+        return tokens.any { it == "list" || it == "lists" || it == "all" }
+    }
+    return false
+}
+
+/**
+ * Classifies the user's message for grounded generation length/focus.
+ * [metaOverview] is true when retrieval took the meta/overview path
+ * ([RagDocumentRepository.metaRouteReason] non-null on [ragQuery]).
+ */
+internal fun detectRagAnswerShape(query: String, metaOverview: Boolean): RagAnswerShape {
+    val trimmed = query.trim()
+    val lower = trimmed.lowercase()
+    val overviewish = metaOverview ||
+        trimmed.equals(ATTACH_OVERVIEW_QUERY, ignoreCase = true) ||
+        lower.contains("overview") ||
+        isDevanagariMetaTrigger(query)
+    if (overviewish) {
+        return if (isBriefRequest(query)) RagAnswerShape.OVERVIEW_SHORT
+        else RagAnswerShape.OVERVIEW
+    }
+    if (isListRequest(query)) return RagAnswerShape.LIST
+    return RagAnswerShape.NARROW_QA
+}
+
+/** Dynamic top-K: fewer chunks for narrow QA, more for overview/compare (P0 #2). */
+internal fun topKForAnswerShape(shape: RagAnswerShape, equalSlots: Boolean): Int = when {
+    equalSlots -> RagDocumentRepository.DEFAULT_TOP_K
+    shape == RagAnswerShape.OVERVIEW_SHORT -> 5
+    shape == RagAnswerShape.OVERVIEW -> 6
+    shape == RagAnswerShape.LIST -> 6
+    else -> 4
+}

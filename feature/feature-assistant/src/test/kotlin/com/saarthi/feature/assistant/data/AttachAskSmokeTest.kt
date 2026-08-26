@@ -34,13 +34,13 @@ class AttachAskSmokeTest {
     @Test
     fun `attach-turn prompt names the demo file and forbids unread cites`() {
         val name = shortDocName(DemoDocument.NAME)
-        val manifest = sessionManifestLine(listOf(DemoDocument.NAME))
+        val manifest = sessionManifestLine(listOf(name))
         val notice = newFilesThisTurnNotice(listOf(name))
         val rules = ragCitationRules(compact = false, strongMatch = true)
         assertTrue(manifest.contains(name))
         assertTrue(notice.contains(name))
         assertTrue(notice.contains("do not reuse answers about earlier documents"))
-        assertTrue(rules.contains("cite each file"))
+        assertTrue(rules.contains("Sources:"))
         assertFalse(manifest.contains("content://"))
     }
 

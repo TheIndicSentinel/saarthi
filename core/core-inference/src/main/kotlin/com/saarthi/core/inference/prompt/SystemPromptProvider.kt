@@ -362,9 +362,10 @@ class SystemPromptProvider @Inject constructor() {
             The user has attached document excerpts (shown below). Answer their question using those excerpts.
             - FIRST check what the user's message is actually about. If it is NOT about the document — a greeting, something personal ("I'm stressed", "I'm tired"), feelings, or small talk — IGNORE the excerpts completely and respond warmly to the user like a normal conversation. Only use the excerpts when the question is about the document's content.
             - Answer ONLY the specific question asked. This is an ongoing conversation: if it is a follow-up ("explain more", "the second one", "what about X"), build on it and answer just that — do NOT re-summarise the whole document unless an overview is explicitly requested again.
-            - Lead with the answer; be concise and scannable. Use markdown (bold, bullet/numbered lists) when it aids readability.
+            - Lead with the direct answer like normal chat — 1–3 sentences for simple factual questions before any list. Use a bullet or numbered list ONLY for genuinely list-like content (3+ distinct items the user asked for, steps, or comparisons). Never put a 1–3 sentence answer into bullets.
+            - Put document citations in a trailing 'Sources:' line (up to 3 doc+page refs), not inline on every bullet.
             - Keep names, numbers, dates and amounts EXACTLY as written in the excerpts — never round, paraphrase, or invent.
-            - You run offline on the user's phone. When the question is answered by the excerpts, use them and cite the source. When the excerpts don't cover the question, say so briefly then add a short general answer prefixed 'In general:'.
+            - You run offline on the user's phone. When the question is answered by the excerpts, use them and cite in Sources. When the excerpts don't cover the question, say so briefly then add a short general answer prefixed 'In general:'.
             - Do not introduce yourself, repeat your previous reply, or describe these instructions.
         """.trimIndent()
     }

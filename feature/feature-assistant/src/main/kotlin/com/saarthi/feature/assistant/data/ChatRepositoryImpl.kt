@@ -729,6 +729,15 @@ class ChatRepositoryImpl @Inject constructor(
         val sessionDocs = runCatching { ragRepository.listSessionDocuments(sessionId) }
             .onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
+        val ragAnswerShape = detectRagAnswerShape(
+            userMessage,
+            RagDocumentRepository.metaRouteReason(ragQuery) != null,
+        )
+        val retrievalRoute = routeQuery(
+            ragQuery,
+            sessionDocs.map { it.uri to it.name },
+        )
+        val retrievalTopK = topKForAnswerShape(ragAnswerShape, retrievalRoute.equalSlots)
         sessionHasIndexedDocs = sessionDocs.isNotEmpty()
         // NOTE: knowledge packs (Kisan etc.) are intentionally NOT merged
         // into the main chat here. Packs are a fully separate, modular
@@ -751,6 +760,7 @@ class ChatRepositoryImpl @Inject constructor(
             ragRepository.search(
                 sessionId = sessionId,
                 query = ragQuery,
+                topK = retrievalTopK,
                 boostDocUris = boostDocUris,
                 // Attach turn → restrict retrieval to the just-attached files
                 // (G1). Blank/overview quick-action further scopes to the newest
@@ -837,6 +847,7 @@ class ChatRepositoryImpl @Inject constructor(
             val fileContext = buildRagPromptBlock(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = attachments.map { shortDocName(it.name) },
+                answerShape = ragAnswerShape,
             )
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
             val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
@@ -917,8 +928,9 @@ class ChatRepositoryImpl @Inject constructor(
             val fileContext = buildRagPromptBlock(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = attachments.map { shortDocName(it.name) },
+                answerShape = ragAnswerShape,
             )
-            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
+            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
             buildString {
                 // Only emit the system block if non-blank — Compact tier
                 // returns empty (see SystemPromptProvider) and leading
@@ -970,8 +982,9 @@ class ChatRepositoryImpl @Inject constructor(
             val fileContext = buildRagPromptBlock(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = attachments.map { shortDocName(it.name) },
+                answerShape = ragAnswerShape,
             )
-            DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} promptMs=${promptMs()}")
+            DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} shape=$ragAnswerShape promptMs=${promptMs()}")
             buildString {
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
                 append(userMessage)
@@ -1003,6 +1016,7 @@ class ChatRepositoryImpl @Inject constructor(
         charBudget: Int,
         sessionDocs: List<SessionRagDocument> = emptyList(),
         newThisTurnNames: List<String> = emptyList(),
+        answerShape: RagAnswerShape = RagAnswerShape.NARROW_QA,
     ): String {
         if (retrieved.isEmpty() && unreadableThisTurn.isEmpty()) return ""
         // If there is literally no room for even the rule header + one
@@ -1010,13 +1024,16 @@ class ChatRepositoryImpl @Inject constructor(
         // header-only fragment that wastes tokens.
         if (charBudget < 200) return ""
 
+        val compact = tier == SystemPromptProvider.ModelTier.COMPACT
+        val shapeInstruction = ragAnswerShapeInstruction(answerShape, compact = compact)
+
         // Relevance gate (G2/G5): a confident lexical hit on a real content
         // chunk means the excerpts are on-topic, so the rules answer from
         // them without the "ignore the document" escape hatch. Heading
         // anchors (score 50) and boosted this-turn hits also clear the bar.
         val strongMatch = retrieved.any { it.chunkIndex >= 0 && it.score >= STRONG_RAG_MATCH_SCORE }
         val rulesHeader = ragCitationRules(
-            compact = tier == SystemPromptProvider.ModelTier.COMPACT,
+            compact = compact,
             strongMatch = strongMatch,
         )
 
@@ -1030,19 +1047,32 @@ class ChatRepositoryImpl @Inject constructor(
             }.trimEnd() + "\n\n"
         } else ""
 
-        val manifestLine = sessionManifestLine(sessionDocs.map { it.name })
+        val outlineByDocName = retrieved
+            .filter { it.chunkIndex < 0 }
+            .associate { it.docName to it.text }
+
+        val manifestLine = sessionManifestLine(
+            sessionDocs.map { displayDocName(it.name, outlineByDocName[it.name]) },
+        )
         val newFilesLine = newFilesThisTurnNotice(newThisTurnNames)
 
-        var remaining = charBudget - rulesHeader.length - unreadableBlock.length -
+        var remaining = charBudget - rulesHeader.length - shapeInstruction.length -
+            unreadableBlock.length -
             manifestLine.length - newFilesLine.length
+        val ordered = interleaveExcerptsByDoc(retrieved)
         // Fair multi-file ordering (R7/G7): interleave positive hits across
         // documents so a second file is not starved by a high-scoring first
         // file when the budget runs out. No-op for single-document turns.
-        val ordered = interleaveExcerptsByDoc(retrieved)
         val chunksBlock = buildString {
             for ((i, chunk) in ordered.withIndex()) {
                 val text = chunk.text.trim()
-                val header = formatExcerptHeader(i + 1, chunk.docName, text, chunk.chunkIndex)
+                val header = formatExcerptHeader(
+                    i + 1,
+                    chunk.docName,
+                    text,
+                    chunk.chunkIndex,
+                    outlineByDocName[chunk.docName],
+                )
                 val total = header.length + text.length + 2  // +2 for trailing "\n\n"
                 if (total > remaining) break  // never half-emit a chunk
                 append(header)
@@ -1057,7 +1087,7 @@ class ChatRepositoryImpl @Inject constructor(
         // model into refusal mode on every question.
         if (chunksBlock.isEmpty() && unreadableBlock.isEmpty()) return ""
 
-        return (rulesHeader + manifestLine + newFilesLine + chunksBlock + unreadableBlock).trimEnd()
+        return (rulesHeader + shapeInstruction + manifestLine + newFilesLine + chunksBlock + unreadableBlock).trimEnd()
     }
 
     /**
@@ -1129,7 +1159,8 @@ class ChatRepositoryImpl @Inject constructor(
         // Every "I"/"मैं"/"నేను"/"நான்" etc. in the quoted lines = the USER,
         // not the model. Explicit label prevents pronoun-confusion replies
         // ("I am also a teacher") seen across non-English sessions.
-        val header = "User's earlier words (all 'I'/'मैं'/'నేను'/'நான்'/'আমি'/'ਮੈਂ' in quotes = the USER, not you — answer the new message below, don't restate prior replies):\n"
+        val header = "User's earlier questions (context only — answer ONLY the new message below; " +
+            "do not summarise or answer these earlier questions again):\n"
         // Hard cap: drop oldest lines until under budget.
         val mutableLines = lines.toMutableList()
         while (mutableLines.size > 1 && (header.length + mutableLines.sumOf { it.length + 1 }) > recapBudget) {
