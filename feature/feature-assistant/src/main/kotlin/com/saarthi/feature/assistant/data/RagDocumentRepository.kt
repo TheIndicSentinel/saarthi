@@ -140,6 +140,7 @@ class RagDocumentRepository @Inject constructor(
             "give overview", "give a summary",
             "analyse the", "analyze the",
             "analyse attached", "analyze attached",
+            "content chi overview", "document content chi",
         )
 
         /**
@@ -409,13 +410,14 @@ class RagDocumentRepository @Inject constructor(
                 else structuralSample(all, topK, query, spaced = route.whichFile)
             val docCount = resolved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size.coerceAtLeast(1)
             val minSlots = if (route.equalSlots) (topK / docCount).coerceAtLeast(1) else 1
+            val contentEntities = all.filter { it.chunkIndex >= 0 }
             val allocated = allocatePerDocSlots(
                 applySessionBoost(resolved, boostDocUris, recencyUri, route.namedDocUris),
                 topK,
                 minSlots,
             )
-            val contentEntities = all.filter { it.chunkIndex >= 0 }
-            val excerpted = coherentExcerptForLowRelevance(allocated, contentEntities)
+            val condensed = collapseRedundantChunkRuns(allocated)
+            val excerpted = coherentExcerptForLowRelevance(condensed, contentEntities)
             if (!expandSmallFiles) return excerpted
             val fullByUri = contentEntities
                 .groupBy { it.docUri }
@@ -478,7 +480,8 @@ class RagDocumentRepository @Inject constructor(
         // detected outline heading, surface that section's chunks first.
         // Additive — BM25 still ranks below; this only guarantees the
         // section the user named is present and leading.
-        val anchoredEntities = anchoredHeadingChunks(all, contentChunks, query)
+        val anchoredEntities = anchoredHeadingChunks(all, contentChunks, query) +
+            anchoredSectionChunks(contentChunks, query)
         headingChunkCount = anchoredEntities.size
 
         // Expand the query when following up on the prior turn.
@@ -671,6 +674,35 @@ class RagDocumentRepository @Inject constructor(
             val headingBit = if (ragLogDocNames()) " heading=${heading.take(40)}" else ""
             logRag("heading-anchored headingLen=${heading.length}$headingBit → ${section.size} chunk(s)")
             return section
+        }
+        return emptyList()
+    }
+
+    /**
+     * When the query names a numbered section/chapter/schedule (not necessarily
+     * an outline heading), surface the matching body window first.
+     */
+    private fun anchoredSectionChunks(
+        contentChunks: List<RagChunkEntity>,
+        query: String,
+    ): List<RagChunkEntity> {
+        val refs = extractSectionRefs(query)
+        if (refs.isEmpty()) return emptyList()
+        for ((_, docChunks) in contentChunks.groupBy { it.docUri }) {
+            val sorted = docChunks.sortedBy { it.chunkIndex }
+            val texts = sorted.map { it.text }
+            for (ref in refs) {
+                val idx = locateSectionInChunks(texts, ref)
+                if (idx < 0) continue
+                val from = (idx - 1).coerceAtLeast(0)
+                val to = minOf(from + HEADING_ANCHOR_MAX, sorted.size)
+                val section = sorted.subList(from, to)
+                if (section.isEmpty()) continue
+                logRag(
+                    "section-anchored kind=${ref.kind} refLen=${ref.token.length} → ${section.size} chunk(s)",
+                )
+                return section
+            }
         }
         return emptyList()
     }
@@ -1060,6 +1092,113 @@ internal fun interleaveExcerptsByDoc(retrieved: List<RetrievedChunk>): List<Retr
     return interleaved + rest
 }
 
+/**
+ * P1 — collapse adjacent same-document hits so one BM25 peak does not fill
+ * top-K with overlapping chunks from the same section. Outline rows and
+ * heading-anchor scores (50) are always kept.
+ */
+internal fun collapseRedundantChunkRuns(
+    retrieved: List<RetrievedChunk>,
+    maxPerAdjacentRun: Int = 2,
+): List<RetrievedChunk> {
+    if (retrieved.size <= maxPerAdjacentRun) return retrieved
+    val outline = retrieved.filter { it.chunkIndex < 0 }
+    val body = retrieved.filter { it.chunkIndex >= 0 }
+    if (body.isEmpty()) return retrieved
+
+    val kept = ArrayList<RetrievedChunk>(retrieved.size)
+    for ((uri, docHits) in body.groupBy { it.docUri }) {
+        val sorted = docHits.sortedBy { it.chunkIndex }
+        var runStart = 0
+        while (runStart < sorted.size) {
+            var runEnd = runStart + 1
+            while (runEnd < sorted.size &&
+                sorted[runEnd].chunkIndex - sorted[runEnd - 1].chunkIndex <= 1
+            ) {
+                runEnd++
+            }
+            val run = sorted.subList(runStart, runEnd)
+            val cap = if (run.any { it.score >= 50.0 }) {
+                maxPerAdjacentRun + 1
+            } else {
+                maxPerAdjacentRun
+            }
+            kept.addAll(run.sortedByDescending { it.score }.take(cap))
+            runStart = runEnd
+        }
+    }
+    // Preserve cross-doc score order for the body hits we kept.
+    val keptSet = kept.toSet()
+    val bodyOut = retrieved.filter { it in keptSet && it.chunkIndex >= 0 }
+    return outline + bodyOut
+}
+
+internal data class SectionRef(val kind: String, val token: String)
+
+private val SECTION_REF_PATTERN = Regex(
+    "(?i)(?:section|sec\\.?|§)\\s*(\\d{1,3})|(?:धारा)\\s*(\\d{1,3})",
+)
+private val CHAPTER_REF_PATTERN = Regex(
+    "(?i)chapter\\s+([ivxlcdm]+|\\d{1,3})|(?:अध्याय)\\s*(\\d{1,3})",
+)
+
+/** Section/chapter/schedule cues that outline matching may miss (e.g. "section 15"). */
+internal fun extractSectionRefs(query: String): List<SectionRef> {
+    val refs = LinkedHashSet<SectionRef>()
+    val lower = query.lowercase()
+    SECTION_REF_PATTERN.findAll(query).forEach { m ->
+        val num = m.groupValues[1].ifEmpty { m.groupValues[2] }
+        if (num.isNotEmpty()) refs.add(SectionRef("section", num))
+    }
+    CHAPTER_REF_PATTERN.findAll(query).forEach { m ->
+        val token = m.groupValues[1].ifEmpty { m.groupValues[2] }
+        if (token.isNotEmpty()) refs.add(SectionRef("chapter", token.lowercase()))
+    }
+    if (Regex("(?i)\\bschedule\\b").containsMatchIn(query) ||
+        query.contains("अनुसूची") || query.contains("अनुसुची")
+    ) {
+        refs.add(SectionRef("schedule", "schedule"))
+    }
+    return refs.toList()
+}
+
+internal fun locateSectionInChunks(chunkTexts: List<String>, ref: SectionRef): Int {
+    if (chunkTexts.isEmpty()) return -1
+    when (ref.kind) {
+        "section" -> {
+            val num = ref.token
+            val patterns = listOf(
+                Regex("(?i)section\\s+$num\\b"),
+                Regex("(?i)sec\\.?\\s+$num\\b"),
+                Regex("(?i)§\\s*$num\\b"),
+                Regex("धारा\\s*$num"),
+                Regex("(?m)(?:^|\\n)\\s*$num\\.\\s+\\p{L}"),
+            )
+            return chunkTexts.indexOfFirst { text ->
+                patterns.any { it.containsMatchIn(text) }
+            }
+        }
+        "chapter" -> {
+            val token = ref.token
+            val patterns = listOf(
+                Regex("(?i)chapter\\s+$token\\b"),
+                Regex("(?i)CHAPTER\\s+$token\\b"),
+                Regex("अध्याय\\s*${Regex.escape(token)}"),
+            )
+            return chunkTexts.indexOfFirst { text ->
+                patterns.any { it.containsMatchIn(text) }
+            }
+        }
+        "schedule" -> {
+            return chunkTexts.indexOfFirst { text ->
+                Regex("(?i)\\bschedule\\b").containsMatchIn(text) ||
+                    text.contains("अनुसूची") || text.contains("SCHEDULE")
+            }
+        }
+        else -> return -1
+    }
+}
+
 internal enum class ZeroScorePick { CONTIGUOUS, SPACED, TAIL }
 
 internal fun hasPositiveBodyHit(hits: List<RetrievedChunk>): Boolean =
@@ -1132,7 +1271,9 @@ internal fun nextSameDocNeighborId(
  * Substring match on glued Devanagari morphology. Bare "सार" is omitted
  * because it appears inside ordinary words (संसार, प्रसार).
  */
-internal val META_DEVANAGARI_PATTERN = Regex("(अनुक्रम|सारांश|विषयसूची|अवलोकन|संक्षेप)")
+internal val META_DEVANAGARI_PATTERN = Regex(
+    "(अनुक्रम|सारांश|विषयसूची|अवलोकन|संक्षेप|आढावा|दस्तऐवर)",
+)
 
 internal fun isDevanagariMetaTrigger(query: String): Boolean =
     META_DEVANAGARI_PATTERN.containsMatchIn(query)

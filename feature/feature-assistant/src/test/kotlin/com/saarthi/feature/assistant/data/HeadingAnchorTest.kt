@@ -149,6 +149,7 @@ class HeadingAnchorTest {
         assertTrue(isDevanagariMetaTrigger("विषयसूची दिखाओ"))
         assertTrue(isDevanagariMetaTrigger("संक्षेप में बताओ"))
         assertTrue(isDevanagariMetaTrigger("अवलोकन"))
+        assertTrue(isDevanagariMetaTrigger("आढावा द्या"))
         assertFalse(isDevanagariMetaTrigger("प्रसार कितना है"))
         assertFalse(isDevanagariMetaTrigger("संसार के नियम"))
         assertFalse(isDevanagariMetaTrigger("what is the penalty"))
