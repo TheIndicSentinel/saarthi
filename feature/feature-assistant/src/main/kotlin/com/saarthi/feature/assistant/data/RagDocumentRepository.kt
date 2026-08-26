@@ -450,7 +450,7 @@ class RagDocumentRepository @Inject constructor(
         // rather than a generic structural sample.
         val queryTokens = query.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
         val isFollowUp = !priorQuery.isNullOrBlank() && queryTokens.take(4).any { it in FOLLOW_UP_TOKENS }
-        val metaReason = if (isFollowUp) null else metaRouteReason(query)
+        val metaReason = effectiveMetaRouteReason(query, isFollowUp)
         fun done(hits: List<RetrievedChunk>, path: RagSearchPath): List<RetrievedChunk> {
             val searchMs = (System.nanoTime() - t0) / 1_000_000
             logRag(
@@ -494,8 +494,15 @@ class RagDocumentRepository @Inject constructor(
         // detected outline heading, surface that section's chunks first.
         // Additive — BM25 still ranks below; this only guarantees the
         // section the user named is present and leading.
+        val sectionAnchored = anchoredSectionChunks(contentChunks, query)
+        val penaltyPreferDocUri = if (isSectionPenaltyComboQuery(query)) {
+            sectionAnchored.firstOrNull()?.docUri
+        } else {
+            null
+        }
         val anchoredEntities = anchoredHeadingChunks(all, contentChunks, query) +
-            anchoredSectionChunks(contentChunks, query)
+            sectionAnchored +
+            anchoredPenaltyScheduleChunks(contentChunks, query, preferDocUri = penaltyPreferDocUri)
         headingChunkCount = anchoredEntities.size
 
         // Expand the query when following up on the prior turn.
@@ -741,6 +748,24 @@ class RagDocumentRepository @Inject constructor(
             }
         }
         return emptyList()
+    }
+
+    /**
+     * B1 — pull Schedule / Chapter VIII / monetary-penalty chunks for fine and
+     * penalty questions so BM25 fragment scatter does not hide the amount table.
+     * B2-1 — when [preferDocUri] is set (section+penalty combo), prefer that file.
+     */
+    private fun anchoredPenaltyScheduleChunks(
+        contentChunks: List<RagChunkEntity>,
+        query: String,
+        preferDocUri: String? = null,
+    ): List<RagChunkEntity> {
+        if (!isPenaltyScheduleQuery(query)) return emptyList()
+        val picked = pickPenaltyScheduleChunkEntities(contentChunks, preferDocUri, HEADING_ANCHOR_MAX)
+        if (picked.isNotEmpty()) {
+            logRag("penalty-schedule-anchored → ${picked.size} chunk(s)")
+        }
+        return picked
     }
 
     /**
@@ -1199,32 +1224,110 @@ internal fun extractSectionRefs(query: String): List<SectionRef> {
     return refs.toList()
 }
 
+/** B1/B2-1 — ranked Schedule / monetary-penalty chunk pick; optional same-doc preference. */
+internal fun pickPenaltyScheduleChunkEntities(
+    contentChunks: List<RagChunkEntity>,
+    preferDocUri: String?,
+    max: Int,
+): List<RagChunkEntity> {
+    val scheduleRx = Regex("(?i)\\bschedule\\b")
+    val monetaryRx = Regex("(?i)monetary\\s+penalty")
+    val chapterViiiRx = Regex("(?i)chapter\\s+viii")
+    val amountRx = Regex("(?i)\\b(crore|lakh|lakhs|rupee|rupees)\\b")
+    val ranked = contentChunks.mapNotNull { chunk ->
+        val text = chunk.text
+        val priority = when {
+            scheduleRx.containsMatchIn(text) && monetaryRx.containsMatchIn(text) -> 0
+            scheduleRx.containsMatchIn(text) -> 1
+            monetaryRx.containsMatchIn(text) || chapterViiiRx.containsMatchIn(text) -> 2
+            amountRx.containsMatchIn(text) -> 3
+            else -> null
+        }
+        if (priority == null) null else chunk to priority
+    }.sortedWith(
+        compareBy<Pair<RagChunkEntity, Int>> { it.second }
+            .thenBy { it.first.chunkIndex },
+    )
+    if (preferDocUri.isNullOrEmpty()) {
+        return ranked.take(max).map { it.first }
+    }
+    val sameDoc = ranked.filter { it.first.docUri == preferDocUri }
+    val picked = sameDoc.take(max).map { it.first }
+    if (picked.size >= max) return picked
+    val rest = ranked.filter { it.first.docUri != preferDocUri }
+    return picked + rest.take(max - picked.size).map { it.first }
+}
+
+/**
+ * B2-1 — best section-header tier in [text] for [num]. Lower tier = stronger
+ * header signal; null = no match. Used to prefer "Section 15" over a bare
+ * "15." list item or mid-sentence cross-reference.
+ */
+internal fun sectionHeaderMatchTier(text: String, num: String): Int? {
+    val tiers = mutableListOf<Int>()
+    fun add(tier: Int, pattern: Regex) {
+        if (pattern.containsMatchIn(text)) tiers.add(tier)
+    }
+    add(0, Regex("(?m)^\\s*Section\\s+$num\\b"))
+    add(0, Regex("(?m)^\\s*SECTION\\s+$num\\b"))
+    add(0, Regex("(?m)^\\s*धारा\\s*$num\\b"))
+    add(1, Regex("(?m)^\\s*Sec\\.?\\s+$num\\b"))
+    add(1, Regex("(?m)^\\s*§\\s*$num\\b"))
+    add(2, Regex("(?i)\\bSection\\s+$num\\b"))
+    add(3, Regex("(?i)\\bsec\\.?\\s+$num\\b"))
+    add(3, Regex("(?i)§\\s*$num\\b"))
+    add(2, Regex("(?m)(?:^|\\n)\\s*धारा\\s*$num\\b"))
+    // Numbered act-style heading: "15. Duties…" — title-shaped, not "15. minor fix"
+    add(4, Regex("(?m)(?:^|\\n)\\s*$num\\.\\s+[\\p{Lu}A-Z]"))
+    add(5, Regex("(?m)(?:^|\\n)\\s*$num\\.\\s+\\p{L}"))
+    return tiers.minOrNull()
+}
+
 internal fun locateSectionInChunks(chunkTexts: List<String>, ref: SectionRef): Int {
     if (chunkTexts.isEmpty()) return -1
     when (ref.kind) {
         "section" -> {
             val num = ref.token
-            val patterns = listOf(
-                Regex("(?i)section\\s+$num\\b"),
-                Regex("(?i)sec\\.?\\s+$num\\b"),
-                Regex("(?i)§\\s*$num\\b"),
-                Regex("धारा\\s*$num"),
-                Regex("(?m)(?:^|\\n)\\s*$num\\.\\s+\\p{L}"),
-            )
-            return chunkTexts.indexOfFirst { text ->
-                patterns.any { it.containsMatchIn(text) }
+            var bestIdx = -1
+            var bestTier = Int.MAX_VALUE
+            chunkTexts.forEachIndexed { idx, text ->
+                val tier = sectionHeaderMatchTier(text, num) ?: return@forEachIndexed
+                if (tier < bestTier) {
+                    bestTier = tier
+                    bestIdx = idx
+                } else if (tier == bestTier && idx < bestIdx) {
+                    bestIdx = idx
+                }
             }
+            return bestIdx
         }
         "chapter" -> {
             val token = ref.token
+            var bestIdx = -1
+            var bestTier = Int.MAX_VALUE
             val patterns = listOf(
-                Regex("(?i)chapter\\s+$token\\b"),
-                Regex("(?i)CHAPTER\\s+$token\\b"),
-                Regex("अध्याय\\s*${Regex.escape(token)}"),
+                0 to Regex("(?m)^\\s*Chapter\\s+$token\\b", RegexOption.IGNORE_CASE),
+                0 to Regex("(?m)^\\s*CHAPTER\\s+$token\\b"),
+                1 to Regex("(?i)\\bchapter\\s+$token\\b"),
+                1 to Regex("अध्याय\\s*${Regex.escape(token)}"),
             )
-            return chunkTexts.indexOfFirst { text ->
-                patterns.any { it.containsMatchIn(text) }
+            chunkTexts.forEachIndexed { idx, text ->
+                var tier: Int? = null
+                for ((t, rx) in patterns) {
+                    if (rx.containsMatchIn(text)) {
+                        tier = minOf(tier ?: t, t)
+                    }
+                }
+                if (tier != null) {
+                    if (tier < bestTier) {
+                        bestTier = tier
+                        bestIdx = idx
+                    } else if (tier == bestTier && idx < bestIdx) {
+                        bestIdx = idx
+                    }
+                }
             }
+            return bestIdx
         }
         "schedule" -> {
             return chunkTexts.indexOfFirst { text ->

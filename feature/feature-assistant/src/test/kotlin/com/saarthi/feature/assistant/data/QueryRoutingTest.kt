@@ -170,8 +170,13 @@ class QueryRoutingTest {
 
     @Test
     fun `narrow factual questions map to NARROW_QA`() {
-        assertEquals(RagAnswerShape.NARROW_QA, detectRagAnswerShape("Penalties kya hai?", metaOverview = false))
         assertEquals(RagAnswerShape.NARROW_QA, detectRagAnswerShape("What is data protection board", metaOverview = false))
+    }
+
+    @Test
+    fun `penalty questions map to LIST answer shape B1`() {
+        assertEquals(RagAnswerShape.LIST, detectRagAnswerShape("Penalties kya hai?", metaOverview = false))
+        assertEquals(RagAnswerShape.LIST, detectRagAnswerShape("What does document say about penalties", metaOverview = false))
     }
 
     @Test

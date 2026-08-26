@@ -310,7 +310,73 @@ internal fun detectRagAnswerShape(query: String, metaOverview: Boolean): RagAnsw
         else RagAnswerShape.OVERVIEW
     }
     if (isListRequest(query)) return RagAnswerShape.LIST
+    if (isPenaltyScheduleQuery(query)) return RagAnswerShape.LIST
     return RagAnswerShape.NARROW_QA
+}
+
+// ── B1: substance queries must use BM25 + penalty/schedule evidence ────────
+
+private val SUBSTANCE_QUERY_TOKENS = setOf(
+    "penalty", "penalties", "fine", "fines", "punishment", "damages",
+    "monetary", "rupee", "rupees", "crore", "lakhs", "lakh",
+    "jurmana", "jurmaana",
+)
+
+private val CHAPTER_COUNT_PATTERN = Regex(
+    "(?i)(how many|number of|total)\\s+.{0,24}\\bchapters?\\b",
+)
+
+/**
+ * B1 — legal-substance questions must not take the meta/structural path
+ * (outline-only). Includes penalties, Schedule, fines, and chapter counts.
+ */
+internal fun bypassMetaForSubstanceQuery(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+    val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    if (tokens.any { it in SUBSTANCE_QUERY_TOKENS }) return true
+    if (lower.contains("penalt") || lower.contains("schedule")) return true
+    if (query.contains("दंड") || query.contains("जुर्माना")) return true
+    if (query.contains("अनुसूची") || query.contains("अनुसुची")) return true
+    if (CHAPTER_COUNT_PATTERN.containsMatchIn(lower)) return true
+    return false
+}
+
+/** Penalty / Schedule / fine queries — BM25 path + schedule anchoring (B1). */
+internal fun isPenaltyScheduleQuery(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+    val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    if (tokens.any { it in SUBSTANCE_QUERY_TOKENS }) return true
+    if (lower.contains("penalt")) return true
+    if (query.contains("दंड") || query.contains("जुर्माना")) return true
+    if (Regex("(?i)\\bschedule\\b").containsMatchIn(query) &&
+        (lower.contains("penalt") || query.contains("दंड"))
+    ) {
+        return true
+    }
+    if (query.contains("अनुसूची") &&
+        (lower.contains("penalt") || lower.contains("fine") || query.contains("दंड"))
+    ) {
+        return true
+    }
+    return false
+}
+
+/** Meta route unless follow-up or B1 substance bypass applies. */
+internal fun effectiveMetaRouteReason(query: String, isFollowUp: Boolean): String? {
+    if (isFollowUp || bypassMetaForSubstanceQuery(query)) return null
+    return RagDocumentRepository.metaRouteReason(query)
+}
+
+/**
+ * B2-1 — query names a numbered section and asks about penalty / fine / amount.
+ * Retrieval should anchor the section block and Schedule/amount rows from the
+ * same document when possible.
+ */
+internal fun isSectionPenaltyComboQuery(query: String): Boolean {
+    if (extractSectionRefs(query).none { it.kind == "section" }) return false
+    return isPenaltyScheduleQuery(query)
 }
 
 /** Dynamic top-K: fewer chunks for narrow QA, more for overview/compare (P0 #2). */
