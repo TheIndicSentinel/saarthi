@@ -1100,9 +1100,11 @@ class ChatRepositoryImpl @Inject constructor(
         // them without the "ignore the document" escape hatch. Heading
         // anchors (score 50) and boosted this-turn hits also clear the bar.
         val strongMatch = retrieved.any { it.chunkIndex >= 0 && it.score >= STRONG_RAG_MATCH_SCORE }
+        val citationLabels = currentLanguage.citationDisplayLabels()
         val rulesHeader = ragCitationRules(
             compact = compact,
             strongMatch = strongMatch,
+            labels = citationLabels,
         )
 
         val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {

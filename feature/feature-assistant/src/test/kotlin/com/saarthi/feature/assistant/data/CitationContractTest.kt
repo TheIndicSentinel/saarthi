@@ -1,5 +1,7 @@
 package com.saarthi.feature.assistant.data
 
+import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.citationDisplayLabels
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -60,6 +62,16 @@ class CitationContractTest {
         assertTrue(rules.contains("Do NOT put (Name, p.X) on every bullet"))
         assertTrue(rules.contains("In general:' with no (Name, p.X) citation"))
         assertTrue(rules.contains("Never cite files listed as unreadable"))
+        assertTrue(rules.contains("Digital Personal Data Protection Act 2023 · page 17"))
+    }
+
+    @Test
+    fun `Hindi rules use localized Sources header and worked example`() {
+        val labels = SupportedLanguage.HINDI.citationDisplayLabels()
+        val rules = ragCitationRules(compact = false, labels = labels)
+        assertTrue(rules.contains("स्रोत:"))
+        assertTrue(rules.contains(labels.citationRulesFooterExample()))
+        assertFalse(rules.contains("Sources:"))
     }
 
     @Test

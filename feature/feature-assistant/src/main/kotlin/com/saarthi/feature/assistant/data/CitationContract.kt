@@ -1,5 +1,8 @@
 package com.saarthi.feature.assistant.data
 
+import com.saarthi.core.i18n.CitationDisplayLabels
+import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.citationDisplayLabels
 import java.util.Locale
 
 /**
@@ -267,23 +270,33 @@ internal fun ragAnswerShapeInstruction(shape: RagAnswerShape, compact: Boolean =
  *            an "In general:" general-knowledge answer AND forbid refusing or
  *            asking the user to rephrase (G5).
  */
-internal fun ragCitationRules(compact: Boolean, strongMatch: Boolean = false): String {
+internal fun ragCitationRules(
+    compact: Boolean,
+    strongMatch: Boolean = false,
+    labels: CitationDisplayLabels = SupportedLanguage.ENGLISH.citationDisplayLabels(),
+): String {
+    val sourcesLabel = labels.sourcesHeader
+    val sourcesExample = labels.citationRulesFooterExample()
     if (compact) {
         return if (strongMatch) {
             "Attached excerpts — the question matches them; answer from these. " +
-                "Lead with 1–3 sentences; put (Name, p.X) refs in a final 'Sources:' line (max 3), not on every sentence. " +
-                "Compare: list each file in Sources. If part is not in excerpts, say so then 'In general:' with no citation. Never cite unread files.\n\n"
+                "Lead with 1–3 sentences; put refs in a final '$sourcesLabel' block (max 3 lines), not on every sentence. " +
+                "Compare: list each file in $sourcesLabel If part is not in excerpts, say so then 'In general:' with no citation. Never cite unread files.\n\n"
         } else {
             "Attached excerpts — answer from these. " +
-                "Lead with 1–3 sentences; put (Name, p.X) refs in a final 'Sources:' line (max 3), not on every sentence. " +
-                "Compare: list each file in Sources. If not in excerpts, say so then 'In general:' with no citation — don't refuse or ask the user to rephrase. Never cite unread files.\n\n"
+                "Lead with 1–3 sentences; put refs in a final '$sourcesLabel' block (max 3 lines), not on every sentence. " +
+                "Compare: list each file in $sourcesLabel If not in excerpts, say so then 'In general:' with no citation — don't refuse or ask the user to rephrase. Never cite unread files.\n\n"
         }
     }
+    val sourcesBullet =
+        "• Do NOT put (Name, p.X) on every bullet — end with one '$sourcesLabel' block (up to 3 lines; file name + page from [N] headers). Example:\n$sourcesExample\n"
+    val multiFileBullet =
+        "• If comparing or using more than one file, list each contributing file in $sourcesLabel\n"
     if (strongMatch) {
         return "ATTACHED EXCERPTS — the user's question matches these documents; answer from them.\n" +
             "• Lead with the direct answer in 1–3 sentences before any list.\n" +
-            "• Do NOT put (Name, p.X) on every bullet — end with one 'Sources:' line listing up to 3 document+page refs you used; use names from the [N] headers below.\n" +
-            "• If comparing or using more than one file, list each contributing file in Sources.\n" +
+            sourcesBullet +
+            multiFileBullet +
             "• If part of the answer is not in the excerpts, say so in one sentence, then add a brief " +
             "general answer prefixed 'In general:' with no (Name, p.X) citation.\n" +
             "• If the message is purely a greeting or small talk, reply normally without the documents.\n" +
@@ -295,8 +308,8 @@ internal fun ragCitationRules(compact: Boolean, strongMatch: Boolean = false): S
         "\"I'm stressed\", feelings, small talk), reply normally to the user and skip the excerpts — " +
         "do not mention the document.\n" +
         "• Lead with the direct answer in 1–3 sentences before any list.\n" +
-        "• Do NOT put (Name, p.X) on every bullet — end with one 'Sources:' line listing up to 3 document+page refs; use names from the [N] headers.\n" +
-        "• If comparing or using more than one file, list each contributing file in Sources.\n" +
+        sourcesBullet +
+        multiFileBullet +
         "• If the answer is not in the excerpts, say so in one sentence, then give a brief " +
         "general answer prefixed 'In general:' with no (Name, p.X) citation. Do NOT refuse or " +
         "ask the user to rephrase.\n" +

@@ -19,4 +19,22 @@ class CitationDisplayLabelsTest {
         val labels = SupportedLanguage.MARATHI.citationDisplayLabels()
         assertTrue(labels.sourcesHeader.startsWith("स्त्रोत"))
     }
+
+    @Test
+    fun `Hindi citation rules example matches A4 spec shape`() {
+        val labels = SupportedLanguage.HINDI.citationDisplayLabels()
+        assertEquals(
+            "स्रोत:\nडिजिटल पर्सनल डेटा प्रोटेक्शन अधिनियम 2023 · पृष्ठ 17",
+            labels.citationRulesFooterExample(),
+        )
+    }
+
+    @Test
+    fun `every language has a non-empty rules example doc title`() {
+        for (lang in SupportedLanguage.entries) {
+            val labels = lang.citationDisplayLabels()
+            assertTrue(labels.rulesExampleDocTitle.isNotBlank())
+            assertTrue(labels.citationRulesFooterExample().contains(labels.sourcesHeader))
+        }
+    }
 }
