@@ -5,8 +5,28 @@ import com.saarthi.core.i18n.CitationDisplayLabels
 /**
  * A1 — system-built Sources footer from retrieval metadata, not model text.
  * A3 — localized Sources header and page/overview labels.
+ * A6 — multi-file compare: at least one source line per contributing document.
  */
 internal const val DETERMINISTIC_SOURCES_MAX = 3
+
+internal fun citationChunkDocKey(chunk: RetrievedChunk): String =
+    chunk.docUri.ifEmpty { chunk.docName }
+
+/**
+ * Multi-file Sources fairness when the user compares documents or retrieval
+ * spans multiple files with real hits (A6 point 1).
+ */
+internal fun shouldFairMultiFileSources(
+    equalSlots: Boolean,
+    chunks: List<RetrievedChunk>,
+): Boolean {
+    if (equalSlots) return true
+    val contributing = chunks
+        .filter { it.score > 0.0 }
+        .map { citationChunkDocKey(it) }
+        .distinct()
+    return contributing.size >= 2
+}
 
 private val SOURCES_TAIL_MARKERS_BASE = listOf("\nSources:", "\nस्रोत:", "\nस्त्रोत:", "\nSOURCES:")
 private val CITATION_INDEX_IN_TAIL = Regex("""\[\d{1,2}\]""")
@@ -74,20 +94,45 @@ internal fun buildDeterministicSourcesFooter(
     outlineByDocName: Map<String, String>,
     labels: CitationDisplayLabels,
     maxSources: Int = DETERMINISTIC_SOURCES_MAX,
+    multiFileFairSources: Boolean = false,
 ): String {
     if (chunks.isEmpty() || maxSources <= 0) return ""
     val ordered = interleaveExcerptsByDoc(chunks)
     val lines = ArrayList<String>(maxSources)
-    val seen = LinkedHashSet<String>()
-    for (chunk in ordered) {
+    val seenLines = LinkedHashSet<String>()
+
+    fun lineFor(chunk: RetrievedChunk): String? {
         val line = formatUserCitationLine(chunk, outlineByDocName, labels)
         val label = line.substringBefore('·').trim()
-        if (looksLikeInternalCitationLabel(label)) continue
-        if (line in seen) continue
-        seen += line
-        lines += line
-        if (lines.size >= maxSources) break
+        if (looksLikeInternalCitationLabel(label)) return null
+        return line
     }
+
+    fun tryAdd(chunk: RetrievedChunk): Boolean {
+        val line = lineFor(chunk) ?: return false
+        if (line in seenLines) return false
+        seenLines += line
+        lines += line
+        return true
+    }
+
+    val distinctDocs = ordered.map { citationChunkDocKey(it) }.distinct()
+    val multiFile = multiFileFairSources && distinctDocs.size >= 2
+
+    if (multiFile) {
+        for (docKey in distinctDocs) {
+            if (lines.size >= maxSources) break
+            val reserveChunk = ordered.firstOrNull { citationChunkDocKey(it) == docKey && it.score > 0.0 }
+                ?: ordered.firstOrNull { citationChunkDocKey(it) == docKey }
+            if (reserveChunk != null) tryAdd(reserveChunk)
+        }
+    }
+
+    for (chunk in ordered) {
+        if (lines.size >= maxSources) break
+        tryAdd(chunk)
+    }
+
     if (lines.isEmpty()) return ""
     return buildString {
         append(labels.sourcesHeader)
@@ -104,10 +149,17 @@ internal fun applyDeterministicSourcesFooter(
     outlineByDocName: Map<String, String>,
     labels: CitationDisplayLabels,
     maxSources: Int = DETERMINISTIC_SOURCES_MAX,
+    multiFileFairSources: Boolean = false,
 ): String {
     if (chunks.isEmpty()) return modelText
     val body = stripModelSourcesBlock(modelText, labels)
-    val footer = buildDeterministicSourcesFooter(chunks, outlineByDocName, labels, maxSources)
+    val footer = buildDeterministicSourcesFooter(
+        chunks,
+        outlineByDocName,
+        labels,
+        maxSources,
+        multiFileFairSources,
+    )
     if (footer.isEmpty()) return body
     return if (body.isBlank()) footer else "$body\n\n$footer"
 }

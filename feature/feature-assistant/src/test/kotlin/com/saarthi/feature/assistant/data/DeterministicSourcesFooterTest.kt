@@ -16,7 +16,59 @@ class DeterministicSourcesFooterTest {
         docName: String = "bf1f0e9f04e6fb4f8fef35e82c42.pdf",
         score: Double = 5.0,
         chunkIndex: Int = 2,
-    ) = RetrievedChunk(text, docName, score, chunkIndex)
+        docUri: String = "",
+    ) = RetrievedChunk(text, docName, score, chunkIndex, docUri)
+
+    @Test
+    fun `multiFileFairSources reserves second file when it only has zero-score padding`() {
+        val nda = "aaa2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val stmt = "bbb2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val outline = mapOf(
+            nda to "NDA Agreement",
+            stmt to "Account Statement",
+        )
+        val chunks = listOf(
+            chunk("--- Page 1 ---\nnda text", nda, score = 10.0, chunkIndex = 1, docUri = "uri-nda"),
+            chunk("--- Page 2 ---\nnda more", nda, score = 9.0, chunkIndex = 2, docUri = "uri-nda"),
+            chunk("--- Page 10 ---\nstmt text", stmt, score = 0.0, chunkIndex = 5, docUri = "uri-stmt"),
+        )
+        val withoutFair = buildDeterministicSourcesFooter(
+            chunks,
+            outline,
+            englishLabels,
+            maxSources = 2,
+            multiFileFairSources = false,
+        )
+        val withFair = buildDeterministicSourcesFooter(
+            chunks,
+            outline,
+            englishLabels,
+            maxSources = 2,
+            multiFileFairSources = true,
+        )
+        assertEquals(2, withoutFair.lines().size - 1)
+        assertFalse(withoutFair.contains("Account"))
+        assertTrue(withoutFair.contains("page 1"))
+        assertTrue(withoutFair.contains("page 2"))
+        assertEquals(2, withFair.lines().size - 1)
+        assertTrue(withFair.contains("NDA"))
+        assertTrue(withFair.contains("Account"))
+    }
+
+    @Test
+    fun `shouldFairMultiFileSources enabled for compare equalSlots`() {
+        assertTrue(shouldFairMultiFileSources(equalSlots = true, chunks = emptyList()))
+    }
+
+    @Test
+    fun `shouldFairMultiFileSources enabled for two positive-score documents`() {
+        val chunks = listOf(
+            chunk("a", "a.pdf", score = 5.0, docUri = "uri-a"),
+            chunk("b", "b.pdf", score = 4.0, docUri = "uri-b"),
+        )
+        assertTrue(shouldFairMultiFileSources(equalSlots = false, chunks = chunks))
+        assertFalse(shouldFairMultiFileSources(equalSlots = false, chunks = listOf(chunks[0])))
+    }
 
     @Test
     fun `stripModelSourcesBlock removes hash Sources footer`() {

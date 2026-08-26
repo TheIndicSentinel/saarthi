@@ -145,6 +145,8 @@ class ChatRepositoryImpl @Inject constructor(
     private var lastCitationChunks: List<RetrievedChunk> = emptyList()
     @Volatile
     private var lastCitationOutlineByDoc: Map<String, String> = emptyMap()
+    @Volatile
+    private var lastCitationMultiFileFair: Boolean = false
 
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
@@ -381,6 +383,7 @@ class ChatRepositoryImpl @Inject constructor(
                             lastCitationChunks,
                             lastCitationOutlineByDoc,
                             currentLanguage.citationDisplayLabels(),
+                            multiFileFairSources = lastCitationMultiFileFair,
                         )
                     } else {
                         parsed.cleanText
@@ -806,6 +809,7 @@ class ChatRepositoryImpl @Inject constructor(
         val newAttachDisplayNames = attachments.map { file ->
             displayDocName(file.name, outlineByDocName[file.name], file.extractedText)
         }
+        val multiFileFairSources = shouldFairMultiFileSources(retrievalRoute.equalSlots, retrieved)
 
         // Per-chunk retrieval log — names + chunk index + BM25 score +
         // page range. Metadata only (no query/chunk text — that's user
@@ -880,6 +884,7 @@ class ChatRepositoryImpl @Inject constructor(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
+                multiFileFairSources = multiFileFairSources,
             )
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
             val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
@@ -961,6 +966,7 @@ class ChatRepositoryImpl @Inject constructor(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
+                multiFileFairSources = multiFileFairSources,
             )
             DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
             buildString {
@@ -1015,6 +1021,7 @@ class ChatRepositoryImpl @Inject constructor(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
+                multiFileFairSources = multiFileFairSources,
             )
             DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} shape=$ragAnswerShape promptMs=${promptMs()}")
             buildString {
@@ -1049,6 +1056,7 @@ class ChatRepositoryImpl @Inject constructor(
         sessionDocs: List<SessionRagDocument> = emptyList(),
         newThisTurnNames: List<String> = emptyList(),
         answerShape: RagAnswerShape = RagAnswerShape.NARROW_QA,
+        multiFileFairSources: Boolean = false,
     ): String {
         val block = buildRagPromptBlock(
             retrieved,
@@ -1059,15 +1067,20 @@ class ChatRepositoryImpl @Inject constructor(
             newThisTurnNames,
             answerShape,
         )
-        updateCitationContext(retrieved, block)
+        updateCitationContext(retrieved, block, multiFileFairSources)
         return block
     }
 
-    private fun updateCitationContext(retrieved: List<RetrievedChunk>, ragBlock: String) {
+    private fun updateCitationContext(
+        retrieved: List<RetrievedChunk>,
+        ragBlock: String,
+        multiFileFairSources: Boolean,
+    ) {
         if (ragBlock.isEmpty() || retrieved.isEmpty()) {
             lastCitationGrounded = false
             lastCitationChunks = emptyList()
             lastCitationOutlineByDoc = emptyMap()
+            lastCitationMultiFileFair = false
             return
         }
         lastCitationGrounded = true
@@ -1075,6 +1088,7 @@ class ChatRepositoryImpl @Inject constructor(
         lastCitationOutlineByDoc = retrieved
             .filter { it.chunkIndex < 0 }
             .associate { it.docName to it.text }
+        lastCitationMultiFileFair = multiFileFairSources
     }
 
     private fun buildRagPromptBlock(
