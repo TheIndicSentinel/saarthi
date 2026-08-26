@@ -183,4 +183,99 @@ class CitationContractTest {
         assertEquals("MSP rates", shortDocName("MSP_rates.xlsx"))
         assertEquals("Kharif slides", shortDocName("Kharif_slides.pptx"))
     }
+
+  // ── B3-1 document role heuristic ─────────────────────────────────────────
+
+    @Test
+    fun `documentRoleLabel detects guide from filename`() {
+        assertEquals(
+            DocumentRoleLabel.GUIDE,
+            documentRoleLabel("EY_India_DPDP_Guide.pdf"),
+        )
+    }
+
+    @Test
+    fun `documentRoleLabel detects summary from filename`() {
+        assertEquals(
+            DocumentRoleLabel.SUMMARY,
+            documentRoleLabel("DPDP_Act_one_page_summary.pdf"),
+        )
+    }
+
+    @Test
+    fun `documentRoleLabel detects sample from filename`() {
+        assertEquals(
+            DocumentRoleLabel.SAMPLE,
+            documentRoleLabel(DemoDocument.NAME),
+        )
+    }
+
+    @Test
+    fun `documentRoleLabel detects sample from demo body`() {
+        assertEquals(
+            DocumentRoleLabel.SAMPLE,
+            documentRoleLabel(
+                "bf1f0e9f04e6fb4f8fef35e82c42.pdf",
+                contentHint = DemoDocument.TEXT,
+                contentCharCount = DemoDocument.TEXT.length,
+            ),
+        )
+    }
+
+    @Test
+    fun `documentRoleLabel null for full act filename`() {
+        assertEquals(
+            null,
+            documentRoleLabel(
+                "Digital_Personal_Data_Protection_Act_2023.pdf",
+                contentCharCount = 80_000,
+            ),
+        )
+    }
+
+    @Test
+    fun `documentRoleLabel null when long body only mentions summary in a clause`() {
+        val rightsClause = """
+            --- Page 11 ---
+            A Data Principal has the right to access a summary of the personal data
+            being processed about them and to correction of inaccurate data.
+        """.trimIndent()
+        assertEquals(
+            null,
+            documentRoleLabel(
+                "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf",
+                contentHint = rightsClause,
+                contentCharCount = 50_000,
+            ),
+        )
+    }
+
+    @Test
+    fun `documentRoleLabel detects circular from Hindi opening`() {
+        assertEquals(
+            DocumentRoleLabel.CIRCULAR,
+            documentRoleLabel(
+                "office_note.pdf",
+                contentHint = "कार्यालय परिपत्र\nधारा 12 के अंतर्गत जुर्माना",
+                contentCharCount = 800,
+            ),
+        )
+    }
+
+    @Test
+    fun `documentRoleLabel null for ordinary NDA`() {
+        assertEquals(null, documentRoleLabel("Mallikarjuna_Rao_NDA_Agreement.pdf"))
+    }
+
+    @Test
+    fun `documentRoleLabel summary from plain language opening on short doc`() {
+        assertEquals(
+            DocumentRoleLabel.SUMMARY,
+            documentRoleLabel(
+                "bf1f0e9f04e6fb4f8fef35e82c42.pdf",
+                contentHint = "DPDP Act — plain-language summary for teams\nPurpose: …",
+                contentCharCount = 2_400,
+            ),
+        )
+    }
 }

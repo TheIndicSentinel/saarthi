@@ -78,6 +78,136 @@ internal fun looksLikeInternalCitationLabel(label: String): Boolean {
 
 internal const val FALLBACK_ATTACHED_DOC_LABEL = "Attached document"
 
+/**
+ * B3-1 — commentary vs primary document role for Sources/manifest labeling (B3-2).
+ * [PRIMARY] is represented by null (no prefix on citations).
+ */
+internal enum class DocumentRoleLabel {
+    SUMMARY,
+    GUIDE,
+    SAMPLE,
+    CIRCULAR,
+}
+
+/** Max extracted chars for a "short" doc — aligns with whole-file RAG path. */
+internal const val DOCUMENT_ROLE_SHORT_CHARS = 3_000
+
+/** Long statutes / agreements above this need a strong filename or title phrase. */
+internal const val DOCUMENT_ROLE_LONG_DOC_CHARS = 12_000
+
+private val ROLE_FILENAME_TOKENS: Map<DocumentRoleLabel, Set<String>> = mapOf(
+    DocumentRoleLabel.SUMMARY to setOf(
+        "summary", "summaries", "synopsis", "saaransh", "saransh", "overview",
+        "सारांश", "संक्षेप", "सारांशम्", "সারাংশ", "సారాంశం", "சுருக்கம்",
+    ),
+    DocumentRoleLabel.GUIDE to setOf(
+        "guide", "handbook", "primer", "companion", "playbook",
+        "मार्गदर्शिका", "गाइड", "গাইড", "గైడ్",
+    ),
+    DocumentRoleLabel.SAMPLE to setOf(
+        "sample", "demo", "specimen", "नमूना", "नमुना",
+    ),
+    DocumentRoleLabel.CIRCULAR to setOf(
+        "circular", "paripatra", "paripatr", "परिपत्र", "পরিপত্র", "పరిపత్ర",
+    ),
+)
+
+private val ROLE_CONTENT_PATTERNS: Map<DocumentRoleLabel, List<Regex>> = mapOf(
+    DocumentRoleLabel.SUMMARY to listOf(
+        Regex("(?i)plain[- ]language\\s+summary"),
+        Regex("(?i)executive\\s+summary"),
+        Regex("(?i)(?:this\\s+)?(?:document|note)\\s+(?:is\\s+)?(?:a\\s+)?summary"),
+        Regex("(?i)summary\\s+of\\s+the\\s+(?:act|law|agreement|policy)"),
+        Regex("सारांश|संक्षेप|सारांशम्"),
+    ),
+    DocumentRoleLabel.GUIDE to listOf(
+        Regex("(?i)(?:practitioner|implementation|compliance)\\s+guide"),
+        Regex("(?i)guide\\s+to\\s+the\\s+"),
+        Regex("(?i)handbook\\s+for\\s+"),
+        Regex("मार्गदर्शिका|गाइड"),
+    ),
+    DocumentRoleLabel.SAMPLE to listOf(
+        Regex("(?i)sample\\s+document"),
+        Regex("(?i)demo\\s+document"),
+        Regex("(?i)\\(sample\\s+document\\)"),
+        Regex("नमूना|नमुना"),
+    ),
+    DocumentRoleLabel.CIRCULAR to listOf(
+        Regex("(?i)office\\s+circular"),
+        Regex("(?i)circular\\s+no\\.?\\s*\\d"),
+        Regex("कार्यालय\\s+परिपत्र|परिपत्र"),
+    ),
+)
+
+private fun roleFilenameTokens(rawName: String): Set<String> =
+    shortDocName(rawName).lowercase()
+        .split(Regex("[^\\p{L}\\p{N}]+"))
+        .filter { it.length >= 3 }
+        .toSet()
+
+private fun scoreRoleFromFilename(rawName: String): Map<DocumentRoleLabel, Int> {
+    val tokens = roleFilenameTokens(rawName)
+    return DocumentRoleLabel.entries.associateWith { role ->
+        val hits = ROLE_FILENAME_TOKENS[role].orEmpty().count { hint ->
+            tokens.any { t -> t == hint || t.contains(hint) || hint.contains(t) }
+        }
+        if (hits > 0) 3 + (hits - 1) else 0
+    }
+}
+
+private fun scoreRoleFromContent(contentHint: String?): Map<DocumentRoleLabel, Int> {
+    if (contentHint.isNullOrBlank()) {
+        return DocumentRoleLabel.entries.associateWith { 0 }
+    }
+    val sample = PAGE_MARKER_REGEX.replace(contentHint.take(4_000), "")
+    return DocumentRoleLabel.entries.associateWith { role ->
+        val hits = ROLE_CONTENT_PATTERNS[role].orEmpty().count { it.containsMatchIn(sample) }
+        if (hits > 0) 4 + (hits - 1) else 0
+    }
+}
+
+/**
+ * B3-1 — detect summary / guide / sample / circular commentary files so B3-2 can
+ * prefix Sources (e.g. "Summary: …") and avoid treating them as primary law.
+ *
+ * Uses filename tokens, opening-body phrases, and length — not one specific PDF.
+ * Returns null when the file looks like a primary full document.
+ */
+internal fun documentRoleLabel(
+    rawName: String,
+    contentHint: String? = null,
+    contentCharCount: Int? = null,
+): DocumentRoleLabel? {
+    val fromName = scoreRoleFromFilename(rawName)
+    val fromContent = scoreRoleFromContent(contentHint)
+    val longDoc = contentCharCount != null && contentCharCount > DOCUMENT_ROLE_LONG_DOC_CHARS
+    val shortDoc = contentCharCount != null && contentCharCount <= DOCUMENT_ROLE_SHORT_CHARS
+
+    val combined = DocumentRoleLabel.entries.associateWith { role ->
+        var score = fromName[role]!! + fromContent[role]!!
+        if (longDoc && fromName[role]!! == 0) {
+            // Body phrase alone on a long file is often a clause ("access a summary…"), not doc type.
+            score = fromContent[role]!! / 2
+        }
+        if (shortDoc && score > 0) score += 1
+        score
+    }
+
+    val best = combined.maxByOrNull { it.value }
+    if (best == null || best.value < 3) return null
+
+    // Sample wins when tied — demo attachments must not read as statute.
+    val topScore = best.value
+    val winners = combined.filter { it.value == topScore }.keys
+    return when {
+        DocumentRoleLabel.SAMPLE in winners -> DocumentRoleLabel.SAMPLE
+        DocumentRoleLabel.SUMMARY in winners -> DocumentRoleLabel.SUMMARY
+        DocumentRoleLabel.GUIDE in winners -> DocumentRoleLabel.GUIDE
+        DocumentRoleLabel.CIRCULAR in winners -> DocumentRoleLabel.CIRCULAR
+        else -> winners.firstOrNull()
+    }
+}
+
 private val DOCUMENT_TITLE_THE_LINE = Regex(
     """^THE\s+(.{10,120})$""",
     setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE),
