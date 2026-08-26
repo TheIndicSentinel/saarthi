@@ -4,6 +4,8 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
+import androidx.sqlite.db.SupportSQLiteQuery
 
 @Dao
 interface RagChunkDao {
@@ -43,4 +45,7 @@ interface RagChunkDao {
     /** Used during session delete and clearHistory — cascades all RAG context. */
     @Query("DELETE FROM rag_chunks WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: String)
+
+    @RawQuery(observedEntities = [RagChunkEntity::class])
+    suspend fun ftsSearchContentRaw(query: SupportSQLiteQuery): List<RagChunkEntity>
 }

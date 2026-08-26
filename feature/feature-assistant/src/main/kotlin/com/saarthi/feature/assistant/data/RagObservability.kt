@@ -20,11 +20,13 @@ internal fun ragSearchLogLine(
     followUp: Boolean = false,
     metaReason: String? = null,
     headingChunks: Int = 0,
+    ftsPrefilter: Boolean = false,
 ): String {
     val extra = buildString {
         append(" named=$named equal=${if (equalSlots) 1 else 0}")
         append(" whichFile=${if (whichFile) 1 else 0} thisDoc=${if (thisDocument) 1 else 0}")
         append(" followUp=${if (followUp) 1 else 0}")
+        if (ftsPrefilter) append(" fts=1")
         if (!metaReason.isNullOrBlank()) append(" meta=$metaReason")
         if (headingChunks > 0) append(" headingChunks=$headingChunks")
     }

@@ -187,6 +187,43 @@ class SaarthiDatabaseMigrationTest {
         assertEquals("Arjun", value)
     }
 
+    // ── MIGRATION_5_6: rag_chunks_fts FTS5 ─────────────────────────────────
+
+    @Test
+    fun `MIGRATION_5_6 creates FTS sync and backfills existing rows`() {
+        seedV5Schema()
+        connection.createStatement().use { st ->
+            st.execute(
+                "INSERT INTO rag_chunks (sessionId, docUri, docName, mimeType, chunkIndex, text, createdAt) " +
+                    "VALUES ('s1', 'content://doc', 'doc.pdf', 'application/pdf', 0, 'penalty is Rs 250 crore', 5000)",
+            )
+        }
+
+        MIGRATION_5_6.migrate(fakeSupportDatabase())
+
+        connection.createStatement().use { st ->
+            val rs = st.executeQuery(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='rag_chunks_fts'",
+            )
+            assertTrue(rs.next())
+        }
+        assertEquals(1, countFtsRows())
+
+        connection.createStatement().use { st ->
+            st.execute(
+                "INSERT INTO rag_chunks (sessionId, docUri, docName, mimeType, chunkIndex, text, createdAt) " +
+                    "VALUES ('s1', 'content://doc', 'doc.pdf', 'application/pdf', 1, 'consent is required', 5001)",
+            )
+        }
+        assertEquals(2, countFtsRows())
+    }
+
+    private fun countFtsRows(): Int = connection.createStatement().use { st ->
+        val rs = st.executeQuery("SELECT COUNT(*) FROM rag_chunks_fts")
+        rs.next()
+        rs.getInt(1)
+    }
+
     // ── Schema fixtures, copied verbatim from Room's exported schema JSON ───
 
     /** schemas/com.saarthi.core.memory.db.SaarthiDatabase/3.json */
@@ -205,6 +242,31 @@ class SaarthiDatabaseMigrationTest {
             st.execute(
                 "CREATE TABLE shared_memory (`sessionId` TEXT NOT NULL, `key` TEXT NOT NULL, `value` TEXT NOT NULL, " +
                     "`packSource` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`sessionId`, `key`))",
+            )
+        }
+    }
+
+    /** v5 schema — rag_chunks without FTS (post MIGRATION_4_5). */
+    private fun seedV5Schema() {
+        seedV4Schema()
+        connection.createStatement().use { st ->
+            st.execute(
+                """
+                CREATE TABLE IF NOT EXISTS rag_chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    sessionId TEXT NOT NULL,
+                    docUri TEXT NOT NULL,
+                    docName TEXT NOT NULL,
+                    mimeType TEXT NOT NULL,
+                    chunkIndex INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
+            st.execute("CREATE INDEX IF NOT EXISTS index_rag_chunks_sessionId ON rag_chunks(sessionId)")
+            st.execute(
+                "CREATE INDEX IF NOT EXISTS index_rag_chunks_sessionId_docUri ON rag_chunks(sessionId, docUri)",
             )
         }
     }

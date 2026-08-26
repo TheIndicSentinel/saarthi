@@ -15,7 +15,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     // v5: rag_chunks table — persisted document chunks for the production
     //     BM25 RAG path. Replaces the in-memory session-docs map that
     //     dropped extracted text on every process restart.
-    version = 5,
+    // v6: rag_chunks_fts FTS5 virtual table (external content) for large
+    //     sessions — BM25 prefilter only when the measurement gate fires.
+    version = 6,
     exportSchema = true,
 )
 abstract class SaarthiDatabase : RoomDatabase() {
@@ -88,5 +90,57 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS index_rag_chunks_sessionId ON rag_chunks(sessionId)")
         db.execSQL("CREATE INDEX IF NOT EXISTS index_rag_chunks_sessionId_docUri ON rag_chunks(sessionId, docUri)")
+    }
+}
+
+/**
+ * v5 → v6: FTS5 external-content index on rag_chunks.text for session-scoped
+ * lexical prefilter before BM25 on huge/slow corpora. Triggers keep the FTS
+ * table in sync; existing rows are backfilled on upgrade.
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_fts USING fts5(
+                text,
+                sessionId UNINDEXED,
+                content='rag_chunks',
+                content_rowid='id'
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TRIGGER IF NOT EXISTS rag_chunks_fts_ai AFTER INSERT ON rag_chunks BEGIN
+                INSERT INTO rag_chunks_fts(rowid, text, sessionId)
+                VALUES (new.id, new.text, new.sessionId);
+            END
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TRIGGER IF NOT EXISTS rag_chunks_fts_ad AFTER DELETE ON rag_chunks BEGIN
+                INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text, sessionId)
+                VALUES ('delete', old.id, old.text, old.sessionId);
+            END
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TRIGGER IF NOT EXISTS rag_chunks_fts_au AFTER UPDATE ON rag_chunks BEGIN
+                INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text, sessionId)
+                VALUES ('delete', old.id, old.text, old.sessionId);
+                INSERT INTO rag_chunks_fts(rowid, text, sessionId)
+                VALUES (new.id, new.text, new.sessionId);
+            END
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO rag_chunks_fts(rowid, text, sessionId)
+            SELECT id, text, sessionId FROM rag_chunks
+            """.trimIndent(),
+        )
     }
 }

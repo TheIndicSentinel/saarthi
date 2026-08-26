@@ -120,4 +120,18 @@ class RagObservabilityTest {
         assertEquals("fts5-candidate chunks=520 searchMs=60", line)
         assertFalse(line.contains("content://"))
     }
+
+    @Test
+    fun `search log includes fts flag when prefilter used`() {
+        val line = ragSearchLogLine(
+            docCount = 1,
+            boostCount = 0,
+            path = RagSearchPath.bm25,
+            hitCount = 4,
+            queryLen = 12,
+            searchMs = 8,
+            ftsPrefilter = true,
+        )
+        assertTrue(line.contains("fts=1"))
+    }
 }

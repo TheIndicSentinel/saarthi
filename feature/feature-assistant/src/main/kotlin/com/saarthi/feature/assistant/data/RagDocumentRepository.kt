@@ -3,6 +3,7 @@ package com.saarthi.feature.assistant.data
 import com.saarthi.core.common.sqliteWriteWithRetry
 import com.saarthi.core.memory.db.RagChunkDao
 import com.saarthi.core.memory.db.RagChunkEntity
+import com.saarthi.core.memory.db.RagChunkFtsSearch
 import com.saarthi.core.rag.Bm25Retriever
 import com.saarthi.feature.assistant.domain.AttachedFile
 import java.util.concurrent.ConcurrentHashMap
@@ -29,10 +30,13 @@ import javax.inject.Singleton
 @Singleton
 class RagDocumentRepository @Inject constructor(
     private val ragChunkDao: RagChunkDao,
+    private val ragChunkFtsSearch: RagChunkFtsSearch,
 ) {
     /** R1 — per-chunk token cache; invalidated when a session's chunks are deleted. */
     private val chunkTokenCache = ConcurrentHashMap<Long, List<String>>()
     private val cachedChunkIdsBySession = ConcurrentHashMap<String, MutableSet<Long>>()
+    /** P3 — once a session trips the FTS5 gate, keep using the FTS prefilter. */
+    private val ftsFastPathSessions = ConcurrentHashMap<String, Boolean>()
 
     companion object {
         // 600 chars ≈ 150 tokens. Small enough that 4-6 chunks fit
@@ -402,6 +406,7 @@ class RagDocumentRepository @Inject constructor(
         }
         val route = routeQuery(query, sessionFiles)
         var headingChunkCount = 0
+        var ftsPrefilterUsed = false
         fun finish(hits: List<RetrievedChunk>): List<RetrievedChunk> {
             // All-zero / overview: rebuild per file (outline + contiguous
             // opening, or spaced samples for "which file"). Real BM25 hits
@@ -456,10 +461,12 @@ class RagDocumentRepository @Inject constructor(
                     followUp = isFollowUp,
                     metaReason = metaReason,
                     headingChunks = headingChunkCount,
+                    ftsPrefilter = ftsPrefilterUsed,
                 ),
             )
             val chunkCount = all.count { it.chunkIndex >= 0 }
             if (fts5IsWarranted(chunkCount, searchMs)) {
+                ftsFastPathSessions[sessionId] = true
                 logRag(ragFts5CandidateLogLine(chunkCount, searchMs))
             }
             return hits
@@ -493,8 +500,30 @@ class RagDocumentRepository @Inject constructor(
 
         val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
         val rankK = (topK * uniqueDocs).coerceAtMost(contentChunks.size).coerceAtLeast(topK)
+        var rankPool = contentChunks
+        if (shouldUseFtsPrefilter(contentChunks.size, ftsFastPathSessions[sessionId] == true)) {
+            val match = buildFtsMatchQuery(effectiveQuery)
+            if (match != null) {
+                val limit = (rankK * FTS5_CANDIDATE_MULTIPLIER)
+                    .coerceAtMost(contentChunks.size)
+                    .coerceAtLeast(rankK)
+                val ftsHits = runCatching {
+                    sqliteWriteWithRetry {
+                        ragChunkFtsSearch.searchContent(sessionId, match, limit)
+                    }
+                }.getOrDefault(emptyList())
+                if (ftsHits.isNotEmpty()) {
+                    val idSet = ftsHits.map { it.id }.toSet()
+                    val filtered = contentChunks.filter { it.id in idSet }
+                    if (filtered.size >= rankK.coerceAtMost(4)) {
+                        rankPool = filtered
+                        ftsPrefilterUsed = true
+                    }
+                }
+            }
+        }
         val ranked = filterRankedByScoreGap(
-            rankContentChunks(contentChunks, sessionId, effectiveQuery, rankK),
+            rankContentChunks(rankPool, sessionId, effectiveQuery, rankK),
             topK,
         )
 
@@ -794,6 +823,7 @@ class RagDocumentRepository @Inject constructor(
 
     private fun invalidateTokenCache(sessionId: String) {
         cachedChunkIdsBySession.remove(sessionId)?.forEach { chunkTokenCache.remove(it) }
+        ftsFastPathSessions.remove(sessionId)
     }
 
     // ── Internal ─────────────────────────────────────────────────────────
