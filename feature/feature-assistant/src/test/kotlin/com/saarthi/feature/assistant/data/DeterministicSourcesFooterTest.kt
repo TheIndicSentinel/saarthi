@@ -1,11 +1,15 @@
 package com.saarthi.feature.assistant.data
 
+import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.citationDisplayLabels
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DeterministicSourcesFooterTest {
+
+    private val englishLabels = SupportedLanguage.ENGLISH.citationDisplayLabels()
 
     private fun chunk(
         text: String,
@@ -18,26 +22,32 @@ class DeterministicSourcesFooterTest {
     fun `stripModelSourcesBlock removes hash Sources footer`() {
         val body = "Penalties may be imposed by the Board."
         val raw = "$body\n\nSources:\n[1] bf1f0e9f04e6fb4f8fef35e82c42 · p.17\n[2] bf1f0e9f04e6fb4f8fef35e82c42"
-        assertEquals(body, stripModelSourcesBlock(raw))
+        assertEquals(body, stripModelSourcesBlock(raw, englishLabels))
     }
 
     @Test
     fun `stripModelSourcesBlock removes bare index Sources line`() {
         val body = "Board functions as a digital office."
         val raw = "$body\n\nSources: [1], [2], [3], [4]"
-        assertEquals(body, stripModelSourcesBlock(raw))
+        assertEquals(body, stripModelSourcesBlock(raw, englishLabels))
     }
 
     @Test
     fun `stripModelSourcesBlock keeps prose that mentions sources in body`() {
         val text = "The Act lists several sources of authority in chapter one."
-        assertEquals(text, stripModelSourcesBlock(text))
+        assertEquals(text, stripModelSourcesBlock(text, englishLabels))
     }
 
     @Test
     fun `formatPageRangeForUser converts p and pp`() {
-        assertEquals("page 17", formatPageRangeForUser("p.17"))
-        assertEquals("pages 10-12", formatPageRangeForUser("pp.10-12"))
+        assertEquals("page 17", formatPageRangeForUser("p.17", englishLabels))
+        assertEquals("pages 10-12", formatPageRangeForUser("pp.10-12", englishLabels))
+    }
+
+    @Test
+    fun `formatPageRangeForUser uses Hindi page word`() {
+        val hindi = SupportedLanguage.HINDI.citationDisplayLabels()
+        assertEquals("पृष्ठ 17", formatPageRangeForUser("p.17", hindi))
     }
 
     @Test
@@ -47,6 +57,7 @@ class DeterministicSourcesFooterTest {
         val line = formatUserCitationLine(
             chunk("--- Page 17 ---\nPenalty schedule", hash, chunkIndex = 5),
             outline,
+            englishLabels,
         )
         assertTrue(line.contains("Digital Personal Data"))
         assertTrue(line.contains("page 17"))
@@ -58,6 +69,7 @@ class DeterministicSourcesFooterTest {
         val line = formatUserCitationLine(
             RetrievedChunk("outline text", "doc.pdf", 1.0, -1),
             emptyMap(),
+            englishLabels,
         )
         assertTrue(line.endsWith("overview"))
     }
@@ -71,11 +83,23 @@ class DeterministicSourcesFooterTest {
             chunk("--- Page 17 ---\nb", hash, chunkIndex = 11),
             chunk("--- Page 3 ---\nc", "NDA.pdf", chunkIndex = 1),
         )
-        val footer = buildDeterministicSourcesFooter(chunks, outline, maxSources = 3)
+        val footer = buildDeterministicSourcesFooter(chunks, outline, englishLabels, maxSources = 3)
         assertTrue(footer.startsWith("Sources:"))
         assertTrue(footer.contains("Digital Personal Data · page 17"))
         assertTrue(footer.contains("NDA · page 3"))
         assertEquals(2, footer.lines().size - 1) // one Sources label + 2 cite lines
+    }
+
+    @Test
+    fun `buildDeterministicSourcesFooter uses Hindi header`() {
+        val hindi = SupportedLanguage.HINDI.citationDisplayLabels()
+        val footer = buildDeterministicSourcesFooter(
+            listOf(chunk("--- Page 2 ---\ntext", "doc.pdf", chunkIndex = 1)),
+            emptyMap(),
+            hindi,
+        )
+        assertTrue(footer.startsWith("स्रोत:"))
+        assertTrue(footer.contains("पृष्ठ 2"))
     }
 
     @Test
@@ -94,6 +118,7 @@ class DeterministicSourcesFooterTest {
                 ),
             ),
             mapOf(hash to outline),
+            englishLabels,
         )
         assertFalse(out.contains("Document outline auto"))
         assertFalse(out.contains("bf1f0e9f"))
@@ -109,6 +134,7 @@ class DeterministicSourcesFooterTest {
             model,
             listOf(chunk("--- Page 17 ---\nSchedule", hash)),
             outline,
+            englishLabels,
         )
         assertTrue(out.contains("two hundred crore"))
         assertFalse(out.contains("Document outline auto"))

@@ -5,6 +5,7 @@ import com.saarthi.core.common.isSqliteUnusable
 import com.saarthi.core.common.sqliteWriteWithRetry
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.citationDisplayLabels
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.InferenceService
@@ -379,6 +380,7 @@ class ChatRepositoryImpl @Inject constructor(
                             parsed.cleanText,
                             lastCitationChunks,
                             lastCitationOutlineByDoc,
+                            currentLanguage.citationDisplayLabels(),
                         )
                     } else {
                         parsed.cleanText

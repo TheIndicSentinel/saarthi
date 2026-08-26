@@ -80,8 +80,21 @@ private val DOCUMENT_TITLE_THE_LINE = Regex(
     setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE),
 )
 
+/** Title-case ALL-CAPS act/circular headings for readable citations. */
+internal fun normalizeDisplayTitle(title: String): String {
+    if (title.none { it.isLowerCase() } && title.any { it.isUpperCase() }) {
+        return title.lowercase(Locale.ENGLISH).split(' ')
+            .filter { it.isNotEmpty() }
+            .joinToString(" ") { word ->
+                word.replaceFirstChar { ch ->
+                    if (ch.isLowerCase()) ch.titlecase(Locale.ENGLISH) else ch.toString()
+                }
+            }
+    }
+    return title
+}
+
 /**
- * Pull a human title from document body (acts, circulars, notices).
  * Scans only the opening — cheap and safe at index + citation time.
  */
 internal fun extractDocumentTitle(text: String?): String? {
@@ -90,6 +103,7 @@ internal fun extractDocumentTitle(text: String?): String? {
     for (raw in sample.lineSequence()) {
         val line = raw.trim()
         if (line.length < 10) continue
+        if (line.startsWith("-")) continue
         if (isOutlineBoilerplateLine(line)) continue
         if (line.startsWith("THE ", ignoreCase = true)) {
             return line.removePrefix("THE ").removePrefix("The ").trim()
@@ -104,6 +118,7 @@ internal fun extractDocumentTitle(text: String?): String? {
     for (raw in sample.lineSequence()) {
         val line = raw.trim()
         if (line.length !in 10..80) continue
+        if (line.startsWith("-")) continue
         if (!line.any { it.isLetter() }) continue
         if (isOutlineBoilerplateLine(line)) continue
         if (line == line.uppercase(Locale.ENGLISH) && line.any { it.isUpperCase() }) {
@@ -119,7 +134,10 @@ internal fun extractDocumentTitle(text: String?): String? {
                 !isOutlineBoilerplateLine(line) &&
                 !line.startsWith("-")
         }
-    return firstContent?.removePrefix("THE ").removePrefix("The ").trim()
+    return firstContent
+        ?.removePrefix("THE ")
+        ?.removePrefix("The ")
+        ?.trim()
 }
 
 /** First real heading line from an outline chunk (skips internal boilerplate). */
@@ -147,10 +165,10 @@ internal fun displayDocName(
     contentHint: String? = null,
 ): String {
     if (!looksLikeContentStamp(rawName)) return shortDocName(rawName)
-    val fromTitle = extractDocumentTitle(contentHint) ?: extractDocumentTitle(outlineText)
-    if (fromTitle != null) return shortDocName(fromTitle)
+    val fromTitle = extractDocumentTitle(outlineText) ?: extractDocumentTitle(contentHint)
+    if (fromTitle != null) return shortDocName(normalizeDisplayTitle(fromTitle))
     val fromOutline = outlineHeadingFromText(outlineText)
-    if (fromOutline != null) return shortDocName(fromOutline)
+    if (fromOutline != null) return shortDocName(normalizeDisplayTitle(fromOutline))
     val stem = shortDocName(rawName)
     return if (looksLikeInternalCitationLabel(stem)) FALLBACK_ATTACHED_DOC_LABEL else stem
 }
