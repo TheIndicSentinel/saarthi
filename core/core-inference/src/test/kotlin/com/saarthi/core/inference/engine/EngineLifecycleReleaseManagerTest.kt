@@ -52,6 +52,7 @@ class EngineLifecycleReleaseManagerTest {
         isInitInProgress: () -> Boolean = { false },
         onReleaseConversation: () -> Unit = {},
         onReleaseEngine: () -> Unit = {},
+        onReturnedToForeground: () -> Unit = {},
     ) = EngineLifecycleReleaseManager(
         context = application,
         totalRamMb = { totalRamMb },
@@ -59,6 +60,7 @@ class EngineLifecycleReleaseManagerTest {
         isInitInProgress = isInitInProgress,
         releaseConversationOnly = { onReleaseConversation() },
         releaseEngine = { onReleaseEngine() },
+        onReturnedToForeground = onReturnedToForeground,
     )
 
     private fun mockApplication(): Pair<Application, io.mockk.CapturingSlot<Application.ActivityLifecycleCallbacks>> {
@@ -139,6 +141,21 @@ class EngineLifecycleReleaseManagerTest {
         scheduler.runCurrent()
 
         assertEquals(false, conversationReleased)
+    }
+
+    @Test
+    fun `returning to foreground invokes onReturnedToForeground callback`() = runTest(testDispatcher) {
+        val (app, slot) = mockApplication()
+        var foregroundCount = 0
+        val mgr = manager(app, onReturnedToForeground = { foregroundCount++ })
+        mgr.register()
+        val callbacks = slot.captured
+
+        callbacks.onActivityStarted(mockk<Activity>()) // cold start — no reload
+        assertEquals(0, foregroundCount)
+        callbacks.onActivityStopped(mockk<Activity>())
+        callbacks.onActivityStarted(mockk<Activity>()) // return from background
+        assertEquals(1, foregroundCount)
     }
 
     @Test

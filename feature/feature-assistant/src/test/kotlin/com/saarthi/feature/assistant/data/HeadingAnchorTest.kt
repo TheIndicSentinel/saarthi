@@ -52,6 +52,22 @@ class HeadingAnchorTest {
     // ── Should match (clear section reference) ─────────────────────────────────
 
     @Test
+    fun `penalty keyword bridge matches penalties heading`() {
+        val hs = listOf(
+            "CHAPTER VIII PENALTIES AND ADJUDICATION",
+            "CHAPTER II OBLIGATIONS OF DATA FIDUCIARY",
+        )
+        assertEquals(
+            "CHAPTER VIII PENALTIES AND ADJUDICATION",
+            matchHeadingKeywordBridge("What does the document say about penalties", hs),
+        )
+        assertEquals(
+            "CHAPTER VIII PENALTIES AND ADJUDICATION",
+            matchHeading("What does the document say about penalties", hs),
+        )
+    }
+
+    @Test
     fun `the production miss now matches its section`() {
         assertEquals("SPECIAL PROVISIONS", matchHeading("What are special provisions", headings))
     }

@@ -303,6 +303,9 @@ class ChatRepositoryImpl @Inject constructor(
                         }
                 }
                 if (newCount > 0) logRag("indexedDocs=$newCount sessionIdLen=${sessionId.length}")
+                attachments.lastOrNull()?.uri?.toString()?.let { lastUri ->
+                    ragRepository.setActiveDocUri(sessionId, lastUri)
+                }
             }
             buildPrompt(userMessage, attachments)
         }
@@ -736,10 +739,8 @@ class ChatRepositoryImpl @Inject constructor(
         // against this turn's query so each follow-up gets a fresh slice
         // of the document — "give overview", "what tech is needed",
         // "what's the salary" all pull different chunks of the same PDF.
-        // Files attached on THIS turn are surfaced as error/unindexable
-        // notes (binary, oversize) so the model knows they exist even
-        // when there is no text to retrieve. This-turn URIs boost ranking
-        // but never hard-filter the session corpus.
+        // Files attached on THIS turn boost ranking when scope is wider
+        // (compare / all-files). Narrow scopes hard-filter via restrictDocUris (T1-1).
         val boostDocUris = if (attachments.isNotEmpty()) {
             attachments.map { it.uri.toString() }.toSet()
         } else {
@@ -747,21 +748,37 @@ class ChatRepositoryImpl @Inject constructor(
         }
         val attachmentUris = attachments.map { it.uri.toString() }
         val ragQuery = attachTurnQuery(userMessage, attachments.isNotEmpty())
-        val restrictDocUris = restrictUrisForAttachTurn(ragQuery, attachmentUris)
         val sessionDocs = runCatching { ragRepository.listSessionDocuments(sessionId) }
             .onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
-        val ragAnswerShape = applyReplyLengthToAnswerShape(
-            detectRagAnswerShape(
-                userMessage,
-                RagDocumentRepository.metaRouteReason(ragQuery) != null,
-            ),
-            responseStyleManager.style.value.length,
-        )
+        val activeDocUri = ragRepository.resolveActiveDocUri(sessionId, sessionDocs)
         val retrievalRoute = routeQuery(
             ragQuery,
             sessionDocs.map { it.uri to it.name },
         )
+        val scopeDecision = resolveRetrievalScope(
+            query = ragQuery,
+            sessionDocs = sessionDocs.map { it.uri to it.name },
+            attachmentUris = attachmentUris,
+            activeDocUri = activeDocUri,
+            route = retrievalRoute,
+        )
+        val restrictDocUris = scopeDecision.restrictUris
+        if (retrievalRoute.namedDocUris.size == 1) {
+            ragRepository.setActiveDocUri(sessionId, retrievalRoute.namedDocUris.first())
+        }
+        val ragAnswerShape = applyReplyLengthToAnswerShape(
+            detectRagAnswerShape(
+                userMessage,
+                effectiveMetaRouteReason(ragQuery, isFollowUp = false) != null,
+            ),
+            responseStyleManager.style.value.length,
+        )
+        val unattachedExternal = detectUnattachedExternalQuery(
+            ragQuery,
+            sessionDocs.map { it.name },
+        )
+        val tabularAmountQuery = isTabularAmountQuery(ragQuery)
         val retrievalTopK = topKForAnswerShape(ragAnswerShape, retrievalRoute.equalSlots)
         sessionHasIndexedDocs = sessionDocs.isNotEmpty()
         // NOTE: knowledge packs (Kisan etc.) are intentionally NOT merged
@@ -787,10 +804,8 @@ class ChatRepositoryImpl @Inject constructor(
                 query = ragQuery,
                 topK = retrievalTopK,
                 boostDocUris = boostDocUris,
-                // Attach turn → restrict retrieval to the just-attached files
-                // (G1). Blank/overview quick-action further scopes to the newest
-                // file so a repeated overview tap cannot mix earlier docs (G8).
                 restrictDocUris = restrictDocUris,
+                retrievalScopeLabel = scopeDecision.scope.name,
                 priorQuery = priorUserQuery?.takeIf {
                     attachments.isEmpty() && it != ragQuery && it.length > 8
                 },
@@ -898,6 +913,8 @@ class ChatRepositoryImpl @Inject constructor(
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
+                tabularAmount = tabularAmountQuery,
+                unattachedExternal = unattachedExternal,
             )
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
             val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
@@ -980,6 +997,8 @@ class ChatRepositoryImpl @Inject constructor(
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
+                tabularAmount = tabularAmountQuery,
+                unattachedExternal = unattachedExternal,
             )
             DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
             buildString {
@@ -1035,6 +1054,8 @@ class ChatRepositoryImpl @Inject constructor(
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
+                tabularAmount = tabularAmountQuery,
+                unattachedExternal = unattachedExternal,
             )
             DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} shape=$ragAnswerShape promptMs=${promptMs()}")
             buildString {
@@ -1070,6 +1091,8 @@ class ChatRepositoryImpl @Inject constructor(
         newThisTurnNames: List<String> = emptyList(),
         answerShape: RagAnswerShape = RagAnswerShape.NARROW_QA,
         multiFileFairSources: Boolean = false,
+        tabularAmount: Boolean = false,
+        unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
     ): String {
         val block = buildRagPromptBlock(
             retrieved,
@@ -1079,6 +1102,8 @@ class ChatRepositoryImpl @Inject constructor(
             sessionDocs,
             newThisTurnNames,
             answerShape,
+            tabularAmount,
+            unattachedExternal,
         )
         updateCitationContext(retrieved, block, multiFileFairSources)
         return block
@@ -1112,6 +1137,8 @@ class ChatRepositoryImpl @Inject constructor(
         sessionDocs: List<SessionRagDocument> = emptyList(),
         newThisTurnNames: List<String> = emptyList(),
         answerShape: RagAnswerShape = RagAnswerShape.NARROW_QA,
+        tabularAmount: Boolean = false,
+        unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
     ): String {
         if (retrieved.isEmpty() && unreadableThisTurn.isEmpty()) return ""
         // If there is literally no room for even the rule header + one
@@ -1120,7 +1147,12 @@ class ChatRepositoryImpl @Inject constructor(
         if (charBudget < 200) return ""
 
         val compact = tier == SystemPromptProvider.ModelTier.COMPACT
-        val shapeInstruction = ragAnswerShapeInstruction(answerShape, compact = compact)
+        val shapeInstruction = ragAnswerShapeInstruction(
+            answerShape,
+            compact = compact,
+            tabularAmount = tabularAmount,
+            unattachedExternal = unattachedExternal,
+        )
 
         // Relevance gate (G2/G5): a confident lexical hit on a real content
         // chunk means the excerpts are on-topic, so the rules answer from
@@ -1132,6 +1164,7 @@ class ChatRepositoryImpl @Inject constructor(
             compact = compact,
             strongMatch = strongMatch,
             labels = citationLabels,
+            blockExternalRegimes = true,
         )
 
         val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {

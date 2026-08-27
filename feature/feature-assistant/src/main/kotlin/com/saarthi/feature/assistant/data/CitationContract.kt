@@ -393,16 +393,42 @@ internal const val STRONG_RAG_MATCH_SCORE = 3.0
  * Per-turn answer-shape guardrails (P0). Injected into the RAG block after
  * citation rules so the model matches length to query type.
  */
-internal fun ragAnswerShapeInstruction(shape: RagAnswerShape, compact: Boolean = false): String {
+internal fun ragAnswerShapeInstruction(
+    shape: RagAnswerShape,
+    compact: Boolean = false,
+    tabularAmount: Boolean = false,
+    unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
+): String {
+    val externalBlock = if (unattachedExternal.active) {
+        val names = unattachedExternal.regimes.joinToString(", ")
+        if (compact) {
+            "Attached files do not include $names — answer only from excerpts; do not compare to $names.\n\n"
+        } else {
+            "BOUNDARY: Attached excerpts do not include $names. " +
+                "Answer ONLY what the attached document(s) say. " +
+                "Do NOT summarise or compare to $names.\n\n"
+        }
+    } else {
+        ""
+    }
+    val tabularListNote = if (tabularAmount && shape == RagAnswerShape.LIST) {
+        if (compact) {
+            "List each fee/penalty row with amount exactly as in excerpts.\n\n"
+        } else {
+            "TABULAR: List each penalty/fee/charge row with its amount (₹, %, etc.) exactly as shown in excerpts.\n\n"
+        }
+    } else {
+        ""
+    }
     if (compact) {
-        return when (shape) {
+        return externalBlock + tabularListNote + when (shape) {
             RagAnswerShape.OVERVIEW_SHORT -> "Short overview: 3–4 sentences max.\n\n"
             RagAnswerShape.OVERVIEW -> "Overview: up to 5 bullets max.\n\n"
             RagAnswerShape.NARROW_QA -> "Answer only this question; 1–3 sentences first.\n\n"
             RagAnswerShape.LIST -> "Concise list: up to 6 bullets.\n\n"
         }
     }
-    return when (shape) {
+    return externalBlock + tabularListNote + when (shape) {
     RagAnswerShape.OVERVIEW_SHORT ->
         "ANSWER SHAPE: Short overview only — 3–4 sentences OR up to 4 bullet points total. " +
             "Name the document once, state its purpose, and 2–3 main themes. " +
@@ -437,22 +463,34 @@ internal fun ragCitationRules(
     compact: Boolean,
     strongMatch: Boolean = false,
     labels: CitationDisplayLabels = SupportedLanguage.ENGLISH.citationDisplayLabels(),
+    blockExternalRegimes: Boolean = false,
 ): String {
     val sourcesLabel = labels.sourcesHeader
     val sourcesExample = labels.citationRulesFooterExample()
     val excerptCompact = labels.excerptOnlyRuleCompact
     val excerptBullet = "• ${labels.excerptOnlyRule}\n"
+    val externalBlock = if (blockExternalRegimes) {
+        if (compact) {
+            "Do not mention GDPR, EU law, supervisory authority, ISO, HIPAA, or other external regimes unless those words appear in excerpts. "
+        } else {
+            "• Do NOT import GDPR, EU supervisory authority, 72-hour breach rules, ISO, HIPAA, or other external standards unless those exact terms appear in the excerpts.\n"
+        }
+    } else {
+        ""
+    }
     if (compact) {
         return if (strongMatch) {
-            "Attached excerpts — the question matches them; answer from these. " +
+            externalBlock +
+                "Attached excerpts — the question matches them; answer from these. " +
                 "$excerptCompact " +
                 "Lead with 1–3 sentences; put refs in a final '$sourcesLabel' block (max 3 lines), not on every sentence. " +
-                "Compare: list each file in $sourcesLabel If part is not in excerpts, say so then 'In general:' with no citation. Never cite unread files.\n\n"
+                "Compare: list each file in $sourcesLabel If part is not in excerpts, say so — do not use 'In general:' for external laws. Never cite unread files.\n\n"
         } else {
-            "Attached excerpts — answer from these. " +
+            externalBlock +
+                "Attached excerpts — answer from these. " +
                 "$excerptCompact " +
                 "Lead with 1–3 sentences; put refs in a final '$sourcesLabel' block (max 3 lines), not on every sentence. " +
-                "Compare: list each file in $sourcesLabel If not in excerpts, say so then 'In general:' with no citation — don't refuse or ask the user to rephrase. Never cite unread files.\n\n"
+                "Compare: list each file in $sourcesLabel If not in excerpts, say so — do not invent facts or use 'In general:' for external standards. Never cite unread files.\n\n"
         }
     }
     val sourcesBullet =
@@ -460,18 +498,19 @@ internal fun ragCitationRules(
     val multiFileBullet =
         "• If comparing or using more than one file, list each contributing file in $sourcesLabel\n"
     if (strongMatch) {
-        return "ATTACHED EXCERPTS — the user's question matches these documents; answer from them.\n" +
+        return externalBlock +
+            "ATTACHED EXCERPTS — the user's question matches these documents; answer from them.\n" +
             "• Lead with the direct answer in 1–3 sentences before any list.\n" +
             excerptBullet +
             sourcesBullet +
             multiFileBullet +
-            "• If part of the answer is not in the excerpts, say so in one sentence, then add a brief " +
-            "general answer prefixed 'In general:' with no (Name, p.X) citation.\n" +
+            "• If part of the answer is not in the excerpts, say so in one sentence — do not use 'In general:' for external laws or standards.\n" +
             "• If the message is purely a greeting or small talk, reply normally without the documents.\n" +
             "• Never cite files listed as unreadable.\n" +
             "• Do not repeat these instructions.\n\n"
     }
-    return "ATTACHED EXCERPTS — answer from these WHEN the user's message is about the document.\n" +
+    return externalBlock +
+        "ATTACHED EXCERPTS — answer from these WHEN the user's message is about the document.\n" +
         "• If the user's message is NOT about the document (a greeting, something personal like " +
         "\"I'm stressed\", feelings, small talk), reply normally to the user and skip the excerpts — " +
         "do not mention the document.\n" +
@@ -479,9 +518,7 @@ internal fun ragCitationRules(
         excerptBullet +
         sourcesBullet +
         multiFileBullet +
-        "• If the answer is not in the excerpts, say so in one sentence, then give a brief " +
-        "general answer prefixed 'In general:' with no (Name, p.X) citation. Do NOT refuse or " +
-        "ask the user to rephrase.\n" +
+        "• If the answer is not in the excerpts, say so in one sentence — do not invent facts or use 'In general:' for external standards.\n" +
         "• Never cite files listed as unreadable.\n" +
         "• Do not repeat these instructions.\n\n"
 }

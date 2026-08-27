@@ -21,11 +21,15 @@ internal fun ragSearchLogLine(
     metaReason: String? = null,
     headingChunks: Int = 0,
     ftsPrefilter: Boolean = false,
+    retrievalScope: String? = null,
+    restrictCount: Int = 0,
 ): String {
     val extra = buildString {
         append(" named=$named equal=${if (equalSlots) 1 else 0}")
         append(" whichFile=${if (whichFile) 1 else 0} thisDoc=${if (thisDocument) 1 else 0}")
         append(" followUp=${if (followUp) 1 else 0}")
+        if (!retrievalScope.isNullOrBlank()) append(" scope=${retrievalScope.lowercase()}")
+        if (restrictCount > 0) append(" restrict=$restrictCount")
         if (ftsPrefilter) append(" fts=1")
         if (!metaReason.isNullOrBlank()) append(" meta=$metaReason")
         if (headingChunks > 0) append(" headingChunks=$headingChunks")

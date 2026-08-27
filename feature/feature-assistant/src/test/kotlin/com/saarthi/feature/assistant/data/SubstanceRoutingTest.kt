@@ -23,6 +23,13 @@ class SubstanceRoutingTest {
     }
 
     @Test
+    fun `list total number of chapters bypasses meta`() {
+        val q = "List total number of chapters mentioned"
+        assertTrue(bypassMetaForSubstanceQuery(q))
+        assertNull(effectiveMetaRouteReason(q, isFollowUp = false))
+    }
+
+    @Test
     fun `overview still uses meta route`() {
         assertFalse(bypassMetaForSubstanceQuery("give an overview in short"))
         assertEquals("overview", effectiveMetaRouteReason("give an overview in short", isFollowUp = false))

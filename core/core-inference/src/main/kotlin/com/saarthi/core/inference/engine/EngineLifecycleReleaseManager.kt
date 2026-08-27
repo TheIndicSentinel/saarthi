@@ -63,11 +63,19 @@ class EngineLifecycleReleaseManager(
     private val isInitInProgress: () -> Boolean,
     private val releaseConversationOnly: suspend () -> Unit,
     private val releaseEngine: suspend () -> Unit,
+    /**
+     * Invoked when any activity becomes visible again (0→1 transition).
+     * Used to reload the inference engine after a debounced background release
+     * without requiring a full process restart.
+     */
+    private val onReturnedToForeground: () -> Unit = {},
 ) {
     private val lifecycleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     @Volatile private var pendingBackgroundRelease: Job? = null
     @Volatile private var pendingConversationRelease: Job? = null
     @Volatile private var visibleActivityCount = 0
+    /** True after the last activity stopped (app left foreground). */
+    @Volatile private var wasBackgrounded = false
 
     private val activityLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityStarted(activity: Activity) {
@@ -77,11 +85,17 @@ class EngineLifecycleReleaseManager(
                 pendingConversationRelease = null
                 pendingBackgroundRelease?.cancel()
                 pendingBackgroundRelease = null
+                // Cold start also hits 0→1 — only reload after a real backgrounding.
+                if (wasBackgrounded) {
+                    wasBackgrounded = false
+                    onReturnedToForeground()
+                }
             }
         }
         override fun onActivityStopped(activity: Activity) {
             visibleActivityCount = (visibleActivityCount - 1).coerceAtLeast(0)
             if (visibleActivityCount == 0) {
+                wasBackgrounded = true
                 val ramMb = totalRamMb()
                 val delays = delaysForTotalRamMb(ramMb)
                 DebugLogger.log(
@@ -135,12 +149,14 @@ class EngineLifecycleReleaseManager(
         pendingConversationRelease?.cancel()
         pendingConversationRelease = lifecycleScope.launch {
             delay(conversationDelayMs)
+            if (visibleActivityCount > 0) return@launch
             if (!isNativeGenerating() && !isInitInProgress()) {
                 DebugLogger.log("LITERT",
                     "App backgrounded for ${conversationDelayMs / 1000}s — releasing Conversation (KV-cache), engine stays resident")
                 releaseConversationOnly()
             } else {
                 DebugLogger.log("LITERT", "Conversation release skipped — generation or load still in progress")
+                scheduleConversationReleaseRetry()
             }
         }
     }
@@ -157,6 +173,7 @@ class EngineLifecycleReleaseManager(
         pendingBackgroundRelease?.cancel()
         pendingBackgroundRelease = lifecycleScope.launch {
             delay(engineDelayMs)
+            if (visibleActivityCount > 0) return@launch
             // Never interrupt an in-flight generation — closeInternal()'s
             // existing deferred-close path handles a concurrent close
             // safely, but a generation the user is actively waiting on
@@ -175,6 +192,33 @@ class EngineLifecycleReleaseManager(
                 releaseEngine()
             } else {
                 DebugLogger.log("LITERT", "Background release skipped — generation or load still in progress")
+                scheduleEngineReleaseRetry()
+            }
+        }
+    }
+
+    /** One-shot retry when stage-1 release was skipped during init/generation. */
+    private fun scheduleConversationReleaseRetry() {
+        pendingConversationRelease?.cancel()
+        pendingConversationRelease = lifecycleScope.launch {
+            delay(15_000)
+            if (visibleActivityCount > 0) return@launch
+            if (!isNativeGenerating() && !isInitInProgress()) {
+                DebugLogger.log("LITERT", "Conversation release retry — releasing KV-cache")
+                releaseConversationOnly()
+            }
+        }
+    }
+
+    /** One-shot retry when stage-2 release was skipped during init/generation. */
+    private fun scheduleEngineReleaseRetry() {
+        pendingBackgroundRelease?.cancel()
+        pendingBackgroundRelease = lifecycleScope.launch {
+            delay(30_000)
+            if (visibleActivityCount > 0) return@launch
+            if (!isNativeGenerating() && !isInitInProgress()) {
+                DebugLogger.log("LITERT", "Engine release retry — releasing model")
+                releaseEngine()
             }
         }
     }

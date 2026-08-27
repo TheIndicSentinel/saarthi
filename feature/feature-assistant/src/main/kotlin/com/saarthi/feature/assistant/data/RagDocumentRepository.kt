@@ -37,6 +37,27 @@ class RagDocumentRepository @Inject constructor(
     private val cachedChunkIdsBySession = ConcurrentHashMap<String, MutableSet<Long>>()
     /** P3 — once a session trips the FTS5 gate, keep using the FTS prefilter. */
     private val ftsFastPathSessions = ConcurrentHashMap<String, Boolean>()
+    /** T1-1 — working document for follow-up turns in a multi-file chat. */
+    private val activeDocUriBySession = ConcurrentHashMap<String, String>()
+
+    /** T1-1 — mark [docUri] as the user's current working attachment in this chat. */
+    fun setActiveDocUri(sessionId: String, docUri: String) {
+        if (docUri.isNotEmpty()) activeDocUriBySession[sessionId] = docUri
+    }
+
+    fun clearActiveDocUri(sessionId: String) {
+        activeDocUriBySession.remove(sessionId)
+    }
+
+    /**
+     * T1-1 — cached working doc, or the most recently indexed file when the
+     * process restarted and the in-memory pointer was lost.
+     */
+    fun resolveActiveDocUri(sessionId: String, sessionDocs: List<SessionRagDocument>): String? {
+        val cached = activeDocUriBySession[sessionId]
+        if (cached != null && sessionDocs.any { it.uri == cached }) return cached
+        return sessionDocs.maxByOrNull { it.lastIndexedAt }?.uri
+    }
 
     companion object {
         // 600 chars ≈ 150 tokens. Small enough that 4-6 chunks fit
@@ -62,7 +83,13 @@ class RagDocumentRepository @Inject constructor(
         // (top score 5.86, none being the actual section) and produced a
         // thin 45-token answer. Capped so anchoring never crowds out the
         // BM25 evidence that fills the remaining slots.
-        private const val HEADING_ANCHOR_MAX = 3
+        private const val HEADING_ANCHOR_MAX = 5
+        // T1-2 — more slots for outline + chapter/section marker chunks.
+        private const val STRUCTURE_ANCHOR_MAX = 5
+        // T1-3 — topic-named sections (appeal, termination, exemptions, …).
+        private const val TOPIC_ANCHOR_MAX = 3
+        // T1-4 — schedule / fee / tariff amount rows need more chunk slots.
+        private const val TABULAR_ANCHOR_MAX = 4
         // Synthetic score for anchored chunks — above any realistic BM25
         // score so they sort first and survive topK truncation, and clearly
         // distinguishable in the debug log.
@@ -210,6 +237,7 @@ class RagDocumentRepository @Inject constructor(
                 )
             }
             logRag("index-alias nameLen=${file.name.length} sessionIdLen=${sessionId.length}")
+            setActiveDocUri(sessionId, uriKey)
             return
         }
 
@@ -275,6 +303,7 @@ class RagDocumentRepository @Inject constructor(
             )
         }
         sqliteWriteWithRetry { ragChunkDao.insertAll(entities) }
+        setActiveDocUri(sessionId, uriKey)
         val hasOutline = entities.any { it.chunkIndex == OUTLINE_CHUNK_INDEX }
         val totalChars = entities.filter { it.chunkIndex >= 0 }.sumOf { it.text.length }
         val indexMs = (System.nanoTime() - t0) / 1_000_000
@@ -336,16 +365,10 @@ class RagDocumentRepository @Inject constructor(
         /**
          * Hard filter (NOT a boost). When non-empty, retrieval is restricted
          * to ONLY these document URIs — every other indexed file in the
-         * session is excluded from the corpus for this turn. Used on an
-         * attach turn so a brand-new file's "give an overview" question is
-         * answered from that file alone, never mixed with excerpts of the
-         * documents attached earlier in the chat (the multi-file attach
-         * deflection, G1). Empty on ordinary turns → full session corpus,
-         * exactly as before. If the restricted set has no indexed chunks
-         * (e.g. the attached file was an unreadable image), the search
-         * returns empty and the caller surfaces it via the unreadable note
-         * — we deliberately do NOT fall back to the full corpus, which would
-         * reintroduce the cross-file mixing this filter exists to prevent.
+         * session is excluded from the corpus for this turn. Used for
+         * attach-turn scoping (G1), named-file queries, and T1-1 active-document
+         * follow-ups in multi-file chats. If the restricted set has no indexed
+         * chunks, search returns empty — no fallback to the full corpus.
          */
         restrictDocUris: Set<String> = emptySet(),
         /**
@@ -372,6 +395,8 @@ class RagDocumentRepository @Inject constructor(
          * so a 4–5k note still arrives intact; COMPACT stays tighter.
          */
         wholeFileChars: Int = FileContentExtractor.WHOLE_FILE_CHARS,
+        /** T1-1 — logged as scope=… in the RAG search line (lowercase enum name). */
+        retrievalScopeLabel: String? = null,
     ): List<RetrievedChunk> {
         val t0 = System.nanoTime()
         val sessionRows = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
@@ -403,6 +428,8 @@ class RagDocumentRepository @Inject constructor(
                     hitCount = 0,
                     queryLen = query.length,
                     searchMs = searchMs,
+                    retrievalScope = retrievalScopeLabel,
+                    restrictCount = expandedRestrict.size,
                 ),
             )
             return emptyList()
@@ -469,6 +496,8 @@ class RagDocumentRepository @Inject constructor(
                     metaReason = metaReason,
                     headingChunks = headingChunkCount,
                     ftsPrefilter = ftsPrefilterUsed,
+                    retrievalScope = retrievalScopeLabel,
+                    restrictCount = expandedRestrict.size,
                 ),
             )
             val chunkCount = all.count { it.chunkIndex >= 0 }
@@ -500,16 +529,40 @@ class RagDocumentRepository @Inject constructor(
         } else {
             null
         }
+        val structureCountHint = buildStructureCountHint(
+            query,
+            contentChunks,
+            all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.map { it.text },
+        )
         val anchoredEntities = anchoredHeadingChunks(all, contentChunks, query) +
             sectionAnchored +
-            anchoredPenaltyScheduleChunks(contentChunks, query, preferDocUri = penaltyPreferDocUri)
+            anchoredBodyChapterChunks(contentChunks, query) +
+            anchoredTopicChunks(contentChunks, query) +
+            anchoredTabularChunks(contentChunks, query, preferDocUri = penaltyPreferDocUri) +
+            anchoredStructureListChunks(all, contentChunks, query)
         headingChunkCount = anchoredEntities.size
 
         // Expand the query when following up on the prior turn.
-        val effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
+        var effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
             "${priorQuery.take(150)} ${route.expandedQuery}"
         } else {
             route.expandedQuery
+        }
+        if (isStructureListQuery(query)) {
+            effectiveQuery += when (structureMarkerKind(query)) {
+                "section" -> " section sections धारा"
+                "part" -> " part parts"
+                "heading" -> " heading headings"
+                "annex" -> " annex appendix annexure"
+                else -> " CHAPTER Chapter chapter अध्याय"
+            }
+        }
+        val topicExpansion = topicAnchorQueryExpansion(query)
+        if (topicExpansion.isNotEmpty()) {
+            effectiveQuery += topicExpansion
+        }
+        if (isTabularAmountQuery(query)) {
+            effectiveQuery += tabularAmountQueryExpansion()
         }
 
         val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
@@ -554,6 +607,18 @@ class RagDocumentRepository @Inject constructor(
         val orderedIdsByDoc = docChunksByUri.mapValues { (_, list) -> list.map { it.id } }
         val usedIds = LinkedHashSet<Long>()
         val bm25Hits = mutableListOf<RetrievedChunk>()
+        if (structureCountHint != null && contentChunks.isNotEmpty()) {
+            val doc = contentChunks.first()
+            bm25Hits.add(
+                RetrievedChunk(
+                    text = structureCountHint,
+                    docName = doc.docName,
+                    score = 100.0,
+                    chunkIndex = -2,
+                    docUri = doc.docUri,
+                ),
+            )
+        }
         // Seed with the anchored section chunks so BM25 dedupes against them
         // and they lead the final result.
         for (e in anchoredEntities) {
@@ -706,11 +771,14 @@ class RagDocumentRepository @Inject constructor(
     ): List<RagChunkEntity> {
         val outlinesByDoc = all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.associateBy { it.docUri }
         for ((uri, docChunks) in contentChunks.groupBy { it.docUri }) {
-            val outline = outlinesByDoc[uri] ?: continue
-            val headings = parseOutlineHeadings(outline.text)
-            val heading = matchHeading(query, headings) ?: continue
             val sorted = docChunks.sortedBy { it.chunkIndex }
+            val outline = outlinesByDoc[uri]
+            val outlineHeadings = outline?.let { parseOutlineHeadings(it.text) } ?: emptyList()
+            val bodyHeadings = extractBodyHeadingLines(sorted)
+            val headings = (outlineHeadings + bodyHeadings).distinct()
+            val heading = matchHeading(query, headings) ?: continue
             val window = headingAnchorWindow(sorted.map { it.text }, heading, headings, HEADING_ANCHOR_MAX)
+                ?: locateHeadingLineWindow(sorted, heading, HEADING_ANCHOR_MAX)
                 ?: continue
             val section = sorted.subList(window.start, window.endExclusive)
             if (section.isEmpty()) continue
@@ -719,6 +787,40 @@ class RagDocumentRepository @Inject constructor(
             return section
         }
         return emptyList()
+    }
+
+    /** Gazette-style chapter titles that the auto-outline may miss. */
+    private fun extractBodyHeadingLines(chunks: List<RagChunkEntity>): List<String> {
+        val lines = mutableListOf<String>()
+        for (chunk in chunks) {
+            for (raw in chunk.text.lines()) {
+                val line = raw.trim()
+                if (line.length !in 8..120) continue
+                if (CHAPTER_MARKER_RX.containsMatchIn(line) ||
+                    Regex("(?i)^(SPECIAL PROVISIONS|PENALTIES AND|APPEAL AND)").containsMatchIn(line)
+                ) {
+                    lines.add(line)
+                }
+            }
+        }
+        return lines
+    }
+
+    /** Window around the chunk that contains [heading] as a line. */
+    private fun locateHeadingLineWindow(
+        sorted: List<RagChunkEntity>,
+        heading: String,
+        maxChunks: Int,
+    ): HeadingWindow? {
+        val needle = heading.trim()
+        if (needle.isEmpty()) return null
+        val idx = sorted.indexOfFirst { entity ->
+            entity.text.lines().any { it.trim().equals(needle, ignoreCase = true) }
+        }
+        if (idx < 0) return null
+        val from = (idx - 1).coerceAtLeast(0)
+        val to = minOf(from + maxChunks, sorted.size)
+        return HeadingWindow(from, to)
     }
 
     /**
@@ -751,21 +853,122 @@ class RagDocumentRepository @Inject constructor(
     }
 
     /**
-     * B1 — pull Schedule / Chapter VIII / monetary-penalty chunks for fine and
-     * penalty questions so BM25 fragment scatter does not hide the amount table.
-     * B2-1 — when [preferDocUri] is set (section+penalty combo), prefer that file.
+     * T1-3 — when the query names a topic (appeal, termination, exemption, …)
+     * but outline heading match missed, surface body chunks carrying that topic.
      */
-    private fun anchoredPenaltyScheduleChunks(
+    private fun anchoredTopicChunks(
+        contentChunks: List<RagChunkEntity>,
+        query: String,
+    ): List<RagChunkEntity> {
+        if (isStructureListQuery(query)) return emptyList()
+        val categories = activeTopicCategories(query)
+        if (categories.isEmpty()) return emptyList()
+        val patterns = categories.flatMap { it.bodyPatterns }
+        for ((_, docChunks) in contentChunks.groupBy { it.docUri }) {
+            val sorted = docChunks.sortedBy { it.chunkIndex }
+            val picks = pickTopicAnchorChunkEntities(sorted, query, TOPIC_ANCHOR_MAX)
+            if (picks.isEmpty()) continue
+            val anchorChunk = picks.minByOrNull { topicAnchorLineStartTier(it.text, patterns) }
+                ?: picks.first()
+            val firstIdx = sorted.indexOfFirst { it.id == anchorChunk.id }
+            if (firstIdx < 0) continue
+            val from = (firstIdx - 1).coerceAtLeast(0)
+            val to = minOf(from + HEADING_ANCHOR_MAX + 1, sorted.size)
+            val section = sorted.subList(from, to)
+            if (section.isEmpty()) continue
+            logRag(
+                "topic-anchored categories=${categories.map { it.id }.joinToString(",")} → ${section.size} chunk(s)",
+            )
+            return section
+        }
+        return emptyList()
+    }
+
+    /**
+     * When the auto-outline missed a chapter title (common on Gazette PDFs),
+     * scan body lines for chapter/section titles that overlap the query and
+     * surface that window before tabular/topic scatter.
+     */
+    private fun anchoredBodyChapterChunks(
+        contentChunks: List<RagChunkEntity>,
+        query: String,
+    ): List<RagChunkEntity> {
+        if (isStructureListQuery(query)) return emptyList()
+        var bestSection: List<RagChunkEntity>? = null
+        var bestScore = 0.0
+        for ((_, docChunks) in contentChunks.groupBy { it.docUri }) {
+            val sorted = docChunks.sortedBy { it.chunkIndex }
+            for ((idx, chunk) in sorted.withIndex()) {
+                val lineScore = chunk.text.lines().mapNotNull { raw ->
+                    val line = raw.trim()
+                    if (line.length !in 8..120) return@mapNotNull null
+                    val isTitleLine = chapterHeaderMatchTier(line) != null ||
+                        BODY_CHAPTER_TITLE_RX.containsMatchIn(line)
+                    if (!isTitleLine) return@mapNotNull null
+                    chapterTitleLineScore(query, line).takeIf { it > 0 }
+                }.maxOrNull() ?: 0.0
+                if (lineScore > bestScore) {
+                    bestScore = lineScore
+                    val from = (idx - 1).coerceAtLeast(0)
+                    val to = minOf(from + HEADING_ANCHOR_MAX, sorted.size)
+                    bestSection = sorted.subList(from, to)
+                }
+            }
+        }
+        if (bestSection != null && bestScore >= 0.45) {
+            logRag("body-chapter-anchored score=${"%.2f".format(bestScore)} → ${bestSection.size} chunk(s)")
+            return bestSection
+        }
+        return emptyList()
+    }
+
+    /**
+     * T1-4 — pull Schedule / fee-table / monetary-penalty chunks so BM25 scatter
+     * does not hide amount rows. B2-1 — [preferDocUri] pins section+amount combo.
+     */
+    private fun anchoredTabularChunks(
         contentChunks: List<RagChunkEntity>,
         query: String,
         preferDocUri: String? = null,
     ): List<RagChunkEntity> {
-        if (!isPenaltyScheduleQuery(query)) return emptyList()
-        val picked = pickPenaltyScheduleChunkEntities(contentChunks, preferDocUri, HEADING_ANCHOR_MAX)
+        if (!isTabularAmountQuery(query)) return emptyList()
+        val picked = pickTabularAmountChunkEntities(contentChunks, preferDocUri, TABULAR_ANCHOR_MAX)
+            .filter { !isTabularWeakFragment(it.text) }
+            .ifEmpty {
+                pickTabularAmountChunkEntities(contentChunks, preferDocUri, TABULAR_ANCHOR_MAX)
+            }
         if (picked.isNotEmpty()) {
-            logRag("penalty-schedule-anchored → ${picked.size} chunk(s)")
+            logRag("tabular-anchored → ${picked.size} chunk(s)")
         }
         return picked
+    }
+
+    /**
+     * T1-2 — structure count/list: inject outline chunk(s) for scoped docs plus
+     * body chunks that carry CHAPTER/Section/अध्याय markers so BM25 scatter
+     * does not hide the table of contents.
+     */
+    private fun anchoredStructureListChunks(
+        all: List<RagChunkEntity>,
+        contentChunks: List<RagChunkEntity>,
+        query: String,
+    ): List<RagChunkEntity> {
+        if (!isStructureListQuery(query)) return emptyList()
+        val docUris = contentChunks.map { it.docUri }.distinct()
+        val outlinesByDoc = all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.associateBy { it.docUri }
+        val result = mutableListOf<RagChunkEntity>()
+        for (uri in docUris) {
+            outlinesByDoc[uri]?.let { result.add(it) }
+        }
+        val markerMax = (STRUCTURE_ANCHOR_MAX - result.size).coerceAtLeast(2)
+        val markers = pickStructureMarkerChunkEntities(contentChunks, query, markerMax)
+        for (chunk in markers) {
+            if (result.none { it.id == chunk.id }) result.add(chunk)
+        }
+        if (result.isNotEmpty()) {
+            logRag("structure-list-anchored → ${result.size} chunk(s)")
+        }
+        return result.take(STRUCTURE_ANCHOR_MAX + docUris.size)
     }
 
     /**
@@ -780,7 +983,7 @@ class RagDocumentRepository @Inject constructor(
      * "outline" isn't useful). Caps at 20 headings to keep the outline
      * chunk well under the prompt budget.
      */
-    private fun extractOutline(text: String, maxHeadings: Int = 20): String? {
+    private fun extractOutline(text: String, maxHeadings: Int = 40): String? {
         val lines = text.lines()
         val headings = mutableListOf<String>()
         for ((idx, raw) in lines.withIndex()) {
@@ -812,6 +1015,7 @@ class RagDocumentRepository @Inject constructor(
     /** Wipe all indexed chunks for [sessionId]. Called on session-delete and clear-history. */
     suspend fun deleteForSession(sessionId: String) {
         invalidateTokenCache(sessionId)
+        clearActiveDocUri(sessionId)
         ragChunkDao.deleteBySession(sessionId)
     }
 
@@ -1224,28 +1428,441 @@ internal fun extractSectionRefs(query: String): List<SectionRef> {
     return refs.toList()
 }
 
-/** B1/B2-1 — ranked Schedule / monetary-penalty chunk pick; optional same-doc preference. */
-internal fun pickPenaltyScheduleChunkEntities(
+// ── T1-3: topic / heading anchors (appeal, provisions, termination, …) ───────
+
+internal data class TopicAnchorCategory(
+    val id: String,
+    val queryTokens: Set<String>,
+    val querySubstrings: List<String>,
+    val bodyPatterns: List<Pair<Int, Regex>>,
+    val expansionTerms: String,
+)
+
+private val TOPIC_ANCHOR_CATEGORIES = listOf(
+    TopicAnchorCategory(
+        id = "obligation",
+        queryTokens = setOf(
+            "obligation", "obligations", "duty", "duties", "compliance",
+        ),
+        querySubstrings = listOf("दायित्व", "कर्तव्य"),
+        bodyPatterns = listOf(
+            0 to Regex("(?m)^\\s*CHAPTER\\s+[IVXLC\\d]+\\s+OBLIGATIONS"),
+            0 to Regex("(?m)^\\s*OBLIGATIONS\\s+OF"),
+            1 to Regex("(?i)\\bobligations?\\s+of\\b"),
+            2 to Regex("(?i)\\bobligations?\\b"),
+            2 to Regex("(?i)\\bduties\\s+of\\b"),
+        ),
+        expansionTerms = " obligations duties compliance दायित्व",
+    ),
+    TopicAnchorCategory(
+        id = "penalty",
+        queryTokens = setOf(
+            "penalty", "penalties", "fine", "fines", "adjudication",
+        ),
+        querySubstrings = listOf("दंड", "जुर्माना"),
+        bodyPatterns = listOf(
+            0 to Regex("(?m)^\\s*CHAPTER\\s+VIII"),
+            0 to Regex("(?m)^\\s*CHAPTER\\s+[IVXLC\\d]+\\s+PENALTIES"),
+            0 to Regex("(?m)^\\s*PENALTIES\\s+AND\\s+ADJUDICATION"),
+            0 to Regex("(?m)^\\s*THE SCHEDULE\\b"),
+            1 to Regex("(?i)\\bpenalties\\s+and\\s+adjudication"),
+            1 to Regex("(?i)\\bsection\\s+33\\b"),
+            2 to Regex("(?i)\\bmonetary\\s+penalty"),
+        ),
+        expansionTerms = " penalties adjudication schedule section 33 दंड",
+    ),
+    TopicAnchorCategory(
+        id = "appeal",
+        queryTokens = setOf(
+            "appeal", "appeals", "adr", "arbitration", "tribunal", "appellate", "appellant",
+        ),
+        querySubstrings = listOf("अपील", "पुनर्निर्धारण"),
+        bodyPatterns = listOf(
+            0 to Regex("(?m)^\\s*CHAPTER\\s+[IVXLC\\d]+\\s+APPEAL"),
+            0 to Regex("(?i)\\bCHAPTER\\s+[IVXLC\\d]+\\s+APPEAL"),
+            0 to Regex("(?m)^\\s*APPEAL\\b"),
+            0 to Regex("(?m)^\\s*Appeal\\b"),
+            1 to Regex("(?i)\\balternative dispute resolution"),
+            1 to Regex("(?i)\\balternate dispute resolution"),
+            2 to Regex("(?i)\\barbitration\\b"),
+            2 to Regex("(?i)\\btribunal\\b"),
+            2 to Regex("(?i)\\bappellate\\b"),
+        ),
+        expansionTerms = " appeal appellate tribunal arbitration dispute resolution अपील",
+    ),
+    TopicAnchorCategory(
+        id = "provision",
+        queryTokens = setOf(
+            "provision", "provisions", "exception", "exceptions",
+            "exemption", "exemptions",
+        ),
+        querySubstrings = listOf("प्रावधान", "छूट", "अपवाद"),
+        bodyPatterns = listOf(
+            0 to Regex("(?m)^\\s*CHAPTER\\s+[IVXLC\\d]+\\s+SPECIAL\\s+PROVISIONS"),
+            0 to Regex("(?i)\\bCHAPTER\\s+[IVXLC\\d]+\\s+SPECIAL\\s+PROVISIONS"),
+            0 to Regex("(?m)^\\s*SPECIAL PROVISIONS"),
+            1 to Regex("(?i)\\bspecial provisions?\\b"),
+            2 to Regex("(?i)\\bexemptions?\\b"),
+            2 to Regex("(?i)\\bexceptions?\\b"),
+        ),
+        expansionTerms = " special provisions exemption exception प्रावधान",
+    ),
+    TopicAnchorCategory(
+        id = "termination",
+        queryTokens = setOf(
+            "termination", "terminate", "cancellation", "cancel", "refund", "rescission",
+        ),
+        querySubstrings = listOf("समाप्ति", "रद्द", "धनवापसी"),
+        bodyPatterns = listOf(
+            0 to Regex("(?m)^\\s*TERMINATION"),
+            1 to Regex("(?i)\\btermination\\b"),
+            1 to Regex("(?i)\\bcancellation\\b"),
+            2 to Regex("(?i)\\brefund\\b"),
+        ),
+        expansionTerms = " termination cancellation refund समाप्ति",
+    ),
+    TopicAnchorCategory(
+        id = "eligibility",
+        queryTokens = setOf(
+            "eligibility", "eligible", "disqualification", "disqualify",
+            "appointment", "qualification",
+        ),
+        querySubstrings = listOf("योग्यता", "अयोग्य"),
+        bodyPatterns = listOf(
+            0 to Regex("(?i)\\bdisqualification\\b"),
+            1 to Regex("(?i)\\beligibility\\b"),
+            1 to Regex("(?i)\\bqualification\\b"),
+            2 to Regex("(?i)\\bappointment\\b"),
+        ),
+        expansionTerms = " eligibility disqualification appointment qualification",
+    ),
+    TopicAnchorCategory(
+        id = "dispute",
+        queryTokens = setOf("dispute", "disputes", "mediation", "conciliation"),
+        querySubstrings = listOf("विवाद", "मध्यस्थता"),
+        bodyPatterns = listOf(
+            1 to Regex("(?i)\\bdispute resolution\\b"),
+            2 to Regex("(?i)\\bmediation\\b"),
+            2 to Regex("(?i)\\bconciliation\\b"),
+        ),
+        expansionTerms = " dispute mediation conciliation विवाद",
+    ),
+)
+
+/** T1-3 — topic categories active for [query] (document-agnostic lexicon). */
+internal fun activeTopicCategories(query: String): List<TopicAnchorCategory> {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return emptyList()
+    val tokens = lower.split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
+    return TOPIC_ANCHOR_CATEGORIES.filter { cat ->
+        tokens.any { it in cat.queryTokens } ||
+            cat.querySubstrings.any { query.contains(it) }
+    }
+}
+
+/** BM25 expansion terms for active topic categories. */
+internal fun topicAnchorQueryExpansion(query: String): String {
+    val cats = activeTopicCategories(query)
+    if (cats.isEmpty()) return ""
+    return cats.map { it.expansionTerms }.distinct().joinToString("")
+}
+
+/** T1-3 — ranked body chunks whose text matches topic anchor patterns. */
+internal fun pickTopicAnchorChunkEntities(
+    contentChunks: List<RagChunkEntity>,
+    query: String,
+    max: Int,
+): List<RagChunkEntity> {
+    val categories = activeTopicCategories(query)
+    if (categories.isEmpty()) return emptyList()
+    val patterns = categories.flatMap { it.bodyPatterns }
+    val ranked = contentChunks.mapNotNull { chunk ->
+        var bestTier: Int? = null
+        for ((tier, pattern) in patterns) {
+            if (pattern.containsMatchIn(chunk.text)) {
+                bestTier = minOf(bestTier ?: Int.MAX_VALUE, tier)
+            }
+        }
+        if (bestTier == null) null else chunk to bestTier
+    }.sortedWith(
+        compareBy<Pair<RagChunkEntity, Int>> { it.second }
+            .thenBy { topicAnchorLineStartTier(it.first.text, patterns) }
+            .thenBy { it.first.chunkIndex },
+    )
+    return ranked.take(max).map { it.first }
+}
+
+/** Prefer chunks where a tier-0/1 pattern hits a line-start heading, not mid-sentence. */
+internal fun topicAnchorLineStartTier(text: String, patterns: List<Pair<Int, Regex>>): Int {
+    var best = Int.MAX_VALUE
+    for ((tier, pattern) in patterns) {
+        if (tier > 1) continue
+        for (line in text.lines()) {
+            if (pattern.containsMatchIn(line.trim())) {
+                best = minOf(best, tier)
+            }
+        }
+    }
+    return best
+}
+
+/** T1-2 — best chapter-header tier in [text]; null when no chapter marker. */
+internal fun chapterHeaderMatchTier(text: String): Int? {
+    val tiers = mutableListOf<Int>()
+    fun add(tier: Int, pattern: Regex) {
+        if (pattern.containsMatchIn(text)) tiers.add(tier)
+    }
+    add(0, Regex("(?m)^\\s*CHAPTER\\s+[IVXLC]+\\b"))
+    add(0, Regex("(?m)^\\s*Chapter\\s+[IVXLC]+\\b"))
+    add(1, Regex("(?m)^\\s*CHAPTER\\s+\\d+\\b"))
+    add(1, Regex("(?m)^\\s*Chapter\\s+\\d+\\b"))
+    add(0, Regex("(?m)^\\s*अध्याय\\s+[\\p{N}\\w]+"))
+    add(2, Regex("(?i)\\bchapter\\s+[ivxlc]+\\b"))
+    add(3, Regex("(?i)\\bchapter\\s+\\d+\\b"))
+    return tiers.minOrNull()
+}
+
+/** T1-2 — score [text] for structure-marker density by [kind]. */
+internal fun structureMarkerScore(text: String, kind: String): Int? = when (kind) {
+    "section" -> {
+        val tiers = mutableListOf<Int>()
+        fun add(tier: Int, pattern: Regex) {
+            if (pattern.containsMatchIn(text)) tiers.add(tier)
+        }
+        add(0, Regex("(?m)^\\s*Section\\s+\\d+\\b"))
+        add(0, Regex("(?m)^\\s*SECTION\\s+\\d+\\b"))
+        add(0, Regex("(?m)^\\s*धारा\\s*\\d+"))
+        add(2, Regex("(?i)\\bsection\\s+\\d+\\b"))
+        tiers.minOrNull()
+    }
+    "part" -> {
+        val tiers = mutableListOf<Int>()
+        fun add(tier: Int, pattern: Regex) {
+            if (pattern.containsMatchIn(text)) tiers.add(tier)
+        }
+        add(0, Regex("(?m)^\\s*PART\\s+[IVXLC\\d]+\\b"))
+        add(1, Regex("(?i)\\bpart\\s+[ivxlc\\d]+\\b"))
+        tiers.minOrNull()
+    }
+    "heading" -> {
+        val count = text.lines().count { line ->
+            val trimmed = line.trim()
+            trimmed.length in 3..80 && isLikelyHeadingLine(trimmed, nextLineBlank = false)
+        }
+        if (count >= 2) 1 else null
+    }
+    "annex" -> {
+        val tiers = mutableListOf<Int>()
+        fun add(tier: Int, pattern: Regex) {
+            if (pattern.containsMatchIn(text)) tiers.add(tier)
+        }
+        add(0, Regex("(?m)^\\s*ANNEX(?:URE)?\\s+[IVXLC\\d]+\\b"))
+        add(1, Regex("(?i)\\bannex(?:ure)?\\s+[ivxlc\\d]+\\b"))
+        tiers.minOrNull()
+    }
+    else -> chapterHeaderMatchTier(text)
+}
+
+/** T1-2 — ranked body chunks carrying chapter/section/part markers. */
+internal fun pickStructureMarkerChunkEntities(
+    contentChunks: List<RagChunkEntity>,
+    query: String,
+    max: Int,
+): List<RagChunkEntity> {
+    val kind = structureMarkerKind(query)
+    val ranked = contentChunks.mapNotNull { chunk ->
+        val tier = structureMarkerScore(chunk.text, kind) ?: return@mapNotNull null
+        val markerCount = countStructureMarkersInText(chunk.text, kind)
+        chunk to StructureMarkerRank(tier, markerCount)
+    }.sortedWith(
+        compareBy<Pair<RagChunkEntity, StructureMarkerRank>> { it.second.tier }
+            .thenByDescending { it.second.markerCount }
+            .thenBy { it.first.chunkIndex },
+    )
+    return ranked.take(max).map { it.first }
+}
+
+/** Tier + how many line-start structure markers live in the chunk (TOC density). */
+internal data class StructureMarkerRank(val tier: Int, val markerCount: Int)
+
+/** Count distinct line-start structure markers in [text] for [kind]. */
+internal fun countStructureMarkersInText(text: String, kind: String): Int =
+    distinctStructureMarkersFromText(text, kind).size
+
+private fun distinctStructureMarkersFromText(text: String, kind: String): List<String> {
+    val found = linkedSetOf<String>()
+    for (line in text.lines()) {
+        val trimmed = line.trim()
+        when (kind) {
+            "section" -> {
+                val m = SECTION_MARKER_RX.find(trimmed) ?: continue
+                found.add(m.groupValues[1])
+            }
+            "part" -> {
+                val m = PART_MARKER_RX.find(trimmed) ?: continue
+                found.add(m.groupValues[1].uppercase())
+            }
+            "annex" -> {
+                val m = Regex("(?im)^\\s*ANNEX(?:URE)?\\s+([IVXLC\\d]+)\\b").find(trimmed) ?: continue
+                found.add(m.groupValues[1].uppercase())
+            }
+            else -> {
+                val m = CHAPTER_MARKER_RX.find(trimmed)
+                if (m != null) {
+                    found.add(m.groupValues[1].uppercase())
+                }
+                // Gazette PDFs often embed "CHAPTER IV …" mid-line, not at line start.
+                for (inline in CHAPTER_INLINE_RX.findAll(trimmed)) {
+                    found.add(inline.groupValues[1].uppercase())
+                }
+            }
+        }
+    }
+    return found.toList()
+}
+
+private val CHAPTER_MARKER_RX = Regex(
+    "(?im)^\\s*(?:CHAPTER|Chapter|अध्याय)\\s+([IVXLC\\d]+)(?:\\s+.+)?\\s*$",
+)
+/** Mid-line chapter markers (common in Indian gazette / legal PDF headers). */
+private val CHAPTER_INLINE_RX = Regex("(?i)\\bCHAPTER\\s+([IVXLC\\d]+)\\b")
+private val SECTION_MARKER_RX = Regex("(?im)^\\s*(?:Section|SECTION|धारा)\\s+(\\d+)\\b")
+private val PART_MARKER_RX = Regex("(?im)^\\s*PART\\s+([IVXLC\\d]+)\\b")
+private val BODY_CHAPTER_TITLE_RX = Regex(
+    "(?i)(CHAPTER|PENALTIES\\s+AND|APPEAL\\s+AND|OBLIGATIONS\\s+OF|SPECIAL\\s+PROVISION)",
+)
+
+/** T1-2 — distinct structure markers across the full scoped corpus (not top-k). */
+internal fun distinctStructureMarkers(
+    contentChunks: List<RagChunkEntity>,
+    kind: String,
+    extraTexts: List<String> = emptyList(),
+): List<String> {
+    val found = linkedSetOf<String>()
+    for (chunk in contentChunks) {
+        found.addAll(distinctStructureMarkersFromText(chunk.text, kind))
+    }
+    for (text in extraTexts) {
+        found.addAll(distinctStructureMarkersFromText(text, kind))
+    }
+    return found.toList()
+}
+
+/** T1-2 — corpus-wide count hint so the model does not guess from partial excerpts. */
+internal fun buildStructureCountHint(
+    query: String,
+    contentChunks: List<RagChunkEntity>,
+    extraTexts: List<String> = emptyList(),
+): String? {
+    if (!isStructureCountQuery(query)) return null
+    val kind = structureMarkerKind(query)
+    val markers = distinctStructureMarkers(contentChunks, kind, extraTexts)
+    if (markers.isEmpty()) return null
+    val unit = when (kind) {
+        "section" -> "sections"
+        "part" -> "parts"
+        "annex" -> "annexes"
+        else -> "chapters"
+    }
+    val preview = markers.take(12).joinToString(", ")
+    val ellipsis = if (markers.size > 12) ", …" else ""
+    return buildString {
+        append("Document structure scan ($unit): ")
+        append(markers.size)
+        append(" distinct $unit markers detected (")
+        append(preview)
+        append(ellipsis)
+        append("). Use this corpus-wide count; do not guess from a partial excerpt.")
+    }
+}
+
+/** Score query ↔ chapter-title line overlap (0..1). */
+internal fun chapterTitleLineScore(query: String, line: String): Double {
+    val qTokens = headingTokens(query)
+    val lineTokens = headingTokens(line)
+    if (qTokens.isEmpty() || lineTokens.isEmpty()) return 0.0
+    val overlap = qTokens.count { it in lineTokens }
+    if (overlap < 2) return 0.0
+    val denom = maxOf(qTokens.size, lineTokens.size)
+    return overlap.toDouble() / denom
+}
+
+/** T1-4 — BM25 expansion for fee/schedule/amount retrieval. */
+internal fun tabularAmountQueryExpansion(): String =
+    " Schedule THE SCHEDULE monetary penalty fee tariff charge rupee crore lakh ₹ शुल्क अनुसूची"
+
+/** T1-4 — tier for tabular / amount-heavy chunk text; lower = stronger signal. */
+internal fun tabularChunkTier(text: String, mimeType: String = ""): Int? {
+    val tiers = mutableListOf<Int>()
+    fun add(tier: Int, pattern: Regex) {
+        if (pattern.containsMatchIn(text)) tiers.add(tier)
+    }
+    val amountLineRx = Regex(
+        "(?i)(₹|rs\\.?|inr|rupee|rupees|\\d+[,.]?\\d*\\s*(crore|lakh|lakhs|%|usd|eur))",
+    )
+    val amountLines = text.lines().count { amountLineRx.containsMatchIn(it) }
+    add(0, Regex("(?im)^\\s*CHAPTER\\s+VIII\\b"))
+    add(0, Regex("(?im)PENALTIES\\s+AND\\s+ADJUDICATION"))
+    add(0, Regex("(?im)^\\s*33\\.\\s*Penalties"))
+    add(0, Regex("(?im)\\bschedule\\b[^\\n]{0,80}monetary\\s+penalty"))
+    add(0, Regex("(?m)^\\s*THE SCHEDULE\\b"))
+    if (amountLines >= 3) tiers.add(1)
+    add(1, Regex("(?i)\\bschedule\\b"))
+    add(2, Regex("(?i)monetary\\s+penalty"))
+    add(2, Regex("(?i)fee\\s+structure"))
+    add(2, Regex("(?i)\\btariff\\b"))
+    add(2, Regex("(?i)rate\\s+card"))
+    add(2, Regex("(?i)charges?\\s+table"))
+    add(3, Regex("(?i)chapter\\s+viii"))
+    if (amountLines >= 2) tiers.add(3)
+    if (amountLines >= 1) tiers.add(4)
+    if (mimeType.contains("csv", ignoreCase = true) && amountLines >= 1) {
+        tiers.add(1)
+    }
+    return tiers.minOrNull()
+}
+
+/**
+ * T1-4 — cross-reference fragments that mention penalties/fees without a
+ * chapter/schedule header or amount table — common BM25 false positives.
+ */
+internal fun isTabularWeakFragment(text: String): Boolean {
+    if (Regex("(?im)^(THE SCHEDULE|CHAPTER\\s+)").containsMatchIn(text.trimStart())) return false
+    if (Regex("(?im)PENALTIES\\s+AND\\s+ADJUDICATION").containsMatchIn(text)) return false
+    if (Regex("(?i)section\\s+33").containsMatchIn(text)) return false
+    if (tabularAmountLineCount(text) >= 2) return false
+    if (Regex("(?im)^\\s*33\\.\\s*Penalties").containsMatchIn(text)) return false
+    val trimmed = text.trimStart()
+    if (trimmed.length < 320 &&
+        trimmed.firstOrNull()?.isLowerCase() == true &&
+        Regex("(?i)penalt").containsMatchIn(text)
+    ) {
+        return true
+    }
+    if (Regex("(?i)chapter\\s+[ivxlc\\d]+").containsMatchIn(text) &&
+        !Regex("(?im)^\\s*CHAPTER").containsMatchIn(text) &&
+        tabularAmountLineCount(text) < 2
+    ) {
+        return true
+    }
+    return Regex("(?i)penalt").containsMatchIn(text) &&
+        !Regex("(?i)(schedule|chapter\\s+[ivxlc\\d]+|section\\s+\\d+)").containsMatchIn(text) &&
+        tabularAmountLineCount(text) < 1
+}
+
+/** T1-4 — ranked tabular / schedule / amount chunk pick; optional same-doc preference. */
+internal fun pickTabularAmountChunkEntities(
     contentChunks: List<RagChunkEntity>,
     preferDocUri: String?,
     max: Int,
 ): List<RagChunkEntity> {
-    val scheduleRx = Regex("(?i)\\bschedule\\b")
-    val monetaryRx = Regex("(?i)monetary\\s+penalty")
-    val chapterViiiRx = Regex("(?i)chapter\\s+viii")
-    val amountRx = Regex("(?i)\\b(crore|lakh|lakhs|rupee|rupees)\\b")
     val ranked = contentChunks.mapNotNull { chunk ->
-        val text = chunk.text
-        val priority = when {
-            scheduleRx.containsMatchIn(text) && monetaryRx.containsMatchIn(text) -> 0
-            scheduleRx.containsMatchIn(text) -> 1
-            monetaryRx.containsMatchIn(text) || chapterViiiRx.containsMatchIn(text) -> 2
-            amountRx.containsMatchIn(text) -> 3
-            else -> null
-        }
-        if (priority == null) null else chunk to priority
+        val tier = tabularChunkTier(chunk.text, chunk.mimeType) ?: return@mapNotNull null
+        chunk to tier
     }.sortedWith(
-        compareBy<Pair<RagChunkEntity, Int>> { it.second }
+        compareBy<Pair<RagChunkEntity, Int>> { if (isTabularWeakFragment(it.first.text)) 1 else 0 }
+            .thenBy { it.second }
+            .thenByDescending { tabularAmountLineCount(it.first.text) }
             .thenBy { it.first.chunkIndex },
     )
     if (preferDocUri.isNullOrEmpty()) {
@@ -1257,6 +1874,21 @@ internal fun pickPenaltyScheduleChunkEntities(
     val rest = ranked.filter { it.first.docUri != preferDocUri }
     return picked + rest.take(max - picked.size).map { it.first }
 }
+
+/** Count of lines carrying currency / amount signals — ranks richer tables first. */
+internal fun tabularAmountLineCount(text: String): Int {
+    val amountLineRx = Regex(
+        "(?i)(₹|rs\\.?|inr|rupee|rupees|\\d+[,.]?\\d*\\s*(crore|lakh|lakhs|%))",
+    )
+    return text.lines().count { amountLineRx.containsMatchIn(it) }
+}
+
+/** B1/B2-1 — backward-compatible alias for tabular amount pick. */
+internal fun pickPenaltyScheduleChunkEntities(
+    contentChunks: List<RagChunkEntity>,
+    preferDocUri: String?,
+    max: Int,
+): List<RagChunkEntity> = pickTabularAmountChunkEntities(contentChunks, preferDocUri, max)
 
 /**
  * B2-1 — best section-header tier in [text] for [num]. Lower tier = stronger
@@ -1536,7 +2168,7 @@ private val HEADING_STOPWORDS = setOf(
     "explain", "describe", "give", "please", "document", "doc", "section",
     "sections", "chapter", "chapters", "part", "parts", "all", "any", "my",
     "your", "under", "as", "per", "does", "do", "says", "say", "content",
-    "contents", "provide", "show", "list",
+    "contents", "provide", "show", "list", "alternate", "alternative",
 )
 
 /**
@@ -1611,18 +2243,40 @@ internal fun parseOutlineHeadings(outlineText: String): List<String> =
         .filter { it.isNotEmpty() }
 
 /**
- * Best heading from [headings] that the [query] names, or null. Conservative:
- * every *significant* heading token (length ≥ 4, so roman numerals and short
- * connectives don't gate the match) must be present in the query, and the
- * heading must carry at least ~6 chars of significant tokens so a single short
- * word can't anchor. Ties break toward the more specific (more-token) heading.
- *
- * Requiring all significant tokens present is the safe direction: it fires only
- * on a clear section reference ("special provisions" → "SPECIAL PROVISIONS")
- * and stays silent on partial overlaps ("rights" alone won't match "RIGHTS AND
- * DUTIES OF DATA PRINCIPAL"), so anchoring never hijacks an ordinary query.
+ * Best heading from [headings] that the [query] names, or null. Tries strict
+ * all-token match first, then fuzzy overlap (T1-3) for OCR / wording gaps.
  */
-internal fun matchHeading(query: String, headings: List<String>): String? {
+internal fun matchHeading(query: String, headings: List<String>): String? =
+    matchHeadingStrict(query, headings)
+        ?: matchHeadingKeywordBridge(query, headings)
+        ?: matchHeadingFuzzy(query, headings)
+
+/**
+ * Single-keyword bridge when the query names a topic but not the full heading
+ * (e.g. "what does the document say about penalties" → "PENALTIES AND ADJUDICATION").
+ */
+internal fun matchHeadingKeywordBridge(query: String, headings: List<String>): String? {
+    val lower = query.lowercase()
+    val bridges = listOf(
+        Regex("(?i)\\bpenalt") to Regex("(?i)(PENALTIES\\s+AND|CHAPTER\\s+VIII)"),
+        Regex("(?i)\\badjudicat") to Regex("(?i)PENALTIES\\s+AND"),
+        Regex("(?i)\\bobligat") to Regex("(?i)OBLIGATIONS\\s+OF"),
+        Regex("(?i)\\bspecial\\s+provision") to Regex("(?i)SPECIAL\\s+PROVISIONS"),
+        Regex("(?i)\\bappeal") to Regex("(?i)APPEAL\\s+AND"),
+        Regex("(?i)\\blegitimate\\s+use") to Regex("(?i)LEGITIMATE\\s+USE"),
+    )
+    for ((queryRx, headingRx) in bridges) {
+        if (!queryRx.containsMatchIn(lower)) continue
+        val match = headings.firstOrNull { headingRx.containsMatchIn(it) }
+        if (match != null) return match
+    }
+    return null
+}
+
+/**
+ * Conservative match: every significant heading token must appear in the query.
+ */
+internal fun matchHeadingStrict(query: String, headings: List<String>): String? {
     val qTokens = headingTokens(query)
     if (qTokens.isEmpty()) return null
     var best: String? = null
@@ -1632,6 +2286,31 @@ internal fun matchHeading(query: String, headings: List<String>): String? {
         if (significant.isEmpty() || significant.sumOf { it.length } < 6) continue
         if (significant.all { it in qTokens } && significant.size > bestScore) {
             bestScore = significant.size
+            best = h
+        }
+    }
+    return best
+}
+
+/**
+ * T1-3 — partial overlap when strict match fails: at least two significant
+ * tokens and ≥50% of the heading's significant tokens present in the query.
+ */
+internal fun matchHeadingFuzzy(query: String, headings: List<String>): String? {
+    val qTokens = headingTokens(query)
+    if (qTokens.isEmpty()) return null
+    var best: String? = null
+    var bestScore = 0.0
+    for (h in headings) {
+        val significant = headingTokens(h).filter { it.length >= 4 }
+        if (significant.isEmpty() || significant.sumOf { it.length } < 6) continue
+        val overlap = significant.count { it in qTokens }
+        if (overlap < 2) continue
+        val ratio = overlap.toDouble() / significant.size
+        if (ratio < 0.5) continue
+        val score = overlap * ratio
+        if (score > bestScore) {
+            bestScore = score
             best = h
         }
     }

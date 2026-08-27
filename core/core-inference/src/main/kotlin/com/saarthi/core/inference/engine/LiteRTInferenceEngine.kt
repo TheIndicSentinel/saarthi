@@ -101,6 +101,7 @@ class LiteRTInferenceEngine @Inject constructor(
         isInitInProgress = { initMutex.isLocked },
         releaseConversationOnly = { withContext(engineDispatcher) { releaseConversationOnly() } },
         releaseEngine = { withContext(engineDispatcher) { release() } },
+        onReturnedToForeground = { scheduleForegroundReloadIfNeeded() },
     )
 
     init {
@@ -184,6 +185,11 @@ class LiteRTInferenceEngine @Inject constructor(
     // generateStream() throws a user-visible error instead of crashing again.
     // Cleared at the start of every initialize() so a fresh model pick gets a clean slate.
     @Volatile private var crashLoopBlocked: Boolean = false
+
+    /** Last successfully requested config — used to reload after background engine release. */
+    @Volatile private var lastInferenceConfig: InferenceConfig? = null
+
+    private val foregroundReloadScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val initMutex = Mutex()
     private val generateMutex = Mutex()
@@ -468,6 +474,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     loadedModelPath == config.modelPath &&
                     loadedMaxTokens == config.maxTokens) {
                     DebugLogger.log("LITERT", "Already loaded — skipping: ${config.modelPath.substringAfterLast('/')}")
+                    lastInferenceConfig = config
                     activeModelName = config.modelName
                     _activeModelNameFlow.value = config.modelName
                     return@withLock
@@ -714,6 +721,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     // CrashRecoveryStore's 24h expiry. Policy pinned by
                     // shouldClearStaleGpuRecoveryOnInitSuccess() === false.
                     setReady(true)
+                    lastInferenceConfig = config
                     DebugLogger.log("LITERT", "Model ready & pre-warmed  $profile  backend=${backendLabel()}")
                 } catch (e: OutOfMemoryError) {
                     crashRecoveryStore.markInitEnded()
@@ -1263,6 +1271,55 @@ class LiteRTInferenceEngine @Inject constructor(
     override fun release() {
         crashRecoveryStore.markStage(CrashStage.CLEANUP)
         closeInternal()
+    }
+
+    /**
+     * After the debounced background release tears down the native engine,
+     * reload it when the user returns — avoids a stuck offline state until
+     * the process is killed and reopened.
+     */
+    private fun scheduleForegroundReloadIfNeeded() {
+        val cfg = lastInferenceConfig
+        if (cfg == null) {
+            DebugLogger.log("LITERT", "Foreground return — no saved InferenceConfig, skip reload")
+            return
+        }
+        if (isReady && engine != null) {
+            // Stage-1 background release drops only the Conversation; recreate it
+            // on return so the next turn does not hang waiting for a dead session.
+            if (activeConversation == null && !isInitializing && !isNativeGenerating) {
+                DebugLogger.log("LITERT", "Foreground return — recreating Conversation (KV-cache was released)")
+                foregroundReloadScope.launch {
+                    runCatching {
+                        withContext(engineDispatcher) {
+                            recycleConversation(samplerForActiveModel())
+                        }
+                    }.onFailure { e ->
+                        DebugLogger.log(
+                            "LITERT",
+                            "Foreground conversation recreate failed: ${e.message?.take(120) ?: e::class.simpleName}",
+                        )
+                    }
+                }
+            }
+            return
+        }
+        if (isInitializing || initMutex.isLocked) {
+            DebugLogger.log("LITERT", "Foreground return — model load already in progress")
+            return
+        }
+        DebugLogger.log("LITERT", "Foreground return — engine not resident, reloading model")
+        // Let initialize() own isInitializing — setting it here without initialize()'s
+        // finally left the UI stuck on "Loading model…" when the coroutine was cancelled.
+        foregroundReloadScope.launch {
+            runCatching { initialize(cfg) }
+                .onFailure { e ->
+                    DebugLogger.log(
+                        "LITERT",
+                        "Foreground reload failed: ${e.message?.take(120) ?: e::class.simpleName}",
+                    )
+                }
+        }
     }
 
     // ── Device state logging ──────────────────────────────────────────────────

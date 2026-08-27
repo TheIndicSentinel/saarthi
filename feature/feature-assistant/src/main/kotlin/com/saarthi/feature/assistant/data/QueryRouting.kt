@@ -230,6 +230,93 @@ internal fun restrictUrisForAttachTurn(
     return attachmentUris.toSet()
 }
 
+// ── T1-1: active-document retrieval scope ───────────────────────────────────
+
+/** How narrowly retrieval is restricted before BM25 / meta routing. */
+internal enum class RetrievalScope {
+    /** Full session corpus — compare, which-file, or explicit all-files query. */
+    SESSION,
+    /** Default follow-up scope: the user's current working document. */
+    ACTIVE_DOC,
+    /** All files attached on this turn (substantive attach-turn question). */
+    THIS_TURN,
+    /** Filename tokens in the query matched one or more session files. */
+    NAMED,
+    /** Attach-turn overview / blank send — newest file in the attach batch. */
+    ATTACH_OVERVIEW,
+}
+
+internal data class RetrievalScopeDecision(
+    val scope: RetrievalScope,
+    val restrictUris: Set<String>,
+)
+
+private val ALL_SESSION_DOCS_PHRASES = listOf(
+    "all files", "all documents", "all pdfs", "all attachments", "every file",
+    "each file", "all my files", "all the files", "every document",
+    "सभी फाइल", "सभी फ़ाइल", "सभी दस्तावेज", "सभी दस्तावेज़",
+    "அனைத்து கோப்பு", "అన్ని ఫైల్", "সব ফাইল", "બધી ફાઇલ",
+)
+
+/** User explicitly wants evidence from every indexed file in the chat. */
+internal fun isAllSessionDocsQuery(query: String): Boolean {
+    val lower = query.lowercase()
+    return ALL_SESSION_DOCS_PHRASES.any { lower.contains(it) }
+}
+
+/**
+ * T1-1 — resolve retrieval corpus for this turn. Returns a hard [restrictUris]
+ * set when scope is narrow; empty set means search the full session corpus.
+ */
+internal fun resolveRetrievalScope(
+    query: String,
+    sessionDocs: List<Pair<String, String>>,
+    attachmentUris: List<String>,
+    activeDocUri: String?,
+    route: QueryRoute,
+): RetrievalScopeDecision {
+    val sessionUriSet = sessionDocs.map { it.first }.toSet()
+    if (sessionUriSet.isEmpty()) {
+        return RetrievalScopeDecision(RetrievalScope.SESSION, emptySet())
+    }
+
+    if (route.equalSlots) {
+        return RetrievalScopeDecision(RetrievalScope.SESSION, emptySet())
+    }
+    if (route.whichFile) {
+        return RetrievalScopeDecision(RetrievalScope.SESSION, emptySet())
+    }
+    if (isAllSessionDocsQuery(query)) {
+        return RetrievalScopeDecision(RetrievalScope.SESSION, emptySet())
+    }
+
+    if (attachmentUris.isNotEmpty()) {
+        val attachRestrict = restrictUrisForAttachTurn(query, attachmentUris)
+        val scope = if (attachRestrict.size == 1 && attachRestrict.single() == attachmentUris.last()) {
+            RetrievalScope.ATTACH_OVERVIEW
+        } else {
+            RetrievalScope.THIS_TURN
+        }
+        return RetrievalScopeDecision(scope, attachRestrict)
+    }
+
+    if (route.namedDocUris.isNotEmpty()) {
+        val named = route.namedDocUris.filter { it in sessionUriSet }.toSet()
+        if (named.isNotEmpty()) {
+            return RetrievalScopeDecision(RetrievalScope.NAMED, named)
+        }
+    }
+
+    val active = activeDocUri?.takeIf { it in sessionUriSet }
+        ?: sessionDocs.singleOrNull()?.first.takeIf { sessionUriSet.size == 1 }
+
+    if (active != null) {
+        return RetrievalScopeDecision(RetrievalScope.ACTIVE_DOC, setOf(active))
+    }
+
+    return RetrievalScopeDecision(RetrievalScope.SESSION, emptySet())
+}
+
 internal fun isDuplicateTurn(
     lastQuery: String?,
     lastUris: Set<String>,
@@ -299,6 +386,8 @@ internal fun isListRequest(query: String): Boolean {
  * ([RagDocumentRepository.metaRouteReason] non-null on [ragQuery]).
  */
 internal fun detectRagAnswerShape(query: String, metaOverview: Boolean): RagAnswerShape {
+    // T1-2 — structure count/list must stay LIST even when "list" triggers metaOverview.
+    if (isStructureListQuery(query)) return RagAnswerShape.LIST
     val trimmed = query.trim()
     val lower = trimmed.lowercase()
     val overviewish = metaOverview ||
@@ -310,58 +399,116 @@ internal fun detectRagAnswerShape(query: String, metaOverview: Boolean): RagAnsw
         else RagAnswerShape.OVERVIEW
     }
     if (isListRequest(query)) return RagAnswerShape.LIST
-    if (isPenaltyScheduleQuery(query)) return RagAnswerShape.LIST
+    if (isTabularAmountQuery(query)) return RagAnswerShape.LIST
     return RagAnswerShape.NARROW_QA
 }
 
-// ── B1: substance queries must use BM25 + penalty/schedule evidence ────────
+// ── B1 / T1-4: substance & tabular amount queries ───────────────────────────
 
-private val SUBSTANCE_QUERY_TOKENS = setOf(
+private val TABULAR_AMOUNT_TOKENS = setOf(
     "penalty", "penalties", "fine", "fines", "punishment", "damages",
     "monetary", "rupee", "rupees", "crore", "lakhs", "lakh",
     "jurmana", "jurmaana",
+    "fee", "fees", "tariff", "charge", "charges", "cost", "costs",
+    "rate", "rates", "amount", "amounts", "pricing", "price",
 )
 
-private val CHAPTER_COUNT_PATTERN = Regex(
-    "(?i)(how many|number of|total)\\s+.{0,24}\\bchapters?\\b",
+/** T1-4 — penalties, fees, tariffs, schedule rows with amounts. */
+internal fun isTabularAmountQuery(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+    val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    if (tokens.any { it in TABULAR_AMOUNT_TOKENS }) return true
+    if (lower.contains("penalt")) return true
+    if (query.contains("दंड") || query.contains("जुर्माना")) return true
+    if (query.contains("शुल्क")) return true
+    if (Regex("(?i)\\bschedule\\b").containsMatchIn(query) &&
+        (lower.contains("penalt") || lower.contains("fee") || lower.contains("fine") ||
+            query.contains("दंड") || query.contains("शुल्क"))
+    ) {
+        return true
+    }
+    if (query.contains("अनुसूची") || query.contains("अनुसुची")) {
+        if (lower.contains("penalt") || lower.contains("fine") || lower.contains("fee") ||
+            query.contains("दंड") || query.contains("शुल्क")
+        ) {
+            return true
+        }
+    }
+    return false
+}
+
+// T1-2 — document structure units (chapters, sections, headings, …).
+private val STRUCTURE_UNIT_TOKENS = setOf(
+    "chapter", "chapters", "section", "sections", "part", "parts",
+    "heading", "headings", "article", "articles", "annex", "annexure",
+    "annexures", "appendix", "appendices",
 )
+
+private val STRUCTURE_COUNT_PATTERN = Regex(
+    "(?i)((?:how many|number of|total|count)\\s+.{0,32}" +
+        "\\b(chapters?|sections?|parts?|headings?|articles?|annexes?|annexures?|appendices?)\\b" +
+        "|(?:give|tell)\\s+.{0,24}(?:total|number)\\s+.{0,24}\\b(chapters?|sections?|parts?)\\b)",
+)
+
+/** T1-2 — asks how many chapters/sections/etc. the document has. */
+internal fun isStructureCountQuery(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+    if (STRUCTURE_COUNT_PATTERN.containsMatchIn(lower)) return true
+    if (query.contains("कुल") && (query.contains("अध्याय") || query.contains("धारा"))) return true
+    if (query.contains("कितने") && (query.contains("अध्याय") || query.contains("धारा"))) return true
+    return false
+}
+
+/**
+ * T1-2 — list/enumerate document structure (chapters, sections, headings).
+ * Includes count-shaped asks so retrieval always pulls outline + markers.
+ */
+internal fun isStructureListQuery(query: String): Boolean {
+    if (isStructureCountQuery(query)) return true
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+    val hasUnit = STRUCTURE_UNIT_TOKENS.any { lower.contains(it) } ||
+        query.contains("अध्याय") || query.contains("धारा") || query.contains("खंड")
+    if (!hasUnit) return false
+    if (isListRequest(query)) return true
+    if (lower.contains("enumerate")) return true
+    if (lower.contains("name all") || lower.contains("names of")) return true
+    return false
+}
+
+/** Which structure marker family the query targets (default chapter). */
+internal fun structureMarkerKind(query: String): String {
+    val lower = query.lowercase()
+    return when {
+        lower.contains("section") || query.contains("धारा") -> "section"
+        lower.contains("part") -> "part"
+        lower.contains("heading") -> "heading"
+        lower.contains("article") -> "article"
+        lower.contains("annex") || lower.contains("appendix") -> "annex"
+        else -> "chapter"
+    }
+}
+
+internal fun bypassMetaForStructureQuery(query: String): Boolean = isStructureListQuery(query)
 
 /**
  * B1 — legal-substance questions must not take the meta/structural path
- * (outline-only). Includes penalties, Schedule, fines, and chapter counts.
+ * (outline-only). Includes penalties, Schedule, fines, and structure queries.
  */
 internal fun bypassMetaForSubstanceQuery(query: String): Boolean {
+    if (bypassMetaForStructureQuery(query)) return true
+    if (isTabularAmountQuery(query)) return true
     val lower = query.lowercase().trim()
     if (lower.isEmpty()) return false
-    val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
-    if (tokens.any { it in SUBSTANCE_QUERY_TOKENS }) return true
-    if (lower.contains("penalt") || lower.contains("schedule")) return true
-    if (query.contains("दंड") || query.contains("जुर्माना")) return true
+    if (lower.contains("schedule")) return true
     if (query.contains("अनुसूची") || query.contains("अनुसुची")) return true
-    if (CHAPTER_COUNT_PATTERN.containsMatchIn(lower)) return true
     return false
 }
 
-/** Penalty / Schedule / fine queries — BM25 path + schedule anchoring (B1). */
-internal fun isPenaltyScheduleQuery(query: String): Boolean {
-    val lower = query.lowercase().trim()
-    if (lower.isEmpty()) return false
-    val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
-    if (tokens.any { it in SUBSTANCE_QUERY_TOKENS }) return true
-    if (lower.contains("penalt")) return true
-    if (query.contains("दंड") || query.contains("जुर्माना")) return true
-    if (Regex("(?i)\\bschedule\\b").containsMatchIn(query) &&
-        (lower.contains("penalt") || query.contains("दंड"))
-    ) {
-        return true
-    }
-    if (query.contains("अनुसूची") &&
-        (lower.contains("penalt") || lower.contains("fine") || query.contains("दंड"))
-    ) {
-        return true
-    }
-    return false
-}
+/** Penalty / Schedule / fine queries — BM25 path + tabular anchoring (B1/T1-4). */
+internal fun isPenaltyScheduleQuery(query: String): Boolean = isTabularAmountQuery(query)
 
 /** Meta route unless follow-up or B1 substance bypass applies. */
 internal fun effectiveMetaRouteReason(query: String, isFollowUp: Boolean): String? {
@@ -401,4 +548,55 @@ internal fun applyReplyLengthToAnswerShape(
     com.saarthi.core.i18n.ReplyLength.LONG,
     com.saarthi.core.i18n.ReplyLength.MEDIUM,
     -> shape
+}
+
+// ── T1-5: unattached external regime (GDPR/ISO compare without that file) ───
+
+internal data class UnattachedExternalDecision(
+    val active: Boolean,
+    val regimes: List<String> = emptyList(),
+)
+
+internal data class ExternalRegimeMarker(
+    val queryToken: String,
+    val label: String,
+    val filenameHints: Set<String>,
+)
+
+private val EXTERNAL_REGIME_MARKERS = listOf(
+    ExternalRegimeMarker("gdpr", "GDPR", setOf("gdpr", "european", "union")),
+    ExternalRegimeMarker("general data protection", "GDPR", setOf("gdpr", "european")),
+    ExternalRegimeMarker("iso 27001", "ISO 27001", setOf("iso", "27001")),
+    ExternalRegimeMarker("iso 27002", "ISO 27002", setOf("iso", "27002")),
+    ExternalRegimeMarker("hipaa", "HIPAA", setOf("hipaa")),
+    ExternalRegimeMarker("ccpa", "CCPA", setOf("ccpa", "california")),
+    ExternalRegimeMarker("pci dss", "PCI DSS", setOf("pci", "dss")),
+    ExternalRegimeMarker("sox", "SOX", setOf("sox", "sarbanes")),
+)
+
+internal fun regimePresentInFilename(docName: String, marker: ExternalRegimeMarker): Boolean {
+    val tokens = filenameTokens(docName)
+    return marker.filenameHints.any { hint -> tokens.any { t -> t.contains(hint) || hint.contains(t) } }
+}
+
+/**
+ * T1-5 — query names an external standard/regime not represented in attached filenames.
+ */
+internal fun detectUnattachedExternalQuery(
+    query: String,
+    sessionDocNames: List<String>,
+): UnattachedExternalDecision {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty() || sessionDocNames.isEmpty()) {
+        return UnattachedExternalDecision(active = false)
+    }
+    val matched = EXTERNAL_REGIME_MARKERS.filter { marker ->
+        lower.contains(marker.queryToken) &&
+            sessionDocNames.none { regimePresentInFilename(it, marker) }
+    }
+    if (matched.isEmpty()) return UnattachedExternalDecision(active = false)
+    return UnattachedExternalDecision(
+        active = true,
+        regimes = matched.map { it.label }.distinct(),
+    )
 }

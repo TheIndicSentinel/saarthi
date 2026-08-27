@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -160,21 +162,47 @@ class MainViewModel @Inject constructor(
                 promptTier = catalogEntry?.promptTier ?: PromptTier.STANDARD,
             )
 
+            suspend fun reloadIfNeeded() {
+                if (inferenceEngine.isReady || inferenceEngine.isInitializing) return
+                runCatching { inferenceEngine.initialize(config) }
+                    .onFailure { e ->
+                        val msg = when {
+                            e is OutOfMemoryError ->
+                                "Not enough RAM to load the saved model.\n\nClose background apps and retry, or select a smaller model."
+                            e.message?.isNotBlank() == true -> e.message!!
+                            else -> "Failed to load AI model (${e.javaClass.simpleName})"
+                        }
+                        com.saarthi.core.inference.DebugLogger.log("MAIN", "Background init failed: $msg")
+                    }
+            }
 
             // Background initialization
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching {
-                    inferenceEngine.initialize(config)
-                }.onFailure { e ->
-                    val msg = when {
-                        e is OutOfMemoryError ->
-                            "Not enough RAM to load the saved model.\n\nClose background apps and retry, or select a smaller model."
-                        e.message?.isNotBlank() == true -> e.message!!
-                        else -> "Failed to load AI model (${e.javaClass.simpleName})"
-                    }
-                    com.saarthi.core.inference.DebugLogger.log("MAIN", "Background init failed: $msg")
-                }
+                reloadIfNeeded()
             }
+
+            // After debounced background release tears down the native engine,
+            // reload when the user returns — belt-and-suspenders with
+            // LiteRTInferenceEngine.scheduleForegroundReloadIfNeeded().
+            inferenceEngine.isReadyFlow
+                .onEach { ready ->
+                    if (!ready) {
+                        kotlinx.coroutines.delay(400)
+                        reloadIfNeeded()
+                    }
+                }
+                .launchIn(viewModelScope)
+
+            // Belt-and-suspenders: trim-memory / OEM kills can drop the engine while
+            // the activity stays visible — isReadyFlow may not re-emit if already false.
+            inferenceEngine.isInitializingFlow
+                .onEach { initializing ->
+                    if (!initializing && !inferenceEngine.isReady) {
+                        kotlinx.coroutines.delay(200)
+                        reloadIfNeeded()
+                    }
+                }
+                .launchIn(viewModelScope)
         }
     }
 

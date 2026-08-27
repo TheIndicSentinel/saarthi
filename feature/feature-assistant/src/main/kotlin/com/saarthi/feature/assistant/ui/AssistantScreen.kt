@@ -338,7 +338,7 @@ fun AssistantScreen(
                     .imePadding(),
             ) {
                 // Background loading indicator
-                if (!uiState.modelReady && !uiState.isStreaming) {
+                if (uiState.modelInitializing && !uiState.isStreaming) {
                     LinearProgressIndicator(
                         modifier = Modifier.fillMaxWidth().height(2.dp),
                         color = SaarthiColors.Gold,
