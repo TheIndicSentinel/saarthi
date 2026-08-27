@@ -256,7 +256,20 @@ class RagDocumentRepository @Inject constructor(
         val chunks = chunkText(text)
         if (chunks.isEmpty()) return
 
-        val entities = ArrayList<RagChunkEntity>(chunks.size + 2)
+        var outlineText: String? = null
+        extractOutline(text)?.let { outlineBody ->
+            outlineText = buildString {
+                extractDocumentTitle(text)?.let { title ->
+                    append(title)
+                    append('\n')
+                }
+                append(outlineBody)
+            }.trimEnd()
+        }
+        val chapterRegistry = buildDocumentChapterRegistry(chunks, outlineText)
+        val metadata = computeChunkMetadata(chunks, chapterRegistry)
+
+        val entities = ArrayList<RagChunkEntity>(chunks.size + 3)
         entities.add(
             RagChunkEntity(
                 sessionId = sessionId,
@@ -268,19 +281,7 @@ class RagDocumentRepository @Inject constructor(
             )
         )
 
-        // Outline (auto-detected headings) — saved as a virtual chunk at
-        // chunkIndex = -1 so the table doesn't need a new column. Meta
-        // queries surface it first; normal BM25 ignores it because we
-        // filter to chunkIndex >= 0 before ranking. Doc with no detectable
-        // headings → no outline chunk, no behaviour change.
-        extractOutline(text)?.let { outlineBody ->
-            val outlineText = buildString {
-                extractDocumentTitle(text)?.let { title ->
-                    append(title)
-                    append('\n')
-                }
-                append(outlineBody)
-            }.trimEnd()
+        if (outlineText != null) {
             entities.add(
                 RagChunkEntity(
                     sessionId = sessionId,
@@ -288,12 +289,28 @@ class RagDocumentRepository @Inject constructor(
                     docName = file.name,
                     mimeType = file.mimeType,
                     chunkIndex = OUTLINE_CHUNK_INDEX,
-                    text = outlineText,
-                )
+                    text = outlineText!!,
+                    chunkRole = ChunkRole.OUTLINE,
+                ),
+            )
+        }
+
+        if (chapterRegistry.chapters.isNotEmpty()) {
+            entities.add(
+                RagChunkEntity(
+                    sessionId = sessionId,
+                    docUri = uriKey,
+                    docName = file.name,
+                    mimeType = file.mimeType,
+                    chunkIndex = STRUCTURE_REGISTRY_CHUNK_INDEX,
+                    text = encodeChapterRegistry(chapterRegistry),
+                    chunkRole = ChunkRole.REGISTRY,
+                ),
             )
         }
 
         chunks.forEachIndexed { idx, chunk ->
+            val meta = metadata[idx]
             entities.add(
                 RagChunkEntity(
                     sessionId = sessionId,
@@ -302,7 +319,12 @@ class RagDocumentRepository @Inject constructor(
                     mimeType = file.mimeType,
                     chunkIndex = idx,
                     text = chunk,
-                )
+                    chapterId = meta.chapterId,
+                    sectionNum = meta.sectionNum,
+                    headingPath = meta.headingPath,
+                    pageNum = meta.pageNum,
+                    chunkRole = meta.role,
+                ),
             )
         }
         sqliteWriteWithRetry { ragChunkDao.insertAll(entities) }
@@ -442,6 +464,7 @@ class RagDocumentRepository @Inject constructor(
             uri to chunks.first().docName
         }
         val route = routeQuery(query, sessionFiles)
+        val chapterRegistries = chapterRegistriesFromEntities(all)
         val spanPreserving = isSpanPreservingQuery(query)
         val effectiveTopK = if (spanPreserving) maxOf(topK, SPAN_PRESERVING_TOP_K) else topK
         val anchorWindow = anchorWindowMax(query)
@@ -567,7 +590,10 @@ class RagDocumentRepository @Inject constructor(
             query,
             contentChunks,
             all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.map { it.text },
+            chapterRegistries,
         )
+        val structureListHint = buildStructureListHint(query, chapterRegistries)
+        val structureHint = structureListHint ?: structureCountHint
         val tabularMax = if (spanPreserving) SPAN_ANCHOR_WINDOW else TABULAR_ANCHOR_MAX
         val anchoredEntities = chapterSpanChunks +
             (if (chapterSpanChunks.isEmpty()) {
@@ -579,7 +605,7 @@ class RagDocumentRepository @Inject constructor(
             }) +
             anchoredTopicChunks(contentChunks, query, anchorWindow) +
             anchoredTabularChunks(contentChunks, query, preferDocUri = penaltyPreferDocUri, maxChunks = tabularMax) +
-            anchoredStructureListChunks(all, contentChunks, query)
+            anchoredStructureListChunks(all, contentChunks, query, chapterRegistries)
         headingChunkCount = anchoredEntities.size
 
         // Expand the query when following up on the prior turn.
@@ -647,11 +673,11 @@ class RagDocumentRepository @Inject constructor(
         val orderedIdsByDoc = docChunksByUri.mapValues { (_, list) -> list.map { it.id } }
         val usedIds = LinkedHashSet<Long>()
         val bm25Hits = mutableListOf<RetrievedChunk>()
-        if (structureCountHint != null && contentChunks.isNotEmpty()) {
+        if (structureHint != null && contentChunks.isNotEmpty()) {
             val doc = contentChunks.first()
             bm25Hits.add(
                 RetrievedChunk(
-                    text = structureCountHint,
+                    text = structureHint,
                     docName = doc.docName,
                     score = 100.0,
                     chunkIndex = -2,
@@ -1000,9 +1026,29 @@ class RagDocumentRepository @Inject constructor(
         all: List<RagChunkEntity>,
         contentChunks: List<RagChunkEntity>,
         query: String,
+        chapterRegistries: Map<String, DocumentChapterRegistry> = emptyMap(),
     ): List<RagChunkEntity> {
         if (!isStructureListQuery(query)) return emptyList()
         val docUris = contentChunks.map { it.docUri }.distinct()
+        if (structureMarkerKind(query) == "chapter" && chapterRegistries.isNotEmpty()) {
+            val result = mutableListOf<RagChunkEntity>()
+            for (uri in docUris) {
+                val registry = chapterRegistries[uri] ?: continue
+                for (entry in registry.sortedByDocumentOrder().take(STRUCTURE_ANCHOR_MAX)) {
+                    if (entry.startChunkIndex < 0) continue
+                    val chunk = contentChunks.firstOrNull {
+                        it.docUri == uri && it.chunkIndex == entry.startChunkIndex
+                    }
+                    if (chunk != null && result.none { it.id == chunk.id }) {
+                        result.add(chunk)
+                    }
+                }
+            }
+            if (result.isNotEmpty()) {
+                logRag("structure-list-registry → ${result.size} chunk(s)")
+                return result.take(STRUCTURE_ANCHOR_MAX + docUris.size)
+            }
+        }
         val outlinesByDoc = all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.associateBy { it.docUri }
         val result = mutableListOf<RagChunkEntity>()
         for (uri in docUris) {
@@ -1819,9 +1865,16 @@ internal fun buildStructureCountHint(
     query: String,
     contentChunks: List<RagChunkEntity>,
     extraTexts: List<String> = emptyList(),
+    chapterRegistries: Map<String, DocumentChapterRegistry> = emptyMap(),
 ): String? {
     if (!isStructureCountQuery(query)) return null
     val kind = structureMarkerKind(query)
+    if (kind == "chapter" && chapterRegistries.isNotEmpty()) {
+        val chapters = registryChaptersInOrder(chapterRegistries)
+        if (chapters.isNotEmpty()) {
+            return buildRegistryCountHint(chapters, kind)
+        }
+    }
     val markers = distinctStructureMarkers(contentChunks, kind, extraTexts)
     if (markers.isEmpty()) return null
     val unit = when (kind) {

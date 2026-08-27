@@ -17,7 +17,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     //     dropped extracted text on every process restart.
     // v6: rag_chunks_fts FTS5 virtual table (external content) for large
     //     sessions — BM25 prefilter only when the measurement gate fires.
-    version = 6,
+    // v7: rag_chunks metadata columns (chapterId, section, headingPath, page, role)
+    //     for index-time structure registry (Wave 2).
+    version = 7,
     exportSchema = true,
 )
 abstract class SaarthiDatabase : RoomDatabase() {
@@ -142,5 +144,19 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
             SELECT id, text, sessionId FROM rag_chunks
             """.trimIndent(),
         )
+    }
+}
+
+/**
+ * v6 → v7: optional structure metadata on rag_chunks for index-time chapter
+ * registry. Nullable columns — existing rows stay valid until re-indexed.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE rag_chunks ADD COLUMN chapterId TEXT")
+        db.execSQL("ALTER TABLE rag_chunks ADD COLUMN sectionNum TEXT")
+        db.execSQL("ALTER TABLE rag_chunks ADD COLUMN headingPath TEXT")
+        db.execSQL("ALTER TABLE rag_chunks ADD COLUMN pageNum INTEGER")
+        db.execSQL("ALTER TABLE rag_chunks ADD COLUMN chunkRole TEXT")
     }
 }

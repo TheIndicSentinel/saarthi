@@ -30,4 +30,10 @@ data class RagChunkEntity(
     val chunkIndex: Int,
     val text: String,
     val createdAt: Long = System.currentTimeMillis(),
+    /** Wave 2 — canonical chapter id (Roman) when chunk sits in a chapter span. */
+    val chapterId: String? = null,
+    val sectionNum: String? = null,
+    val headingPath: String? = null,
+    val pageNum: Int? = null,
+    val chunkRole: String? = null,
 )
