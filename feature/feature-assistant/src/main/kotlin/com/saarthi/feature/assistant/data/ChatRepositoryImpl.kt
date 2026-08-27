@@ -147,6 +147,10 @@ class ChatRepositoryImpl @Inject constructor(
     private var lastCitationOutlineByDoc: Map<String, String> = emptyMap()
     @Volatile
     private var lastCitationMultiFileFair: Boolean = false
+    @Volatile
+    private var lastCitationQuery: String = ""
+    @Volatile
+    private var lastCitationTurnMode: RagTurnMode = RagTurnMode.PLAIN_CHAT
 
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
@@ -380,16 +384,19 @@ class ChatRepositoryImpl @Inject constructor(
                     // Parse markers out of the raw accumulated text
                     val raw = accumulated.toString()
                     val parsed = ResponseMarkerParser.parse(raw)
+                    val citationLabels = currentLanguage.citationDisplayLabels()
                     val groundedText = if (lastCitationGrounded && lastCitationChunks.isNotEmpty()) {
                         applyDeterministicSourcesFooter(
                             parsed.cleanText,
                             lastCitationChunks,
                             lastCitationOutlineByDoc,
-                            currentLanguage.citationDisplayLabels(),
+                            citationLabels,
                             multiFileFairSources = lastCitationMultiFileFair,
+                            claimOverlapQuery = lastCitationQuery,
+                            claimOverlapTurnMode = lastCitationTurnMode,
                         )
                     } else {
-                        parsed.cleanText
+                        stripModelSourcesBlock(parsed.cleanText, citationLabels)
                     }
                     logRag(
                         ragGenerationLogLine(
@@ -773,6 +780,7 @@ class ChatRepositoryImpl @Inject constructor(
                 effectiveMetaRouteReason(ragQuery, isFollowUp = false) != null,
             ),
             responseStyleManager.style.value.length,
+            query = ragQuery,
         )
         val unattachedExternal = detectUnattachedExternalQuery(
             ragQuery,
@@ -783,6 +791,7 @@ class ChatRepositoryImpl @Inject constructor(
             query = ragQuery,
             sessionDocCount = sessionDocs.size,
             attachmentsThisTurn = attachments.isNotEmpty(),
+            sessionDocNames = sessionDocs.map { it.name },
         )
         val retrievalTopK = effectiveRetrievalTopK(ragQuery, ragAnswerShape, retrievalRoute.equalSlots)
         sessionHasIndexedDocs = sessionDocs.isNotEmpty()
@@ -803,7 +812,7 @@ class ChatRepositoryImpl @Inject constructor(
             ?.content
             ?.take(200)
 
-        val retrieved = if (ragTurnMode == RagTurnMode.DOCUMENT_GROUNDED) {
+        val retrieved = if (shouldRetrieveForRagTurnMode(ragTurnMode)) {
             runCatching {
                 ragRepository.search(
                     sessionId = sessionId,
@@ -921,7 +930,7 @@ class ChatRepositoryImpl @Inject constructor(
             val scaffolding = identity.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
-            val forceGroundedDelivery = ragTurnMode == RagTurnMode.DOCUMENT_GROUNDED && retrieved.isNotEmpty()
+            val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
             val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
@@ -930,6 +939,9 @@ class ChatRepositoryImpl @Inject constructor(
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
                 forceGroundedDelivery = forceGroundedDelivery,
+                ragTurnMode = ragTurnMode,
+                ragQuery = ragQuery,
+                attachmentsThisTurn = attachments.isNotEmpty(),
             )
             if (ragAssembly.groundedDeliveryFailed) {
                 DebugLogger.log("PROMPT", "COMPACT grounded delivery failed — retry instruction")
@@ -969,8 +981,8 @@ class ChatRepositoryImpl @Inject constructor(
             // the compact grounded prompt (~962c) frees ~3400c, there is ample
             // room for the recent-questions recap, which lets the model treat
             // follow-ups as a continuing conversation instead of restarting.
-            val docsPinned = ragTurnMode == RagTurnMode.DOCUMENT_GROUNDED
-            val forceGroundedDelivery = docsPinned && retrieved.isNotEmpty()
+            val docsPinned = shouldPinDocsForRagTurnMode(ragTurnMode)
+            val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
             // Recap policy per turn type:
             //  • New attach this turn → NO recap, so file A's Q&A cannot
             //    answer for file B. Name/facts still come from memory.
@@ -1021,9 +1033,12 @@ class ChatRepositoryImpl @Inject constructor(
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
                 forceGroundedDelivery = forceGroundedDelivery,
+                ragTurnMode = ragTurnMode,
+                ragQuery = ragQuery,
+                attachmentsThisTurn = attachments.isNotEmpty(),
             )
             if (ragAssembly.groundedDeliveryFailed) {
-                DebugLogger.log("PROMPT", "Grounded delivery failed — retry instruction")
+                DebugLogger.log("PROMPT", "FRESH grounded delivery failed — retry instruction")
                 return groundedDeliveryRetryInstruction(userMessage)
             }
             val fileContext = ragAssembly.block
@@ -1076,7 +1091,7 @@ class ChatRepositoryImpl @Inject constructor(
             // budget is available for RAG, minus the user message.
             val budget = maxPromptChars
             val ragBudget = (budget - userMessage.length - 80).coerceAtLeast(0)
-            val forceGroundedDelivery = ragTurnMode == RagTurnMode.DOCUMENT_GROUNDED && retrieved.isNotEmpty()
+            val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
             val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
@@ -1085,6 +1100,9 @@ class ChatRepositoryImpl @Inject constructor(
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
                 forceGroundedDelivery = forceGroundedDelivery,
+                ragTurnMode = ragTurnMode,
+                ragQuery = ragQuery,
+                attachmentsThisTurn = attachments.isNotEmpty(),
             )
             if (ragAssembly.groundedDeliveryFailed) {
                 DebugLogger.log("PROMPT", "CONTINUE grounded delivery failed — retry instruction")
@@ -1128,6 +1146,9 @@ class ChatRepositoryImpl @Inject constructor(
         tabularAmount: Boolean = false,
         unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
         forceGroundedDelivery: Boolean = false,
+        ragTurnMode: RagTurnMode = RagTurnMode.DOCUMENT_GROUNDED,
+        ragQuery: String = "",
+        attachmentsThisTurn: Boolean = false,
     ): RagPromptAssemblyResult {
         val citationLabels = currentLanguage.citationDisplayLabels()
         val result = assembleRagPromptBlock(
@@ -1142,8 +1163,18 @@ class ChatRepositoryImpl @Inject constructor(
             unattachedExternal = unattachedExternal,
             citationLabels = citationLabels,
             forceGroundedDelivery = forceGroundedDelivery,
+            turnMode = ragTurnMode,
+            ragQuery = ragQuery,
+            attachmentsThisTurn = attachmentsThisTurn,
         )
-        updateCitationContext(retrieved, result.block, multiFileFairSources)
+        updateCitationContext(
+            retrieved = retrieved,
+            ragBlock = result.block,
+            multiFileFairSources = multiFileFairSources,
+            ragTurnMode = ragTurnMode,
+            ragQuery = ragQuery,
+            attachmentsThisTurn = attachmentsThisTurn,
+        )
         return result
     }
 
@@ -1151,20 +1182,36 @@ class ChatRepositoryImpl @Inject constructor(
         retrieved: List<RetrievedChunk>,
         ragBlock: String,
         multiFileFairSources: Boolean,
+        ragTurnMode: RagTurnMode,
+        ragQuery: String,
+        attachmentsThisTurn: Boolean,
     ) {
-        if (ragBlock.isEmpty() || retrieved.isEmpty()) {
+        val ragBlockChars = ragBlock.length
+        val shouldCite = shouldAttachDeterministicSources(
+            turnMode = ragTurnMode,
+            ragBlockChars = ragBlockChars,
+            retrieved = retrieved,
+            query = ragQuery,
+            attachmentsThisTurn = attachmentsThisTurn,
+        )
+        if (!shouldCite) {
             lastCitationGrounded = false
             lastCitationChunks = emptyList()
             lastCitationOutlineByDoc = emptyMap()
             lastCitationMultiFileFair = false
+            lastCitationQuery = ""
+            lastCitationTurnMode = RagTurnMode.PLAIN_CHAT
             return
         }
+        val citable = citableRetrievalChunks(retrieved)
         lastCitationGrounded = true
-        lastCitationChunks = interleaveExcerptsByDoc(retrieved)
+        lastCitationChunks = interleaveExcerptsByDoc(citable)
         lastCitationOutlineByDoc = retrieved
             .filter { it.chunkIndex < 0 }
             .associate { it.docName to it.text }
         lastCitationMultiFileFair = multiFileFairSources
+        lastCitationQuery = ragQuery
+        lastCitationTurnMode = ragTurnMode
     }
 
     /**

@@ -72,6 +72,7 @@ internal fun formatPageRangeForUser(pageRange: String, labels: CitationDisplayLa
 internal fun formatCitationLocation(chunk: RetrievedChunk, labels: CitationDisplayLabels): String = when {
     chunk.chunkIndex < 0 -> labels.overview
     else -> extractPageRange(chunk.text)?.let { formatPageRangeForUser(it, labels) }
+        ?: extractCitationSectionHeading(chunk.text)
         ?: labels.locationUnknown
 }
 
@@ -186,11 +187,19 @@ internal fun applyDeterministicSourcesFooter(
     labels: CitationDisplayLabels,
     maxSources: Int = DETERMINISTIC_SOURCES_MAX,
     multiFileFairSources: Boolean = false,
+    claimOverlapQuery: String? = null,
+    claimOverlapTurnMode: RagTurnMode? = null,
 ): String {
     if (chunks.isEmpty()) return modelText
     val body = stripModelSourcesBlock(modelText, labels)
+    val overlapChunks = if (shouldFilterSourcesByClaimOverlap(claimOverlapQuery, claimOverlapTurnMode)) {
+        filterChunksByClaimOverlap(chunks, body)
+    } else {
+        chunks
+    }
+    if (overlapChunks.isEmpty()) return body
     val footer = buildDeterministicSourcesFooter(
-        chunks,
+        overlapChunks,
         outlineByDocName,
         labels,
         maxSources,

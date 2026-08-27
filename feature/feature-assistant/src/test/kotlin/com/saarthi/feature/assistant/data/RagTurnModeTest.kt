@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Wave 1 — turn mode classifier lifecycle matrix. */
+/** Wave 1 + Wave 3 — turn mode classifier lifecycle matrix. */
 class RagTurnModeTest {
 
     @Test
@@ -82,6 +82,66 @@ class RagTurnModeTest {
             RagTurnMode.GENERAL_KNOWLEDGE,
             classifyRagTurnMode("Hi", sessionDocCount = 1, attachmentsThisTurn = false),
         )
+    }
+
+    @Test
+    fun `ambiguous off-topic with docs is plain chat`() {
+        assertEquals(
+            RagTurnMode.PLAIN_CHAT,
+            classifyRagTurnMode(
+                "Tell me about yourself",
+                sessionDocCount = 1,
+                attachmentsThisTurn = false,
+            ),
+        )
+        assertEquals(
+            RagTurnMode.PLAIN_CHAT,
+            classifyRagTurnMode(
+                "What's your favorite color",
+                sessionDocCount = 1,
+                attachmentsThisTurn = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `mixed doc and general topic`() {
+        assertEquals(
+            RagTurnMode.MIXED,
+            classifyRagTurnMode(
+                "What are penalties in the act and explain black holes to a kid",
+                sessionDocCount = 1,
+                attachmentsThisTurn = false,
+            ),
+        )
+        assertTrue(
+            isMixedDocumentQuery(
+                "From the document and also explain photosynthesis",
+            ),
+        )
+    }
+
+    @Test
+    fun `mixed compare with external regime`() {
+        assertEquals(
+            RagTurnMode.MIXED,
+            classifyRagTurnMode(
+                "Compare this document with GDPR requirements",
+                sessionDocCount = 1,
+                attachmentsThisTurn = false,
+                sessionDocNames = listOf("dpdpa.pdf"),
+            ),
+        )
+    }
+
+    @Test
+    fun `retrieval helpers`() {
+        assertTrue(shouldRetrieveForRagTurnMode(RagTurnMode.DOCUMENT_GROUNDED))
+        assertTrue(shouldRetrieveForRagTurnMode(RagTurnMode.MIXED))
+        assertFalse(shouldRetrieveForRagTurnMode(RagTurnMode.GENERAL_KNOWLEDGE))
+        assertFalse(shouldRetrieveForRagTurnMode(RagTurnMode.PLAIN_CHAT))
+        assertTrue(requiresForceGroundedDelivery(RagTurnMode.DOCUMENT_GROUNDED, retrievedNonEmpty = true))
+        assertFalse(requiresForceGroundedDelivery(RagTurnMode.MIXED, retrievedNonEmpty = true))
     }
 
     @Test

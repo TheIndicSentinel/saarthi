@@ -579,13 +579,19 @@ internal fun effectiveRetrievalTopK(
 }
 
 /** Nudge P0 answer shape when Settings → Reply length is Short/Long (P2 #11). */
+internal fun isReplyLengthShapeLockedQuery(query: String): Boolean =
+    isStructureCountQuery(query) ||
+        isStructureListQuery(query) ||
+        isChapterSpanQuery(query)
+
 internal fun applyReplyLengthToAnswerShape(
     shape: RagAnswerShape,
     length: com.saarthi.core.i18n.ReplyLength,
+    query: String = "",
 ): RagAnswerShape = when (length) {
     com.saarthi.core.i18n.ReplyLength.SHORT -> when (shape) {
         RagAnswerShape.OVERVIEW -> RagAnswerShape.OVERVIEW_SHORT
-        RagAnswerShape.LIST -> RagAnswerShape.NARROW_QA
+        RagAnswerShape.LIST -> if (isReplyLengthShapeLockedQuery(query)) shape else RagAnswerShape.NARROW_QA
         else -> shape
     }
     com.saarthi.core.i18n.ReplyLength.LONG,
@@ -648,12 +654,14 @@ internal fun detectUnattachedExternalQuery(
 
 /** Whether this turn should retrieve and ground in session documents. */
 internal enum class RagTurnMode {
-    /** No indexed docs — normal assistant chat. */
+    /** Normal assistant chat — no retrieval (with or without indexed docs). */
     PLAIN_CHAT,
     /** Docs exist but this message is general / opt-out — skip retrieval. */
     GENERAL_KNOWLEDGE,
     /** User is asking about attached document(s). */
     DOCUMENT_GROUNDED,
+    /** Document + general knowledge in one message — retrieve doc part; label both slices. */
+    MIXED,
 }
 
 private val DOCUMENT_OPT_OUT_PHRASES = listOf(
@@ -737,10 +745,68 @@ internal fun isSmallTalkQuery(query: String): Boolean {
     return tokens.size == 1 && tokens[0] in SMALL_TALK_EXACT
 }
 
+internal fun hasGeneralKnowledgeTopicCues(query: String): Boolean =
+    GENERAL_KNOWLEDGE_TOPIC_PATTERN.containsMatchIn(query)
+
 internal fun isLikelyGeneralKnowledgeWithoutDocCues(query: String): Boolean {
     if (hasDocumentQueryCues(query)) return false
-    return GENERAL_KNOWLEDGE_TOPIC_PATTERN.containsMatchIn(query)
+    return hasGeneralKnowledgeTopicCues(query)
 }
+
+private val PLAIN_CHAT_IDENTITY_PATTERN = Regex(
+    "(?i)\\b(" +
+        "who are you|what are you|tell me about yourself|about yourself|about saarthi|" +
+        "what can you do|how do you work|what do you do" +
+        ")\\b",
+)
+
+private val MIXED_QUERY_BRIDGE_PATTERN = Regex(
+    "(?i)\\b(" +
+        "from the document and|from the file and|from this (document|file|pdf) and|" +
+        "in the (act|document|file|pdf) and|in this (act|document|file|pdf) and|" +
+        "document and (also|in general)|file and (also|in general)|" +
+        "act and (also|in general)|pdf and (also|in general)" +
+        ")\\b",
+)
+
+/** Identity / capability questions that stay plain chat even when docs are attached. */
+internal fun isAssistantIdentityQuery(query: String): Boolean =
+    PLAIN_CHAT_IDENTITY_PATTERN.containsMatchIn(query.trim())
+
+/**
+ * Wave 3 — query asks for both document-grounded and general-knowledge slices.
+ * Opt-out wins over mixed; unattached external regimes (T1-5) with doc cues → mixed.
+ */
+internal fun isMixedDocumentQuery(
+    query: String,
+    sessionDocNames: List<String> = emptyList(),
+): Boolean {
+    if (isDocumentOptOutQuery(query)) return false
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+
+    val docCues = hasDocumentQueryCues(query)
+    val gkTopic = hasGeneralKnowledgeTopicCues(query)
+    val compareBridge = isCompareQuery(query) || MIXED_QUERY_BRIDGE_PATTERN.containsMatchIn(lower)
+    val unattachedExternal = if (sessionDocNames.isNotEmpty()) {
+        detectUnattachedExternalQuery(query, sessionDocNames).active
+    } else {
+        false
+    }
+
+    if (docCues && (gkTopic || unattachedExternal || compareBridge)) return true
+    if (MIXED_QUERY_BRIDGE_PATTERN.containsMatchIn(lower) && (docCues || gkTopic)) return true
+    return false
+}
+
+internal fun shouldRetrieveForRagTurnMode(mode: RagTurnMode): Boolean =
+    mode == RagTurnMode.DOCUMENT_GROUNDED || mode == RagTurnMode.MIXED
+
+internal fun shouldPinDocsForRagTurnMode(mode: RagTurnMode): Boolean =
+    shouldRetrieveForRagTurnMode(mode)
+
+internal fun requiresForceGroundedDelivery(mode: RagTurnMode, retrievedNonEmpty: Boolean): Boolean =
+    mode == RagTurnMode.DOCUMENT_GROUNDED && retrievedNonEmpty
 
 internal fun isFollowUpContinuationQuery(query: String): Boolean {
     val lower = query.lowercase().trim()
@@ -748,6 +814,8 @@ internal fun isFollowUpContinuationQuery(query: String): Boolean {
         return true
     }
     val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    // Short continuations only — avoid hijacking standalone off-topic questions ("what's your favorite…").
+    if (tokens.size > 4) return false
     return tokens.take(3).any { it in FOLLOW_UP_TOKENS_MODE }
 }
 
@@ -760,8 +828,9 @@ internal fun classifyRagTurnMode(
     query: String,
     sessionDocCount: Int,
     attachmentsThisTurn: Boolean,
+    sessionDocNames: List<String> = emptyList(),
 ): RagTurnMode {
-  if (sessionDocCount == 0 && !attachmentsThisTurn) {
+    if (sessionDocCount == 0 && !attachmentsThisTurn) {
         return RagTurnMode.PLAIN_CHAT
     }
 
@@ -769,8 +838,16 @@ internal fun classifyRagTurnMode(
         return RagTurnMode.GENERAL_KNOWLEDGE
     }
 
+    if (isMixedDocumentQuery(query, sessionDocNames)) {
+        return RagTurnMode.MIXED
+    }
+
     if (isSmallTalkQuery(query) && !hasDocumentQueryCues(query)) {
         return RagTurnMode.GENERAL_KNOWLEDGE
+    }
+
+    if (isAssistantIdentityQuery(query) && !hasDocumentQueryCues(query)) {
+        return RagTurnMode.PLAIN_CHAT
     }
 
     if (attachmentsThisTurn && query.trim().isNotEmpty() && !isDocumentOptOutQuery(query)) {
@@ -793,6 +870,6 @@ internal fun classifyRagTurnMode(
         return RagTurnMode.DOCUMENT_GROUNDED
     }
 
-    // Ambiguous with indexed docs — stay grounded so legal/doc follow-ups work.
-    return RagTurnMode.DOCUMENT_GROUNDED
+    // Wave 3 — indexed docs are available, not forced; ambiguous → plain chat.
+    return RagTurnMode.PLAIN_CHAT
 }

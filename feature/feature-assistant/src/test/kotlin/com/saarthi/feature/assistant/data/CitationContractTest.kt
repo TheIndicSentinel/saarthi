@@ -334,4 +334,49 @@ class CitationContractTest {
         )
         assertTrue(header.contains("Sample:"))
     }
+
+    // ── Wave 3 P12 citation labels ───────────────────────────────────────────
+
+    @Test
+    fun `body prose is not used as citation document title`() {
+        val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val prose = "the Board may, after giving the Data Principal an opportunity of being heard"
+        assertTrue(looksLikeBodyProseLine(prose))
+        assertEquals(
+            FALLBACK_ATTACHED_DOC_LABEL,
+            displayCitationDocName(hash, null, prose, prose.length),
+        )
+        assertTrue(looksLikeInternalCitationLabel("the Board may after giving"))
+    }
+
+    @Test
+    fun `chapter header is section context not document title`() {
+        assertTrue(isChapterOnlyCitationLabel("CHAPTER VII"))
+        assertTrue(looksLikeInternalCitationLabel("Chapter VII"))
+        val outline = "Document outline (auto-detected headings):\n- CHAPTER I\n- CHAPTER VII"
+        assertEquals(
+            FALLBACK_ATTACHED_DOC_LABEL,
+            displayDocName("2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf", outline, null),
+        )
+    }
+
+    @Test
+    fun `extractCitationSectionHeading finds chapter line`() {
+        val heading = extractCitationSectionHeading(
+            "CHAPTER VIII\nPENALTIES AND ADJUDICATION\n33. Penalty for failure",
+        )
+        assertTrue(heading != null && heading.contains("Chapter VIII", ignoreCase = true))
+    }
+
+    @Test
+    fun `txt without pages uses section heading in excerpt header`() {
+        val header = formatExcerptHeader(
+            1,
+            "act.pdf",
+            "CHAPTER II\nObligations of Data Fiduciary",
+            chunkIndex = 3,
+        )
+        assertTrue(header.contains("Chapter II"))
+        assertFalse(header.contains("location not marked"))
+    }
 }

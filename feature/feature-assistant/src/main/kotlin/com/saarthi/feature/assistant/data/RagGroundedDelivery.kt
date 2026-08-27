@@ -39,6 +39,9 @@ internal fun assembleRagPromptBlock(
     unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
     citationLabels: CitationDisplayLabels,
     forceGroundedDelivery: Boolean = false,
+    turnMode: RagTurnMode = RagTurnMode.DOCUMENT_GROUNDED,
+    ragQuery: String = "",
+    attachmentsThisTurn: Boolean = false,
 ): RagPromptAssemblyResult {
     if (retrieved.isEmpty() && unreadableThisTurn.isEmpty()) {
         return RagPromptAssemblyResult("")
@@ -48,7 +51,12 @@ internal fun assembleRagPromptBlock(
     }
 
     val compact = tier == SystemPromptProvider.ModelTier.COMPACT
-    val strongMatch = retrieved.any { it.chunkIndex >= 0 && it.score >= STRONG_RAG_MATCH_SCORE }
+    val strongMatch = shouldUseStrongMatchPromptRules(
+        retrieved = retrieved,
+        query = ragQuery,
+        turnMode = turnMode,
+        attachmentsThisTurn = attachmentsThisTurn,
+    )
 
     val attempts = listOf(
         AssemblyAttempt(fullRules = true, includeShape = true, includeManifest = true, chunkStrategy = ChunkPickStrategy.INTERLEAVE),
@@ -71,6 +79,7 @@ internal fun assembleRagPromptBlock(
             unattachedExternal = unattachedExternal,
             citationLabels = citationLabels,
             attempt = attempt,
+            turnMode = turnMode,
         )
         if (block.isNotEmpty()) return RagPromptAssemblyResult(block)
     }
@@ -107,6 +116,7 @@ private fun tryAssemble(
     unattachedExternal: UnattachedExternalDecision,
     citationLabels: CitationDisplayLabels,
     attempt: AssemblyAttempt,
+    turnMode: RagTurnMode,
 ): String {
     val shapeInstruction = if (attempt.includeShape) {
         ragAnswerShapeInstruction(
@@ -119,15 +129,15 @@ private fun tryAssemble(
         ""
     }
 
-    val rulesHeader = if (attempt.fullRules) {
-        ragCitationRules(
+    val rulesHeader = when {
+        turnMode == RagTurnMode.MIXED -> ragMixedModeRules(compact = compact, labels = citationLabels)
+        attempt.fullRules -> ragCitationRules(
             compact = compact,
             strongMatch = strongMatch,
             labels = citationLabels,
             blockExternalRegimes = true,
         )
-    } else {
-        ragCitationRulesMinimal(citationLabels)
+        else -> ragCitationRulesMinimal(citationLabels)
     }
 
     val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {

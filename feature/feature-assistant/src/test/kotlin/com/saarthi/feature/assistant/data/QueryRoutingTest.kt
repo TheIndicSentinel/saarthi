@@ -231,6 +231,39 @@ class QueryRoutingTest {
     }
 
     @Test
+    fun `reply length short keeps LIST for structure and chapter highlights`() {
+        assertEquals(
+            RagAnswerShape.LIST,
+            applyReplyLengthToAnswerShape(
+                RagAnswerShape.LIST,
+                com.saarthi.core.i18n.ReplyLength.SHORT,
+                query = "How many chapters are there",
+            ),
+        )
+        assertEquals(
+            RagAnswerShape.LIST,
+            applyReplyLengthToAnswerShape(
+                RagAnswerShape.LIST,
+                com.saarthi.core.i18n.ReplyLength.SHORT,
+                query = "Highlights from chapter VI",
+            ),
+        )
+    }
+
+    @Test
+    fun `chapter highlights with short reply keeps LIST topK`() {
+        val query = "Highlights from chapter VI"
+        val shape = applyReplyLengthToAnswerShape(
+            detectRagAnswerShape(query, metaOverview = false),
+            com.saarthi.core.i18n.ReplyLength.SHORT,
+            query = query,
+        )
+        assertEquals(RagAnswerShape.LIST, shape)
+        assertEquals(6, topKForAnswerShape(shape, equalSlots = false))
+        assertEquals(SPAN_PRESERVING_TOP_K, effectiveRetrievalTopK(query, shape, equalSlots = false))
+    }
+
+    @Test
     fun `filterRankedByScoreGap drops weak tail hits`() {
         val ranked = listOf(
             Bm25Retriever.Scored(0, 10.0),
