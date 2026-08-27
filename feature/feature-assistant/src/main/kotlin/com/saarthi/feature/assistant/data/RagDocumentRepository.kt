@@ -10,6 +10,9 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Score assigned to heading/topic/section anchored chunks in retrieval. */
+internal const val ANCHORED_CHUNK_SCORE = 50.0
+
 /**
  * Production RAG pipeline for attached documents.
  *
@@ -93,7 +96,7 @@ class RagDocumentRepository @Inject constructor(
         // Synthetic score for anchored chunks — above any realistic BM25
         // score so they sort first and survive topK truncation, and clearly
         // distinguishable in the debug log.
-        private const val HEADING_ANCHOR_SCORE = 50.0
+        private const val HEADING_ANCHOR_SCORE = ANCHORED_CHUNK_SCORE
 
         // Sentinel chunkIndex for an auto-extracted document outline —
         // headings scraped during indexing and stored as a single virtual
@@ -439,6 +442,9 @@ class RagDocumentRepository @Inject constructor(
             uri to chunks.first().docName
         }
         val route = routeQuery(query, sessionFiles)
+        val spanPreserving = isSpanPreservingQuery(query)
+        val effectiveTopK = if (spanPreserving) maxOf(topK, SPAN_PRESERVING_TOP_K) else topK
+        val anchorWindow = anchorWindowMax(query)
         var headingChunkCount = 0
         var ftsPrefilterUsed = false
         fun finish(hits: List<RetrievedChunk>): List<RetrievedChunk> {
@@ -446,18 +452,29 @@ class RagDocumentRepository @Inject constructor(
             // opening, or spaced samples for "which file"). Real BM25 hits
             // (body score > 0) are left as ranked.
             val resolved = if (hasPositiveBodyHit(hits)) hits
-                else structuralSample(all, topK, query, spaced = route.whichFile)
+                else structuralSample(all, effectiveTopK, query, spaced = route.whichFile)
             val docCount = resolved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size.coerceAtLeast(1)
-            val minSlots = if (route.equalSlots) (topK / docCount).coerceAtLeast(1) else 1
+            val minSlots = if (route.equalSlots) (effectiveTopK / docCount).coerceAtLeast(1) else 1
             val contentEntities = all.filter { it.chunkIndex >= 0 }
             val allocated = allocatePerDocSlots(
                 applySessionBoost(resolved, boostDocUris, recencyUri, route.namedDocUris),
-                topK,
+                effectiveTopK,
                 minSlots,
             )
-            val condensed = collapseRedundantChunkRuns(allocated)
+            val condensed = collapseRedundantChunkRuns(
+                allocated,
+                preserveAnchoredSpans = spanPreserving,
+                anchoredSpanMax = ANCHORED_SPAN_COLLAPSE_MAX,
+            )
             val excerpted = coherentExcerptForLowRelevance(condensed, contentEntities)
-            if (!expandSmallFiles) return excerpted
+            if (!expandSmallFiles) {
+                return applyChapterRetrievalConfidence(
+                    query = query,
+                    retrieved = excerpted,
+                    contentChunks = contentEntities,
+                    expandedSpanChunks = ANCHORED_SPAN_COLLAPSE_MAX,
+                )
+            }
             val fullByUri = contentEntities
                 .groupBy { it.docUri }
                 .mapValues { (_, chunks) ->
@@ -466,7 +483,14 @@ class RagDocumentRepository @Inject constructor(
             return coherentExcerptForLowRelevance(
                 expandWholeSmallFiles(excerpted, fullByUri, wholeFileChars),
                 contentEntities,
-            )
+            ).let { expanded ->
+                applyChapterRetrievalConfidence(
+                    query = query,
+                    retrieved = expanded,
+                    contentChunks = contentEntities,
+                    expandedSpanChunks = ANCHORED_SPAN_COLLAPSE_MAX,
+                )
+            }
         }
 
         // Follow-up detection: if the query STARTS with a continuation
@@ -523,9 +547,19 @@ class RagDocumentRepository @Inject constructor(
         // detected outline heading, surface that section's chunks first.
         // Additive — BM25 still ranks below; this only guarantees the
         // section the user named is present and leading.
-        val sectionAnchored = anchoredSectionChunks(contentChunks, query)
+        val chapterSpanQuery = isChapterSpanQuery(query)
+        val chapterSpanChunks = if (chapterSpanQuery) {
+            resolveChapterSpanChunks(contentChunks, query, SPAN_ANCHOR_WINDOW)
+        } else {
+            emptyList()
+        }
+        val sectionAnchored = if (!chapterSpanQuery || chapterSpanChunks.isEmpty()) {
+            anchoredSectionChunks(contentChunks, query, anchorWindow)
+        } else {
+            emptyList()
+        }
         val penaltyPreferDocUri = if (isSectionPenaltyComboQuery(query)) {
-            sectionAnchored.firstOrNull()?.docUri
+            (chapterSpanChunks + sectionAnchored).firstOrNull()?.docUri
         } else {
             null
         }
@@ -534,11 +568,17 @@ class RagDocumentRepository @Inject constructor(
             contentChunks,
             all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.map { it.text },
         )
-        val anchoredEntities = anchoredHeadingChunks(all, contentChunks, query) +
-            sectionAnchored +
-            anchoredBodyChapterChunks(contentChunks, query) +
-            anchoredTopicChunks(contentChunks, query) +
-            anchoredTabularChunks(contentChunks, query, preferDocUri = penaltyPreferDocUri) +
+        val tabularMax = if (spanPreserving) SPAN_ANCHOR_WINDOW else TABULAR_ANCHOR_MAX
+        val anchoredEntities = chapterSpanChunks +
+            (if (chapterSpanChunks.isEmpty()) {
+                anchoredHeadingChunks(all, contentChunks, query, anchorWindow) +
+                    sectionAnchored +
+                    anchoredBodyChapterChunks(contentChunks, query, anchorWindow)
+            } else {
+                emptyList()
+            }) +
+            anchoredTopicChunks(contentChunks, query, anchorWindow) +
+            anchoredTabularChunks(contentChunks, query, preferDocUri = penaltyPreferDocUri, maxChunks = tabularMax) +
             anchoredStructureListChunks(all, contentChunks, query)
         headingChunkCount = anchoredEntities.size
 
@@ -566,7 +606,7 @@ class RagDocumentRepository @Inject constructor(
         }
 
         val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
-        val rankK = (topK * uniqueDocs).coerceAtMost(contentChunks.size).coerceAtLeast(topK)
+        val rankK = (effectiveTopK * uniqueDocs).coerceAtMost(contentChunks.size).coerceAtLeast(effectiveTopK)
         var rankPool = contentChunks
         if (shouldUseFtsPrefilter(contentChunks.size, ftsFastPathSessions[sessionId] == true)) {
             val match = buildFtsMatchQuery(effectiveQuery)
@@ -591,7 +631,7 @@ class RagDocumentRepository @Inject constructor(
         }
         val ranked = filterRankedByScoreGap(
             rankContentChunks(rankPool, sessionId, effectiveQuery, rankK),
-            topK,
+            effectiveTopK,
         )
 
         // Neighbor expansion: for the top BM25 hits, also include the
@@ -648,7 +688,7 @@ class RagDocumentRepository @Inject constructor(
         // allocation so a large first file cannot occupy every top-K seat.
         // All-zero never comes from BM25.rank (zeros are dropped); finish()
         // still rebuilds if only padding/outline remains.
-        if (bm25Hits.size >= topK) return done(finish(bm25Hits), RagSearchPath.bm25)
+        if (bm25Hits.size >= effectiveTopK) return done(finish(bm25Hits), RagSearchPath.bm25)
 
         // Zero-hit retry with prior query: if the current query alone had no
         // BM25 vocabulary match (e.g. "Also list meaning of each" without
@@ -666,7 +706,7 @@ class RagDocumentRepository @Inject constructor(
             val retryPool = contentChunks.filter { it.docUri in scope }.ifEmpty { contentChunks }
             val retryRanked = filterRankedByScoreGap(
                 rankContentChunks(retryPool, sessionId, priorQuery.take(150), rankK),
-                topK,
+                effectiveTopK,
             )
             for (scored in retryRanked) {
                 val entity = retryPool[scored.index]
@@ -674,7 +714,7 @@ class RagDocumentRepository @Inject constructor(
                     bm25Hits.add(entity.toRetrieved(scored.score * 0.5))
                 }
             }
-            if (bm25Hits.size >= topK) return done(finish(bm25Hits), RagSearchPath.bm25)
+            if (bm25Hits.size >= effectiveTopK) return done(finish(bm25Hits), RagSearchPath.bm25)
         }
 
         // No lexical body hit: per-file contiguous (or spaced) fallback
@@ -697,14 +737,14 @@ class RagDocumentRepository @Inject constructor(
         val docCount = byDoc.size.coerceAtLeast(1)
         for ((_, docChunks) in byDoc) {
             val sorted = docChunks.sortedBy { it.chunkIndex }
-            val perDoc = ((topK - bm25Hits.size - padding.size + docCount - 1) / docCount).coerceAtLeast(2)
+            val perDoc = ((effectiveTopK - bm25Hits.size - padding.size + docCount - 1) / docCount).coerceAtLeast(2)
             for (s in pickStructuralSamples(sorted, perDoc)) {
                 if (s.id in usedIds) continue
                 padding.add(s.toRetrieved(0.0))
                 usedIds.add(s.id)
-                if (bm25Hits.size + padding.size >= topK) break
+                if (bm25Hits.size + padding.size >= effectiveTopK) break
             }
-            if (bm25Hits.size + padding.size >= topK) break
+            if (bm25Hits.size + padding.size >= effectiveTopK) break
         }
         return done(finish(bm25Hits + padding), RagSearchPath.bm25)
     }
@@ -768,6 +808,7 @@ class RagDocumentRepository @Inject constructor(
         all: List<RagChunkEntity>,
         contentChunks: List<RagChunkEntity>,
         query: String,
+        windowMax: Int = HEADING_ANCHOR_MAX,
     ): List<RagChunkEntity> {
         val outlinesByDoc = all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.associateBy { it.docUri }
         for ((uri, docChunks) in contentChunks.groupBy { it.docUri }) {
@@ -777,8 +818,9 @@ class RagDocumentRepository @Inject constructor(
             val bodyHeadings = extractBodyHeadingLines(sorted)
             val headings = (outlineHeadings + bodyHeadings).distinct()
             val heading = matchHeading(query, headings) ?: continue
-            val window = headingAnchorWindow(sorted.map { it.text }, heading, headings, HEADING_ANCHOR_MAX)
-                ?: locateHeadingLineWindow(sorted, heading, HEADING_ANCHOR_MAX)
+            val substanceOnly = !usesTocForRetrieval(query)
+            val window = headingAnchorWindowInBody(sorted, heading, headings, windowMax, substanceOnly)
+                ?: locateHeadingLineWindow(sorted, heading, windowMax, substanceOnly)
                 ?: continue
             val section = sorted.subList(window.start, window.endExclusive)
             if (section.isEmpty()) continue
@@ -811,12 +853,11 @@ class RagDocumentRepository @Inject constructor(
         sorted: List<RagChunkEntity>,
         heading: String,
         maxChunks: Int,
+        substanceOnly: Boolean = true,
     ): HeadingWindow? {
         val needle = heading.trim()
         if (needle.isEmpty()) return null
-        val idx = sorted.indexOfFirst { entity ->
-            entity.text.lines().any { it.trim().equals(needle, ignoreCase = true) }
-        }
+        val idx = locateHeadingInBodyChunks(sorted, heading, substanceOnly)
         if (idx < 0) return null
         val from = (idx - 1).coerceAtLeast(0)
         val to = minOf(from + maxChunks, sorted.size)
@@ -830,17 +871,18 @@ class RagDocumentRepository @Inject constructor(
     private fun anchoredSectionChunks(
         contentChunks: List<RagChunkEntity>,
         query: String,
+        windowMax: Int = HEADING_ANCHOR_MAX,
     ): List<RagChunkEntity> {
         val refs = extractSectionRefs(query)
         if (refs.isEmpty()) return emptyList()
+        val substanceOnly = !usesTocForRetrieval(query)
         for ((_, docChunks) in contentChunks.groupBy { it.docUri }) {
             val sorted = docChunks.sortedBy { it.chunkIndex }
-            val texts = sorted.map { it.text }
             for (ref in refs) {
-                val idx = locateSectionInChunks(texts, ref)
+                val idx = locateSectionInBodyChunks(sorted, ref, substanceOnly)
                 if (idx < 0) continue
                 val from = (idx - 1).coerceAtLeast(0)
-                val to = minOf(from + HEADING_ANCHOR_MAX, sorted.size)
+                val to = minOf(from + windowMax, sorted.size)
                 val section = sorted.subList(from, to)
                 if (section.isEmpty()) continue
                 logRag(
@@ -859,21 +901,23 @@ class RagDocumentRepository @Inject constructor(
     private fun anchoredTopicChunks(
         contentChunks: List<RagChunkEntity>,
         query: String,
+        windowMax: Int = HEADING_ANCHOR_MAX,
     ): List<RagChunkEntity> {
         if (isStructureListQuery(query)) return emptyList()
         val categories = activeTopicCategories(query)
         if (categories.isEmpty()) return emptyList()
         val patterns = categories.flatMap { it.bodyPatterns }
+        val topicPickMax = minOf(TOPIC_ANCHOR_MAX, windowMax)
         for ((_, docChunks) in contentChunks.groupBy { it.docUri }) {
             val sorted = docChunks.sortedBy { it.chunkIndex }
-            val picks = pickTopicAnchorChunkEntities(sorted, query, TOPIC_ANCHOR_MAX)
+            val picks = pickTopicAnchorChunkEntities(sorted, query, topicPickMax)
             if (picks.isEmpty()) continue
             val anchorChunk = picks.minByOrNull { topicAnchorLineStartTier(it.text, patterns) }
                 ?: picks.first()
             val firstIdx = sorted.indexOfFirst { it.id == anchorChunk.id }
             if (firstIdx < 0) continue
             val from = (firstIdx - 1).coerceAtLeast(0)
-            val to = minOf(from + HEADING_ANCHOR_MAX + 1, sorted.size)
+            val to = minOf(from + windowMax + 1, sorted.size)
             val section = sorted.subList(from, to)
             if (section.isEmpty()) continue
             logRag(
@@ -892,13 +936,16 @@ class RagDocumentRepository @Inject constructor(
     private fun anchoredBodyChapterChunks(
         contentChunks: List<RagChunkEntity>,
         query: String,
+        windowMax: Int = HEADING_ANCHOR_MAX,
     ): List<RagChunkEntity> {
         if (isStructureListQuery(query)) return emptyList()
+        val substanceOnly = !usesTocForRetrieval(query)
         var bestSection: List<RagChunkEntity>? = null
         var bestScore = 0.0
         for ((_, docChunks) in contentChunks.groupBy { it.docUri }) {
             val sorted = docChunks.sortedBy { it.chunkIndex }
             for ((idx, chunk) in sorted.withIndex()) {
+                if (substanceOnly && isTocLikeChunk(chunk)) continue
                 val lineScore = chunk.text.lines().mapNotNull { raw ->
                     val line = raw.trim()
                     if (line.length !in 8..120) return@mapNotNull null
@@ -910,7 +957,7 @@ class RagDocumentRepository @Inject constructor(
                 if (lineScore > bestScore) {
                     bestScore = lineScore
                     val from = (idx - 1).coerceAtLeast(0)
-                    val to = minOf(from + HEADING_ANCHOR_MAX, sorted.size)
+                    val to = minOf(from + windowMax, sorted.size)
                     bestSection = sorted.subList(from, to)
                 }
             }
@@ -930,12 +977,13 @@ class RagDocumentRepository @Inject constructor(
         contentChunks: List<RagChunkEntity>,
         query: String,
         preferDocUri: String? = null,
+        maxChunks: Int = TABULAR_ANCHOR_MAX,
     ): List<RagChunkEntity> {
         if (!isTabularAmountQuery(query)) return emptyList()
-        val picked = pickTabularAmountChunkEntities(contentChunks, preferDocUri, TABULAR_ANCHOR_MAX)
+        val picked = pickTabularAmountChunkEntities(contentChunks, preferDocUri, maxChunks)
             .filter { !isTabularWeakFragment(it.text) }
             .ifEmpty {
-                pickTabularAmountChunkEntities(contentChunks, preferDocUri, TABULAR_ANCHOR_MAX)
+                pickTabularAmountChunkEntities(contentChunks, preferDocUri, maxChunks)
             }
         if (picked.isNotEmpty()) {
             logRag("tabular-anchored → ${picked.size} chunk(s)")
@@ -1362,10 +1410,17 @@ internal fun interleaveExcerptsByDoc(retrieved: List<RetrievedChunk>): List<Retr
  * P1 — collapse adjacent same-document hits so one BM25 peak does not fill
  * top-K with overlapping chunks from the same section. Outline rows and
  * heading-anchor scores (50) are always kept.
+ *
+ * Wave 1 P2 — when [preserveAnchoredSpans] is true, contiguous anchored runs
+ * (score ≥ [anchoredScoreThreshold]) keep up to [anchoredSpanMax] chunks in
+ * document order instead of capping at 3.
  */
 internal fun collapseRedundantChunkRuns(
     retrieved: List<RetrievedChunk>,
     maxPerAdjacentRun: Int = 2,
+    preserveAnchoredSpans: Boolean = false,
+    anchoredSpanMax: Int = ANCHORED_SPAN_COLLAPSE_MAX,
+    anchoredScoreThreshold: Double = ANCHORED_CHUNK_SCORE,
 ): List<RetrievedChunk> {
     if (retrieved.size <= maxPerAdjacentRun) return retrieved
     val outline = retrieved.filter { it.chunkIndex < 0 }
@@ -1373,7 +1428,7 @@ internal fun collapseRedundantChunkRuns(
     if (body.isEmpty()) return retrieved
 
     val kept = ArrayList<RetrievedChunk>(retrieved.size)
-    for ((uri, docHits) in body.groupBy { it.docUri }) {
+    for ((_, docHits) in body.groupBy { it.docUri }) {
         val sorted = docHits.sortedBy { it.chunkIndex }
         var runStart = 0
         while (runStart < sorted.size) {
@@ -1384,12 +1439,21 @@ internal fun collapseRedundantChunkRuns(
                 runEnd++
             }
             val run = sorted.subList(runStart, runEnd)
-            val cap = if (run.any { it.score >= 50.0 }) {
-                maxPerAdjacentRun + 1
-            } else {
-                maxPerAdjacentRun
+            val isAnchoredRun = run.any { it.score >= anchoredScoreThreshold }
+            val cap = when {
+                preserveAnchoredSpans && isAnchoredRun ->
+                    minOf(run.size, anchoredSpanMax)
+                isAnchoredRun ->
+                    maxPerAdjacentRun + 1
+                else ->
+                    maxPerAdjacentRun
             }
-            kept.addAll(run.sortedByDescending { it.score }.take(cap))
+            val picked = if (preserveAnchoredSpans && isAnchoredRun) {
+                run.take(cap)
+            } else {
+                run.sortedByDescending { it.score }.take(cap)
+            }
+            kept.addAll(picked)
             runStart = runEnd
         }
     }
@@ -1572,11 +1636,13 @@ internal fun pickTopicAnchorChunkEntities(
     contentChunks: List<RagChunkEntity>,
     query: String,
     max: Int,
+    substanceOnly: Boolean = !usesTocForRetrieval(query),
 ): List<RagChunkEntity> {
     val categories = activeTopicCategories(query)
     if (categories.isEmpty()) return emptyList()
+    val pool = if (substanceOnly) contentChunks.filter { !isTocLikeChunk(it) } else contentChunks
     val patterns = categories.flatMap { it.bodyPatterns }
-    val ranked = contentChunks.mapNotNull { chunk ->
+    val ranked = pool.mapNotNull { chunk ->
         var bestTier: Int? = null
         for ((tier, pattern) in patterns) {
             if (pattern.containsMatchIn(chunk.text)) {
@@ -1934,32 +2000,8 @@ internal fun locateSectionInChunks(chunkTexts: List<String>, ref: SectionRef): I
             return bestIdx
         }
         "chapter" -> {
-            val token = ref.token
-            var bestIdx = -1
-            var bestTier = Int.MAX_VALUE
-            val patterns = listOf(
-                0 to Regex("(?m)^\\s*Chapter\\s+$token\\b", RegexOption.IGNORE_CASE),
-                0 to Regex("(?m)^\\s*CHAPTER\\s+$token\\b"),
-                1 to Regex("(?i)\\bchapter\\s+$token\\b"),
-                1 to Regex("अध्याय\\s*${Regex.escape(token)}"),
-            )
-            chunkTexts.forEachIndexed { idx, text ->
-                var tier: Int? = null
-                for ((t, rx) in patterns) {
-                    if (rx.containsMatchIn(text)) {
-                        tier = minOf(tier ?: t, t)
-                    }
-                }
-                if (tier != null) {
-                    if (tier < bestTier) {
-                        bestTier = tier
-                        bestIdx = idx
-                    } else if (tier == bestTier && idx < bestIdx) {
-                        bestIdx = idx
-                    }
-                }
-            }
-            return bestIdx
+            val aliases = chapterIdAliases(ref.token)
+            return findChapterTitleChunkIndex(chunkTexts, aliases)
         }
         "schedule" -> {
             return chunkTexts.indexOfFirst { text ->

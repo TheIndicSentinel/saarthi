@@ -459,6 +459,12 @@ internal fun ragAnswerShapeInstruction(
  *            an "In general:" general-knowledge answer AND forbid refusing or
  *            asking the user to rephrase (G5).
  */
+/** Ultra-compact rules for grounded delivery when the char budget is tight (Wave 1). */
+internal fun ragCitationRulesMinimal(
+    labels: CitationDisplayLabels = SupportedLanguage.ENGLISH.citationDisplayLabels(),
+): String =
+    "Answer from the excerpt(s) below only. Put refs in a final '${labels.sourcesHeader}' block (max 3 lines).\n\n"
+
 internal fun ragCitationRules(
     compact: Boolean,
     strongMatch: Boolean = false,

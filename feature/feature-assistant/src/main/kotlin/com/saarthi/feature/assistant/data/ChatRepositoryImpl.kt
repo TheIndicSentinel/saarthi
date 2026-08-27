@@ -779,7 +779,12 @@ class ChatRepositoryImpl @Inject constructor(
             sessionDocs.map { it.name },
         )
         val tabularAmountQuery = isTabularAmountQuery(ragQuery)
-        val retrievalTopK = topKForAnswerShape(ragAnswerShape, retrievalRoute.equalSlots)
+        val ragTurnMode = classifyRagTurnMode(
+            query = ragQuery,
+            sessionDocCount = sessionDocs.size,
+            attachmentsThisTurn = attachments.isNotEmpty(),
+        )
+        val retrievalTopK = effectiveRetrievalTopK(ragQuery, ragAnswerShape, retrievalRoute.equalSlots)
         sessionHasIndexedDocs = sessionDocs.isNotEmpty()
         // NOTE: knowledge packs (Kisan etc.) are intentionally NOT merged
         // into the main chat here. Packs are a fully separate, modular
@@ -798,21 +803,29 @@ class ChatRepositoryImpl @Inject constructor(
             ?.content
             ?.take(200)
 
-        val retrieved = runCatching {
-            ragRepository.search(
-                sessionId = sessionId,
-                query = ragQuery,
-                topK = retrievalTopK,
-                boostDocUris = boostDocUris,
-                restrictDocUris = restrictDocUris,
-                retrievalScopeLabel = scopeDecision.scope.name,
-                priorQuery = priorUserQuery?.takeIf {
-                    attachments.isEmpty() && it != ragQuery && it.length > 8
-                },
-                wholeFileChars = wholeFileCharBudget(maxPromptChars),
-            )
-        }.onFailure { if (isSqliteUnusable(it)) throw it }
-            .getOrDefault(emptyList())
+        val retrieved = if (ragTurnMode == RagTurnMode.DOCUMENT_GROUNDED) {
+            runCatching {
+                ragRepository.search(
+                    sessionId = sessionId,
+                    query = ragQuery,
+                    topK = retrievalTopK,
+                    boostDocUris = boostDocUris,
+                    restrictDocUris = restrictDocUris,
+                    retrievalScopeLabel = scopeDecision.scope.name,
+                    priorQuery = priorUserQuery?.takeIf {
+                        attachments.isEmpty() && it != ragQuery && it.length > 8
+                    },
+                    wholeFileChars = wholeFileCharBudget(maxPromptChars),
+                )
+            }.onFailure { if (isSqliteUnusable(it)) throw it }
+                .getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        DebugLogger.log(
+            "RAG",
+            "turnMode=${ragTurnMode.name} sessionDocs=${sessionDocs.size} attach=${attachments.isNotEmpty()}",
+        )
         val unreadableThisTurn = attachments.filter {
             isUnreadableThisTurn(it.error, it.extractedText)
         }
@@ -908,14 +921,21 @@ class ChatRepositoryImpl @Inject constructor(
             val scaffolding = identity.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlockAndTrackCitation(
+            val forceGroundedDelivery = ragTurnMode == RagTurnMode.DOCUMENT_GROUNDED && retrieved.isNotEmpty()
+            val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
+                forceGroundedDelivery = forceGroundedDelivery,
             )
+            if (ragAssembly.groundedDeliveryFailed) {
+                DebugLogger.log("PROMPT", "COMPACT grounded delivery failed — retry instruction")
+                return groundedDeliveryRetryInstruction(userMessage)
+            }
+            val fileContext = ragAssembly.block
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
             val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
             DebugLogger.log("PROMPT", "COMPACT turn ragChars=${fileContext.length} ragBudget=$ragBudget promptMs=${promptMs()}")
@@ -949,7 +969,8 @@ class ChatRepositoryImpl @Inject constructor(
             // the compact grounded prompt (~962c) frees ~3400c, there is ample
             // room for the recent-questions recap, which lets the model treat
             // follow-ups as a continuing conversation instead of restarting.
-            val docsPinned = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty()
+            val docsPinned = ragTurnMode == RagTurnMode.DOCUMENT_GROUNDED
+            val forceGroundedDelivery = docsPinned && retrieved.isNotEmpty()
             // Recap policy per turn type:
             //  • New attach this turn → NO recap, so file A's Q&A cannot
             //    answer for file B. Name/facts still come from memory.
@@ -992,14 +1013,20 @@ class ChatRepositoryImpl @Inject constructor(
                 // saved 80 c is exactly enough for one extra chunk.
                 80                                                    // safety margin
             val ragBudget = (budget - systemPlusMargin).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlockAndTrackCitation(
+            val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
+                forceGroundedDelivery = forceGroundedDelivery,
             )
+            if (ragAssembly.groundedDeliveryFailed) {
+                DebugLogger.log("PROMPT", "Grounded delivery failed — retry instruction")
+                return groundedDeliveryRetryInstruction(userMessage)
+            }
+            val fileContext = ragAssembly.block
             DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
             buildString {
                 // Only emit the system block if non-blank — Compact tier
@@ -1049,14 +1076,21 @@ class ChatRepositoryImpl @Inject constructor(
             // budget is available for RAG, minus the user message.
             val budget = maxPromptChars
             val ragBudget = (budget - userMessage.length - 80).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlockAndTrackCitation(
+            val forceGroundedDelivery = ragTurnMode == RagTurnMode.DOCUMENT_GROUNDED && retrieved.isNotEmpty()
+            val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
+                forceGroundedDelivery = forceGroundedDelivery,
             )
+            if (ragAssembly.groundedDeliveryFailed) {
+                DebugLogger.log("PROMPT", "CONTINUE grounded delivery failed — retry instruction")
+                return groundedDeliveryRetryInstruction(userMessage)
+            }
+            val fileContext = ragAssembly.block
             DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} shape=$ragAnswerShape promptMs=${promptMs()}")
             buildString {
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
@@ -1093,20 +1127,24 @@ class ChatRepositoryImpl @Inject constructor(
         multiFileFairSources: Boolean = false,
         tabularAmount: Boolean = false,
         unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
-    ): String {
-        val block = buildRagPromptBlock(
-            retrieved,
-            unreadableThisTurn,
-            tier,
-            charBudget,
-            sessionDocs,
-            newThisTurnNames,
-            answerShape,
-            tabularAmount,
-            unattachedExternal,
+        forceGroundedDelivery: Boolean = false,
+    ): RagPromptAssemblyResult {
+        val citationLabels = currentLanguage.citationDisplayLabels()
+        val result = assembleRagPromptBlock(
+            retrieved = retrieved,
+            unreadableThisTurn = unreadableThisTurn,
+            tier = tier,
+            charBudget = charBudget,
+            sessionDocs = sessionDocs,
+            newThisTurnNames = newThisTurnNames,
+            answerShape = answerShape,
+            tabularAmount = tabularAmount,
+            unattachedExternal = unattachedExternal,
+            citationLabels = citationLabels,
+            forceGroundedDelivery = forceGroundedDelivery,
         )
-        updateCitationContext(retrieved, block, multiFileFairSources)
-        return block
+        updateCitationContext(retrieved, result.block, multiFileFairSources)
+        return result
     }
 
     private fun updateCitationContext(
@@ -1127,111 +1165,6 @@ class ChatRepositoryImpl @Inject constructor(
             .filter { it.chunkIndex < 0 }
             .associate { it.docName to it.text }
         lastCitationMultiFileFair = multiFileFairSources
-    }
-
-    private fun buildRagPromptBlock(
-        retrieved: List<com.saarthi.feature.assistant.data.RetrievedChunk>,
-        unreadableThisTurn: List<AttachedFile>,
-        tier: SystemPromptProvider.ModelTier,
-        charBudget: Int,
-        sessionDocs: List<SessionRagDocument> = emptyList(),
-        newThisTurnNames: List<String> = emptyList(),
-        answerShape: RagAnswerShape = RagAnswerShape.NARROW_QA,
-        tabularAmount: Boolean = false,
-        unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
-    ): String {
-        if (retrieved.isEmpty() && unreadableThisTurn.isEmpty()) return ""
-        // If there is literally no room for even the rule header + one
-        // small chunk, drop the block rather than emit a meaningless
-        // header-only fragment that wastes tokens.
-        if (charBudget < 200) return ""
-
-        val compact = tier == SystemPromptProvider.ModelTier.COMPACT
-        val shapeInstruction = ragAnswerShapeInstruction(
-            answerShape,
-            compact = compact,
-            tabularAmount = tabularAmount,
-            unattachedExternal = unattachedExternal,
-        )
-
-        // Relevance gate (G2/G5): a confident lexical hit on a real content
-        // chunk means the excerpts are on-topic, so the rules answer from
-        // them without the "ignore the document" escape hatch. Heading
-        // anchors (score 50) and boosted this-turn hits also clear the bar.
-        val strongMatch = retrieved.any { it.chunkIndex >= 0 && it.score >= STRONG_RAG_MATCH_SCORE }
-        val citationLabels = currentLanguage.citationDisplayLabels()
-        val rulesHeader = ragCitationRules(
-            compact = compact,
-            strongMatch = strongMatch,
-            labels = citationLabels,
-            blockExternalRegimes = true,
-        )
-
-        val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {
-            buildString {
-                appendLine(UNREADABLE_FILES_INTRO)
-                unreadableThisTurn.forEach { f ->
-                    val why = f.error ?: "unsupported format — Saarthi cannot read binary files yet"
-                    appendLine("  - ${f.name}: $why")
-                }
-            }.trimEnd() + "\n\n"
-        } else ""
-
-        val outlineByDocName = retrieved
-            .filter { it.chunkIndex < 0 }
-            .associate { it.docName to it.text }
-
-        val manifestLine = sessionManifestLine(
-            sessionDocs.map { doc ->
-                val outline = outlineByDocName[doc.name]
-                val bodyHint = retrieved.firstOrNull {
-                    it.docName == doc.name && it.chunkIndex >= 0
-                }?.text
-                val charEst = retrieved.filter { it.docName == doc.name }.sumOf { it.text.length }
-                displayCitationDocName(
-                    doc.name,
-                    outline,
-                    bodyHint,
-                    charEst.takeIf { it > 0 },
-                    citationLabels,
-                )
-            },
-        )
-        val newFilesLine = newFilesThisTurnNotice(newThisTurnNames)
-
-        var remaining = charBudget - rulesHeader.length - shapeInstruction.length -
-            unreadableBlock.length -
-            manifestLine.length - newFilesLine.length
-        val ordered = interleaveExcerptsByDoc(retrieved)
-        // Fair multi-file ordering (R7/G7): interleave positive hits across
-        // documents so a second file is not starved by a high-scoring first
-        // file when the budget runs out. No-op for single-document turns.
-        val chunksBlock = buildString {
-            for ((i, chunk) in ordered.withIndex()) {
-                val text = chunk.text.trim()
-                val header = formatExcerptHeader(
-                    i + 1,
-                    chunk.docName,
-                    text,
-                    chunk.chunkIndex,
-                    outlineByDocName[chunk.docName],
-                    citationLabels,
-                )
-                val total = header.length + text.length + 2  // +2 for trailing "\n\n"
-                if (total > remaining) break  // never half-emit a chunk
-                append(header)
-                append(text)
-                append("\n\n")
-                remaining -= total
-            }
-        }
-
-        // If the budget was so tight that not a single chunk fit, drop
-        // the whole RAG block — emitting rules with no excerpts puts the
-        // model into refusal mode on every question.
-        if (chunksBlock.isEmpty() && unreadableBlock.isEmpty()) return ""
-
-        return (rulesHeader + shapeInstruction + manifestLine + newFilesLine + chunksBlock + unreadableBlock).trimEnd()
     }
 
     /**
