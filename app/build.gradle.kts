@@ -32,11 +32,18 @@ android {
         // — only the library one did — so the generated test APK referenced a
         // runner it didn't package, which is the upload error Firebase showed.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Kisan knowledge-pack manifest URL. Defaults to the public
-        // saarthi-packs GitHub Releases "latest" manifest, so the signed
-        // update channel works in a stock build. Until the first signed
-        // release is published the URL simply 404s and PackUpdateWorker
-        // backs off (Result.retry) — harmless. Override via:
+        // Kisan knowledge-pack manifest URL. Empty by DEFAULT (privacy-by-
+        // default): a stock build performs NO background pack-update polling,
+        // so an installed app makes zero unsolicited network calls once the
+        // model is on disk — the app is fully offline out of the box. The
+        // Kisan pack itself still works offline: the seed pack ships in assets
+        // and is installed on first launch (KisanPackInstaller.installSeedIfAbsent).
+        // When the URL is blank, PackUpdateChecker short-circuits to
+        // Unavailable (no network) and PackUpdateWorker returns success (no
+        // retry) — see PackUpdateScheduler / PackUpdateWorker.
+        //
+        // The signed auto-update channel is OPT-IN — enable it for a release by
+        // supplying the manifest URL via either:
         //   local.properties → kisan.pack.manifest.url=https://…/manifest.json
         //   CI env           → KISAN_PACK_MANIFEST_URL=https://…/manifest.json
         val kisanManifestUrl = System.getenv("KISAN_PACK_MANIFEST_URL")
@@ -44,7 +51,7 @@ android {
                 Properties().apply { f.inputStream().use { load(it) } }
                     .getProperty("kisan.pack.manifest.url")
             })
-            ?: "https://github.com/TheIndicSentinel/saarthi-packs/releases/latest/download/manifest.json"
+            ?: ""
         buildConfigField("String", "KISAN_PACK_MANIFEST_URL", "\"$kisanManifestUrl\"")
 
         // ECDSA P-256 (secp256r1) public key — X.509 SPKI, base64 — used to

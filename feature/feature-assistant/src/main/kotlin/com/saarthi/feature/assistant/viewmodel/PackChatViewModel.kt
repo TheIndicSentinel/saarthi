@@ -15,6 +15,7 @@ import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.ConversationEntity
+import com.saarthi.feature.assistant.data.ChatHistoryHygiene
 import com.saarthi.feature.assistant.data.RagDocumentRepository
 import com.saarthi.feature.assistant.data.ResponseMarkerParser
 import com.saarthi.feature.assistant.data.RetrievedChunk
@@ -114,7 +115,7 @@ class PackChatViewModel @Inject constructor(
                 )
             }.getOrDefault(emptyList())
             if (saved.isNotEmpty()) {
-                _messages.value = saved.map { it.toChatMessage() }
+                _messages.value = ChatHistoryHygiene.dropOrphanedUserTurns(saved.map { it.toChatMessage() })
             }
         }
         // Clear the speaking highlight when TTS finishes / is stopped.

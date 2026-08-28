@@ -16,6 +16,7 @@ import com.saarthi.core.memory.db.ChatSessionDao
 import com.saarthi.core.memory.db.ChatSessionEntity
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.ConversationEntity
+import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.core.memory.domain.MemoryRepository
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
@@ -101,6 +102,7 @@ class ChatRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val conversationDao: ConversationDao,
     private val chatSessionDao: ChatSessionDao,
+    private val transactionRunner: DatabaseTransactionRunner,
     private val memoryRepository: MemoryRepository,
     private val languageManager: LanguageManager,
     private val inferenceEngine: InferenceEngine,
@@ -178,7 +180,9 @@ class ChatRepositoryImpl @Inject constructor(
                 sessionId,
                 ConversationDao.UI_HISTORY_LIMIT,
             )
-            if (saved.isNotEmpty()) _history.value = saved.map { it.toChatMessage() }
+            if (saved.isNotEmpty()) {
+                _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(saved.map { it.toChatMessage() })
+            }
             sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         }
     }
@@ -206,7 +210,7 @@ class ChatRepositoryImpl @Inject constructor(
             sessionId,
             ConversationDao.UI_HISTORY_LIMIT,
         )
-        _history.value = messages.map { it.toChatMessage() }
+        _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(messages.map { it.toChatMessage() })
         sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         // Reset engine session to prevent stale KV cache from previous chat
         runCatching { inferenceEngine.resetSession() }
@@ -216,13 +220,17 @@ class ChatRepositoryImpl @Inject constructor(
         // Cascade-delete every artefact tied to this chat. Without this,
         // memories/embeddings from a deleted chat would persist and surface
         // in future chats — that's the "states-in-India answer mentions
-        // groceries" bug class users reported.
-        conversationDao.deleteBySession(sessionId)
-        memoryRepository.deleteForSession(sessionId)
-        ragRepository.deleteForSession(sessionId)
+        // groceries" bug class users reported. Wrapped in a single Room
+        // transaction so a crash/SQLite error mid-cascade can't leave orphaned
+        // rows (e.g. messages gone but RAG chunks remaining).
+        transactionRunner.runInTransaction {
+            conversationDao.deleteBySession(sessionId)
+            memoryRepository.deleteForSession(sessionId)
+            ragRepository.deleteForSession(sessionId)
+            chatSessionDao.deleteById(sessionId)
+        }
         indexedDocsByUri.remove(sessionId)
         sessionHasIndexedDocs = false
-        chatSessionDao.deleteById(sessionId)
         if (_currentSessionId.value == sessionId) {
             val remaining = chatSessionDao.getAll()
             if (remaining.isNotEmpty()) {
@@ -500,18 +508,53 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun clearHistory() {
         val sessionId = _currentSessionId.value
         _history.update { emptyList() }
-        conversationDao.deleteBySession(sessionId)
         // Clearing history is also "wipe this chat's brain" — drop the
-        // session's memories so the next reply starts clean. Without this,
-        // the model could still see facts from messages the user just
-        // cleared.
-        memoryRepository.deleteForSession(sessionId)
-        ragRepository.deleteForSession(sessionId)
+        // session's messages, memories and RAG chunks together so the next
+        // reply starts clean and the model can't still see facts the user just
+        // cleared. Atomic so a mid-cascade failure can't leave a half-wiped
+        // chat (e.g. messages cleared but memories still present).
+        transactionRunner.runInTransaction {
+            conversationDao.deleteBySession(sessionId)
+            memoryRepository.deleteForSession(sessionId)
+            ragRepository.deleteForSession(sessionId)
+            chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
+        }
         indexedDocsByUri.remove(sessionId)
         sessionHasIndexedDocs = false
-        chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
+    }
+
+    override suspend fun deleteAllData() {
+        _history.update { emptyList() }
+        val sessions = chatSessionDao.getAll()
+        // Cascade every real chat session through the SAME per-session
+        // primitives used by deleteSession/clearHistory, so RAG token caches and
+        // active-doc state are invalidated correctly (not just the Room rows).
+        // Include the current session id too, in case it isn't yet a
+        // chat_sessions row (e.g. the initial "default" pseudo-session).
+        val sessionIds = (sessions.map { it.id } + _currentSessionId.value).toSet()
+        // Whole wipe in one transaction: either every session's artefacts AND
+        // the USER_SCOPE profile are gone, or nothing is — no partially-wiped
+        // state if a delete fails partway through.
+        transactionRunner.runInTransaction {
+            for (id in sessionIds) {
+                conversationDao.deleteBySession(id)
+                memoryRepository.deleteForSession(id)
+                ragRepository.deleteForSession(id)
+            }
+            // clearHistory/deleteSession never touch the durable cross-chat
+            // profile memory; a true "delete all" must clear USER_SCOPE too.
+            memoryRepository.deleteForSession(MemoryRepository.USER_SCOPE)
+            for (session in sessions) {
+                chatSessionDao.deleteById(session.id)
+            }
+        }
+        indexedDocsByUri.clear()
+        sessionHasIndexedDocs = false
+        runCatching { inferenceEngine.resetSession() }
+        // Leave the user on a clean, valid empty chat.
+        createSession()
     }
 
     override suspend fun exportAllData(): File = withContext(Dispatchers.IO) {
