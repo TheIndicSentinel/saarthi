@@ -29,6 +29,14 @@ class ReminderManager @Inject constructor(
         const val EXTRA_TEXT  = "reminder_text"
         const val EXTRA_ID    = "reminder_id"
         const val ACTION_REMINDER = "com.saarthi.app.REMINDER"
+
+        /** Logcat line for a successful schedule — lengths only, never raw text. */
+        internal fun scheduledLogcatLine(id: Int, textLen: Int, at: java.util.Date, exact: Boolean): String =
+            "ReminderManager: scheduled id=$id textLen=$textLen at $at exact=$exact"
+
+        /** Logcat line for an unparseable HH:MM string — length only. */
+        internal fun unparseableTimeLogcatLine(timeLen: Int): String =
+            "ReminderManager: could not parse time timeLen=$timeLen"
     }
 
     init {
@@ -65,7 +73,7 @@ class ReminderManager @Inject constructor(
     /** Schedule a reminder at an absolute HH:MM time today (tomorrow if already past). */
     fun scheduleReminder(text: String, timeStr: String): Boolean {
         val triggerMs = parseTimeToMs(timeStr) ?: run {
-            Timber.w("ReminderManager: could not parse time timeLen=${timeStr.length}")
+            Timber.w(unparseableTimeLogcatLine(timeStr.length))
             return false
         }
         return scheduleAt(text, triggerMs)
@@ -122,7 +130,7 @@ class ReminderManager @Inject constructor(
                 "REMINDER",
                 "scheduled id=$id exact=$exact in=${"%.1f".format(mins)}min at=${java.util.Date(triggerMs)} textLen=${text.length}",
             )
-            Timber.d("ReminderManager: scheduled id=$id textLen=${text.length} at ${java.util.Date(triggerMs)} exact=$exact")
+            Timber.d(scheduledLogcatLine(id, text.length, java.util.Date(triggerMs), exact))
             true
         } catch (e: Exception) {
             DebugLogger.log("REMINDER", "schedule FAILED id=$id exact=$exact err=${e.message}")

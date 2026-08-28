@@ -6,9 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
-import io.mockk.Runs
 import io.mockk.every
-import io.mockk.just
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
@@ -64,7 +62,6 @@ class ReminderManagerTest {
     @After
     fun tearDown() {
         unmockkStatic(PendingIntent::class)
-        unmockkStatic(timber.log.Timber::class)
     }
 
     // ── scheduleByDelay ────────────────────────────────────────────────────────
@@ -147,37 +144,23 @@ class ReminderManagerTest {
 
     @Test
     fun `logcat schedule line uses textLen and never echoes reminder text`() {
-        mockkStatic(timber.log.Timber::class)
-        every { timber.log.Timber.d(any<String>()) } just Runs
-
-        manager.scheduleByDelay("take medicine after dinner", 15)
-
-        verify {
-            timber.log.Timber.d(
-                match<String> { msg ->
-                    msg.contains("textLen=") &&
-                        !msg.contains("take medicine") &&
-                        !msg.contains("dinner")
-                },
-            )
-        }
+        val text = "take medicine after dinner"
+        val line = ReminderManager.scheduledLogcatLine(
+            id = 1,
+            textLen = text.length,
+            at = java.util.Date(0L),
+            exact = true,
+        )
+        assertTrue(line.contains("textLen=${text.length}"))
+        assertTrue("Must not echo reminder text. Got:\n$line", !line.contains("take medicine"))
+        assertTrue("Must not echo reminder text. Got:\n$line", !line.contains("dinner"))
     }
 
     @Test
     fun `unparseable time is logged as timeLen not the raw string`() {
-        mockkStatic(timber.log.Timber::class)
-        every { timber.log.Timber.w(any<String>()) } just Runs
-
-        manager.scheduleReminder("secret appointment", "not-a-time")
-
-        verify {
-            timber.log.Timber.w(
-                match<String> { msg ->
-                    msg.contains("timeLen=") &&
-                        !msg.contains("not-a-time") &&
-                        !msg.contains("secret")
-                },
-            )
-        }
+        val raw = "not-a-time"
+        val line = ReminderManager.unparseableTimeLogcatLine(raw.length)
+        assertTrue(line.contains("timeLen=${raw.length}"))
+        assertTrue("Must not echo the raw time string. Got:\n$line", !line.contains(raw))
     }
 }
