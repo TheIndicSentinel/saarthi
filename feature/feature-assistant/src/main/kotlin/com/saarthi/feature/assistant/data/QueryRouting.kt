@@ -672,28 +672,6 @@ internal enum class RagTurnMode {
     MIXED,
 }
 
-private val DOCUMENT_OPT_OUT_PHRASES = listOf(
-    "don't consider",
-    "do not consider",
-    "dont consider",
-    "ignore the document",
-    "ignore the file",
-    "ignore this document",
-    "ignore this file",
-    "without the document",
-    "without using the document",
-    "not from the document",
-    "not from the file",
-    "don't use the document",
-    "do not use the document",
-    "don't use the file",
-    "do not use the file",
-    "दस्तावेज़ मत",
-    "दस्तावेज मत",
-    "फ़ाइल मत",
-    "फाइल मत",
-)
-
 private val SMALL_TALK_EXACT = setOf(
     "hi", "hello", "hey", "hii", "hola", "thanks", "thank you", "ok", "okay",
     "namaste", "नमस्ते", "नमस्कार", "हैलो", "हाय",
@@ -704,19 +682,7 @@ private val FOLLOW_UP_TOKENS_MODE = setOf(
     "what", "how", "why", "and", "plus", "further", "अधिक", "और", "विस्तार",
 )
 
-private val DOCUMENT_SCOPE_PHRASES = listOf(
-    "from the document", "from the file", "from this document", "from this file", "from the pdf",
-    "in this document", "in the document", "in this file", "in the attached", "in this pdf",
-    "what does it say", "what does the document say", "according to the file", "according to the document",
-    "mentioned in the attached", "mentioned in the document", "mentioned in the file",
-    "attached document", "this act", "the act says", "in the act",
-    "document se", "file se", "dastavaz", "dastavez", "dastavēj", "dastāvaj",
-    "इस दस्तावेज", "इस फाइल", "इस फ़ाइल", "दस्तावेज में", "फाइल में",
-    "இந்த ஆவணத்தில்", "இந்த கோப்பில்",
-    "ఈ పత్రంలో", "ఈ ఫైల్‌లో",
-    "এই নথিতে", "এই ফাইলে",
-    "ಈ ದಾಖಲೆಯಲ್ಲಿ", "ಈ ಫೈಲ್‌ನಲ್ಲಿ",
-)
+private val DOCUMENT_SCOPE_PHRASES = I18N_DOCUMENT_SCOPE_PHRASES
 
 private val DOCUMENT_QUERY_CUE_PATTERN = Regex(
     "(?i)\\b(" +
@@ -738,8 +704,7 @@ private val TOPICAL_QUESTION_LEADS = setOf(
     "what", "how", "why", "when", "where", "who", "which",
     "is", "are", "was", "were", "does", "do", "did", "can", "should", "could",
     "list", "explain", "tell", "describe", "give", "name", "show",
-    "क्या", "कैसे", "क्यों", "कब", "कहाँ", "कहां", "कौन", "बताओ", "बताएं",
-)
+) + I18N_TOPICAL_QUESTION_LEADS
 
 private val GENERAL_KNOWLEDGE_TOPIC_PATTERN = Regex(
     "(?i)\\b(" +
@@ -753,7 +718,7 @@ private val GENERAL_KNOWLEDGE_TOPIC_PATTERN = Regex(
 internal fun isDocumentOptOutQuery(query: String): Boolean {
     val lower = query.lowercase().trim()
     if (lower.isEmpty()) return false
-    return DOCUMENT_OPT_OUT_PHRASES.any { lower.contains(it) } ||
+    return hasI18nDocumentOptOutCue(query) ||
         Regex("(?i)\\bin general\\b").containsMatchIn(lower) &&
         Regex("(?i)\\b(explain|describe|tell|what is|what are)\\b").containsMatchIn(lower)
 }
