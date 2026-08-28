@@ -1430,6 +1430,33 @@ enum class SupportedLanguage(
         ODIA     -> "ଡାଉନଲୋଡ ଆରମ୍ଭ ହେଉଛି…"
     }
 
+    /** After reboot / FGS timeout: tap-to-open so Range-resume can start in the foreground. */
+    val resumeInterruptedDownloadTitle: String get() = when (this) {
+        ENGLISH  -> "Model download paused"
+        HINDI    -> "मॉडल डाउनलोड रुका हुआ है"
+        TAMIL    -> "மாதிரி பதிவிறக்கம் நிறுத்தப்பட்டது"
+        TELUGU   -> "మోడల్ డౌన్‌లోడ్ ఆగింది"
+        BENGALI  -> "মডেল ডাউনলোড থেমে আছে"
+        MARATHI  -> "मॉडेल डाउनलोड थांबले आहे"
+        KANNADA  -> "ಮಾದರಿ ಡೌನ್‌ಲೋಡ್ ನಿಂತಿದೆ"
+        GUJARATI -> "મોડેલ ડાઉનલોડ થોભ્યું છે"
+        PUNJABI  -> "ਮਾਡਲ ਡਾਊਨਲੋਡ ਰੁਕਿਆ ਹੋਇਆ ਹੈ"
+        ODIA     -> "ମଡେଲ୍ ଡାଉନଲୋଡ୍ ବନ୍ଦ ଅଛି"
+    }
+
+    val resumeInterruptedDownloadBody: String get() = when (this) {
+        ENGLISH  -> "Tap to open Saarthi and resume the download."
+        HINDI    -> "डाउनलोड जारी रखने के लिए सारथी खोलें।"
+        TAMIL    -> "பதிவிறக்கத்தைத் தொடர சார்த்தியைத் திறக்கவும்."
+        TELUGU   -> "డౌన్‌లోడ్ కొనసాగించడానికి సారథిని తెరవండి."
+        BENGALI  -> "ডাউনলোড চালিয়ে যেতে সারথি খুলুন।"
+        MARATHI  -> "डाउनलोड पुन्हा सुरू करण्यासाठी सारथी उघडा."
+        KANNADA  -> "ಡೌನ್‌ಲೋಡ್ ಮುಂದುವರಿಸಲು ಸಾರಥಿಯನ್ನು ತೆರೆಯಿರಿ."
+        GUJARATI -> "ડાઉનલોડ ફરી શરૂ કરવા સારથી ખોલો."
+        PUNJABI  -> "ਡਾਊਨਲੋਡ ਮੁੜ ਚਾਲੂ ਕਰਨ ਲਈ ਸਾਰਥੀ ਖੋਲ੍ਹੋ।"
+        ODIA     -> "ଡାଉନଲୋଡ୍ ଜାରି ରଖିବାକୁ ସାରଥୀ ଖୋଲନ୍ତୁ।"
+    }
+
     /** Title of the "Kisan pack refreshed" notification (a crop emoji is prefixed in code). */
     val packUpdatedTitle: String get() = when (this) {
         ENGLISH  -> "Kisan pack updated"

@@ -253,6 +253,8 @@ class SupportedLanguageTest {
         assertNonBlankForEveryLanguage("loadingModelBody") { loadingModelBody }
         assertNonBlankForEveryLanguage("generatingResponseTitle") { generatingResponseTitle }
         assertNonBlankForEveryLanguage("generatingResponseBody") { generatingResponseBody }
+        assertNonBlankForEveryLanguage("resumeInterruptedDownloadTitle") { resumeInterruptedDownloadTitle }
+        assertNonBlankForEveryLanguage("resumeInterruptedDownloadBody") { resumeInterruptedDownloadBody }
     }
 
     @Test

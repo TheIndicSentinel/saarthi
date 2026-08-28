@@ -67,10 +67,9 @@ private class ChecksumMismatchException(message: String) : IOException(message)
  *
  * [serverTotalBytes] is parsed from the 416 response's own Content-Range
  * header (an unsatisfied-range indicator followed by a slash and the total
- * size — RFC 7233 §4.4 requires the server to include it) — used by
- * [runDownload] to verify the local file actually
- * covers what the server reports before accepting it as complete, rather
- * than assuming from the 416 status alone.
+ * size — RFC 7233 §4.4 requires the server to include it) — used with
+ * [DownloadRangePolicy] plus the catalog's pinned fileSizeBytes before
+ * accepting the local tmp as complete.
  */
 private class RangeExhaustedException(val serverTotalBytes: Long?) :
     IOException("Local file already complete relative to server")
@@ -176,6 +175,7 @@ class ModelDownloadService : Service() {
                 val title   = intent.getStringExtra(EXTRA_TITLE) ?: DEFAULT_TITLE
                 val replace = intent.getBooleanExtra(EXTRA_REPLACE, false)
                 val expectedSha256 = intent.getStringExtra(EXTRA_EXPECTED_SHA256)
+                val expectedFileSizeBytes = intent.getLongExtra(EXTRA_FILE_SIZE_BYTES, 0L)
 
                 if (modelId == null || url == null || tmp == null || dest == null) {
                     DebugLogger.log("DOWNLOAD_SVC", "START missing extras — ignored")
@@ -226,7 +226,7 @@ class ModelDownloadService : Service() {
                         // and the new run would resume instead of starting over.
                         if (replace) File(tmp).delete()
                         val token = hfTokenManager.effectiveToken.first()
-                        runDownload(modelId, url, File(tmp), File(dest), token, title, expectedSha256)
+                        runDownload(modelId, url, File(tmp), File(dest), token, title, expectedSha256, expectedFileSizeBytes)
                     }
                 }
                 jobs[modelId] = job
@@ -278,6 +278,9 @@ class ModelDownloadService : Service() {
      */
     override fun onTimeout(startId: Int, fgsType: Int) {
         DebugLogger.log("DOWNLOAD_SVC", "onTimeout — dataSync background budget exhausted, stopping cleanly")
+        // FGS notification is removed on stop; leave a tap-to-open so the
+        // user can resume after the 6h dataSync budget (same as reboot).
+        notifyResumeOnOpen(this, languageManager.selectedLanguage.value)
         stopSelf()
     }
 
@@ -327,6 +330,7 @@ class ModelDownloadService : Service() {
         token: String,
         title: String,
         expectedSha256: String? = null,
+        expectedFileSizeBytes: Long = 0L,
     ) {
         tmpFile.parentFile?.mkdirs()
         destFile.parentFile?.mkdirs()
@@ -369,19 +373,20 @@ class ModelDownloadService : Service() {
                 // A 416 on resume means our Range start is at/past the
                 // resource's current length — but verify against the size the
                 // server itself reported (Content-Range on the 416 response)
-                // before trusting it, rather than assuming from the status
-                // code alone. A genuinely short local file (corruption, not
-                // drift) gets discarded and restarted instead of silently
-                // accepted.
+                // AND the catalog's pinned fileSizeBytes before trusting it.
+                // Accepting because the server is "done" while the catalog
+                // expects ~2.5 GB left onboarding looking complete with a
+                // file isFileComplete() would still reject.
                 val localBytes = tmpFile.length()
                 val serverTotal = e.serverTotalBytes
-                if (serverTotal != null && localBytes < serverTotal) {
-                    Timber.w("416 on resume but local ${localBytes}B < server-reported ${serverTotal}B for ${tmpFile.name} — discarding and restarting")
+                val catalogSize = expectedFileSizeBytes.takeIf { it > 0L }
+                if (!DownloadRangePolicy.shouldAcceptAsComplete(localBytes, serverTotal, catalogSize)) {
+                    Timber.w("416 on resume but local ${localBytes}B does not cover server=$serverTotal catalog=$catalogSize for ${tmpFile.name} — discarding and restarting")
                     DebugLogger.log("DOWNLOAD_SVC",
-                        "416 on resume for $modelId: local=${localBytes}B < server=${serverTotal}B — restarting from zero")
+                        "416 on resume for $modelId: local=${localBytes}B server=${serverTotal}B catalog=${catalogSize}B — restarting from zero")
                     tmpFile.delete()
                     if (attempt >= MAX_ATTEMPTS) {
-                        manager.emitFailed(modelId, "Download failed: local file shorter than server reports (HTTP 416)")
+                        manager.emitFailed(modelId, "Download failed: file size does not match server or catalog (HTTP 416)")
                         return
                     }
                     delay((attempt * 10_000L).coerceAtMost(60_000L))
@@ -673,24 +678,11 @@ class ModelDownloadService : Service() {
             .build()
     }
 
-    private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(CHANNEL_ID) != null) return
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Model Downloads",
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = "Shows progress while AI models are downloaded"
-            setShowBadge(false)
-            setSound(null, null)
-        }
-        nm.createNotificationChannel(channel)
-    }
+    private fun ensureChannel() = ensureChannel(this)
 
     companion object {
         private const val NOTIF_ID = 9100        // distinct from InferenceService (9001)
+        private const val RESUME_NOTIF_ID = 9101 // tap-to-open after reboot / FGS timeout
         private const val CHANNEL_ID = "saarthi_download"
         private const val DEFAULT_TITLE = "Downloading AI model…"
         private const val PROGRESS_INTERVAL_MS = 800L
@@ -706,6 +698,55 @@ class ModelDownloadService : Service() {
         private const val EXTRA_TITLE    = "title"
         private const val EXTRA_REPLACE  = "replace"
         private const val EXTRA_EXPECTED_SHA256 = "expected_sha256"
+        private const val EXTRA_FILE_SIZE_BYTES = "file_size_bytes"
+
+        /**
+         * Tap-to-open after a reboot or dataSync FGS timeout. Does **not**
+         * start this service — Android 12+ forbids startForegroundService
+         * from [BOOT_COMPLETED]. Opening the app runs
+         * [ModelDownloadManager.reattachActiveDownloads].
+         */
+        fun notifyResumeOnOpen(context: Context, language: com.saarthi.core.i18n.SupportedLanguage) {
+            ensureChannel(context)
+            val tapIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                ?.apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }
+            val tapPi = PendingIntent.getActivity(
+                context, RESUME_NOTIF_ID, tapIntent ?: Intent(),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(context, CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(context)
+            }
+            val notification = builder
+                .setContentTitle(language.resumeInterruptedDownloadTitle)
+                .setContentText(language.resumeInterruptedDownloadBody)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentIntent(tapPi)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .build()
+            val nm = context.getSystemService(NotificationManager::class.java)
+            nm.notify(RESUME_NOTIF_ID, notification)
+        }
+
+        private fun ensureChannel(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val nm = context.getSystemService(NotificationManager::class.java)
+            if (nm.getNotificationChannel(CHANNEL_ID) != null) return
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Model Downloads",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "Shows progress while AI models are downloaded"
+                setShowBadge(false)
+                setSound(null, null)
+            }
+            nm.createNotificationChannel(channel)
+        }
 
         /**
          * Starts (or resumes) a download. MUST be called from a foreground
@@ -723,6 +764,10 @@ class ModelDownloadService : Service() {
          *
          * [expectedSha256] = null skips verification entirely (today's
          * behavior for every catalog entry that hasn't been pinned yet).
+         *
+         * [expectedFileSizeBytes] is the catalog size (not a secret). Used
+         * with HTTP 416 so a server that is "done" at a shorter length than
+         * the catalog is not accepted as complete.
          *
          * Returns true only if the OS actually accepted the service start.
          * This is a DIFFERENT, earlier failure point than the in-service
@@ -743,6 +788,7 @@ class ModelDownloadService : Service() {
             title: String,
             replace: Boolean = false,
             expectedSha256: String? = null,
+            expectedFileSizeBytes: Long = 0L,
         ): Boolean {
             val intent = Intent(context, ModelDownloadService::class.java).apply {
                 action = ACTION_START
@@ -753,6 +799,7 @@ class ModelDownloadService : Service() {
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_REPLACE, replace)
                 if (expectedSha256 != null) putExtra(EXTRA_EXPECTED_SHA256, expectedSha256)
+                if (expectedFileSizeBytes > 0L) putExtra(EXTRA_FILE_SIZE_BYTES, expectedFileSizeBytes)
             }
             return startServiceCompat(context, intent)
         }

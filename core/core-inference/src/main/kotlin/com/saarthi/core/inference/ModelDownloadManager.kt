@@ -197,6 +197,7 @@ class ModelDownloadManager @Inject constructor(
             title = "${languageManager.selectedLanguage.value.downloadingTitlePrefix} ${model.displayName}",
             replace = replace,
             expectedSha256 = model.expectedSha256,
+            expectedFileSizeBytes = model.fileSizeBytes,
         )
         if (!serviceStarted) {
             // startForegroundService() itself threw — the Intent never
@@ -264,23 +265,52 @@ class ModelDownloadManager @Inject constructor(
      * Range-resumes from exactly where it stopped. This is the kill/reboot
      * resilience the old WorkManager path provided, now done explicitly.
      */
+    /**
+     * Resumes any download that was interrupted by a process kill / reboot.
+     *
+     * A lingering partial tmp file means a transfer was cut off mid-flight
+     * (cancel + delete both wipe the tmp, so a leftover partial is never a
+     * cancelled download). Re-starting hands it back to the service, which
+     * Range-resumes from exactly where it stopped. This is the kill/reboot
+     * resilience the old WorkManager path provided, now done explicitly.
+     *
+     * Must run from a foreground context (onboarding / manage-downloads).
+     * After a reboot Android 12+ will not let [BootReceiver] start the
+     * download FGS — that path only posts a tap-to-open notification via
+     * [findResumablePartials].
+     */
     fun reattachActiveDownloads(models: List<ModelEntry>) {
-        migrateLegacyExternalTmp(models)
+        val resumable = findResumablePartials(models)
         models.forEach { model ->
             val destFile = resolveLocalFile(model)
             if (isFileComplete(destFile, model.fileSizeBytes)) {
                 verifyExistingFileInBackground(model, destFile)
-                return@forEach
-            }
-
-            val tmp = tmpPathFor(model)
-            if (tmp.exists() && tmp.length() > 1_000_000L) {
-                DebugLogger.log("DOWNLOAD",
-                    "Resuming interrupted download ${model.id}  partial=${tmp.length() / 1_048_576}MB")
-                startDownload(model)
             }
         }
+        resumable.forEach { model ->
+            DebugLogger.log(
+                "DOWNLOAD",
+                "Resuming interrupted download ${model.id}  partial=${tmpPathFor(model).length() / 1_048_576}MB",
+            )
+            startDownload(model)
+        }
         sweepOrphanedTmpFiles(models)
+    }
+
+    /**
+     * Catalog models with a genuine partial tmp on disk (above 1 MB) whose
+     * final file is not complete. Does not start the FGS — safe to call
+     * from [BootReceiver] where startForegroundService is not allowed.
+     * Migrates leftover external tmp first so a reboot after an old-build
+     * download still sees the partial.
+     */
+    fun findResumablePartials(models: List<ModelEntry>): List<ModelEntry> {
+        migrateLegacyExternalTmp(models)
+        return models.filter { model ->
+            if (isFileComplete(resolveLocalFile(model), model.fileSizeBytes)) return@filter false
+            val tmp = tmpPathFor(model)
+            tmp.exists() && tmp.length() > DownloadRangePolicy.MIN_COMPLETE_BYTES
+        }
     }
 
     /**

@@ -395,6 +395,23 @@ class ModelDownloadManagerTest {
         assertNull(manager.allProgress.value[model.id])
     }
 
+    @Test
+    fun `findResumablePartials lists genuine partials without starting the service`() {
+        val partial = testModel(id = "partial", fileName = "partial.litertlm", fileSizeBytes = 10_000_000L)
+        val complete = testModel(id = "complete", fileName = "complete.litertlm", fileSizeBytes = 5_000_000L)
+        val tiny = testModel(id = "tiny", fileName = "tiny.litertlm", fileSizeBytes = 10_000_000L)
+        writeFile(manager.tmpModelsDir(), partial.fileName, sizeBytes = 3_000_000)
+        writeFile(manager.modelsDir(), complete.fileName, sizeBytes = 5_000_000)
+        writeFile(manager.tmpModelsDir(), tiny.fileName, sizeBytes = 500_000)
+
+        val found = manager.findResumablePartials(listOf(partial, complete, tiny))
+        assertEquals(listOf("partial"), found.map { it.id })
+        assertNull(
+            "findResumablePartials must not flip UI into Downloading (no FGS from boot)",
+            manager.allProgress.value[partial.id],
+        )
+    }
+
     // ── Background integrity verification on reattach ───────────────────────
     // Same bar as a fresh ModelDownloadService download: mismatch deletes
     // the file so the existing download UI takes over. Matching verdicts
