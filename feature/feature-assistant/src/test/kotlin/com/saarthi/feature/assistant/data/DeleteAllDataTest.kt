@@ -13,9 +13,11 @@ import com.saarthi.core.memory.db.ChatSessionEntity
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.core.memory.domain.MemoryRepository
+import io.mockk.any
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
+import io.mockk.firstArg
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,14 +75,19 @@ class DeleteAllDataTest {
         responseStyleInstructionCompiler = responseStyleInstructionCompiler,
     )
 
+    /** Execute the cascade block; vacuum is a no-op (no real SQLite in JVM tests). */
+    private fun stubTransactionRunner() {
+        coEvery { transactionRunner.runInTransaction(any<suspend () -> Any?>()) } coAnswers {
+            firstArg<suspend () -> Any?>().invoke()
+        }
+        coEvery { transactionRunner.vacuum() } returns Unit
+    }
+
     @Test
     fun `deleteAllData cascades every session and wipes USER_SCOPE`() = runTest {
         every { languageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
         coEvery { chatSessionDao.getAll() } returns listOf(session("s1"), session("s2"))
-        // The runner must actually execute the cascade so the deletes below run.
-        coEvery { transactionRunner.runInTransaction(any<suspend () -> Any?>()) } coAnswers {
-            firstArg<suspend () -> Any?>().invoke()
-        }
+        stubTransactionRunner()
 
         val repo = createRepo()
 
@@ -100,15 +107,16 @@ class DeleteAllDataTest {
         // Session rows themselves removed.
         coVerify { chatSessionDao.deleteById("s1") }
         coVerify { chatSessionDao.deleteById("s2") }
+
+        // Unused SQLite pages reclaimed after the wipe commits — never inside the txn.
+        coVerify(exactly = 1) { transactionRunner.vacuum() }
     }
 
     @Test
     fun `deleteAllData does not use single-session clear semantics`() = runTest {
         every { languageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
         coEvery { chatSessionDao.getAll() } returns listOf(session("s1"), session("s2"))
-        coEvery { transactionRunner.runInTransaction(any<suspend () -> Any?>()) } coAnswers {
-            firstArg<suspend () -> Any?>().invoke()
-        }
+        stubTransactionRunner()
 
         val repo = createRepo()
         repo.deleteAllData()
@@ -117,5 +125,28 @@ class DeleteAllDataTest {
         // it; deleteAllData must actually remove the rows, not rename them.
         coVerify(exactly = 0) { chatSessionDao.updateTitleAndTimestamp("s1", "New Chat", any()) }
         coVerify(exactly = 0) { chatSessionDao.updateTitleAndTimestamp("s2", "New Chat", any()) }
+    }
+
+    @Test
+    fun `clearHistory vacuums after the session wipe commits`() = runTest {
+        every { languageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
+        stubTransactionRunner()
+
+        val repo = createRepo()
+        repo.clearHistory()
+
+        coVerify(exactly = 1) { transactionRunner.vacuum() }
+    }
+
+    @Test
+    fun `deleteSession vacuums after the cascade commits`() = runTest {
+        every { languageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
+        stubTransactionRunner()
+        coEvery { chatSessionDao.getAll() } returns emptyList()
+
+        val repo = createRepo()
+        repo.deleteSession("s1")
+
+        coVerify(exactly = 1) { transactionRunner.vacuum() }
     }
 }

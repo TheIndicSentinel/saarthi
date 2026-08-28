@@ -7,6 +7,7 @@ import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ConversationDao
+import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.feature.assistant.data.KisanPackInstaller
 import com.saarthi.feature.assistant.data.RagDocumentRepository
 import com.saarthi.feature.assistant.data.RetrievedChunk
@@ -60,6 +61,7 @@ class PackChatViewModelTest {
     private lateinit var inferenceEngine: InferenceEngine
     private lateinit var ragRepository: RagDocumentRepository
     private lateinit var conversationDao: ConversationDao
+    private lateinit var transactionRunner: DatabaseTransactionRunner
     private lateinit var kisanPackPreference: KisanPackPreference
     private lateinit var packInstaller: KisanPackInstaller
     private val userStateFlow = MutableStateFlow("")
@@ -97,6 +99,9 @@ class PackChatViewModelTest {
         conversationDao = mockk(relaxed = true)
         coEvery { conversationDao.getBySession(any()) } returns emptyList()
 
+        transactionRunner = mockk(relaxed = true)
+        coEvery { transactionRunner.vacuum() } returns Unit
+
         kisanPackPreference = mockk(relaxed = true)
         every { kisanPackPreference.userState } returns userStateFlow
         coEvery { kisanPackPreference.setUserState(any()) } answers { userStateFlow.value = firstArg() }
@@ -116,6 +121,7 @@ class PackChatViewModelTest {
         inferenceEngine = inferenceEngine,
         ragRepository = ragRepository,
         conversationDao = conversationDao,
+        transactionRunner = transactionRunner,
         languageManager = mockk(relaxed = true) {
             every { selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
         },
@@ -221,6 +227,7 @@ class PackChatViewModelTest {
 
         assertTrue(vm.messages.value.isEmpty())
         coVerify(exactly = 1) { conversationDao.deleteBySession("pack_chat_kisan") }
+        coVerify(exactly = 1) { transactionRunner.vacuum() }
     }
 
     @Test

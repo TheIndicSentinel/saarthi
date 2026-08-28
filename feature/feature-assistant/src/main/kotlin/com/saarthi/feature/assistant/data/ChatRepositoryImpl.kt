@@ -231,6 +231,7 @@ class ChatRepositoryImpl @Inject constructor(
         }
         indexedDocsByUri.remove(sessionId)
         sessionHasIndexedDocs = false
+        vacuumAfterCommittedBulkDelete()
         if (_currentSessionId.value == sessionId) {
             val remaining = chatSessionDao.getAll()
             if (remaining.isNotEmpty()) {
@@ -521,6 +522,7 @@ class ChatRepositoryImpl @Inject constructor(
         }
         indexedDocsByUri.remove(sessionId)
         sessionHasIndexedDocs = false
+        vacuumAfterCommittedBulkDelete()
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
     }
@@ -553,8 +555,24 @@ class ChatRepositoryImpl @Inject constructor(
         indexedDocsByUri.clear()
         sessionHasIndexedDocs = false
         runCatching { inferenceEngine.resetSession() }
+        // Vacuum after the wipe commits, before createSession() inserts one
+        // empty row. SQLite forbids VACUUM inside a transaction; the new
+        // session is a tiny insert and does not need reclaiming first.
+        vacuumAfterCommittedBulkDelete()
         // Leave the user on a clean, valid empty chat.
         createSession()
+    }
+
+    /**
+     * Reclaim unused SQLite pages after a bulk delete has committed.
+     *
+     * Must run *after* [DatabaseTransactionRunner.runInTransaction] returns — never
+     * inside that block. [DatabaseTransactionRunner.vacuum] swallows failures
+     * so a reclaim miss cannot undo the already-committed wipe or fail the
+     * user-visible delete.
+     */
+    private suspend fun vacuumAfterCommittedBulkDelete() {
+        transactionRunner.vacuum()
     }
 
     override suspend fun exportAllData(): File = withContext(Dispatchers.IO) {

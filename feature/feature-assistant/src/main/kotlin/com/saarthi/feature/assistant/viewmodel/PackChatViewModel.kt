@@ -15,6 +15,7 @@ import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.ConversationEntity
+import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.feature.assistant.data.ChatHistoryHygiene
 import com.saarthi.feature.assistant.data.RagDocumentRepository
 import com.saarthi.feature.assistant.data.ResponseMarkerParser
@@ -64,6 +65,7 @@ class PackChatViewModel @Inject constructor(
     private val inferenceEngine: InferenceEngine,
     private val ragRepository: RagDocumentRepository,
     private val conversationDao: ConversationDao,
+    private val transactionRunner: DatabaseTransactionRunner,
     private val languageManager: LanguageManager,
     private val ttsManager: com.saarthi.feature.assistant.data.TtsManager,
     private val kisanPackPreference: com.saarthi.core.i18n.KisanPackPreference,
@@ -317,7 +319,12 @@ class PackChatViewModel @Inject constructor(
         _messages.update { emptyList() }
         viewModelScope.launch {
             withContext(NonCancellable) {
-                runCatching { conversationDao.deleteBySession(chatSessionId) }
+                val wiped = runCatching { conversationDao.deleteBySession(chatSessionId) }
+                // VACUUM cannot run inside a transaction; this path isn't in
+                // one. Same best-effort helper as main-chat bulk deletes.
+                if (wiped.isSuccess) {
+                    transactionRunner.vacuum()
+                }
             }
         }
     }
