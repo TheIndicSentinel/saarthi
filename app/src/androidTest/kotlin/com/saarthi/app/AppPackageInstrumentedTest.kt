@@ -84,6 +84,25 @@ class AppPackageInstrumentedTest {
     }
 
     @Test
+    fun attach_overview_scopes_to_newest_file() {
+        val uris = listOf("content://old", com.saarthi.feature.assistant.data.DemoDocument.URI)
+        assertEquals(
+            setOf(com.saarthi.feature.assistant.data.DemoDocument.URI),
+            com.saarthi.feature.assistant.data.restrictUrisForAttachTurn(
+                com.saarthi.feature.assistant.data.ATTACH_OVERVIEW_QUERY,
+                uris,
+            ),
+        )
+        assertEquals(
+            setOf(com.saarthi.feature.assistant.data.DemoDocument.URI),
+            com.saarthi.feature.assistant.data.restrictUrisForAttachTurn(
+                com.saarthi.feature.assistant.data.ATTACH_BRIEF_OVERVIEW_QUERY,
+                uris,
+            ),
+        )
+    }
+
+    @Test
     fun attach_demo_document_penalty_question_retrieves_a_hit() {
         val hits = com.saarthi.core.rag.Bm25Retriever.rank(
             listOf(com.saarthi.feature.assistant.data.DemoDocument.TEXT),

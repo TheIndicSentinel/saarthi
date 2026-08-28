@@ -8,6 +8,20 @@ The items below are the human gates around that.
 ## Every build (beta or production)
 
 - [ ] `./gradlew test` passes locally and in CI (green check on the commit).
+- [ ] **RAG ship eval gate** (Phase 5.5): DPDPA golden replay for attach→ask, chapter
+      VI/VII + special provisions spans, and GK/opt-out citation-off paths. Focused
+      command (also included in full `testDebugUnitTest`):
+
+      ```bash
+      ./gradlew :feature:feature-assistant:testDebugUnitTest \
+        --tests "com.saarthi.feature.assistant.data.DpdpaShipEvalGateTest" \
+        --tests "com.saarthi.feature.assistant.data.AttachAskSmokeTest" \
+        --no-daemon
+      ```
+
+      Firebase Test Lab's `attach_demo_document_penalty_question_retrieves_a_hit` and
+      `attach_overview_scopes_to_newest_file` instrumented smokes cover the same attach
+      path on device (no model load).
 - [ ] Lint report reviewed (CI artifact `lint-report`) — no new Error-level findings.
 - [ ] `versionCode` / `versionName` bumped in `app/build.gradle.kts`.
       Store tag must be `v` + `versionName` (`release_aab.yml` fails otherwise).
