@@ -24,6 +24,7 @@ internal fun isQueryAboutDocumentForCitation(
     if (turnMode == RagTurnMode.MIXED) return true
     if (attachmentsThisTurn) return true
     if (hasDocumentQueryCues(query)) return true
+    if (isIndexedTopicalCitationIntent(query, turnMode)) return true
     if (effectiveMetaRouteReason(query, isFollowUp = false) != null) return true
     if (isStructureCountQuery(query) || isStructureListQuery(query)) return true
     if (isFollowUpContinuationQuery(query)) return true
