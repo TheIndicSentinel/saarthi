@@ -154,8 +154,17 @@ class FileContentExtractor @Inject constructor(
             else -> null
         }
 
-        val failure = extractedText?.let { extractionFailureMessage(it) }
-            ?: if (isImage && extractedText.isNullOrBlank()) {
+        // Untrusted attachment text is sanitized once so prompt stuffing and
+        // RAG indexing share the same cleaned body. Extractor failure
+        // sentinels ([PDF: …], [Image: …], …) are left intact so
+        // extractionFailureMessage still maps them to AttachedFile.error.
+        val cleanedText = extractedText?.let { raw ->
+            if (extractionFailureMessage(raw) != null) raw
+            else DocumentTextSanitizer.sanitize(raw)
+        }
+
+        val failure = cleanedText?.let { extractionFailureMessage(it) }
+            ?: if (isImage && cleanedText.isNullOrBlank()) {
                 "No text detected in this image."
             } else {
                 null
@@ -165,7 +174,7 @@ class FileContentExtractor @Inject constructor(
             name = name,
             mimeType = mime,
             sizeBytes = size,
-            extractedText = if (failure != null) null else extractedText,
+            extractedText = if (failure != null) null else cleanedText,
             isImage = isImage,
             error = failure,
             indexTruncationNotice = if (failure != null) null else pdfOutcome?.truncationNotice,
