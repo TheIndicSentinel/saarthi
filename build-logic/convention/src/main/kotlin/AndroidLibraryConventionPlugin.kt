@@ -33,6 +33,10 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
             }
 
+            // Pin transitive versions for compile/runtime classpaths.
+            // See DependencyLocking.kt for the refresh command.
+            configureSaarthiDependencyLocking()
+
             // Standard JVM-unit-test toolkit for every Android library module.
             // Industry-standard set: JUnit4 (assertions/runner), MockK (Kotlin
             // mocking + coroutine support), kotlinx-coroutines-test (TestScope,

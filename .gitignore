@@ -40,6 +40,11 @@ google-services.json
 # Kotlin compiler transient session files
 .kotlin/
 
+# --write-locks also emits a root settings-gradle.lockfile for the version
+# catalog incoming configuration (empty). Plugin versions are already
+# catalog-pinned; we only commit per-module gradle.lockfile files.
+/settings-gradle.lockfile
+
 # Local dev scratch — one-off regex-edit scripts and captured crash/debug logs
 fix_*.py
 scratchpad_*.py

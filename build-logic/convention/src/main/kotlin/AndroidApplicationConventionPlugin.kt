@@ -44,6 +44,10 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
             }
 
+            // Pin transitive versions for compile/runtime classpaths.
+            // See DependencyLocking.kt for the refresh command.
+            configureSaarthiDependencyLocking()
+
             // Same JVM-unit-test toolkit every saarthi.android.library module
             // already gets (see AndroidLibraryConventionPlugin) — :app had none
             // of this wired up, so app/src/test didn't exist and ViewModels
