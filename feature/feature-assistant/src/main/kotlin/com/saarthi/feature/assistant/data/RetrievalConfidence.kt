@@ -66,13 +66,7 @@ internal fun buildChapterMissHint(chapterRef: String): String =
 
 internal fun chapterSpanToRetrieved(span: List<RagChunkEntity>): List<RetrievedChunk> =
     span.map { entity ->
-        RetrievedChunk(
-            text = entity.text,
-            docName = entity.docName,
-            score = ANCHORED_CHUNK_SCORE,
-            chunkIndex = entity.chunkIndex,
-            docUri = entity.docUri,
-        )
+        entity.toRetrievedChunk(0.0, StructuralAnchorKind.CHAPTER_SPAN)
     }
 
 internal fun retryChapterSpanRetrieved(

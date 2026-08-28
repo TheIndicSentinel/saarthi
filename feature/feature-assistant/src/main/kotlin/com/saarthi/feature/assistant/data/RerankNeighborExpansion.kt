@@ -76,7 +76,7 @@ internal fun expandRerankedNeighborHits(
     docChunksByUri: Map<String, List<RagChunkEntity>>,
     orderedIdsByDoc: Map<String, List<Long>>,
     topHitCount: Int = RERANK_EXPANSION_TOP_HITS,
-    expansionScore: Double = RERANK_EXPANSION_SCORE,
+    expansionScoreMultiplier: Double = 0.5,
 ): List<Pair<RagChunkEntity, Double>> {
     if (ranked.isEmpty() || pool.isEmpty()) return emptyList()
     val expanded = mutableListOf<Pair<RagChunkEntity, Double>>()
@@ -84,16 +84,17 @@ internal fun expandRerankedNeighborHits(
     for ((rank, scored) in ranked.withIndex()) {
         if (rank >= topHitCount) break
         val hit = pool.getOrNull(scored.index) ?: continue
+        val expansionOrganic = scored.score * expansionScoreMultiplier
         val docChunks = docChunksByUri[hit.docUri].orEmpty()
         val parent = parentHeadingChunkForHit(hit, docChunks, orderedIdsByDoc)
         if (parent != null && usedIds.add(parent.id)) {
-            expanded.add(parent to expansionScore)
+            expanded.add(parent to expansionOrganic)
         }
         val nextId = nextSameDocNeighborId(hit.id, hit.docUri, orderedIdsByDoc)
         if (nextId != null) {
             val next = docChunks.firstOrNull { it.id == nextId }
             if (next != null && usedIds.add(next.id)) {
-                expanded.add(next to expansionScore)
+                expanded.add(next to expansionOrganic)
             }
         }
     }

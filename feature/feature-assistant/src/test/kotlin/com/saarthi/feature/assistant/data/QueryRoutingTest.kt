@@ -15,6 +15,18 @@ class QueryRoutingTest {
     )
 
     @Test
+    fun `devanagari filename stem matches query with combining vowel signs`() {
+        // Regression: without \p{M}, QUERY_SPLIT fragments "मूल्य" into single
+        // letters that filenameTokens drops (length < 4), so named-doc routing fails.
+        val indicDocs = listOf("content://price" to "मूल्य_Report.pdf")
+        assertEquals(setOf("content://price"), matchNamedDocs("मूल्य क्या है", indicDocs))
+        assertEquals(
+            Bm25Retriever.tokeniseDocument("मूल्य"),
+            "मूल्य".lowercase().split(Regex("[^\\p{L}\\p{N}\\p{M}]+")).filter { it.length >= 2 },
+        )
+    }
+
+    @Test
     fun `filename stem agreement matches the NDA uri`() {
         val named = matchNamedDocs("इस agreement में term क्या है", docs)
         assertEquals(setOf("content://nda"), named)

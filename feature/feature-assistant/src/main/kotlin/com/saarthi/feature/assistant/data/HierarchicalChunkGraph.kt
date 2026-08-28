@@ -83,7 +83,7 @@ internal fun expandHierarchicalSectionHits(
     pool: List<RagChunkEntity>,
     sectionGroupsByDoc: Map<String, Map<Int, List<RagChunkEntity>>>,
     topHitCount: Int = RERANK_EXPANSION_TOP_HITS,
-    expansionScore: Double = RERANK_EXPANSION_SCORE,
+    expansionScoreMultiplier: Double = 0.5,
 ): List<Pair<RagChunkEntity, Double>> {
     if (ranked.isEmpty() || pool.isEmpty()) return emptyList()
     val expanded = mutableListOf<Pair<RagChunkEntity, Double>>()
@@ -91,12 +91,13 @@ internal fun expandHierarchicalSectionHits(
     for ((rank, scored) in ranked.withIndex()) {
         if (rank >= topHitCount) break
         val hit = pool.getOrNull(scored.index) ?: continue
+        val expansionOrganic = scored.score * expansionScoreMultiplier
         val root = sectionRootChunkIndex(hit)
         val siblings = sectionGroupsByDoc[hit.docUri]?.get(root).orEmpty()
         if (siblings.size <= 1) continue
         for (sibling in siblings) {
             if (sibling.id != hit.id && usedIds.add(sibling.id)) {
-                expanded.add(sibling to expansionScore)
+                expanded.add(sibling to expansionOrganic)
             }
         }
     }

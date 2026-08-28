@@ -65,8 +65,10 @@ class CitationGatingTest {
     }
 
     @Test
-    fun `no sources when off-topic despite anchor score`() {
-        val anchored = bodyChunk(score = ANCHORED_CHUNK_SCORE)
+    fun `no sources when off-topic despite structural anchor`() {
+        val anchored = bodyChunk(score = 0.0).copy(
+            structuralAnchor = StructuralAnchorKind.HEADING,
+        )
         assertFalse(
             isQueryAboutDocumentForCitation(
                 query = "Explain black holes",
@@ -86,12 +88,17 @@ class CitationGatingTest {
     }
 
     @Test
-    fun `sources for grounded doc query with anchor hit`() {
+    fun `sources for grounded doc query with lexical hit`() {
         assertTrue(
             shouldAttachDeterministicSources(
                 turnMode = RagTurnMode.DOCUMENT_GROUNDED,
                 ragBlockChars = 800,
-                retrieved = listOf(bodyChunk(score = ANCHORED_CHUNK_SCORE)),
+                retrieved = listOf(
+                    bodyChunk(
+                        score = 5.0,
+                        index = 1,
+                    ).copy(text = "--- Page 17 ---\nPenalties and adjudication factors"),
+                ),
                 query = "What are penalties in the act",
                 attachmentsThisTurn = false,
             ),
@@ -144,7 +151,11 @@ class CitationGatingTest {
             shouldAttachDeterministicSources(
                 turnMode = RagTurnMode.MIXED,
                 ragBlockChars = 600,
-                retrieved = listOf(bodyChunk(score = ANCHORED_CHUNK_SCORE)),
+                retrieved = listOf(
+                    bodyChunk(score = 5.0).copy(
+                        text = "--- Page 17 ---\nPenalties under the act",
+                    ),
+                ),
                 query = "Penalties in the act and explain black holes",
                 attachmentsThisTurn = false,
             ),

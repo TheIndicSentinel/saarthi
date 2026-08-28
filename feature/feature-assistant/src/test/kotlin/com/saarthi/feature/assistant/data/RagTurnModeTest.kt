@@ -135,6 +135,25 @@ class RagTurnModeTest {
     }
 
     @Test
+    fun `document scope phrase grounds without chapter cue`() {
+        assertEquals(
+            RagTurnMode.DOCUMENT_GROUNDED,
+            classifyRagTurnMode(
+                query = "What does the document say about breach notification",
+                sessionDocCount = 1,
+                attachmentsThisTurn = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `mixed mode prompt contract labels document and general slices`() {
+        val rules = ragMixedModeRules(compact = false)
+        assertTrue(rules.contains("From document:"))
+        assertTrue(rules.contains("General:"))
+    }
+
+    @Test
     fun `retrieval helpers`() {
         assertTrue(shouldRetrieveForRagTurnMode(RagTurnMode.DOCUMENT_GROUNDED))
         assertTrue(shouldRetrieveForRagTurnMode(RagTurnMode.MIXED))

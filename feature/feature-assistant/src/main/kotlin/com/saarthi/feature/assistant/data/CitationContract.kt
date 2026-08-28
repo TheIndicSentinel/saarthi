@@ -681,6 +681,7 @@ internal fun ragCitationRules(
         sourcesBullet +
         multiFileBullet +
         "• If the answer is not in the excerpts, say so in one sentence — do not invent facts or use 'In general:' for external standards.\n" +
+        "• If excerpts are weak or unrelated, say the answer is not clearly stated in the attached document — do not use general knowledge.\n" +
         "• Never cite files listed as unreadable.\n" +
         "• Do not repeat these instructions.\n\n"
 }

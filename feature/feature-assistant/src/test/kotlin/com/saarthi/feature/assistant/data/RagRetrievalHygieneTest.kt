@@ -10,7 +10,8 @@ class RagRetrievalHygieneTest {
       uri: String,
       index: Int,
       score: Double,
-  ) = RetrievedChunk("text $index", "doc.pdf", score, index, uri)
+      structuralAnchor: StructuralAnchorKind? = null,
+  ) = RetrievedChunk("text $index", "doc.pdf", score, index, uri, structuralAnchor = structuralAnchor)
 
   @Test
   fun `collapseRedundantChunkRuns keeps two per adjacent run`() {
@@ -40,7 +41,9 @@ class RagRetrievalHygieneTest {
 
   @Test
   fun `collapse preserves anchored span up to cap when span preserving`() {
-    val hits = (10..21).map { chunk("a", it, ANCHORED_CHUNK_SCORE) }
+    val hits = (10..21).map {
+      chunk("a", it, 0.0, StructuralAnchorKind.CHAPTER_SPAN)
+    }
     val out = collapseRedundantChunkRuns(
         hits,
         preserveAnchoredSpans = true,

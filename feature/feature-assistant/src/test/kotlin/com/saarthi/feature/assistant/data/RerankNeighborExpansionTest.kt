@@ -58,14 +58,29 @@ class RerankNeighborExpansionTest {
         assertEquals(2, expanded.size)
         assertEquals(4, expanded[0].first.chunkIndex)
         assertEquals(6, expanded[1].first.chunkIndex)
-        assertEquals(RERANK_EXPANSION_SCORE, expanded[0].second, 0.0)
+        assertEquals(4.0, expanded[0].second, 0.0)
+        assertEquals(4.0, expanded[1].second, 0.0)
     }
 
     @Test
     fun `expansion survives collapse as anchored span`() {
-        val heading = RetrievedChunk("CHAPTER VII", "act.pdf", RERANK_EXPANSION_SCORE, 4, "content://doc")
+        val heading = RetrievedChunk(
+            "CHAPTER VII",
+            "act.pdf",
+            4.0,
+            4,
+            "content://doc",
+            structuralAnchor = StructuralAnchorKind.NEIGHBOR_EXPAND,
+        )
         val body = RetrievedChunk("operative clause text", "act.pdf", 9.0, 5, "content://doc")
-        val tail = RetrievedChunk("continuation text", "act.pdf", RERANK_EXPANSION_SCORE, 6, "content://doc")
+        val tail = RetrievedChunk(
+            "continuation text",
+            "act.pdf",
+            4.0,
+            6,
+            "content://doc",
+            structuralAnchor = StructuralAnchorKind.NEIGHBOR_EXPAND,
+        )
         val out = collapseRedundantChunkRuns(
             listOf(heading, body, tail),
             preserveAnchoredSpans = true,

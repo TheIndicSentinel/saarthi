@@ -6,20 +6,26 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Wave 3 P14 — strongMatch requires document intent, not just anchor scores. */
+/** Wave 3 P14 + Phase 0.1 — strongMatch requires lexical overlap, not anchor injection. */
 class StrongMatchSplitTest {
 
     private val anchoredChunk = RetrievedChunk(
         text = "CHAPTER II\nObligations of Data Fiduciary",
         docName = "act.pdf",
-        score = ANCHORED_CHUNK_SCORE,
+        score = 0.0,
         chunkIndex = 2,
         docUri = "content://act",
+        structuralAnchor = StructuralAnchorKind.HEADING,
     )
 
     @Test
-    fun `anchor hit without doc intent is not strong match`() {
-        assertTrue(hasHighConfidenceRetrievalHit(listOf(anchoredChunk)))
+    fun `structural anchor without doc intent is not strong match`() {
+        assertFalse(
+            hasHighConfidenceRetrievalHit(
+                query = "Explain black holes to a kid",
+                retrieved = listOf(anchoredChunk),
+            ),
+        )
         assertFalse(
             shouldUseStrongMatchPromptRules(
                 retrieved = listOf(anchoredChunk),
@@ -31,7 +37,13 @@ class StrongMatchSplitTest {
     }
 
     @Test
-    fun `anchor hit with doc question is strong match`() {
+    fun `structural anchor with doc question and overlap is strong match`() {
+        assertTrue(
+            hasHighConfidenceRetrievalHit(
+                query = "What are obligations in the act",
+                retrieved = listOf(anchoredChunk),
+            ),
+        )
         assertTrue(
             shouldUseStrongMatchPromptRules(
                 retrieved = listOf(anchoredChunk),
@@ -44,8 +56,13 @@ class StrongMatchSplitTest {
 
     @Test
     fun `weak bm25 alone is not strong match`() {
-        val weak = anchoredChunk.copy(score = 1.5)
-        assertFalse(hasHighConfidenceRetrievalHit(listOf(weak)))
+        val weak = anchoredChunk.copy(score = 1.5, structuralAnchor = null)
+        assertFalse(
+            hasHighConfidenceRetrievalHit(
+                query = "What are penalties in the act",
+                retrieved = listOf(weak),
+            ),
+        )
         assertFalse(
             shouldUseStrongMatchPromptRules(
                 retrieved = listOf(weak),

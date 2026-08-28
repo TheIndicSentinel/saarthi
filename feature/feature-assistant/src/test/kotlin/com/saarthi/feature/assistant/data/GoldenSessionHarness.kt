@@ -128,6 +128,10 @@ internal fun goldenSessionRetrieve(
     } else {
         emptyList()
     }
+    val anchorKinds = LinkedHashMap<Long, StructuralAnchorKind>()
+    chapterSpanChunks.forEach { anchorKinds[it.id] = StructuralAnchorKind.CHAPTER_SPAN }
+    topicAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.TOPIC }
+    tabularContract.forEach { anchorKinds[it.id] = StructuralAnchorKind.TABULAR_CONTRACT }
     val anchoredEntities = chapterSpanChunks + topicAnchored + tabularContract
 
     var effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
@@ -172,16 +176,19 @@ internal fun goldenSessionRetrieve(
     val sectionGroupsByDoc = buildSectionGroupsByDoc(contentChunks)
     val usedIds = LinkedHashSet<Long>()
     val hits = mutableListOf<RetrievedChunk>()
+    val organicByEntityId = finalRanked.associate { contentChunks[it.index].id to it.score }
 
     for (e in anchoredEntities) {
         if (usedIds.add(e.id)) {
-            hits.add(e.toRetrieved(ANCHORED_CHUNK_SCORE))
+            val kind = anchorKinds[e.id] ?: StructuralAnchorKind.HEADING
+            val organic = organicByEntityId[e.id] ?: 0.0
+            hits.add(e.toRetrievedChunk(organic, kind))
         }
     }
     for (scored in finalRanked) {
         val entity = contentChunks[scored.index]
         if (usedIds.add(entity.id)) {
-            hits.add(entity.toRetrieved(scored.score))
+            hits.add(entity.toRetrievedChunk(scored.score))
         }
     }
     for ((entity, score) in expandRerankedNeighborHits(
@@ -191,7 +198,7 @@ internal fun goldenSessionRetrieve(
         orderedIdsByDoc = orderedIdsByDoc,
     )) {
         if (usedIds.add(entity.id)) {
-            hits.add(entity.toRetrieved(score))
+            hits.add(entity.toRetrievedChunk(score, StructuralAnchorKind.NEIGHBOR_EXPAND))
         }
     }
     for ((entity, score) in expandHierarchicalSectionHits(
@@ -200,7 +207,7 @@ internal fun goldenSessionRetrieve(
         sectionGroupsByDoc = sectionGroupsByDoc,
     )) {
         if (usedIds.add(entity.id)) {
-            hits.add(entity.toRetrieved(score))
+            hits.add(entity.toRetrievedChunk(score, StructuralAnchorKind.HIERARCHICAL_SECTION))
         }
     }
 
@@ -258,6 +265,8 @@ internal fun runGoldenTurn(
         query = spec.query,
         sessionDocCount = sessionDocCount,
         attachmentsThisTurn = spec.attachmentsThisTurn,
+        sessionDocNames = docs.map { it.name },
+        priorQuery = spec.priorQuery,
     )
     val retrieved = goldenSessionRetrieve(
         query = spec.query,
@@ -301,23 +310,17 @@ internal fun runGoldenTurn(
         turnMode = turnMode,
         ragChars = ragChars,
         chunkCount = retrieved.count { it.chunkIndex >= 0 },
-        anchoredChunkCount = retrieved.count { it.score >= ANCHORED_CHUNK_SCORE },
+        anchoredChunkCount = retrieved.count { it.isStructuralAnchor() },
         shouldCite = shouldCite,
         strongMatch = strongMatch,
     )
 }
 
-private fun RagChunkEntity.toRetrieved(score: Double) = RetrievedChunk(
-    text = text,
-    docName = docName,
-    score = score,
-    chunkIndex = chunkIndex,
-    docUri = docUri,
-)
+private fun RagChunkEntity.toRetrieved(score: Double) = toRetrievedChunk(score)
 
-/** Organic BM25/rerank primary doc — excludes anchored contract chunks for BM25 parity. */
+/** Organic BM25/rerank primary doc — excludes structural anchor injections for BM25 parity. */
 internal fun goldenPipelinePrimaryDocUri(retrieved: List<RetrievedChunk>): String? {
-    val organic = retrieved.filter { it.chunkIndex >= 0 && it.score < ANCHORED_CHUNK_SCORE }
+    val organic = retrieved.filter { it.chunkIndex >= 0 && !it.isStructuralAnchor() }
     if (organic.isNotEmpty()) return organic.maxByOrNull { it.score }?.docUri
     return retrieved.filter { it.chunkIndex >= 0 }.maxByOrNull { it.score }?.docUri
 }

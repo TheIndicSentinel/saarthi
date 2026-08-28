@@ -787,11 +787,18 @@ class ChatRepositoryImpl @Inject constructor(
             sessionDocs.map { it.name },
         )
         val tabularAmountQuery = isTabularAmountQuery(ragQuery)
+        val priorUserQuery = _history.value
+            .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
+            .dropLast(1)  // exclude the current turn being built
+            .lastOrNull()
+            ?.content
+            ?.take(200)
         val ragTurnMode = classifyRagTurnMode(
             query = ragQuery,
             sessionDocCount = sessionDocs.size,
             attachmentsThisTurn = attachments.isNotEmpty(),
             sessionDocNames = sessionDocs.map { it.name },
+            priorQuery = priorUserQuery,
         )
         val retrievalTopK = effectiveRetrievalTopK(ragQuery, ragAnswerShape, retrievalRoute.equalSlots)
         sessionHasIndexedDocs = sessionDocs.isNotEmpty()
@@ -801,17 +808,6 @@ class ChatRepositoryImpl @Inject constructor(
         // them into the persona-driven main chat caused pack context to
         // bleed into normal conversations. The main chat only ever
         // retrieves the user's OWN attached documents for this session.
-        // Last completed user turn — passed to the retriever for two uses:
-        // (a) follow-up expansion: "also list X" → BM25("prior X also list X")
-        // (b) zero-hit retry: if BM25 finds nothing for the current query,
-        //     retry with prior query to surface the same evidence region.
-        val priorUserQuery = _history.value
-            .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
-            .dropLast(1)  // exclude the current turn being built
-            .lastOrNull()
-            ?.content
-            ?.take(200)
-
         val retrieved = if (shouldRetrieveForRagTurnMode(ragTurnMode)) {
             runCatching {
                 ragRepository.search(
@@ -821,15 +817,21 @@ class ChatRepositoryImpl @Inject constructor(
                     boostDocUris = boostDocUris,
                     restrictDocUris = restrictDocUris,
                     retrievalScopeLabel = scopeDecision.scope.name,
-                    priorQuery = priorUserQuery?.takeIf {
-                        attachments.isEmpty() && it != ragQuery && it.length > 8
-                    },
+                    priorQuery = priorUserQuery?.takeIf { attachments.isEmpty() && it != ragQuery && it.length > 8 }
+                        ?.takeIf { prior ->
+                            isFollowUpContinuationQuery(ragQuery) ||
+                                isFollowUpTopicCarry(ragQuery, prior)
+                        },
                     wholeFileChars = wholeFileCharBudget(maxPromptChars),
                 )
             }.onFailure { if (isSqliteUnusable(it)) throw it }
                 .getOrDefault(emptyList())
         } else {
             emptyList()
+        }
+        if (shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved)) {
+            DebugLogger.log("RAG", "deterministic retrieval miss turnMode=${ragTurnMode.name}")
+            return buildDeterministicRetrievalMissMessage(ragQuery)
         }
         DebugLogger.log(
             "RAG",

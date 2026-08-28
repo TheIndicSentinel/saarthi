@@ -14,7 +14,11 @@ internal data class QueryRoute(
     val expandedQuery: String,
 )
 
-private val QUERY_SPLIT = Regex("[^\\p{L}\\p{N}]+")
+/**
+ * BM25-aligned query token split — includes `\p{M}` so Indic dependent vowel
+ * signs stay attached to base letters (same fix as [Bm25Retriever.tokenise]).
+ */
+private val QUERY_SPLIT = Regex("[^\\p{L}\\p{N}\\p{M}]+")
 
 private val FILENAME_STOPWORDS = setOf(
     "the", "this", "that", "document", "documents", "file", "files",
@@ -700,14 +704,41 @@ private val FOLLOW_UP_TOKENS_MODE = setOf(
     "what", "how", "why", "and", "plus", "further", "अधिक", "और", "विस्तार",
 )
 
+private val DOCUMENT_SCOPE_PHRASES = listOf(
+    "from the document", "from the file", "from this document", "from this file", "from the pdf",
+    "in this document", "in the document", "in this file", "in the attached", "in this pdf",
+    "what does it say", "what does the document say", "according to the file", "according to the document",
+    "mentioned in the attached", "mentioned in the document", "mentioned in the file",
+    "attached document", "this act", "the act says", "in the act",
+    "document se", "file se", "dastavaz", "dastavez", "dastavēj", "dastāvaj",
+    "इस दस्तावेज", "इस फाइल", "इस फ़ाइल", "दस्तावेज में", "फाइल में",
+    "இந்த ஆவணத்தில்", "இந்த கோப்பில்",
+    "ఈ పత్రంలో", "ఈ ఫైల్‌లో",
+    "এই নথিতে", "এই ফাইলে",
+    "ಈ ದಾಖಲೆಯಲ್ಲಿ", "ಈ ಫೈಲ್‌ನಲ್ಲಿ",
+)
+
 private val DOCUMENT_QUERY_CUE_PATTERN = Regex(
     "(?i)\\b(" +
         "chapter|chapters|section|sections|schedule|annex|appendix|article|" +
         "document|documents|file|files|pdf|attached|attachment|overview|excerpt|" +
         "content|contents|clause|paragraph|heading|highlights?|fiduciary|" +
         "obligation|obligations|penalt|appeal|provision|provisions|board|" +
-        "duties|rights|tabular|amount|fee|fine|jurmana|धारा|अध्याय|अनुसूची|दस्तावेज|फाइल|फ़ाइल" +
+        "duties|rights|tabular|amount|fee|fine|jurmana|breach|notification|" +
+        "applicable|applicability|children|consent|processing|principal|" +
+        "salary|balance|statement|address|timeline|personal|धारा|अध्याय|अनुसूची|दस्तावेज|फाइल|फ़ाइल" +
         ")\\b",
+)
+
+private val NON_TOPICAL_CHAT_PATTERN = Regex(
+    "(?i)\\b(joke|jokes|favorite color|favourite colour|your favorite)\\b",
+)
+
+private val TOPICAL_QUESTION_LEADS = setOf(
+    "what", "how", "why", "when", "where", "who", "which",
+    "is", "are", "was", "were", "does", "do", "did", "can", "should", "could",
+    "list", "explain", "tell", "describe", "give", "name", "show",
+    "क्या", "कैसे", "क्यों", "कब", "कहाँ", "कहां", "कौन", "बताओ", "बताएं",
 )
 
 private val GENERAL_KNOWLEDGE_TOPIC_PATTERN = Regex(
@@ -731,6 +762,7 @@ internal fun hasDocumentQueryCues(query: String): Boolean {
     val q = query.trim()
     if (q.isEmpty()) return false
     if (DOCUMENT_QUERY_CUE_PATTERN.containsMatchIn(q)) return true
+    if (DOCUMENT_SCOPE_PHRASES.any { q.contains(it, ignoreCase = true) }) return true
     if (RagDocumentRepository.metaRouteReason(q) != null) return true
     if (isStructureCountQuery(q) || isStructureListQuery(q)) return true
     if (isTabularAmountQuery(q)) return true
@@ -812,6 +844,26 @@ internal fun shouldPinDocsForRagTurnMode(mode: RagTurnMode): Boolean =
 internal fun requiresForceGroundedDelivery(mode: RagTurnMode, retrievedNonEmpty: Boolean): Boolean =
     mode == RagTurnMode.DOCUMENT_GROUNDED && retrievedNonEmpty
 
+internal fun isFollowUpTopicCarry(query: String, priorQuery: String): Boolean {
+    if (!isFollowUpContinuationQuery(query)) return false
+    if (hasDocumentQueryCues(priorQuery)) return true
+    return isIndexedSessionTopicalQuestion(priorQuery)
+}
+
+/**
+ * Phase 1.2 — indexed session + topical question without GK cues → retrieve,
+ * but still downstream-gated (no strong-match / Sources on weak hits).
+ */
+internal fun isIndexedSessionTopicalQuestion(query: String): Boolean {
+    if (NON_TOPICAL_CHAT_PATTERN.containsMatchIn(query)) return false
+    if (isAssistantIdentityQuery(query) || isSmallTalkQuery(query)) return false
+    if (hasGeneralKnowledgeTopicCues(query) || isDocumentOptOutQuery(query)) return false
+    val tokens = query.lowercase().split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    if (tokens.isEmpty() || tokens.size > 24) return false
+    if (tokens.any { it in TOPICAL_QUESTION_LEADS }) return true
+    return query.contains('?')
+}
+
 internal fun isFollowUpContinuationQuery(query: String): Boolean {
     val lower = query.lowercase().trim()
     if (Regex("(?i)\\b(explain more|explain further|tell me more|go on|continue)\\b").containsMatchIn(lower)) {
@@ -833,6 +885,7 @@ internal fun classifyRagTurnMode(
     sessionDocCount: Int,
     attachmentsThisTurn: Boolean,
     sessionDocNames: List<String> = emptyList(),
+    priorQuery: String? = null,
 ): RagTurnMode {
     if (sessionDocCount == 0 && !attachmentsThisTurn) {
         return RagTurnMode.PLAIN_CHAT
@@ -870,7 +923,15 @@ internal fun classifyRagTurnMode(
         return RagTurnMode.DOCUMENT_GROUNDED
     }
 
+    if (!priorQuery.isNullOrBlank() && isFollowUpTopicCarry(query, priorQuery)) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
     if (attachmentsThisTurn) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    if (sessionDocCount > 0 && isIndexedSessionTopicalQuestion(query)) {
         return RagTurnMode.DOCUMENT_GROUNDED
     }
 

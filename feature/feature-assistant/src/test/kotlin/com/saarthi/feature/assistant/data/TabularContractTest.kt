@@ -85,16 +85,18 @@ class TabularContractTest {
         val schedule = RetrievedChunk(
             "THE SCHEDULE\n₹200 crore",
             "act.pdf",
-            TABULAR_CONTRACT_SCORE,
+            0.0,
             2,
             "content://act",
+            structuralAnchor = StructuralAnchorKind.TABULAR_CONTRACT,
         )
         val section33 = RetrievedChunk(
             "33. Penalties\nFactors",
             "act.pdf",
-            TABULAR_CONTRACT_SCORE,
+            0.0,
             1,
             "content://act",
+            structuralAnchor = StructuralAnchorKind.TABULAR_CONTRACT,
         )
         val body = RetrievedChunk("operative", "act.pdf", 8.0, 3, "content://act")
         val out = collapseRedundantChunkRuns(

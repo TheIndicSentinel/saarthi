@@ -63,15 +63,9 @@ internal fun isRetrievalStrongEnoughForCitation(
     if (citable.isEmpty()) return false
 
     if (isStructureCountQuery(query) || isStructureListQuery(query)) return true
+    if (isDocumentMetaOverviewQuery(query)) return true
 
-    val bodyChunks = citable.filter { it.chunkIndex >= 0 }
-    if (bodyChunks.any { it.score >= ANCHORED_CHUNK_SCORE }) return true
-    if (bodyChunks.any { it.score >= STRONG_RAG_MATCH_SCORE }) return true
-
-    if (bodyChunks.isEmpty() && citable.any { it.chunkIndex == -1 }) {
-        return isDocumentMetaOverviewQuery(query)
-    }
-    return false
+    return hasStrongLexicalRetrievalHit(query, retrieved)
 }
 
 internal fun shouldAttachDeterministicSources(
@@ -89,12 +83,11 @@ internal fun shouldAttachDeterministicSources(
     return citableRetrievalChunks(retrieved).isNotEmpty()
 }
 
-/** BM25 or anchor-tier hit in body chunks — retrieval confidence only. */
-internal fun hasHighConfidenceRetrievalHit(retrieved: List<RetrievedChunk>): Boolean =
-    retrieved.any { chunk ->
-        chunk.chunkIndex >= 0 &&
-            (chunk.score >= STRONG_RAG_MATCH_SCORE || chunk.score >= ANCHORED_CHUNK_SCORE)
-    }
+/** Organic BM25 strength or lexical overlap — structural anchor alone is not enough. */
+internal fun hasHighConfidenceRetrievalHit(
+    query: String,
+    retrieved: List<RetrievedChunk>,
+): Boolean = hasStrongLexicalRetrievalHit(query, retrieved)
 
 /**
  * Wave 3 P14 — pinned files and anchor scores do not alone force “answer from excerpts”.
@@ -105,6 +98,10 @@ internal fun shouldUseStrongMatchPromptRules(
     query: String,
     turnMode: RagTurnMode,
     attachmentsThisTurn: Boolean,
-): Boolean =
-    hasHighConfidenceRetrievalHit(retrieved) &&
+): Boolean {
+    if (turnMode == RagTurnMode.GENERAL_KNOWLEDGE || turnMode == RagTurnMode.PLAIN_CHAT) return false
+    if (isDocumentOptOutQuery(query)) return false
+    if (isLowConfidenceAnchorOnlyRetrieval(query, retrieved)) return false
+    return hasStrongLexicalRetrievalHit(query, retrieved) &&
         isQueryAboutDocumentForCitation(query, turnMode, attachmentsThisTurn)
+}

@@ -93,11 +93,8 @@ class RagDocumentRepository @Inject constructor(
         private const val TOPIC_ANCHOR_MAX = 3
         // T1-4 — schedule / fee / tariff amount rows need more chunk slots.
         private const val TABULAR_ANCHOR_MAX = 4
-        // Synthetic score for anchored chunks — above any realistic BM25
-        // score so they sort first and survive topK truncation, and clearly
-        // distinguishable in the debug log.
-        private const val HEADING_ANCHOR_SCORE = ANCHORED_CHUNK_SCORE
-
+        // Synthetic score for anchored chunks — legacy constant; ranking uses
+        // [structuralAnchor] + [STRUCTURAL_ANCHOR_RANK_FLOOR] instead.
         // Sentinel chunkIndex for an auto-extracted document outline —
         // headings scraped during indexing and stored as a single virtual
         // chunk that meta-queries ("what sections are there?", "summarise
@@ -621,22 +618,46 @@ class RagDocumentRepository @Inject constructor(
         val structureListHint = buildStructureListHint(query, chapterRegistries)
         val structureHint = structureListHint ?: structureCountHint
         val tabularMax = if (spanPreserving) SPAN_ANCHOR_WINDOW else TABULAR_ANCHOR_MAX
+        val headingAnchored = if (chapterSpanChunks.isEmpty()) {
+            anchoredHeadingChunks(all, contentChunks, query, anchorWindow)
+        } else {
+            emptyList()
+        }
+        val bodyChapterAnchored = if (chapterSpanChunks.isEmpty()) {
+            anchoredBodyChapterChunks(contentChunks, query, anchorWindow)
+        } else {
+            emptyList()
+        }
+        val topicAnchored = anchoredTopicChunks(contentChunks, query, anchorWindow)
+        val tabularAnchored = anchoredTabularChunks(
+            contentChunks,
+            query,
+            preferDocUri = penaltyPreferDocUri,
+            maxChunks = tabularMax,
+        )
+        val structureListAnchored = anchoredStructureListChunks(all, contentChunks, query, chapterRegistries)
+        val tabularContractEntities = if (requiresTabularContract(query)) {
+            tabularContractChunkEntities(contentChunks, penaltyPreferDocUri)
+        } else {
+            emptyList()
+        }
+        val anchorKinds = LinkedHashMap<Long, StructuralAnchorKind>()
+        chapterSpanChunks.forEach { anchorKinds[it.id] = StructuralAnchorKind.CHAPTER_SPAN }
+        sectionAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.SECTION }
+        headingAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.HEADING }
+        bodyChapterAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.BODY_CHAPTER }
+        topicAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.TOPIC }
+        tabularAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.TABULAR }
+        structureListAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.STRUCTURE_LIST }
+        tabularContractEntities.forEach { anchorKinds[it.id] = StructuralAnchorKind.TABULAR_CONTRACT }
         val anchoredEntities = chapterSpanChunks +
-            (if (chapterSpanChunks.isEmpty()) {
-                anchoredHeadingChunks(all, contentChunks, query, anchorWindow) +
-                    sectionAnchored +
-                    anchoredBodyChapterChunks(contentChunks, query, anchorWindow)
-            } else {
-                emptyList()
-            }) +
-            anchoredTopicChunks(contentChunks, query, anchorWindow) +
-            anchoredTabularChunks(contentChunks, query, preferDocUri = penaltyPreferDocUri, maxChunks = tabularMax) +
-            anchoredStructureListChunks(all, contentChunks, query, chapterRegistries) +
-            if (requiresTabularContract(query)) {
-                tabularContractChunkEntities(contentChunks, penaltyPreferDocUri)
-            } else {
-                emptyList()
-            }
+            sectionAnchored +
+            headingAnchored +
+            bodyChapterAnchored +
+            topicAnchored +
+            tabularAnchored +
+            structureListAnchored +
+            tabularContractEntities
         headingChunkCount = anchoredEntities.size
 
         // Expand the query when following up on the prior turn.
@@ -732,17 +753,19 @@ class RagDocumentRepository @Inject constructor(
                 RetrievedChunk(
                     text = structureHint,
                     docName = doc.docName,
-                    score = 100.0,
+                    score = 0.0,
                     chunkIndex = -2,
                     docUri = doc.docUri,
+                    structuralAnchor = StructuralAnchorKind.STRUCTURE_HINT,
                 ),
             )
         }
-        // Seed with the anchored section chunks so BM25 dedupes against them
-        // and they lead the final result.
+        val organicByEntityId = ranked.associate { rankPool[it.index].id to it.score }
         for (e in anchoredEntities) {
             if (usedIds.add(e.id)) {
-                bm25Hits.add(e.toRetrieved(HEADING_ANCHOR_SCORE))
+                val kind = anchorKinds[e.id] ?: StructuralAnchorKind.HEADING
+                val organic = organicByEntityId[e.id] ?: 0.0
+                bm25Hits.add(e.toRetrieved(organic, kind))
             }
         }
         for ((rank, scored) in ranked.withIndex()) {
@@ -758,7 +781,7 @@ class RagDocumentRepository @Inject constructor(
             orderedIdsByDoc = orderedIdsByDoc,
         )) {
             if (usedIds.add(entity.id)) {
-                bm25Hits.add(entity.toRetrieved(score))
+                bm25Hits.add(entity.toRetrieved(score, StructuralAnchorKind.NEIGHBOR_EXPAND))
             }
         }
         for ((entity, score) in expandHierarchicalSectionHits(
@@ -767,7 +790,7 @@ class RagDocumentRepository @Inject constructor(
             sectionGroupsByDoc = sectionGroupsByDoc,
         )) {
             if (usedIds.add(entity.id)) {
-                bm25Hits.add(entity.toRetrieved(score))
+                bm25Hits.add(entity.toRetrieved(score, StructuralAnchorKind.HIERARCHICAL_SECTION))
             }
         }
 
@@ -810,10 +833,10 @@ class RagDocumentRepository @Inject constructor(
                 pool = retryPool,
                 docChunksByUri = retryDocChunksByUri,
                 orderedIdsByDoc = retryOrderedIds,
-                expansionScore = RERANK_EXPANSION_SCORE * 0.5,
+                expansionScoreMultiplier = 0.5,
             )) {
                 if (usedIds.add(entity.id)) {
-                    bm25Hits.add(entity.toRetrieved(score))
+                    bm25Hits.add(entity.toRetrieved(score, StructuralAnchorKind.NEIGHBOR_EXPAND))
                 }
             }
             if (bm25Hits.size >= effectiveTopK) return done(finish(bm25Hits), RagSearchPath.bm25)
@@ -1257,6 +1280,7 @@ class RagDocumentRepository @Inject constructor(
 data class RetrievedChunk(
     val text: String,
     val docName: String,
+    /** Organic BM25/rerank score — not inflated by structural anchor injection. */
     val score: Double,
     /**
      * Position of this chunk inside its document. -1 = auto-extracted
@@ -1267,6 +1291,8 @@ data class RetrievedChunk(
     val chunkIndex: Int = 0,
     /** Source document URI; empty for pack/synthetic chunks. */
     val docUri: String = "",
+    /** Set when this row was injected by heading/section/span expansion (Phase 0.1). */
+    val structuralAnchor: StructuralAnchorKind? = null,
 )
 
 /** Distinct file indexed under a chat session, for the prompt manifest. */
@@ -1278,13 +1304,10 @@ data class SessionRagDocument(
     val indexTruncationNotice: String? = null,
 )
 
-private fun RagChunkEntity.toRetrieved(score: Double) = RetrievedChunk(
-    text = text,
-    docName = docName,
-    score = score,
-    chunkIndex = chunkIndex,
-    docUri = docUri,
-)
+private fun RagChunkEntity.toRetrieved(
+    score: Double,
+    structuralAnchor: StructuralAnchorKind? = null,
+) = toRetrievedChunk(score, structuralAnchor)
 
 /**
  * R6 — documents a prior-query retry should be scoped to: this-turn attaches,
@@ -1463,13 +1486,13 @@ internal fun allocatePerDocSlots(
     minPerDoc: Int = MIN_SLOTS_PER_DOC,
 ): List<RetrievedChunk> {
     if (hits.isEmpty() || topK <= 0) return emptyList()
-    val sorted = hits.sortedByDescending { it.score }
+    val sorted = hits.sortedByDescending { it.rankingScore() }
     val byDoc = sorted.groupBy { it.docUri }
     if (byDoc.size <= 1) return sorted.take(topK)
 
     val min = minPerDoc.coerceAtLeast(1)
     val picked = LinkedHashSet<RetrievedChunk>()
-    val docsByBest = byDoc.entries.sortedByDescending { (_, chunks) -> chunks.maxOf { it.score } }
+    val docsByBest = byDoc.entries.sortedByDescending { (_, chunks) -> chunks.maxOf { it.rankingScore() } }
     for ((_, chunks) in docsByBest) {
         if (picked.size >= topK) break
         repeat(min) { slot ->
@@ -1481,7 +1504,7 @@ internal fun allocatePerDocSlots(
         if (picked.size >= topK) break
         picked.add(h)
     }
-    return picked.sortedByDescending { it.score }
+    return picked.sortedByDescending { it.rankingScore() }
 }
 
 /**
@@ -1510,8 +1533,8 @@ internal fun interleaveExcerptsByDoc(retrieved: List<RetrievedChunk>): List<Retr
     if (retrieved.isEmpty()) return retrieved
     if (retrieved.map { it.docUri }.distinct().size <= 1) return retrieved
 
-    val positive = retrieved.filter { it.score > 0.0 }
-    val rest = retrieved.filter { it.score <= 0.0 }
+    val positive = retrieved.filter { it.rankingScore() > 0.0 || it.isStructuralAnchor() }
+    val rest = retrieved.filter { it.rankingScore() <= 0.0 && !it.isStructuralAnchor() }
     if (positive.isEmpty()) return retrieved
 
     val byDoc = LinkedHashMap<String, ArrayDeque<RetrievedChunk>>()
@@ -1563,7 +1586,7 @@ internal fun collapseRedundantChunkRuns(
                 runEnd++
             }
             val run = sorted.subList(runStart, runEnd)
-            val isAnchoredRun = run.any { it.score >= anchoredScoreThreshold }
+            val isAnchoredRun = run.any { it.isStructuralAnchor() }
             val cap = when {
                 preserveAnchoredSpans && isAnchoredRun ->
                     minOf(run.size, anchoredSpanMax)
@@ -2147,7 +2170,7 @@ internal fun locateSectionInChunks(chunkTexts: List<String>, ref: SectionRef): I
 internal enum class ZeroScorePick { CONTIGUOUS, SPACED, TAIL }
 
 internal fun hasPositiveBodyHit(hits: List<RetrievedChunk>): Boolean =
-    hits.any { it.chunkIndex >= 0 && it.score > 0.0 }
+    hasPositiveBodyRetrievalHit(hits)
 
 /**
  * Body indices for one document. CONTIGUOUS = opening window (overviews /
