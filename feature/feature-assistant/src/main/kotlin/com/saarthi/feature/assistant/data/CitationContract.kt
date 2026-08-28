@@ -85,7 +85,9 @@ internal fun looksLikeInternalCitationLabel(label: String): Boolean {
     return isOutlineBoilerplateLine(trimmed) ||
         looksLikeContentStamp(trimmed) ||
         looksLikeBodyProseLine(trimmed) ||
-        isChapterOnlyCitationLabel(trimmed)
+        isChapterOnlyCitationLabel(trimmed) ||
+        looksLikeMidSentenceCrossRefCitationLabel(trimmed) ||
+        looksLikeTruncatedTitleFragment(trimmed)
 }
 
 /** Chapter-only labels are section context, not document titles (Wave 3 P12). */
@@ -98,6 +100,39 @@ internal fun isChapterOnlyCitationLabel(label: String): Boolean {
 private val STATUTE_TITLE_PHRASE_PATTERN = Regex(
     "(?i)\\b(act|agreement|policy|law|rules|regulation|code|ordinance|notification|amendment)\\b",
 )
+
+/** Phase 2.3 — mid-sentence cross-refs are not document titles (Code 2016, sub-sections…). */
+internal fun looksLikeMidSentenceCrossRefCitationLabel(label: String): Boolean {
+    val t = label.trim()
+    if (t.isEmpty()) return true
+    val words = t.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (t.first().isLowerCase() && (words.size >= 2 || t.length >= 24)) return true
+    if (Regex("(?i)\\bsub[- ]?sections?\\s+\\d+").containsMatchIn(t)) return true
+    if (Regex("(?i)\\bsections?\\s+\\d+\\s+and\\s+\\d+").containsMatchIn(t)) return true
+    if (Regex("(?i)\\bof\\s+this\\s+act\\b").containsMatchIn(t)) return true
+    if (Regex("(?i)\\bunder\\s+(?:chapter|section|sec\\.?)\\b").containsMatchIn(t)) return true
+    if (
+        Regex("(?i)\\b(?:code|act)\\s*,?\\s*\\d{4}\\b").containsMatchIn(t) &&
+        !t.startsWith("THE ", ignoreCase = true) &&
+        t.length <= 40
+    ) {
+        return true
+    }
+    if (Regex("(?i)^[\\p{L}\\p{N}\\s]{0,28}(?:code|act)\\s+\\d{4}$").matches(t)) return true
+    return false
+}
+
+/** Phase 2.3 — truncated heading fragments must not become citation titles. */
+internal fun looksLikeTruncatedTitleFragment(label: String): Boolean {
+    val t = label.trim()
+    if (t.isEmpty()) return true
+    if (t.endsWith('…') || t.endsWith("...")) return true
+    if (t.endsWith('-') || t.endsWith('–') || t.endsWith('—')) return true
+    if (Regex("(?i)\\s(and|or|of|the|a|an|under|sub)\\s*$").containsMatchIn(t)) return true
+    val words = t.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (words.size >= 2 && words.last().length <= 2 && !words.last().all { it.isDigit() }) return true
+    return false
+}
 
 /**
  * Wave 3 P12 — operative clause prose must never become a citation document title.
@@ -300,6 +335,8 @@ internal fun extractDocumentTitle(text: String?): String? {
         if (line.startsWith("-")) continue
         if (isOutlineBoilerplateLine(line)) continue
         if (looksLikeBodyProseLine(line)) continue
+        if (looksLikeMidSentenceCrossRefCitationLabel(line)) continue
+        if (looksLikeTruncatedTitleFragment(line)) continue
         if (chapterHeaderMatchTier(line) != null) continue
         if (line.startsWith("THE ", ignoreCase = true)) {
             return line.removePrefix("THE ").removePrefix("The ").trim()
@@ -307,7 +344,11 @@ internal fun extractDocumentTitle(text: String?): String? {
     }
     DOCUMENT_TITLE_THE_LINE.find(sample)?.let { match ->
         val line = match.value.trim()
-        if (!looksLikeBodyProseLine(line)) {
+        if (
+            !looksLikeBodyProseLine(line) &&
+            !looksLikeMidSentenceCrossRefCitationLabel(line) &&
+            !looksLikeTruncatedTitleFragment(line)
+        ) {
             return line.removePrefix("THE ").removePrefix("The ").trim()
         }
     }
@@ -325,6 +366,8 @@ internal fun isLikelyStatuteTitleLine(line: String): Boolean {
     if (!line.any { it.isLetter() }) return false
     if (isOutlineBoilerplateLine(line)) return false
     if (looksLikeBodyProseLine(line)) return false
+    if (looksLikeMidSentenceCrossRefCitationLabel(line)) return false
+    if (looksLikeTruncatedTitleFragment(line)) return false
     if (chapterHeaderMatchTier(line) != null) return false
     if (line == line.uppercase(Locale.ENGLISH) && line.any { it.isUpperCase() }) return true
     if (STATUTE_TITLE_PHRASE_PATTERN.containsMatchIn(line)) return true
@@ -342,6 +385,8 @@ internal fun outlineHeadingFromText(outlineText: String?): String? {
                 !isOutlineBoilerplateLine(line) &&
                 chapterHeaderMatchTier(line) == null &&
                 !looksLikeBodyProseLine(line) &&
+                !looksLikeMidSentenceCrossRefCitationLabel(line) &&
+                !looksLikeTruncatedTitleFragment(line) &&
                 !isOutlineTocBulletLine(line)
         }
         ?.removePrefix("THE ")
@@ -413,6 +458,7 @@ internal fun extractCitationSectionHeading(text: String): String? {
         val line = raw.trim()
         if (line.isEmpty()) continue
         if (PAGE_MARKER_REGEX.containsMatchIn(line)) continue
+        if (looksLikeMidSentenceCrossRefCitationLabel(line)) continue
         if (chapterHeaderMatchTier(line)?.let { it <= 1 } == true) {
             return normalizeCitationSectionHeading(line)
         }

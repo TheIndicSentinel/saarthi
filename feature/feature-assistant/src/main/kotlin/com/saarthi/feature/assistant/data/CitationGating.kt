@@ -3,16 +3,8 @@ package com.saarthi.feature.assistant.data
 /**
  * Wave 3 P11 — citation gating: deterministic Sources only when excerpts were
  * placed, the turn is document-grounded, and retrieval matches the query type.
+ * Phase 2.4 — outline/system chunks gated via [SystemChunkGuardrail].
  */
-internal fun isCitableRetrievalChunk(chunk: RetrievedChunk): Boolean = when (chunk.chunkIndex) {
-    RETRIEVAL_HINT_CHUNK_INDEX,
-    STRUCTURE_REGISTRY_CHUNK_INDEX,
-    -> false
-    else -> true
-}
-
-internal fun citableRetrievalChunks(retrieved: List<RetrievedChunk>): List<RetrievedChunk> =
-    retrieved.filter { isCitableRetrievalChunk(it) }
 
 internal fun isDocumentMetaOverviewQuery(query: String): Boolean {
     val q = query.trim()
@@ -59,7 +51,7 @@ internal fun isRetrievalStrongEnoughForCitation(
 ): Boolean {
     if (!isQueryAboutDocumentForCitation(query, turnMode, attachmentsThisTurn)) return false
 
-    val citable = citableRetrievalChunks(retrieved)
+    val citable = citableRetrievalChunks(retrieved, query)
     if (citable.isEmpty()) return false
 
     if (isStructureCountQuery(query) || isStructureListQuery(query)) return true
@@ -80,7 +72,7 @@ internal fun shouldAttachDeterministicSources(
     if (retrieved.isEmpty()) return false
     if (!isRetrievalOnTypeForCitation(query, retrieved)) return false
     if (!isRetrievalStrongEnoughForCitation(query, retrieved, turnMode, attachmentsThisTurn)) return false
-    return citableRetrievalChunks(retrieved).isNotEmpty()
+    return citableRetrievalChunks(retrieved, query).isNotEmpty()
 }
 
 /** Organic BM25 strength or lexical overlap — structural anchor alone is not enough. */

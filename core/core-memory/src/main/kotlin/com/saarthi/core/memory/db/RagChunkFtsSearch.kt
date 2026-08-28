@@ -15,7 +15,9 @@ class RagChunkFtsSearch @Inject constructor(
                 """
                 SELECT c.* FROM rag_chunks AS c
                 INNER JOIN rag_chunks_fts AS fts ON c.id = fts.rowid
-                WHERE c.sessionId = ? AND c.chunkIndex >= 0 AND fts MATCH ?
+                WHERE c.sessionId = ? AND c.chunkIndex >= 0
+                  AND (c.chunkRole IS NULL OR c.chunkRole NOT IN ('outline', 'registry', 'prompt_hint'))
+                  AND fts MATCH ?
                 LIMIT ?
                 """.trimIndent(),
                 arrayOf<Any>(sessionId, matchQuery, limit),

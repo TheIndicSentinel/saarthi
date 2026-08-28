@@ -501,7 +501,7 @@ class RagDocumentRepository @Inject constructor(
                 else structuralSample(all, effectiveTopK, query, spaced = route.whichFile)
             val docCount = resolved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size.coerceAtLeast(1)
             val minSlots = if (route.equalSlots) (effectiveTopK / docCount).coerceAtLeast(1) else 1
-            val contentEntities = all.filter { it.chunkIndex >= 0 }
+            val contentEntities = all.filter { isBm25SearchableChunk(it) }
             val allocated = allocatePerDocSlots(
                 applySessionBoost(resolved, boostDocUris, recencyUri, route.namedDocUris),
                 effectiveTopK,
@@ -586,7 +586,7 @@ class RagDocumentRepository @Inject constructor(
         // BM25 sees only content chunks. The outline chunk is curated
         // meta, not evidence, so it should not be ranked against the
         // user's actual question.
-        val contentChunks = all.filter { it.chunkIndex >= 0 }
+        val contentChunks = all.filter { isBm25SearchableChunk(it) }
         if (contentChunks.isEmpty()) return done(emptyList(), RagSearchPath.empty)
 
         // Heading-anchored retrieval: if the query closely matches a

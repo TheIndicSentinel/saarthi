@@ -14,6 +14,8 @@ internal const val STRUCTURE_REGISTRY_CHUNK_INDEX = -3
 internal object ChunkRole {
     const val OUTLINE = "outline"
     const val REGISTRY = "registry"
+    /** Phase 2.4 — future prompt/registry hints; never BM25/FTS/citable. */
+    const val PROMPT_HINT = "prompt_hint"
     const val TOC = "toc"
     const val HEADING = "heading"
     const val BODY = "body"

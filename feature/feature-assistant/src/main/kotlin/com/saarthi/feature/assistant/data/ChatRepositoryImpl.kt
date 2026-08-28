@@ -1248,7 +1248,7 @@ class ChatRepositoryImpl @Inject constructor(
             lastCitationTurnMode = RagTurnMode.PLAIN_CHAT
             return
         }
-        val citable = citableRetrievalChunks(retrieved)
+        val citable = citableRetrievalChunks(retrieved, ragQuery)
         lastCitationGrounded = true
         lastCitationChunks = interleaveExcerptsByDoc(citable)
         lastCitationOutlineByDoc = retrieved
