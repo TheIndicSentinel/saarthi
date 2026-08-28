@@ -59,7 +59,7 @@ class ImplicitFactExtractor @Inject constructor() {
      * patterns are deliberately strict (anchored, single capture, length-capped).
      *
      * Returns (key, value) pairs; persistence + USER_SCOPE routing is handled
-     * by ChatRepositoryImpl.persistMemoryFact.
+     * by MemoryFactWriter (via ChatRepositoryImpl.persistMemoryFact).
      */
     fun extractImplicitFacts(message: String): List<Pair<String, String>> {
         val msg = message.trim()
