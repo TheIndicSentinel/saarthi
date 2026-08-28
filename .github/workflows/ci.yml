@@ -5,9 +5,15 @@ name: CI (PR checks)
 # release_aab.yml's job on a version tag). Attach this job as the required
 # status check on main ("test-and-lint") so a PR cannot merge red.
 
+# Every pull request, including those targeting feature branches
+# (e.g. feature/phase-4-rag). Previously this only ran for PRs into
+# main/master, so hardening PRs never got the test/lint gate the
+# release checklist already claimed they had. workflow_dispatch lets
+# a maintainer run the same job on a branch with no open PR.
+# This is NOT on-device inference proof — see docs/RELEASE_CHECKLIST.md.
 on:
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 
 # Cancel an in-flight run when a newer commit is pushed to the same PR.
 concurrency:

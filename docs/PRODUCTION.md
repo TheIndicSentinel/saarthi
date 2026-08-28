@@ -72,17 +72,21 @@ constructor args, broken Hilt graphs.
 
 If this is red, nothing else matters yet.
 
-### 2. Unit tests (55 tests)
+### 2. Unit tests
 
-Cover the pure-logic surfaces most likely to silently regress:
+Cover the pure-logic surfaces most likely to silently regress.
+Counts change as tests are added — run `./gradlew testDebugUnitTest` rather
+than treating any number in this table as current.
 
-| Module              | Tests | What's locked              |
-|---------------------|-------|---------------------------|
-| `core-i18n`         | 11    | Language enum invariants  |
-| `core-memory`       | 10    | Memory repo + summary     |
-| `core-rag`          | 11    | Chunking + augmented prompt|
-| `core-inference`    | 11    | Prompt provider tier logic|
-| `feature-assistant` | 12    | Marker parser + identity rewriter|
+| Module              | What's locked |
+|---------------------|---------------|
+| `core-i18n`         | Language enum, personality, prompt instructions |
+| `core-memory`       | Room helpers, memory/chat hygiene |
+| `core-rag`          | BM25 retrieval, chunking |
+| `core-inference`    | Download policy, crash recovery, engine lifecycle, catalog |
+| `feature-assistant` | Chat mapping, reminders, pack chat |
+| `feature-onboarding`| Onboarding download/init flow |
+| `app`               | Manage-downloads, boot/wisdom wiring |
 
 Run the whole suite or a single module:
 
@@ -158,25 +162,23 @@ adb logcat | grep -i saarthi
 adb logcat -b crash
 ```
 
-### 6. CI as the final gate
+### 6. CI as a necessary gate (not the ship bar)
 
-Every PR triggers `.github/workflows/ci.yml`:
+Every pull request triggers `.github/workflows/ci.yml` (job `test-and-lint`:
+`testDebugUnitTest` + `lintDebug`). That is JVM unit tests and Android Lint —
+not an APK, not Firebase Test Lab, and not LiteRT inference on a phone.
 
-- **Unit tests** job — runs all 55 tests, uploads HTML reports as an
-  artefact you can download from the run page.
-- **Assemble debug APK** job — builds the full APK, uploads the
-  artefact for installation.
+`.github/workflows/build_apk.yml` runs on push to `main`/`master` and
+uploads a **debug** APK. The Play-signed `.aab` is `.github/workflows/release_aab.yml`
+on a `v*` tag only.
 
-Branch protection (`SaarthiTest` rule on `main`) refuses the merge
-button until both jobs are green. There is no human-only safety net
-upstream of this — if it's red, it doesn't merge.
-
-`.github/workflows/build_apk.yml` runs separately on push-to-main and
-ships the **signed release APK** to the run's artefacts.
+A green CI check is required and not sufficient for Play. Physical-phone
+smoke in `docs/RELEASE_CHECKLIST.md` is still the ship bar. Emulator and
+cloud-agent runs are not GPU/SIGKILL proof.
 
 `.github/dependabot.yml` opens grouped weekly dependency-update PRs
 (Compose, Lifecycle, Hilt, Room, etc.). Each goes through the same
-CI gate, so a regressing upgrade can't merge silently.
+`ci.yml` job, so a regressing upgrade can't merge silently to `main`.
 
 ## Adding a new feature without breaking production
 
@@ -193,8 +195,9 @@ The order matters — front-load the cheap checks:
 6. **Install on device** and exercise the feature end-to-end.
 7. **Pull the debug log** after the test session and confirm your
    new log lines tell the story you'd expect.
-8. Open the PR — CI runs the same checks plus the assemble job.
-9. Wait for `SaarthiTest` to go green. Merge.
+8. Open the PR — `ci.yml` runs unit tests + lint (not assemble, not device inference).
+9. Wait for `test-and-lint` to go green. Merge only after the human smoke list
+   in `docs/RELEASE_CHECKLIST.md` if this is a store candidate.
 
 This is the production loop. There is nothing missing from it that
 Android Studio would add — it gives you a friendlier UI for steps 3

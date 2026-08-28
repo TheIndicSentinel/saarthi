@@ -25,7 +25,7 @@ Saarthi is a **100% offline** Android AI assistant for Indian users, powered by 
 - **Monitoring:** Firebase Crashlytics + Analytics (google-services.json required to activate)
 - **Logging:** Timber
 - **Build:** AGP 8.7.3, convention plugins in `build-logic/`
-- **CI/CD:** Not configured in this repo (no CI yaml found)
+- **CI/CD:** GitHub Actions in `.github/workflows/` — `ci.yml` (`testDebugUnitTest` + `lintDebug` on every pull request and `workflow_dispatch`), `build_apk.yml` (debug APK on push to `main`/`master`), `release_aab.yml` (signed Play `.aab` on a `v*` tag), optional `test_lab.yml`. Green CI is not LiteRT/GPU/SIGKILL proof; physical-phone smoke in `docs/RELEASE_CHECKLIST.md` is still required before Play.
 - **Testing:** JUnit 4, MockK, Turbine (Flow testing)
 
 ## Project structure

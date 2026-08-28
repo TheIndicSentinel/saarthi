@@ -69,23 +69,23 @@ all free.
 
 ## CI gates
 
-Two GitHub Actions workflows:
+| Workflow             | When it runs                                         | What it does |
+|----------------------|------------------------------------------------------|--------------|
+| `ci.yml`             | Every pull request (any target branch), `workflow_dispatch` | Single job `test-and-lint`: `testDebugUnitTest` + `lintDebug`. No APK/AAB. |
+| `build_apk.yml`      | Push to `main`/`master`, `workflow_dispatch`         | Debug APK (not the Play-signed release). |
+| `release_aab.yml`    | `v*` version tag                                     | Signed Play `.aab`. Tag must match `versionName`. |
+| `test_lab.yml`       | `workflow_dispatch`                                  | Optional Firebase Test Lab; skips if the secret is unset. |
 
-| Workflow             | When it runs                                | What it does                                                                                       |
-|----------------------|---------------------------------------------|----------------------------------------------------------------------------------------------------|
-| `ci.yml`             | Every push to `main`, every PR, dispatch    | **`Unit tests`** job — `testDebugUnitTest` across all modules. **`Assemble debug APK`** job — full debug build with NDK + Vulkan + ggml SVE patch. Uploads test reports + APK as artifacts. |
-| `build_apk.yml`      | Push to `main`, dispatch                    | Builds the **signed release APK**. Pulls signing keys + HF token from secrets.                     |
-
-CI runs but doesn't *gate* merges by itself. Branch protection on `main`
-requires both `ci.yml` jobs to pass before merge. Configured under
-**Settings → Branches → Branch protection rules**.
+Branch protection on `main` (when enabled) should require the `test-and-lint`
+check. Feature-branch PRs now get the same job automatically — that is still
+not on-device inference proof; see `docs/RELEASE_CHECKLIST.md`.
 
 If you fork this repo and CI fails the first time, the most common causes
 are:
-- Missing repo secrets (`HF_APP_TOKEN`, `KEYSTORE_BASE64`, etc.) — only
-  `build_apk.yml` needs these. `ci.yml` runs without secrets.
-- A change to NDK / CMake versions in one workflow but not the other —
-  keep them in sync.
+- Missing repo secret `HF_APP_TOKEN` — `ci.yml` writes it into `local.properties`
+  when present; an empty token is fine for unit tests that do not hit the network.
+- Signing secrets (`KEYSTORE_*`) — only `release_aab.yml` / signed release builds
+  need these. `ci.yml` and `build_apk.yml` (debug) do not.
 
 ## Writing tests
 

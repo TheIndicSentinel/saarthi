@@ -1,8 +1,20 @@
 # Saarthi Release Checklist
 
-Run through this before publishing any build. PRs run `.github/workflows/ci.yml`
-(`testDebugUnitTest` + `lintDebug`). Pushes to `main` run `.github/workflows/build_apk.yml`
-(same tests/lint plus a debug APK). Store `.aab` is `.github/workflows/release_aab.yml` on a `v*` tag.
+Run through this before publishing any build.
+
+**What CI actually covers:** `.github/workflows/ci.yml` runs `testDebugUnitTest` +
+`lintDebug` on **every pull request** (any target branch, including
+`feature/phase-4-rag`) and on `workflow_dispatch`. Pushes to `main`/`master` run
+`.github/workflows/build_apk.yml` (same tests/lint plus a debug APK). Store `.aab`
+is `.github/workflows/release_aab.yml` on a `v*` tag.
+
+**What CI does not cover:** instrumented tests, Firebase Test Lab, Play Console
+forms, signed-AAB install, or on-device LiteRT inference. A green `test-and-lint`
+check is necessary and not sufficient. Emulator / cloud-agent / JVM unit tests
+are **not** inference proof (GPU, SIGKILL, OEM killers, 2.5 GB+ downloads).
+Complete **Manual smoke** on a physical phone before any Play upload. Do not bump
+`versionCode` until you are cutting a store candidate.
+
 The items below are the human gates around that.
 
 ## Every build (beta or production)
