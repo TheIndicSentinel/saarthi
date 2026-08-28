@@ -21,7 +21,7 @@ app
 ├── core:core-inference   ← LiteRT-LM (litertlm) Gemma engine (interface + impl)
 ├── core:core-memory      ← Room: memory, conversations, sessions, rag_chunks
 ├── core:core-i18n        ← Language manager, SupportedLanguage, personalities
-├── core:core-rag         ← Embedding/VectorStore + BM25 retriever
+├── core:core-rag         ← Bm25Retriever (production); deprecated embedding/vector path
 └── core:core-common      ← Dispatchers, sqliteWriteWithRetry, CrashReporter
 ```
 
@@ -41,7 +41,7 @@ app
 |-----------|-------|
 | **S**ingle Responsibility | `InferenceEngine` only generates text. `RagDocumentRepository` only indexes/retrieves chunks. `ReminderManager` only schedules reminders. |
 | **O**pen/Closed | New inference backends implement `InferenceEngine` without modifying callers (`InferenceEngineSelector` routes to the active impl). New packs add a `PackType` arm, not new call sites. |
-| **L**iskov Substitution | `LiteRTInferenceEngine` fully substitutes `InferenceEngine`. `SqliteVectorStore` substitutes `VectorStore`. |
+| **L**iskov Substitution | `LiteRTInferenceEngine` fully substitutes `InferenceEngine`. `Bm25Retriever` is the production retrieval primitive; legacy `VectorStore` impls are not wired in app code. |
 | **I**nterface Segregation | `MemoryRepository` exposes only what callers need. `EmbeddingModel` hides model internals. |
 | **D**ependency Inversion | ViewModels depend on repository interfaces, not Room DAOs directly. Hilt DI wires implementations. |
 
@@ -71,17 +71,47 @@ Data (Repository impl, Room DAOs, LiteRT-LM engine, DataStore)
 - Streaming via `Conversation.sendMessageAsync` → Kotlin `callbackFlow`.
 
 ### 2. Pack System
-Each Pack = Base Gemma model + optional LoRA adapter + dedicated RAG vector store.
+Each Pack = base Gemma model + optional LoRA adapter + **persona / RAG prompt overlays**
+(not a separate vector DB). Session-attached documents share one BM25 index per chat
+(`rag_chunks` in Room). Packs reuse the same retrieval pipeline with pack-specific
+personality strings.
 - Packs share user context via **Shared Memory Layer** (Room DB key-value store)
 - `MemoryRepository.buildContextSummary()` prepends user profile to every prompt
 
-### 3. Offline RAG
-- Production path is **BM25** over Room-persisted chunks
-  (`RagDocumentRepository` + `Bm25Retriever`), with structural sampling,
-  neighbour expansion and outline extraction. The `EmbeddingModel` /
-  `SqliteVectorStore` cosine path (`RagPipeline`) is legacy/unused
-  (`@Deprecated`) and kept only for its test contract.
-- Documents chunked sentence/word-aware (~600 chars / 80 overlap).
+### 3. Offline RAG (production path)
+**Do not add callers to `RagPipeline`, `GemmaEmbeddingModel`, or `SqliteVectorStore`.**
+Those are legacy reference code in `core-rag`; the live path is BM25-only.
+
+```
+Attach PDF/DOC → extract (PdfBox, OCR fallback) → legal/gazette-aware chunking
+              → Room rag_chunks (+ chapter registry, parentChunkIndex graph)
+              → optional FTS5 prefilter (large sessions only)
+
+Query → turn-mode routing (plain / GK / doc-grounded / mixed)
+      → scope (active doc, this-turn attach, compare, session)
+      → query rewrite lexicon + Indic/Hinglish expansion (pre-BM25)
+      → structural anchors (chapter span, topic, tabular contract, registry)
+      → BM25 (+ FTS5 candidate pool when gated)
+      → lightweight feature rerank (no cross-encoder, no embeddings)
+      → neighbor + hierarchical section expansion
+      → paraphrase retry when scores stay weak
+      → prompt assembly (shape, char budget, citation labels)
+      → on-device Gemma generation
+      → post-gen groundedness audit (amounts, sections, shall)
+      → deterministic Sources footer + claim-overlap filter
+```
+
+| Layer | Module / type | Notes |
+|-------|----------------|-------|
+| Index | `RagDocumentRepository.indexIfNeeded` | Idempotent per `(sessionId, docUri)`; legal sections at ~1800c, tables at 600c |
+| Retrieve | `RagDocumentRepository.search` | `Bm25Retriever` in `core-rag`; metadata from `chapterId`, `parentChunkIndex` |
+| Rerank | `FeatureRerank` | Additive bonuses on BM25 scores; **cross-encoder deferred** (Wave 6 P28) |
+| Eval | JVM golden harness (`GoldenSessionHarness`, `retrieveGoldenFull`) | No Room, no LLM — ship gate for retrieval regressions |
+| Citations | `DeterministicSourcesFooter`, `CitationGating`, `PostGenGroundedness` | System-built footer; drop when excerpts do not support claims |
+
+**Not in production:** MiniLM ONNX, `sqlite-vss`, cosine `SqliteVectorStore`, `GemmaEmbeddingModel`,
+`RagPipeline`. Revisit dense retrieval only if golden eval still misses after metadata +
+feature rerank + lexicon plateau **and** RAM/latency budget allows a second on-device model.
 
 ### 4. Multi-Language
 - `SupportedLanguage` enum — 10 Indian languages + English
@@ -113,13 +143,14 @@ Each Pack = Base Gemma model + optional LoRA adapter + dedicated RAG vector stor
 
 ## Scalability Path
 
-| Milestone | What to add |
-|-----------|-------------|
-| Voice input | Whisper.cpp via JNI, new `core-voice` module |
-| Better embeddings | Replace `GemmaEmbeddingModel` with MiniLM ONNX in `core-rag` |
-| SQLite-VSS | Drop in `SqliteVssVectorStore : VectorStore` — zero callers change |
-| iOS port | KMP shared `domain` + `data` layers; only `presentation` changes |
-| New Pack | Add `feature-xyz` module, implement `InferenceEngine` with LoRA path |
+| Milestone | What to add | Status |
+|-----------|-------------|--------|
+| Voice input | Whisper.cpp via JNI, new `core-voice` module | Planned |
+| Dense embeddings | MiniLM ONNX or tiny on-device encoder in `core-rag` | **Deferred** — BM25 + lexicon + feature rerank first; see golden harness |
+| Cross-encoder rerank | Second-stage neural reranker | **Deferred** — on-device RAM/latency; `FeatureRerank` covers ordering today |
+| SQLite-VSS | `SqliteVssVectorStore : VectorStore` | **Legacy only** — no Hilt wiring; do not enable without architecture review |
+| iOS port | KMP shared `domain` + `data` layers; only `presentation` changes | Planned |
+| New Pack | Add `PackType` + persona/RAG overlays in `feature-assistant` | Ongoing |
 
 ---
 

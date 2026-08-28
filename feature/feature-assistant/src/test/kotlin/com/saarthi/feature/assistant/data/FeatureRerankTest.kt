@@ -3,6 +3,7 @@ package com.saarthi.feature.assistant.data
 import com.saarthi.core.memory.db.RagChunkEntity
 import com.saarthi.core.rag.Bm25Retriever
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,6 +27,11 @@ class FeatureRerankTest {
         headingPath = headingPath,
         chunkRole = chunkRole,
     )
+
+    @Test
+    fun `cross encoder rerank stays disabled for on-device budget`() {
+        assertFalse(crossEncoderRerankEnabled())
+    }
 
     @Test
     fun `candidate pool clamps between min and max`() {

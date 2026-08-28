@@ -240,6 +240,26 @@ class SaarthiDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun `MIGRATION_7_8 adds parentChunkIndex on rag_chunks`() {
+        seedV5Schema()
+        MIGRATION_5_6.migrate(fakeSupportDatabase())
+        MIGRATION_6_7.migrate(fakeSupportDatabase())
+        MIGRATION_7_8.migrate(fakeSupportDatabase())
+        connection.createStatement().use { st ->
+            st.execute(
+                "INSERT INTO rag_chunks (sessionId, docUri, docName, mimeType, chunkIndex, text, createdAt, " +
+                    "parentChunkIndex) " +
+                    "VALUES ('s1', 'content://doc', 'doc.pdf', 'application/pdf', 2, 'schedule row', 1, 0)",
+            )
+            val rs = st.executeQuery(
+                "SELECT parentChunkIndex FROM rag_chunks WHERE chunkIndex=2",
+            )
+            assertTrue(rs.next())
+            assertEquals(0, rs.getInt(1))
+        }
+    }
+
     private fun countFtsRows(): Int = connection.createStatement().use { st ->
         val rs = st.executeQuery("SELECT COUNT(*) FROM rag_chunks_fts")
         rs.next()

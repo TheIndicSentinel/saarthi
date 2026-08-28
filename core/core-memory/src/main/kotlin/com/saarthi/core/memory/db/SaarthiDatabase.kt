@@ -19,7 +19,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     //     sessions — BM25 prefilter only when the measurement gate fires.
     // v7: rag_chunks metadata columns (chapterId, section, headingPath, page, role)
     //     for index-time structure registry (Wave 2).
-    version = 7,
+    // v8: parentChunkIndex for hierarchical section graph (Wave 6).
+    version = 8,
     exportSchema = true,
 )
 abstract class SaarthiDatabase : RoomDatabase() {
@@ -158,5 +159,14 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         db.execSQL("ALTER TABLE rag_chunks ADD COLUMN headingPath TEXT")
         db.execSQL("ALTER TABLE rag_chunks ADD COLUMN pageNum INTEGER")
         db.execSQL("ALTER TABLE rag_chunks ADD COLUMN chunkRole TEXT")
+    }
+}
+
+/**
+ * v7 → v8: parentChunkIndex links multi-chunk legal sections for complete-section fetch.
+ */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE rag_chunks ADD COLUMN parentChunkIndex INTEGER")
     }
 }

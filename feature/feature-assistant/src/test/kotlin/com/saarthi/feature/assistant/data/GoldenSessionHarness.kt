@@ -35,8 +35,9 @@ internal fun goldenDocsToEntities(
     var id = 1L
     for (doc in docs) {
         if (extractionFailureMessage(doc.text) != null) continue
-        val chunks = chunkDocumentTextForIndexing(doc.text, mimeType = "application/pdf")
-        if (chunks.isEmpty()) continue
+        val indexedChunks = chunkDocumentForIndexing(doc.text, mimeType = "application/pdf")
+        if (indexedChunks.isEmpty()) continue
+        val chunks = indexedChunks.map { it.text }
         val registry = buildDocumentChapterRegistry(chunks, outlineText = null)
         val metadata = computeChunkMetadata(chunks, registry)
         if (registry.chapters.isNotEmpty()) {
@@ -53,7 +54,7 @@ internal fun goldenDocsToEntities(
                 ),
             )
         }
-        chunks.forEachIndexed { idx, text ->
+        indexedChunks.forEachIndexed { idx, indexed ->
             val meta = metadata[idx]
             entities.add(
                 RagChunkEntity(
@@ -63,12 +64,13 @@ internal fun goldenDocsToEntities(
                     docName = doc.name,
                     mimeType = "application/pdf",
                     chunkIndex = idx,
-                    text = text,
+                    text = indexed.text,
                     chapterId = meta.chapterId,
                     sectionNum = meta.sectionNum,
                     headingPath = meta.headingPath,
                     pageNum = meta.pageNum,
                     chunkRole = meta.role,
+                    parentChunkIndex = indexed.parentChunkIndex,
                 ),
             )
         }
@@ -148,9 +150,26 @@ internal fun goldenSessionRetrieve(
         featureRerankBm25Candidates(bm25Candidates, contentChunks, query, rerankCtx),
         effectiveTopK,
     )
+    var finalRanked = ranked
+    val paraphraseExpansion = paraphraseQueryExpansion(query)
+    if (shouldRunParaphraseRetrievalRetry(
+            topOrganicScore = ranked.firstOrNull()?.score ?: 0.0,
+            hasAnchoredHits = anchoredEntities.isNotEmpty(),
+            paraphraseExpansion = paraphraseExpansion,
+        )
+    ) {
+        val paraphraseQuery = "$effectiveQuery $paraphraseExpansion"
+        val retryCandidates = Bm25Retriever.rankTokenised(tokenised, paraphraseQuery, candidateK)
+        val paraphraseRanked = filterRankedByScoreGap(
+            featureRerankBm25Candidates(retryCandidates, contentChunks, query, rerankCtx),
+            effectiveTopK,
+        )
+        finalRanked = mergeRankedBm25Results(ranked, paraphraseRanked, effectiveTopK)
+    }
 
     val docChunksByUri = contentChunks.groupBy { it.docUri }.mapValues { (_, list) -> list.sortedBy { it.chunkIndex } }
     val orderedIdsByDoc = docChunksByUri.mapValues { (_, list) -> list.map { it.id } }
+    val sectionGroupsByDoc = buildSectionGroupsByDoc(contentChunks)
     val usedIds = LinkedHashSet<Long>()
     val hits = mutableListOf<RetrievedChunk>()
 
@@ -159,17 +178,26 @@ internal fun goldenSessionRetrieve(
             hits.add(e.toRetrieved(ANCHORED_CHUNK_SCORE))
         }
     }
-    for (scored in ranked) {
+    for (scored in finalRanked) {
         val entity = contentChunks[scored.index]
         if (usedIds.add(entity.id)) {
             hits.add(entity.toRetrieved(scored.score))
         }
     }
     for ((entity, score) in expandRerankedNeighborHits(
-        ranked = ranked,
+        ranked = finalRanked,
         pool = contentChunks,
         docChunksByUri = docChunksByUri,
         orderedIdsByDoc = orderedIdsByDoc,
+    )) {
+        if (usedIds.add(entity.id)) {
+            hits.add(entity.toRetrieved(score))
+        }
+    }
+    for ((entity, score) in expandHierarchicalSectionHits(
+        ranked = finalRanked,
+        pool = contentChunks,
+        sectionGroupsByDoc = sectionGroupsByDoc,
     )) {
         if (usedIds.add(entity.id)) {
             hits.add(entity.toRetrieved(score))

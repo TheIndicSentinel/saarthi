@@ -6,8 +6,16 @@ import com.saarthi.core.rag.Bm25Retriever
 /**
  * Wave 4 P16 — two-stage retrieve: BM25/FTS candidate pool (~20–30) then
  * lightweight feature rerank (heading, line-start, chapter metadata, tabular,
- * query-type) before score-gap trim. No cross-encoder — on-device safe.
+ * query-type) before score-gap trim.
+ *
+ * Wave 6 P28 — cross-encoder rerank is **intentionally off** (`CROSS_ENCODER_RERANK_ENABLED`).
+ * Revisit only after golden harness plateaus and on-device RAM/latency allows a second model pass.
  */
+
+/** Cross-encoder rerank deferred — production uses [featureRerankBm25Candidates] only. */
+internal const val CROSS_ENCODER_RERANK_ENABLED = false
+
+internal fun crossEncoderRerankEnabled(): Boolean = CROSS_ENCODER_RERANK_ENABLED
 
 internal const val FEATURE_RERANK_CANDIDATE_MIN = 20
 internal const val FEATURE_RERANK_CANDIDATE_MAX = 30

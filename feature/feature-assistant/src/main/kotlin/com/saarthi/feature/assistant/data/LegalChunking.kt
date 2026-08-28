@@ -109,14 +109,5 @@ internal fun chunkLegalGazetteDocument(text: String): List<String> {
 }
 
 /** Index-time router: legal/gazette vs default prose chunking. */
-internal fun chunkDocumentTextForIndexing(text: String, mimeType: String = ""): List<String> {
-    if (mimeType.contains("pdf", ignoreCase = true) || mimeType.contains("doc", ignoreCase = true)) {
-        if (isLegalGazetteStyleDocument(text)) {
-            return chunkLegalGazetteDocument(text)
-        }
-    }
-    if (isLegalGazetteStyleDocument(text)) {
-        return chunkLegalGazetteDocument(text)
-    }
-    return chunkDocumentText(text, 600, 80)
-}
+internal fun chunkDocumentTextForIndexing(text: String, mimeType: String = ""): List<String> =
+    chunkDocumentForIndexing(text, mimeType).map { it.text }

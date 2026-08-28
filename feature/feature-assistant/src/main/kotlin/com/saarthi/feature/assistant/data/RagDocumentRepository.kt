@@ -255,8 +255,10 @@ class RagDocumentRepository @Inject constructor(
             logRag("index-evict count=${evict.size} sessionIdLen=${sessionId.length}")
         }
 
-        val chunks = chunkText(text, file.mimeType)
-        if (chunks.isEmpty()) return
+        val indexedChunks = chunkText(text, file.mimeType)
+        if (indexedChunks.isEmpty()) return
+
+        val chunks = indexedChunks.map { it.text }
 
         var outlineText: String? = null
         extractOutline(text)?.let { outlineBody ->
@@ -324,7 +326,7 @@ class RagDocumentRepository @Inject constructor(
             )
         }
 
-        chunks.forEachIndexed { idx, chunk ->
+        indexedChunks.forEachIndexed { idx, indexed ->
             val meta = metadata[idx]
             entities.add(
                 RagChunkEntity(
@@ -333,12 +335,13 @@ class RagDocumentRepository @Inject constructor(
                     docName = file.name,
                     mimeType = file.mimeType,
                     chunkIndex = idx,
-                    text = chunk,
+                    text = indexed.text,
                     chapterId = meta.chapterId,
                     sectionNum = meta.sectionNum,
                     headingPath = meta.headingPath,
                     pageNum = meta.pageNum,
                     chunkRole = meta.role,
+                    parentChunkIndex = indexed.parentChunkIndex,
                 ),
             )
         }
@@ -685,10 +688,29 @@ class RagDocumentRepository @Inject constructor(
             }
         }
         val bm25Candidates = rankContentChunks(rankPool, sessionId, effectiveQuery, candidateK)
-        val ranked = filterRankedByScoreGap(
+        var ranked = filterRankedByScoreGap(
             featureRerankBm25Candidates(bm25Candidates, rankPool, query, rerankCtx),
             effectiveTopK,
         )
+        val paraphraseExpansion = paraphraseQueryExpansion(query)
+        if (shouldRunParaphraseRetrievalRetry(
+                topOrganicScore = ranked.firstOrNull()?.score ?: 0.0,
+                hasAnchoredHits = anchoredEntities.isNotEmpty(),
+                paraphraseExpansion = paraphraseExpansion,
+            )
+        ) {
+            val paraphraseQuery = "$effectiveQuery $paraphraseExpansion"
+            val retryCandidates = rankContentChunks(rankPool, sessionId, paraphraseQuery, candidateK)
+            val paraphraseRanked = filterRankedByScoreGap(
+                featureRerankBm25Candidates(retryCandidates, rankPool, query, rerankCtx),
+                effectiveTopK,
+            )
+            ranked = mergeRankedBm25Results(ranked, paraphraseRanked, effectiveTopK)
+            logRag(
+                "paraphrase-retry rules=${activeParaphraseRuleIds(query).joinToString()} " +
+                    "top=${paraphraseRanked.firstOrNull()?.score ?: 0.0}",
+            )
+        }
 
         // Neighbor expansion: for the top BM25 hits, also include the
         // *next* chunk in the same document. Answers often straddle a
@@ -701,6 +723,7 @@ class RagDocumentRepository @Inject constructor(
             .mapValues { (_, list) -> list.sortedBy { it.chunkIndex } }
 
         val orderedIdsByDoc = docChunksByUri.mapValues { (_, list) -> list.map { it.id } }
+        val sectionGroupsByDoc = buildSectionGroupsByDoc(contentChunks)
         val usedIds = LinkedHashSet<Long>()
         val bm25Hits = mutableListOf<RetrievedChunk>()
         if (structureHint != null && contentChunks.isNotEmpty()) {
@@ -733,6 +756,15 @@ class RagDocumentRepository @Inject constructor(
             pool = rankPool,
             docChunksByUri = docChunksByUri,
             orderedIdsByDoc = orderedIdsByDoc,
+        )) {
+            if (usedIds.add(entity.id)) {
+                bm25Hits.add(entity.toRetrieved(score))
+            }
+        }
+        for ((entity, score) in expandHierarchicalSectionHits(
+            ranked = ranked,
+            pool = rankPool,
+            sectionGroupsByDoc = sectionGroupsByDoc,
         )) {
             if (usedIds.add(entity.id)) {
                 bm25Hits.add(entity.toRetrieved(score))
@@ -1217,8 +1249,8 @@ class RagDocumentRepository @Inject constructor(
      * found — at a word boundary. The next chunk also starts at a word
      * boundary so the overlap window doesn't reintroduce the fragment.
      */
-    private fun chunkText(text: String, mimeType: String = ""): List<String> =
-        chunkDocumentTextForIndexing(text, mimeType)
+    private fun chunkText(text: String, mimeType: String = ""): List<IndexedChunkText> =
+        chunkDocumentForIndexing(text, mimeType)
 }
 
 /** Result of a [RagDocumentRepository.search] call. */

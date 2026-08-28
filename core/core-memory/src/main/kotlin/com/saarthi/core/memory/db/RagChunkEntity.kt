@@ -36,4 +36,6 @@ data class RagChunkEntity(
     val headingPath: String? = null,
     val pageNum: Int? = null,
     val chunkRole: String? = null,
+    /** Wave 6 — section root chunk index within the same document (legal section graph). */
+    val parentChunkIndex: Int? = null,
 )

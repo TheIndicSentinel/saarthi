@@ -175,6 +175,10 @@ internal fun expandRetrievalQuery(query: String, docNames: List<String>): String
     query.lowercase().split(QUERY_SPLIT).filter { it.isNotEmpty() }.forEach { t ->
         ROMANIZED_INDIC_HINTS[t]?.let { extra.addAll(it) }
     }
+    val rewrite = queryRewriteLexiconExpansion(query)
+    if (rewrite.isNotEmpty()) {
+        rewrite.split(QUERY_SPLIT).filter { it.isNotEmpty() }.forEach { extra.add(it) }
+    }
     // Drop only short ASCII tokens (articles / "nda"). Native-script terms are
     // meaningful below 4 chars (e.g. "धारा"), so they are never length-filtered.
     extra.removeAll { it.length < 4 && it.all { c -> c.code < 128 } }

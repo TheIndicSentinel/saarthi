@@ -192,6 +192,20 @@ internal fun applyDeterministicSourcesFooter(
 ): String {
     if (chunks.isEmpty()) return modelText
     val body = stripModelSourcesBlock(modelText, labels)
+    if (
+        shouldAuditPostGenGroundedness(claimOverlapQuery, claimOverlapTurnMode) &&
+        hasAuditableLegalClaims(body)
+    ) {
+        val audit = auditPostGenGroundedness(body, buildRetrievalCorpus(chunks))
+        if (!audit.isFullyGrounded) {
+            logRag(
+                "post-gen-groundedness fail amounts=${audit.ungroundedAmounts} " +
+                    "sections=${audit.ungroundedSections} shall=${audit.ungroundedShall}",
+            )
+            val caveat = labels.groundednessCaveat
+            return if (body.isBlank()) caveat else "$body\n\n$caveat"
+        }
+    }
     val overlapChunks = if (shouldFilterSourcesByClaimOverlap(claimOverlapQuery, claimOverlapTurnMode)) {
         filterChunksByClaimOverlap(chunks, body)
     } else {
