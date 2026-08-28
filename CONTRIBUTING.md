@@ -87,6 +87,23 @@ are:
 - The Hugging Face token is **not** baked into the APK. Unit tests do not need
   `HF_APP_TOKEN`. Gated Gemma 3n downloads on a device use a user-pasted token.
 
+## Dependency locks and checksums
+
+Direct versions live in `gradle/libs.versions.toml`. Transitive versions are
+pinned in each module’s `gradle.lockfile`. Artifact SHA-256 checksums live in
+`gradle/verification-metadata.xml` (Gradle enables verification as soon as
+that file exists).
+
+After adding or bumping a library:
+
+```bash
+./gradlew resolveAndLockAll --write-locks --no-configuration-cache
+./gradlew --write-verification-metadata sha256 testDebugUnitTest lintDebug :app:assembleDebug --no-configuration-cache
+```
+
+Commit every updated `gradle.lockfile` and `gradle/verification-metadata.xml`.
+Do not turn verification off in CI.
+
 ## Writing tests
 
 Every library module has the test classpath ready. Drop a test file in

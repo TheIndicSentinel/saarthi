@@ -27,6 +27,7 @@ junit = "4.13.2"
 mockk = "1.13.13"
 turbine = "1.1.0"
 sqlite-jdbc = "3.46.1.3"
+sqlcipher-android = "4.12.0"
 androidx-test-runner = "1.6.2"
 androidx-test-ext-junit = "1.2.1"
 androidx-test-espresso = "3.6.1"
@@ -90,6 +91,10 @@ turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine
 # JVM unit test (no Robolectric, no emulator/instrumented-test CI needed,
 # neither of which this project has).
 sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqlite-jdbc" }
+
+# SQLCipher — at-rest encryption for Room (`saarthi.db`). 4.12.0 depends on
+# androidx.sqlite 2.2 (runtime); Room 2.7.2 already brings 2.5.1 on the graph.
+sqlcipher-android = { group = "net.zetetic", name = "sqlcipher-android", version.ref = "sqlcipher-android" }
 
 # Instrumentation tests (androidTest) — the test APK Firebase Test Lab runs.
 # androidx.test:runner carries AndroidJUnitRunner, the class the test APK's

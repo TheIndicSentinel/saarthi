@@ -14,8 +14,10 @@ Your conversations, attached files, and remembered facts (name, preferences, etc
 **no accounts and no login**.
 
 ## What stays on your device (never sent to us)
-- **Chats & messages** — stored locally; deletable any time (Settings → Clear chat history).
-- **Remembered facts** (name, city, diet, likes, …) — local only; used to personalise replies.
+- **Chats & messages** — stored locally in an encrypted on-device database
+  (SQLCipher); deletable any time (Settings → Clear chat history).
+- **Remembered facts** (name, city, diet, likes, …) — local only, in that same
+  encrypted database; used to personalise replies.
 - **Attached documents / photos** — processed on-device for your question; not uploaded.
 - **Voice input** — Saarthi asks your device to transcribe speech to text and uses
   on-device transcription **by default**. Voice works only when an on-device speech

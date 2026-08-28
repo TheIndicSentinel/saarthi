@@ -117,7 +117,9 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
 - [ ] Voice: mic turn + read a long reply aloud (>4000 chars) — chunked TTS speaks fully.
 - [ ] Background ~1–2 min during/after load, return — no freeze; generation still works.
 - [ ] App upgrade over a previous version — chat history / memories survive
-      (Room migrations; destructive fallback only from ancient dev schemas).
+      (Room migrations; plaintext `saarthi.db` is exported once into SQLCipher
+      on first launch after this change. Destructive fallback only from ancient
+      dev schemas).
 
 ## Production (Play Store) only
 
@@ -141,6 +143,10 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
       token that was previously baked into shipped APKs — those builds remain
       extractable. Treat any leftover dashboard token as download-quota only,
       never write/billing.
+- [ ] **SQLCipher**: Room `saarthi.db` is encrypted at rest (user-pasted HF
+      token stays in DataStore, not this file). Confirm a debug upgrade over a
+      pre-SQLCipher install still shows old chats; a clean install creates an
+      encrypted file (no `SQLite format 3` header).
 - [ ] **Play policy review** before submission:
   - No "Alarms & reminders" declaration needed — SCHEDULE_EXACT_ALARM isn't declared
     (verified 2026-07-13; see "Every build" section above).

@@ -136,3 +136,9 @@
 -keep class com.saarthi.core.memory.db.** { *; }
 -keep @androidx.room.Entity class * { *; }
 -keepclassmembers @androidx.room.Entity class * { <fields>; }
+
+# ── SQLCipher JNI ──────────────────────────────────────────────────────────
+-keep class net.zetetic.** { *; }
+-keep class net.sqlcipher.** { *; }
+-dontwarn net.zetetic.**
+-dontwarn net.sqlcipher.**
