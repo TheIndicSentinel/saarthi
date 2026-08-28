@@ -65,7 +65,7 @@ class ReminderManager @Inject constructor(
     /** Schedule a reminder at an absolute HH:MM time today (tomorrow if already past). */
     fun scheduleReminder(text: String, timeStr: String): Boolean {
         val triggerMs = parseTimeToMs(timeStr) ?: run {
-            Timber.w("ReminderManager: could not parse time '$timeStr'")
+            Timber.w("ReminderManager: could not parse time timeLen=${timeStr.length}")
             return false
         }
         return scheduleAt(text, triggerMs)
@@ -122,7 +122,7 @@ class ReminderManager @Inject constructor(
                 "REMINDER",
                 "scheduled id=$id exact=$exact in=${"%.1f".format(mins)}min at=${java.util.Date(triggerMs)} textLen=${text.length}",
             )
-            Timber.d("ReminderManager: scheduled id=$id text='$text' at ${java.util.Date(triggerMs)} exact=$exact")
+            Timber.d("ReminderManager: scheduled id=$id textLen=${text.length} at ${java.util.Date(triggerMs)} exact=$exact")
             true
         } catch (e: Exception) {
             DebugLogger.log("REMINDER", "schedule FAILED id=$id exact=$exact err=${e.message}")

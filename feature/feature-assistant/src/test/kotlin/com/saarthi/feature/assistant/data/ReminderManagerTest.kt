@@ -6,7 +6,9 @@ import android.app.PendingIntent
 import android.content.Context
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import io.mockk.Runs
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
@@ -62,6 +64,7 @@ class ReminderManagerTest {
     @After
     fun tearDown() {
         unmockkStatic(PendingIntent::class)
+        unmockkStatic(timber.log.Timber::class)
     }
 
     // ── scheduleByDelay ────────────────────────────────────────────────────────
@@ -137,6 +140,42 @@ class ReminderManagerTest {
                         "FLAG_IMMUTABLE must be set",
                         flags and PendingIntent.FLAG_IMMUTABLE != 0,
                     )
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `logcat schedule line uses textLen and never echoes reminder text`() {
+        mockkStatic(timber.log.Timber::class)
+        every { timber.log.Timber.d(any<String>()) } just Runs
+
+        manager.scheduleByDelay("take medicine after dinner", 15)
+
+        verify {
+            timber.log.Timber.d(
+                match<String> { msg ->
+                    msg.contains("textLen=") &&
+                        !msg.contains("take medicine") &&
+                        !msg.contains("dinner")
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `unparseable time is logged as timeLen not the raw string`() {
+        mockkStatic(timber.log.Timber::class)
+        every { timber.log.Timber.w(any<String>()) } just Runs
+
+        manager.scheduleReminder("secret appointment", "not-a-time")
+
+        verify {
+            timber.log.Timber.w(
+                match<String> { msg ->
+                    msg.contains("timeLen=") &&
+                        !msg.contains("not-a-time") &&
+                        !msg.contains("secret")
                 },
             )
         }

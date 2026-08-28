@@ -494,7 +494,10 @@ class ChatRepositoryImpl @Inject constructor(
                     // the log, keep the chat flow alive.
                     runCatching { implicitFactExtractor.extractImplicitFacts(userMessage) }
                         .onFailure { e ->
-                            DebugLogger.log("MEMORY", "implicit extraction FAILED: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
+                            DebugLogger.log(
+                                "MEMORY",
+                                "implicit extraction FAILED: ${e.javaClass.simpleName} ${LogPrivacy.valueLen(e.message.orEmpty())}",
+                            )
                         }
                         .getOrDefault(emptyList())
                         .forEach { (k, v) ->
