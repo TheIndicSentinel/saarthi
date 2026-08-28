@@ -9,7 +9,7 @@ import com.saarthi.core.rag.Bm25Retriever
  * query-type) before score-gap trim.
  *
  * Wave 6 P28 — cross-encoder rerank is **intentionally off** (`CROSS_ENCODER_RERANK_ENABLED`).
- * Revisit only after golden harness plateaus and on-device RAM/latency allows a second model pass.
+ * Phase 6.2 deferral gate: ship eval must stay green on feature rerank alone before enabling.
  */
 
 /** Cross-encoder rerank deferred — production uses [featureRerankBm25Candidates] only. */

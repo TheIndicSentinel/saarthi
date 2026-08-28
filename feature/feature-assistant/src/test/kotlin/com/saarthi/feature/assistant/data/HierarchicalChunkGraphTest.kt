@@ -67,6 +67,39 @@ class HierarchicalChunkGraphTest {
     }
 
     @Test
+    fun `anchor seed expands schedule siblings when bm25 ranked list omits section`() {
+        val indexed = chunkLegalGazetteDocumentWithParents(
+            "CHAPTER VIII\nPENALTIES\n\n${scheduleSectionText()}",
+        )
+        val entities = indexed.mapIndexed { idx, chunk ->
+            RagChunkEntity(
+                id = idx.toLong() + 1,
+                sessionId = "s",
+                docUri = "content://act",
+                docName = "act.pdf",
+                mimeType = "application/pdf",
+                chunkIndex = idx,
+                text = chunk.text,
+                parentChunkIndex = chunk.parentChunkIndex,
+            )
+        }
+        val sectionGroups = buildSectionGroupsByDoc(entities)
+        val scheduleRootIdx = indexed.indexOfFirst { it.text.contains("THE SCHEDULE") && it.parentChunkIndex == null }
+        assertTrue(scheduleRootIdx >= 0)
+        val anchor = entities[scheduleRootIdx]
+        val unrelatedIdx = indexed.indexOfFirst { it.text.contains("CHAPTER VIII") }
+        val ranked = listOf(Bm25Retriever.Scored(unrelatedIdx, 4.0))
+        val expanded = expandHierarchicalSectionHits(
+            ranked = ranked,
+            pool = entities,
+            sectionGroupsByDoc = sectionGroups,
+            anchorSeeds = listOf(anchor),
+        )
+        assertTrue(expanded.isNotEmpty())
+        assertTrue(expanded.any { it.first.text.contains("Breach category") })
+    }
+
+    @Test
     fun `single chunk section does not expand`() {
         val entity = RagChunkEntity(
             id = 1,

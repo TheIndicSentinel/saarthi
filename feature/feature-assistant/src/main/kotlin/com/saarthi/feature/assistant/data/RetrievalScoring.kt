@@ -69,7 +69,7 @@ internal fun hasStrongLexicalRetrievalHit(
     query: String,
     retrieved: List<RetrievedChunk>,
 ): Boolean {
-    val body = citableRetrievalChunks(retrieved).filter { it.chunkIndex >= 0 }
+    val body = citableRetrievalChunks(retrieved, query).filter { it.chunkIndex >= 0 }
     if (body.isEmpty()) return false
     if (body.any { it.score >= STRONG_RAG_MATCH_SCORE }) return true
     val terms = significantQueryTermsForRetrieval(query)

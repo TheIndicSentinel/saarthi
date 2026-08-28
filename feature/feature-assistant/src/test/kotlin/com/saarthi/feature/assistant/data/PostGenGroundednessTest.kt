@@ -83,4 +83,12 @@ class PostGenGroundednessTest {
         assertTrue(out.contains(englishLabels.sourcesHeader))
         assertFalse(out.contains(englishLabels.groundednessCaveat))
     }
+
+    @Test
+    fun `chapter typed query skips loose section number audit`() {
+        val corpus = "CHAPTER VII\nAPPEAL AND ALTERNATE DISPUTE RESOLUTION"
+        val answer = "Chapter VII covers appeal to the Appellate Tribunal."
+        val audit = auditPostGenGroundedness(answer, corpus, "highlights from chapter VII")
+        assertTrue(audit.isFullyGrounded)
+    }
 }

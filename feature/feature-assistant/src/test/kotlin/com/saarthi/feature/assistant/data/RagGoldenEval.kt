@@ -78,6 +78,39 @@ internal object GoldenFixtures {
     const val HINDI_URI = "content://hindi-circular"
     const val TAMIL_URI = "content://tamil-notice"
     const val SCAN_URI = "content://scan"
+    const val TICKET_URI = "content://train-ticket"
+    const val GUIDE_URI = "content://dpdp-guide"
+
+    val ticket = GoldenDoc(
+        uri = TICKET_URI,
+        name = "IRCTC_Ticket.pdf",
+        text = """
+            --- Page 1 ---
+            INDIAN RAILWAYS E-TICKET
+            Train No 12345 Rajdhani Express
+            From: New Delhi NDLS
+            To: Mumbai Central BCT
+            Date of Journey: 15 March 2026
+            Passenger: Arjun Kumar
+            PNR: ABCD1234
+            Coach: B1  Seat: 42
+            Fare: Rs 2,450.00
+        """.trimIndent(),
+    )
+
+    val dpdpGuide = GoldenDoc(
+        uri = GUIDE_URI,
+        name = "DPDP_Practitioner_Guide.pdf",
+        text = """
+            Practitioner guide to the Digital Personal Data Protection Act
+            This handbook explains obligations in plain language for businesses.
+            Penalties can reach very large amounts for serious breaches.
+            Data fiduciaries must implement reasonable security safeguards.
+            This is not the official statute — read the Act for legal text.
+        """.trimIndent(),
+    )
+
+    val guideAndAct = listOf(dpdpGuide, DpdpaActFixture.doc)
 
     val nda = GoldenDoc(
         uri = NDA_URI,

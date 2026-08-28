@@ -838,12 +838,22 @@ class ChatRepositoryImpl @Inject constructor(
             .onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
         val activeDocUri = ragRepository.resolveActiveDocUri(sessionId, sessionDocs)
+        val priorUserQuery = _history.value
+            .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
+            .dropLast(1)  // exclude the current turn being built
+            .lastOrNull()
+            ?.content
+            ?.take(200)
+        val priorForCarry = priorUserQuery?.takeIf {
+            attachments.isEmpty() && shouldPassPriorQueryToRetrieval(ragQuery, it)
+        }
+        val retrievalRoutingQuery = followUpScopeRoutingQuery(ragQuery, priorForCarry)
         val retrievalRoute = routeQuery(
-            ragQuery,
+            retrievalRoutingQuery,
             sessionDocs.map { it.uri to it.name },
         )
         val scopeDecision = resolveRetrievalScope(
-            query = ragQuery,
+            query = retrievalRoutingQuery,
             sessionDocs = sessionDocs.map { it.uri to it.name },
             attachmentUris = attachmentUris,
             activeDocUri = activeDocUri,
@@ -866,12 +876,6 @@ class ChatRepositoryImpl @Inject constructor(
             sessionDocs.map { it.name },
         )
         val tabularAmountQuery = isTabularAmountQuery(ragQuery)
-        val priorUserQuery = _history.value
-            .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
-            .dropLast(1)  // exclude the current turn being built
-            .lastOrNull()
-            ?.content
-            ?.take(200)
         val ragTurnMode = classifyRagTurnMode(
             query = ragQuery,
             sessionDocCount = sessionDocs.size,
@@ -896,11 +900,7 @@ class ChatRepositoryImpl @Inject constructor(
                     boostDocUris = boostDocUris,
                     restrictDocUris = restrictDocUris,
                     retrievalScopeLabel = scopeDecision.scope.name,
-                    priorQuery = priorUserQuery?.takeIf { attachments.isEmpty() && it != ragQuery && it.length > 8 }
-                        ?.takeIf { prior ->
-                            isFollowUpContinuationQuery(ragQuery) ||
-                                isFollowUpTopicCarry(ragQuery, prior)
-                        },
+                    priorQuery = priorForCarry,
                     wholeFileChars = wholeFileCharBudget(maxPromptChars),
                 )
             }.onFailure { if (isSqliteUnusable(it)) throw it }
@@ -908,7 +908,9 @@ class ChatRepositoryImpl @Inject constructor(
         } else {
             emptyList()
         }
-        if (shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved)) {
+        if (shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved) ||
+            shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved)
+        ) {
             DebugLogger.log("RAG", "deterministic retrieval miss turnMode=${ragTurnMode.name}")
             return buildDeterministicRetrievalMissMessage(ragQuery)
         }
@@ -1247,7 +1249,7 @@ class ChatRepositoryImpl @Inject constructor(
             lastCitationTurnMode = RagTurnMode.PLAIN_CHAT
             return
         }
-        val citable = citableRetrievalChunks(retrieved)
+        val citable = citableRetrievalChunks(retrieved, ragQuery)
         lastCitationGrounded = true
         lastCitationChunks = interleaveExcerptsByDoc(citable)
         lastCitationOutlineByDoc = retrieved

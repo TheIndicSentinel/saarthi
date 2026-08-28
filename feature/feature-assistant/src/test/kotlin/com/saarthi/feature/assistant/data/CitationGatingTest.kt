@@ -163,6 +163,27 @@ class CitationGatingTest {
     }
 
     @Test
+    fun `no sources when only outline on narrow query`() {
+        assertFalse(
+            shouldAttachDeterministicSources(
+                turnMode = RagTurnMode.DOCUMENT_GROUNDED,
+                ragBlockChars = 400,
+                retrieved = listOf(
+                    RetrievedChunk(
+                        text = "Document outline (auto-detected headings):\n- CHAPTER I",
+                        docName = "act.pdf",
+                        score = 1.0,
+                        chunkIndex = OUTLINE_CHUNK_INDEX,
+                        docUri = "content://act",
+                    ),
+                ),
+                query = "What are penalties in the act",
+                attachmentsThisTurn = false,
+            ),
+        )
+    }
+
+    @Test
     fun `citable chunks filter synthetic hints`() {
         val filtered = citableRetrievalChunks(
             listOf(

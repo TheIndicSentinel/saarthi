@@ -142,6 +142,51 @@ class DeterministicSourcesFooterTest {
     }
 
     @Test
+    fun `stripModelSourcesBlock removes parenthetical prose-style cites`() {
+        val body = "The Act provides for processing of digital personal data."
+        val hash = "bf1f0e9f04e6fb4f8fef35e82c42"
+        val raw =
+            "$body\n\nSources:\n" +
+                "Digital Personal Data Protection Act, 2023 ($hash, p.1; $hash, p.3)."
+        assertEquals(body, stripModelSourcesBlock(raw, englishLabels))
+    }
+
+    @Test
+    fun `stripModelSourcesBlock removes act title line without hash stamp`() {
+        val body = "Penalties may be imposed by the Board."
+        val raw =
+            "$body\n\nSources:\nDigital Personal Data Protection Act, 2023"
+        assertEquals(body, stripModelSourcesBlock(raw, englishLabels))
+    }
+
+    @Test
+    fun `stripModelSourcesBlock removes prose fragment cite line`() {
+        val body = "Overview of the attached law."
+        val raw = "$body\n\nSources:\nDocument outline auto"
+        assertEquals(body, stripModelSourcesBlock(raw, englishLabels))
+    }
+
+    @Test
+    fun `applyDeterministicSourcesFooter yields single Sources surface`() {
+        val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val outline = mapOf(hash to "Digital Personal Data Protection Act, 2023")
+        val body = "The penalty may extend to two hundred crore rupees."
+        val model =
+            "$body\n\nSources:\n" +
+                "Digital Personal Data Protection Act, 2023 (bf1f0e9f04e6fb4f8fef35e82c42, p.17)."
+        val out = applyDeterministicSourcesFooter(
+            model,
+            listOf(chunk("--- Page 17 ---\nPenalty may extend to two hundred crore rupees.", hash)),
+            outline,
+            englishLabels,
+            claimOverlapQuery = "penalties in the act",
+            claimOverlapTurnMode = RagTurnMode.DOCUMENT_GROUNDED,
+        )
+        assertEquals(1, out.lowercase().split("sources:").size - 1)
+        assertTrue(out.contains("Digital Personal Data · page 17"))
+    }
+
+    @Test
     fun `formatPageRangeForUser converts p and pp`() {
         assertEquals("page 17", formatPageRangeForUser("p.17", englishLabels))
         assertEquals("pages 10-12", formatPageRangeForUser("pp.10-12", englishLabels))

@@ -1,8 +1,9 @@
 package com.saarthi.feature.assistant.data
 
 /**
- * Wave 3 P13 — heuristic claim overlap: drop Sources lines whose chunk text
- * does not share meaningful tokens with the model answer body.
+ * Phase 2.1 — citation ↔ claim pairing: each Sources line must share meaningful
+ * tokens with the answer span (document block only in MIXED). Outline chunks
+ * only bypass overlap on structure/overview queries.
  */
 internal const val CLAIM_OVERLAP_MIN_SHARED_TOKENS = 2
 
@@ -18,17 +19,40 @@ private val CLAIM_OVERLAP_STOPWORDS = setOf(
     "saarthi", "overview", "excerpt", "excerpts",
 )
 
+private val MIXED_GENERAL_BLOCK = Regex("(?im)^\\s*General:\\s*")
+private val MIXED_FROM_DOCUMENT = Regex("(?im)From document:\\s*")
+
 /** Structure / overview answers often paraphrase without lexical overlap with hints. */
 internal fun shouldFilterSourcesByClaimOverlap(
     query: String?,
     turnMode: RagTurnMode?,
 ): Boolean {
-    if (query.isNullOrBlank()) return true
+    if (turnMode == null || query.isNullOrBlank()) return false
     if (turnMode == RagTurnMode.GENERAL_KNOWLEDGE || turnMode == RagTurnMode.PLAIN_CHAT) return false
     if (isStructureCountQuery(query) || isStructureListQuery(query)) return false
     if (isDocumentMetaOverviewQuery(query)) return false
     if (turnMode == RagTurnMode.MIXED && !hasDocumentQueryCues(query)) return false
     return true
+}
+
+internal fun outlineChunkExemptFromClaimOverlap(query: String?): Boolean {
+    if (query.isNullOrBlank()) return false
+    if (isStructureCountQuery(query) || isStructureListQuery(query)) return true
+    if (isDocumentMetaOverviewQuery(query)) return true
+    return false
+}
+
+/** MIXED answers pair citations only against the document slice, not General knowledge. */
+internal fun answerBodyForClaimOverlap(body: String, turnMode: RagTurnMode?): String {
+    if (turnMode != RagTurnMode.MIXED) return body.trim()
+    val fromMatch = MIXED_FROM_DOCUMENT.find(body)
+    if (fromMatch == null) {
+        return if (MIXED_GENERAL_BLOCK.find(body) != null) "" else body.trim()
+    }
+    val start = fromMatch.range.last + 1
+    val generalMatch = MIXED_GENERAL_BLOCK.find(body, start)
+    val end = generalMatch?.range?.first ?: body.length
+    return body.substring(start, end).trim()
 }
 
 internal fun significantTokensForClaimOverlap(text: String): Set<String> =
@@ -52,8 +76,17 @@ internal fun chunkSharesTokensWithAnswer(
     chunk: RetrievedChunk,
     answerBody: String,
     minShared: Int = CLAIM_OVERLAP_MIN_SHARED_TOKENS,
+    query: String? = null,
 ): Boolean {
-    if (chunk.chunkIndex < 0) return true
+    if (chunk.chunkIndex < 0 && outlineChunkExemptFromClaimOverlap(query)) return true
+    return chunkSharesLexicalOverlapWithAnswerBody(chunk, answerBody, minShared)
+}
+
+private fun chunkSharesLexicalOverlapWithAnswerBody(
+    chunk: RetrievedChunk,
+    answerBody: String,
+    minShared: Int,
+): Boolean {
     val answerTokens = significantTokensForClaimOverlap(answerBody)
     if (answerTokens.isEmpty()) return false
     val chunkTokens = significantTokensForClaimOverlap(chunk.text)
@@ -64,7 +97,15 @@ internal fun filterChunksByClaimOverlap(
     chunks: List<RetrievedChunk>,
     answerBody: String,
     minShared: Int = CLAIM_OVERLAP_MIN_SHARED_TOKENS,
+    query: String? = null,
 ): List<RetrievedChunk> {
-    if (chunks.isEmpty() || answerBody.isBlank()) return chunks
-    return chunks.filter { chunkSharesTokensWithAnswer(it, answerBody, minShared) }
+    if (chunks.isEmpty()) return chunks
+    if (answerBody.isBlank()) {
+        return if (outlineChunkExemptFromClaimOverlap(query)) {
+            chunks.filter { it.chunkIndex < 0 }
+        } else {
+            emptyList()
+        }
+    }
+    return chunks.filter { chunkSharesTokensWithAnswer(it, answerBody, minShared, query) }
 }

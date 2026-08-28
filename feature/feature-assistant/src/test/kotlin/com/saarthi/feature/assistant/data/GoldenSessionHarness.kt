@@ -87,20 +87,22 @@ internal fun goldenSessionRetrieve(
     attachmentsThisTurn: Boolean = false,
 ): List<RetrievedChunk> {
     val all = entities
-    val contentChunks = all.filter { it.chunkIndex >= 0 }
-    if (contentChunks.isEmpty()) return emptyList()
+    val rawContent = all.filter { it.chunkIndex >= 0 }
+    if (rawContent.isEmpty()) return emptyList()
 
-    val route = routeQuery(query, sessionFiles)
-    val queryTokens = query.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
-    val isFollowUp = !priorQuery.isNullOrBlank() && queryTokens.take(4).any { it in FOLLOW_UP_TOKENS }
+    val priorForCarry = priorQuery?.takeIf { shouldPassPriorQueryToRetrieval(query, it) }
+    val routingQuery = followUpScopeRoutingQuery(query, priorForCarry)
+    val route = routeQuery(routingQuery, sessionFiles)
+    val isFollowUp = shouldMergePriorQueryInSearch(query, priorQuery)
     val metaReason = effectiveMetaRouteReason(query, isFollowUp)
     val spanPreserving = isSpanPreservingQuery(query)
     val shape = detectRagAnswerShape(query, metaOverview = metaReason != null)
     val effectiveTopK = effectiveRetrievalTopK(query, shape, route.equalSlots)
-    val recencyUri = contentChunks.maxByOrNull { it.id }?.docUri.orEmpty()
+    val recencyUri = rawContent.maxByOrNull { it.id }?.docUri.orEmpty()
+    val docRoles = documentRolesByUri(all)
 
     if (metaReason != null && !isFollowUp && !bypassMetaForSubstanceQuery(query)) {
-        val opening = contentChunks.groupBy { it.docUri }.flatMap { (_, chunks) ->
+        val opening = rawContent.groupBy { it.docUri }.flatMap { (_, chunks) ->
             chunks.sortedBy { it.chunkIndex }.take(6).map { e ->
                 RetrievedChunk(e.text, e.docName, 0.0, e.chunkIndex, e.docUri)
             }
@@ -108,7 +110,7 @@ internal fun goldenSessionRetrieve(
         return finishGoldenRetrieve(
             opening,
             query,
-            contentChunks,
+            rawContent,
             effectiveTopK,
             boostDocUris,
             route,
@@ -116,6 +118,15 @@ internal fun goldenSessionRetrieve(
             spanPreserving,
         )
     }
+
+    val contentChunks = filterSubstanceContentChunks(
+        rawContent,
+        docRoles,
+        query,
+        route,
+        isFollowUp,
+    )
+    if (contentChunks.isEmpty()) return emptyList()
 
     val chapterSpanChunks = if (isChapterSpanQuery(query)) {
         resolveChapterSpanChunks(contentChunks, query, SPAN_ANCHOR_WINDOW)
@@ -135,7 +146,7 @@ internal fun goldenSessionRetrieve(
     val anchoredEntities = chapterSpanChunks + topicAnchored + tabularContract
 
     var effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
-        "${priorQuery.take(150)} ${route.expandedQuery}"
+        mergeFollowUpRetrievalQuery(priorQuery!!, route.expandedQuery)
     } else {
         route.expandedQuery
     }
@@ -205,6 +216,7 @@ internal fun goldenSessionRetrieve(
         ranked = finalRanked,
         pool = contentChunks,
         sectionGroupsByDoc = sectionGroupsByDoc,
+        anchorSeeds = anchoredEntities,
     )) {
         if (usedIds.add(entity.id)) {
             hits.add(entity.toRetrievedChunk(score, StructuralAnchorKind.HIERARCHICAL_SECTION))

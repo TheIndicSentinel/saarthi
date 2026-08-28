@@ -156,4 +156,27 @@ class ActiveDocScopeTest {
         )
         assertEquals(payslip.first, repo.resolveActiveDocUri(sessionId, docs))
     }
+
+    @Test
+    fun `follow-up carry scopes named file from merged prior plus current`() {
+        val payslip = "content://pay" to "February Payslip"
+        val bank = "content://bank" to "January Bank Statement"
+        val prior = "Is the salary credit mentioned in the payslip"
+        val current = "what about penalties"
+        val routingQuery = followUpScopeRoutingQuery(current, prior)
+        val route = route(
+            routingQuery,
+            docs = listOf(bank, payslip),
+            named = routeQuery(routingQuery, listOf(bank, payslip)).namedDocUris,
+        )
+        val decision = resolveRetrievalScope(
+            query = routingQuery,
+            sessionDocs = listOf(bank, payslip),
+            attachmentUris = emptyList(),
+            activeDocUri = bank.first,
+            route = route,
+        )
+        assertEquals(RetrievalScope.NAMED, decision.scope)
+        assertEquals(setOf(payslip.first), decision.restrictUris)
+    }
 }

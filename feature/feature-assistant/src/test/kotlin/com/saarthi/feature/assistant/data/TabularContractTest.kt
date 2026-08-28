@@ -63,14 +63,15 @@ class TabularContractTest {
     }
 
     @Test
-    fun `contract tolerates documents without THE SCHEDULE`() {
+    fun `contract picks amount heavy chunk without schedule`() {
         val uri = "content://nda"
         val chunks = listOf(
             chunk(uri, 0, "Penalty for breach of this clause is Rs 5 lakh."),
             chunk(uri, 1, "Term is 24 months from the effective date."),
         )
         val picked = tabularContractChunkEntities(chunks)
-        assertTrue(picked.isEmpty())
+        assertEquals(1, picked.size)
+        assertTrue(picked[0].text.contains("5 lakh"))
     }
 
     @Test
