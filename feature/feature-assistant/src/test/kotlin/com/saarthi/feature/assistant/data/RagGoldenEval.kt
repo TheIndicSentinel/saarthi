@@ -131,7 +131,12 @@ internal object GoldenFixtures {
     val tamilHoliday = GoldenDoc(
         uri = "content://tamil-holiday",
         name = "விடுமுறை.pdf",
-        text = "பள்ளி அறிவிப்பு. நாளை விடுமுறை. மாலை விழா நடைபெறும்.",
+        // Must not share அறிவிப்பு with the salary notice, and must not
+        // repeat the filename token விடுமுறை in the body: expandRetrievalQuery
+        // adds every session filename to the BM25 query, so a holiday note
+        // that says "விடுமுறை" wins a salary question ("சம்பளம் எப்போது")
+        // via that leak plus length-norm on the shorter distractor.
+        text = "பள்ளி நாள் நிகழ்ச்சி. நாளை விழா நடைபெறும். வகுப்பு இல்லை.",
     )
 
     val unreadableScan = GoldenDoc(
