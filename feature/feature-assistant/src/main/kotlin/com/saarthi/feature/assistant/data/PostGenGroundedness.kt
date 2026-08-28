@@ -5,7 +5,11 @@ import com.saarthi.core.i18n.CitationDisplayLabels
 /**
  * Wave 6 P27 — post-generation groundedness for legal/tabular replies: amounts,
  * section numbers, and "shall" obligations must appear in retrieved excerpts.
+ * Phase 3.4 — calibrated audit behind [POST_GEN_GROUNDEDNESS_AUDIT_ENABLED].
  */
+
+/** Ship gate for post-gen audit — golden harness must be green before disabling. */
+internal const val POST_GEN_GROUNDEDNESS_AUDIT_ENABLED = true
 
 internal data class PostGenGroundednessAudit(
     val ungroundedAmounts: List<String> = emptyList(),
@@ -20,6 +24,7 @@ internal fun shouldAuditPostGenGroundedness(
     query: String?,
     turnMode: RagTurnMode?,
 ): Boolean {
+    if (!POST_GEN_GROUNDEDNESS_AUDIT_ENABLED) return false
     if (query.isNullOrBlank()) return false
     if (turnMode == RagTurnMode.GENERAL_KNOWLEDGE || turnMode == RagTurnMode.PLAIN_CHAT) return false
     return shouldFilterSourcesByClaimOverlap(query, turnMode)
@@ -35,35 +40,9 @@ internal fun hasAuditableLegalClaims(text: String): Boolean =
 
 private val SHALL_CLAIM_RX = Regex("(?i)\\bshall\\b")
 
-private val CRORE_CLAIM_RX = Regex(
-    "(?i)(?:₹|Rs\\.?|INR)?\\s*([\\d,]+)\\s*(crore|crores)",
-)
-private val LAKH_CLAIM_RX = Regex(
-    "(?i)(?:₹|Rs\\.?|INR)?\\s*([\\d,]+)\\s*(lakh|lakhs|lacs)",
-)
-private val RS_CLAIM_RX = Regex(
-    "(?i)(?:₹|Rs\\.?|INR)\\s*([\\d,]+(?:\\.\\d+)?)",
-)
 private val SECTION_CLAIM_RX = Regex(
     "(?i)(?:section|sec\\.?)\\s*(\\d{1,3})|§\\s*(\\d{1,3})",
 )
-
-internal fun extractMonetarySignatures(text: String): Set<String> {
-    val sigs = LinkedHashSet<String>()
-    CRORE_CLAIM_RX.findAll(text).forEach { match ->
-        val num = normalizeAmountDigits(match.groupValues[1])
-        if (num.isNotEmpty()) sigs.add("${num}crore")
-    }
-    LAKH_CLAIM_RX.findAll(text).forEach { match ->
-        val num = normalizeAmountDigits(match.groupValues[1])
-        if (num.isNotEmpty()) sigs.add("${num}lakh")
-    }
-    RS_CLAIM_RX.findAll(text).forEach { match ->
-        val num = normalizeAmountDigits(match.groupValues[1])
-        if (num.isNotEmpty()) sigs.add("rs$num")
-    }
-    return sigs
-}
 
 internal fun extractSectionNumberClaims(text: String): Set<String> {
     val nums = LinkedHashSet<String>()
@@ -74,24 +53,8 @@ internal fun extractSectionNumberClaims(text: String): Set<String> {
     return nums
 }
 
-private fun normalizeAmountDigits(raw: String): String =
-    raw.replace(",", "").trim()
-
-internal fun isMonetarySignatureGrounded(signature: String, corpus: String): Boolean {
-    val lower = corpus.lowercase().replace(",", "")
-    return when {
-        signature.endsWith("crore") -> {
-            val num = signature.removeSuffix("crore")
-            lower.contains(num) && lower.contains("crore")
-        }
-        signature.endsWith("lakh") -> {
-            val num = signature.removeSuffix("lakh")
-            lower.contains(num) && (lower.contains("lakh") || lower.contains("lac"))
-        }
-        signature.startsWith("rs") -> lower.contains(signature.removePrefix("rs"))
-        else -> lower.contains(signature)
-    }
-}
+internal fun isMonetarySignatureGrounded(signature: String, corpus: String): Boolean =
+    corpusContainsMonetarySignature(signature, corpus)
 
 internal fun isSectionNumberGrounded(sectionNum: String, corpus: String): Boolean {
     val patterns = listOf(
@@ -117,14 +80,19 @@ internal fun hasUngroundedShallClaims(answer: String, corpus: String): Boolean {
 internal fun auditPostGenGroundedness(
     answerBody: String,
     corpus: String,
+    query: String? = null,
 ): PostGenGroundednessAudit {
     if (answerBody.isBlank() || corpus.isBlank()) {
         return PostGenGroundednessAudit()
     }
     val amounts = extractMonetarySignatures(answerBody)
         .filterNot { isMonetarySignatureGrounded(it, corpus) }
-    val sections = extractSectionNumberClaims(answerBody)
-        .filterNot { isSectionNumberGrounded(it, corpus) }
+    val sections = if (isChapterTypedQuery(query.orEmpty())) {
+        emptySet()
+    } else {
+        extractSectionNumberClaims(answerBody)
+            .filterNot { isSectionNumberGrounded(it, corpus) }
+    }
     val shall = hasUngroundedShallClaims(answerBody, corpus)
     return PostGenGroundednessAudit(
         ungroundedAmounts = amounts.toList(),
@@ -147,7 +115,7 @@ internal fun applyPostGenGroundednessGuard(
     if (!shouldAuditPostGenGroundedness(query, turnMode)) return modelText
     val body = modelText.trimEnd()
     if (!hasAuditableLegalClaims(body)) return modelText
-    val audit = auditPostGenGroundedness(body, buildRetrievalCorpus(chunks))
+    val audit = auditPostGenGroundedness(body, buildRetrievalCorpus(chunks), query)
     if (audit.isFullyGrounded) return modelText
     logRag(
         "post-gen-groundedness fail amounts=${audit.ungroundedAmounts} " +

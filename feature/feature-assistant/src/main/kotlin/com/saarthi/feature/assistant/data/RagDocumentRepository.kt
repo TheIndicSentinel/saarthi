@@ -682,6 +682,10 @@ class RagDocumentRepository @Inject constructor(
         if (isTabularAmountQuery(query)) {
             effectiveQuery += tabularAmountQueryExpansion()
         }
+        val lookupExpansion = explicitLookupLexicalExpansion(query)
+        if (lookupExpansion.isNotBlank()) {
+            effectiveQuery += " $lookupExpansion"
+        }
 
         val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
         val candidateK = featureRerankCandidatePoolSize(effectiveTopK, uniqueDocs, contentChunks.size)

@@ -251,7 +251,7 @@ internal fun applyDeterministicSourcesFooter(
         shouldAuditPostGenGroundedness(claimOverlapQuery, claimOverlapTurnMode) &&
         hasAuditableLegalClaims(body)
     ) {
-        val audit = auditPostGenGroundedness(body, buildRetrievalCorpus(chunks))
+        val audit = auditPostGenGroundedness(body, buildRetrievalCorpus(chunks), claimOverlapQuery)
         if (!audit.isFullyGrounded) {
             logRag(
                 "post-gen-groundedness fail amounts=${audit.ungroundedAmounts} " +
