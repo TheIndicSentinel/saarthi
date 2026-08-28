@@ -14,7 +14,11 @@ internal data class QueryRoute(
     val expandedQuery: String,
 )
 
-private val QUERY_SPLIT = Regex("[^\\p{L}\\p{N}]+")
+/**
+ * BM25-aligned query token split — includes `\p{M}` so Indic dependent vowel
+ * signs stay attached to base letters (same fix as [Bm25Retriever.tokenise]).
+ */
+private val QUERY_SPLIT = Regex("[^\\p{L}\\p{N}\\p{M}]+")
 
 private val FILENAME_STOPWORDS = setOf(
     "the", "this", "that", "document", "documents", "file", "files",
@@ -174,6 +178,10 @@ internal fun expandRetrievalQuery(query: String, docNames: List<String>): String
     // Hinglish / romanized-Indic bridge → English + Devanagari equivalents.
     query.lowercase().split(QUERY_SPLIT).filter { it.isNotEmpty() }.forEach { t ->
         ROMANIZED_INDIC_HINTS[t]?.let { extra.addAll(it) }
+    }
+    val rewrite = queryRewriteLexiconExpansion(query)
+    if (rewrite.isNotEmpty()) {
+        rewrite.split(QUERY_SPLIT).filter { it.isNotEmpty() }.forEach { extra.add(it) }
     }
     // Drop only short ASCII tokens (articles / "nda"). Native-script terms are
     // meaningful below 4 chars (e.g. "धारा"), so they are never length-filtered.
@@ -388,6 +396,15 @@ internal fun isListRequest(query: String): Boolean {
 internal fun detectRagAnswerShape(query: String, metaOverview: Boolean): RagAnswerShape {
     // T1-2 — structure count/list must stay LIST even when "list" triggers metaOverview.
     if (isStructureListQuery(query)) return RagAnswerShape.LIST
+    // Wave 1 P3 — chapter highlights/summary need span-shaped answers, not narrow QA.
+    if (isChapterSpanQuery(query)) {
+        val lower = query.lowercase()
+        return if (Regex("(?i)highlights?|key points?|summary|summar").containsMatchIn(lower)) {
+            RagAnswerShape.LIST
+        } else {
+            RagAnswerShape.OVERVIEW
+        }
+    }
     val trimmed = query.trim()
     val lower = trimmed.lowercase()
     val overviewish = metaOverview ||
@@ -535,14 +552,54 @@ internal fun topKForAnswerShape(shape: RagAnswerShape, equalSlots: Boolean): Int
     else -> 4
 }
 
+/** Wave 1 P2 — chapter/topic/tabular queries need a wider retrieval window. */
+internal const val SPAN_PRESERVING_TOP_K = 12
+
+/** Contiguous body chunks to keep from an anchored section window. */
+internal const val SPAN_ANCHOR_WINDOW = 10
+
+internal const val ANCHORED_SPAN_COLLAPSE_MAX = 12
+
+/**
+ * Queries that need a contiguous section/chapter/table span in the prompt,
+ * not 3 deduped fragments from a stacked anchor pass.
+ */
+internal fun isSpanPreservingQuery(query: String): Boolean {
+    if (isChapterSpanQuery(query)) return true
+    if (extractSectionRefs(query).isNotEmpty()) return true
+    if (isTabularAmountQuery(query)) return true
+    if (activeTopicCategories(query).isNotEmpty()) return true
+    if (isStructureListQuery(query)) return true
+    if (isStructureCountQuery(query)) return false
+    return hasDocumentQueryCues(query)
+}
+
+internal fun anchorWindowMax(query: String): Int =
+    if (isSpanPreservingQuery(query)) SPAN_ANCHOR_WINDOW else 5
+
+internal fun effectiveRetrievalTopK(
+    query: String,
+    shape: RagAnswerShape,
+    equalSlots: Boolean,
+): Int {
+    val base = topKForAnswerShape(shape, equalSlots)
+    return if (isSpanPreservingQuery(query)) maxOf(base, SPAN_PRESERVING_TOP_K) else base
+}
+
 /** Nudge P0 answer shape when Settings → Reply length is Short/Long (P2 #11). */
+internal fun isReplyLengthShapeLockedQuery(query: String): Boolean =
+    isStructureCountQuery(query) ||
+        isStructureListQuery(query) ||
+        isChapterSpanQuery(query)
+
 internal fun applyReplyLengthToAnswerShape(
     shape: RagAnswerShape,
     length: com.saarthi.core.i18n.ReplyLength,
+    query: String = "",
 ): RagAnswerShape = when (length) {
     com.saarthi.core.i18n.ReplyLength.SHORT -> when (shape) {
         RagAnswerShape.OVERVIEW -> RagAnswerShape.OVERVIEW_SHORT
-        RagAnswerShape.LIST -> RagAnswerShape.NARROW_QA
+        RagAnswerShape.LIST -> if (isReplyLengthShapeLockedQuery(query)) shape else RagAnswerShape.NARROW_QA
         else -> shape
     }
     com.saarthi.core.i18n.ReplyLength.LONG,
@@ -599,4 +656,255 @@ internal fun detectUnattachedExternalQuery(
         active = true,
         regimes = matched.map { it.label }.distinct(),
     )
+}
+
+// ── Wave 1: turn mode (document vs general chat lifecycle) ─────────────────
+
+/** Whether this turn should retrieve and ground in session documents. */
+internal enum class RagTurnMode {
+    /** Normal assistant chat — no retrieval (with or without indexed docs). */
+    PLAIN_CHAT,
+    /** Docs exist but this message is general / opt-out — skip retrieval. */
+    GENERAL_KNOWLEDGE,
+    /** User is asking about attached document(s). */
+    DOCUMENT_GROUNDED,
+    /** Document + general knowledge in one message — retrieve doc part; label both slices. */
+    MIXED,
+}
+
+private val SMALL_TALK_EXACT = setOf(
+    "hi", "hello", "hey", "hii", "hola", "thanks", "thank you", "ok", "okay",
+    "namaste", "नमस्ते", "नमस्कार", "हैलो", "हाय",
+)
+
+private val FOLLOW_UP_TOKENS_MODE = setOf(
+    "also", "more", "another", "continue", "elaborate", "clarify",
+    "what", "how", "why", "and", "plus", "further", "अधिक", "और", "विस्तार",
+)
+
+private val DOCUMENT_SCOPE_PHRASES = I18N_DOCUMENT_SCOPE_PHRASES
+
+private val DOCUMENT_QUERY_CUE_PATTERN = Regex(
+    "(?i)\\b(" +
+        "chapter|chapters|section|sections|schedule|annex|appendix|article|" +
+        "document|documents|file|files|pdf|attached|attachment|overview|excerpt|" +
+        "content|contents|clause|paragraph|heading|highlights?|fiduciary|" +
+        "obligation|obligations|penalt|appeal|provision|provisions|board|" +
+        "duties|rights|tabular|amount|fee|fine|jurmana|breach|notification|" +
+        "applicable|applicability|children|consent|processing|principal|" +
+        "salary|balance|statement|address|timeline|personal|धारा|अध्याय|अनुसूची|दस्तावेज|फाइल|फ़ाइल" +
+        ")\\b",
+)
+
+private val NON_TOPICAL_CHAT_PATTERN = Regex(
+    "(?i)\\b(joke|jokes|favorite color|favourite colour|your favorite)\\b",
+)
+
+private val TOPICAL_QUESTION_LEADS = setOf(
+    "what", "how", "why", "when", "where", "who", "which",
+    "is", "are", "was", "were", "does", "do", "did", "can", "should", "could",
+    "list", "explain", "tell", "describe", "give", "name", "show",
+) + I18N_TOPICAL_QUESTION_LEADS
+
+private val GENERAL_KNOWLEDGE_TOPIC_PATTERN = Regex(
+    "(?i)\\b(" +
+        "black holes?|photosynthesis|gravity|solar system|atom|molecule|evolution|" +
+        "dinosaurs|volcano|earthquake|pythagoras|newton|einstein|quantum|" +
+        "school kid|school child|5 year old|five year old|beginner" +
+        ")\\b",
+)
+
+/** Explicit user request to ignore attached documents for this turn. */
+internal fun isDocumentOptOutQuery(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+    return hasI18nDocumentOptOutCue(query) ||
+        Regex("(?i)\\bin general\\b").containsMatchIn(lower) &&
+        Regex("(?i)\\b(explain|describe|tell|what is|what are)\\b").containsMatchIn(lower)
+}
+
+internal fun hasDocumentQueryCues(query: String): Boolean {
+    val q = query.trim()
+    if (q.isEmpty()) return false
+    if (DOCUMENT_QUERY_CUE_PATTERN.containsMatchIn(q)) return true
+    if (DOCUMENT_SCOPE_PHRASES.any { q.contains(it, ignoreCase = true) }) return true
+    if (RagDocumentRepository.metaRouteReason(q) != null) return true
+    if (isStructureCountQuery(q) || isStructureListQuery(q)) return true
+    if (isTabularAmountQuery(q)) return true
+    if (extractSectionRefs(q).isNotEmpty()) return true
+    return THIS_DOC_PHRASES.any { q.contains(it, ignoreCase = true) } ||
+        WHICH_FILE_PHRASES.any { q.contains(it, ignoreCase = true) } ||
+        COMPARE_PHRASES.any { q.contains(it, ignoreCase = true) } ||
+        COMPARE_TOKENS.any { q.lowercase().split(QUERY_SPLIT).contains(it) }
+}
+
+internal fun isSmallTalkQuery(query: String): Boolean {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return false
+    val tokens = trimmed.lowercase().split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    if (tokens.size <= 2 && tokens.all { it in SMALL_TALK_EXACT }) return true
+    return tokens.size == 1 && tokens[0] in SMALL_TALK_EXACT
+}
+
+internal fun hasGeneralKnowledgeTopicCues(query: String): Boolean =
+    GENERAL_KNOWLEDGE_TOPIC_PATTERN.containsMatchIn(query)
+
+internal fun isLikelyGeneralKnowledgeWithoutDocCues(query: String): Boolean {
+    if (hasDocumentQueryCues(query)) return false
+    return hasGeneralKnowledgeTopicCues(query)
+}
+
+private val PLAIN_CHAT_IDENTITY_PATTERN = Regex(
+    "(?i)\\b(" +
+        "who are you|what are you|tell me about yourself|about yourself|about saarthi|" +
+        "what can you do|how do you work|what do you do" +
+        ")\\b",
+)
+
+private val MIXED_QUERY_BRIDGE_PATTERN = Regex(
+    "(?i)\\b(" +
+        "from the document and|from the file and|from this (document|file|pdf) and|" +
+        "in the (act|document|file|pdf) and|in this (act|document|file|pdf) and|" +
+        "document and (also|in general)|file and (also|in general)|" +
+        "act and (also|in general)|pdf and (also|in general)" +
+        ")\\b",
+)
+
+/** Identity / capability questions that stay plain chat even when docs are attached. */
+internal fun isAssistantIdentityQuery(query: String): Boolean =
+    PLAIN_CHAT_IDENTITY_PATTERN.containsMatchIn(query.trim())
+
+/**
+ * Wave 3 — query asks for both document-grounded and general-knowledge slices.
+ * Opt-out wins over mixed; unattached external regimes (T1-5) with doc cues → mixed.
+ */
+internal fun isMixedDocumentQuery(
+    query: String,
+    sessionDocNames: List<String> = emptyList(),
+): Boolean {
+    if (isDocumentOptOutQuery(query)) return false
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+
+    val docCues = hasDocumentQueryCues(query)
+    val gkTopic = hasGeneralKnowledgeTopicCues(query)
+    val compareBridge = isCompareQuery(query) || MIXED_QUERY_BRIDGE_PATTERN.containsMatchIn(lower)
+    val unattachedExternal = if (sessionDocNames.isNotEmpty()) {
+        detectUnattachedExternalQuery(query, sessionDocNames).active
+    } else {
+        false
+    }
+
+    if (docCues && (gkTopic || unattachedExternal || compareBridge)) return true
+    if (MIXED_QUERY_BRIDGE_PATTERN.containsMatchIn(lower) && (docCues || gkTopic)) return true
+    return false
+}
+
+internal fun shouldRetrieveForRagTurnMode(mode: RagTurnMode): Boolean =
+    mode == RagTurnMode.DOCUMENT_GROUNDED || mode == RagTurnMode.MIXED
+
+internal fun shouldPinDocsForRagTurnMode(mode: RagTurnMode): Boolean =
+    shouldRetrieveForRagTurnMode(mode)
+
+internal fun requiresForceGroundedDelivery(mode: RagTurnMode, retrievedNonEmpty: Boolean): Boolean =
+    mode == RagTurnMode.DOCUMENT_GROUNDED && retrievedNonEmpty
+
+internal fun isFollowUpTopicCarry(query: String, priorQuery: String): Boolean {
+    if (!isFollowUpContinuationQuery(query)) return false
+    if (hasDocumentQueryCues(priorQuery)) return true
+    return isIndexedSessionTopicalQuestion(priorQuery)
+}
+
+/**
+ * Phase 1.2 — indexed session + topical question without GK cues → retrieve,
+ * but still downstream-gated (no strong-match / Sources on weak hits).
+ */
+internal fun isIndexedSessionTopicalQuestion(query: String): Boolean {
+    if (NON_TOPICAL_CHAT_PATTERN.containsMatchIn(query)) return false
+    if (isAssistantIdentityQuery(query) || isSmallTalkQuery(query)) return false
+    if (hasGeneralKnowledgeTopicCues(query) || isDocumentOptOutQuery(query)) return false
+    if (hasAmbiguousTopicalSubjectCues(query)) return true
+    val tokens = query.lowercase().split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    if (tokens.isEmpty() || tokens.size > 24) return false
+    if (tokens.any { it in TOPICAL_QUESTION_LEADS }) return true
+    return query.contains('?')
+}
+
+internal fun isFollowUpContinuationQuery(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (Regex("(?i)\\b(explain more|explain further|tell me more|go on|continue)\\b").containsMatchIn(lower)) {
+        return true
+    }
+    val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
+    // Short continuations only — avoid hijacking standalone off-topic questions ("what's your favorite…").
+    if (tokens.size > 4) return false
+    return tokens.take(3).any { it in FOLLOW_UP_TOKENS_MODE }
+}
+
+/**
+ * Wave 1 — classify whether this turn should retrieve from session documents.
+ * Files in the chat are **available**, not **forced**, except when the user
+ * attaches this turn or names document structure/content.
+ */
+internal fun classifyRagTurnMode(
+    query: String,
+    sessionDocCount: Int,
+    attachmentsThisTurn: Boolean,
+    sessionDocNames: List<String> = emptyList(),
+    priorQuery: String? = null,
+): RagTurnMode {
+    if (sessionDocCount == 0 && !attachmentsThisTurn) {
+        return RagTurnMode.PLAIN_CHAT
+    }
+
+    if (isDocumentOptOutQuery(query)) {
+        return RagTurnMode.GENERAL_KNOWLEDGE
+    }
+
+    if (isMixedDocumentQuery(query, sessionDocNames)) {
+        return RagTurnMode.MIXED
+    }
+
+    if (isSmallTalkQuery(query) && !hasDocumentQueryCues(query)) {
+        return RagTurnMode.GENERAL_KNOWLEDGE
+    }
+
+    if (isAssistantIdentityQuery(query) && !hasDocumentQueryCues(query)) {
+        return RagTurnMode.PLAIN_CHAT
+    }
+
+    if (attachmentsThisTurn && query.trim().isNotEmpty() && !isDocumentOptOutQuery(query)) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    if (hasDocumentQueryCues(query)) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    if (!priorQuery.isNullOrBlank() && isFollowUpScopeUpgrade(query, priorQuery)) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    if (isLikelyGeneralKnowledgeWithoutDocCues(query)) {
+        return RagTurnMode.GENERAL_KNOWLEDGE
+    }
+
+    if (isFollowUpContinuationQuery(query)) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    if (!priorQuery.isNullOrBlank() && isFollowUpTopicCarry(query, priorQuery)) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    if (attachmentsThisTurn) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    if (sessionDocCount > 0 && isIndexedSessionTopicalQuestion(query)) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    // Wave 3 — indexed docs are available, not forced; ambiguous → plain chat.
+    return RagTurnMode.PLAIN_CHAT
 }

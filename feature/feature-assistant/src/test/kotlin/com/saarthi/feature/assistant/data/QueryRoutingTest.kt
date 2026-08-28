@@ -15,6 +15,18 @@ class QueryRoutingTest {
     )
 
     @Test
+    fun `devanagari filename stem matches query with combining vowel signs`() {
+        // Regression: without \p{M}, QUERY_SPLIT fragments "मूल्य" into single
+        // letters that filenameTokens drops (length < 4), so named-doc routing fails.
+        val indicDocs = listOf("content://price" to "मूल्य_Report.pdf")
+        assertEquals(setOf("content://price"), matchNamedDocs("मूल्य क्या है", indicDocs))
+        assertEquals(
+            Bm25Retriever.tokeniseDocument("मूल्य"),
+            "मूल्य".lowercase().split(Regex("[^\\p{L}\\p{N}\\p{M}]+")).filter { it.length >= 2 },
+        )
+    }
+
+    @Test
     fun `filename stem agreement matches the NDA uri`() {
         val named = matchNamedDocs("इस agreement में term क्या है", docs)
         assertEquals(setOf("content://nda"), named)
@@ -228,6 +240,39 @@ class QueryRoutingTest {
             RagAnswerShape.NARROW_QA,
             applyReplyLengthToAnswerShape(RagAnswerShape.LIST, com.saarthi.core.i18n.ReplyLength.SHORT),
         )
+    }
+
+    @Test
+    fun `reply length short keeps LIST for structure and chapter highlights`() {
+        assertEquals(
+            RagAnswerShape.LIST,
+            applyReplyLengthToAnswerShape(
+                RagAnswerShape.LIST,
+                com.saarthi.core.i18n.ReplyLength.SHORT,
+                query = "How many chapters are there",
+            ),
+        )
+        assertEquals(
+            RagAnswerShape.LIST,
+            applyReplyLengthToAnswerShape(
+                RagAnswerShape.LIST,
+                com.saarthi.core.i18n.ReplyLength.SHORT,
+                query = "Highlights from chapter VI",
+            ),
+        )
+    }
+
+    @Test
+    fun `chapter highlights with short reply keeps LIST topK`() {
+        val query = "Highlights from chapter VI"
+        val shape = applyReplyLengthToAnswerShape(
+            detectRagAnswerShape(query, metaOverview = false),
+            com.saarthi.core.i18n.ReplyLength.SHORT,
+            query = query,
+        )
+        assertEquals(RagAnswerShape.LIST, shape)
+        assertEquals(6, topKForAnswerShape(shape, equalSlots = false))
+        assertEquals(SPAN_PRESERVING_TOP_K, effectiveRetrievalTopK(query, shape, equalSlots = false))
     }
 
     @Test

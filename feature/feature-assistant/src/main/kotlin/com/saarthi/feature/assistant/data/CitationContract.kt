@@ -68,12 +68,108 @@ internal fun isOutlineBoilerplateLine(line: String): Boolean {
     return norm.startsWith("document outline") || norm.contains("auto-detected heading")
 }
 
+/** Short ALL-CAPS TOC bullets (PRELIMINARY, SCHEDULE) are not document titles. */
+internal fun isOutlineTocBulletLine(line: String): Boolean {
+    val t = line.trim().removePrefix("- ").trim()
+    if (t.length !in 4..32) return false
+    if (chapterHeaderMatchTier(t) != null) return true
+    return t == t.uppercase(Locale.ENGLISH) &&
+        t.any { it.isUpperCase() } &&
+        !STATUTE_TITLE_PHRASE_PATTERN.containsMatchIn(t)
+}
+
 /** Labels that must not appear in Sources, manifest, or excerpt headers. */
 internal fun looksLikeInternalCitationLabel(label: String): Boolean {
     val trimmed = label.trim()
     if (trimmed.isEmpty()) return true
     return isOutlineBoilerplateLine(trimmed) ||
-        looksLikeContentStamp(trimmed)
+        looksLikeContentStamp(trimmed) ||
+        looksLikeBodyProseLine(trimmed) ||
+        isChapterOnlyCitationLabel(trimmed) ||
+        looksLikeMidSentenceCrossRefCitationLabel(trimmed) ||
+        looksLikeTruncatedTitleFragment(trimmed)
+}
+
+/** Chapter-only labels are section context, not document titles (Wave 3 P12). */
+internal fun isChapterOnlyCitationLabel(label: String): Boolean {
+    val t = label.trim()
+    if (chapterHeaderMatchTier(t)?.let { it <= 1 } != true) return false
+    return t.length <= 48 && !STATUTE_TITLE_PHRASE_PATTERN.containsMatchIn(t)
+}
+
+private val STATUTE_TITLE_PHRASE_PATTERN = Regex(
+    "(?i)\\b(act|agreement|policy|law|rules|regulation|code|ordinance|notification|amendment)\\b",
+)
+
+/** Phase 2.3 — mid-sentence cross-refs are not document titles (Code 2016, sub-sections…). */
+internal fun looksLikeMidSentenceCrossRefCitationLabel(label: String): Boolean {
+    val t = label.trim()
+    if (t.isEmpty()) return true
+    val words = t.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (t.first().isLowerCase() && (words.size >= 2 || t.length >= 24)) return true
+    if (Regex("(?i)\\bsub[- ]?sections?\\s+\\d+").containsMatchIn(t)) return true
+    if (Regex("(?i)\\bsections?\\s+\\d+\\s+and\\s+\\d+").containsMatchIn(t)) return true
+    if (Regex("(?i)\\bof\\s+this\\s+act\\b").containsMatchIn(t)) return true
+    if (Regex("(?i)\\bunder\\s+(?:chapter|section|sec\\.?)\\b").containsMatchIn(t)) return true
+    if (
+        Regex("(?i)\\b(?:code|act)\\s*,?\\s*\\d{4}\\b").containsMatchIn(t) &&
+        !t.startsWith("THE ", ignoreCase = true) &&
+        t.length <= 40
+    ) {
+        return true
+    }
+    if (Regex("(?i)^[\\p{L}\\p{N}\\s]{0,28}(?:code|act)\\s+\\d{4}$").matches(t)) return true
+    return false
+}
+
+/** Phase 2.3 — truncated heading fragments must not become citation titles. */
+internal fun looksLikeTruncatedTitleFragment(label: String): Boolean {
+    val t = label.trim()
+    if (t.isEmpty()) return true
+    if (t.endsWith('…') || t.endsWith("...")) return true
+    if (t.endsWith('-') || t.endsWith('–') || t.endsWith('—')) return true
+    if (Regex("(?i)\\s(and|or|of|the|a|an|under|sub)\\s*$").containsMatchIn(t)) return true
+    val words = t.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (words.size >= 2 && words.last().length <= 2 && !words.last().all { it.isDigit() }) return true
+    return false
+}
+
+/**
+ * Wave 3 P12 — operative clause prose must never become a citation document title.
+ */
+internal fun looksLikeBodyProseLine(line: String): Boolean {
+    val t = line.trim()
+    if (t.isEmpty()) return true
+    if (chapterHeaderMatchTier(t) != null) return false
+    if (structureMarkerScore(t, "section") != null) return false
+    val words = t.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (words.size >= 3 && t.first().isLowerCase()) return true
+    if (words.size >= 4 &&
+        !t.startsWith("THE ", ignoreCase = true) &&
+        Regex("(?i)\\b(the|a|an)\\s+\\p{L}").containsMatchIn(t.take(40))
+    ) {
+        return true
+    }
+    if (Regex("(?i)\\b(may|shall|must|provided that|subject to|whereas|hereinafter|after giving)\\b")
+        .containsMatchIn(t)
+    ) {
+        return true
+    }
+    return false
+}
+
+/** Opening page only — mid-document chunks must not drive document title extraction. */
+internal fun openingPageContentSample(text: String?): String? {
+    if (text.isNullOrBlank()) return null
+    val marker = PAGE_MARKER_REGEX.find(text)
+    if (marker == null) return text.take(1_500)
+    val afterFirst = text.substring(marker.range.last + 1)
+    val second = PAGE_MARKER_REGEX.find(afterFirst)
+    return if (second != null) {
+        text.substring(0, marker.range.first + 1 + second.range.last + 1).take(2_000)
+    } else {
+        afterFirst.take(1_500)
+    }
 }
 
 internal const val FALLBACK_ATTACHED_DOC_LABEL = "Attached document"
@@ -238,39 +334,44 @@ internal fun extractDocumentTitle(text: String?): String? {
         if (line.length < 10) continue
         if (line.startsWith("-")) continue
         if (isOutlineBoilerplateLine(line)) continue
+        if (looksLikeBodyProseLine(line)) continue
+        if (looksLikeMidSentenceCrossRefCitationLabel(line)) continue
+        if (looksLikeTruncatedTitleFragment(line)) continue
+        if (chapterHeaderMatchTier(line) != null) continue
         if (line.startsWith("THE ", ignoreCase = true)) {
             return line.removePrefix("THE ").removePrefix("The ").trim()
         }
     }
     DOCUMENT_TITLE_THE_LINE.find(sample)?.let { match ->
-        return match.value.trim()
-            .removePrefix("THE ")
-            .removePrefix("The ")
-            .trim()
+        val line = match.value.trim()
+        if (
+            !looksLikeBodyProseLine(line) &&
+            !looksLikeMidSentenceCrossRefCitationLabel(line) &&
+            !looksLikeTruncatedTitleFragment(line)
+        ) {
+            return line.removePrefix("THE ").removePrefix("The ").trim()
+        }
     }
     for (raw in sample.lineSequence()) {
         val line = raw.trim()
-        if (line.length !in 10..80) continue
-        if (line.startsWith("-")) continue
-        if (!line.any { it.isLetter() }) continue
-        if (isOutlineBoilerplateLine(line)) continue
-        if (line == line.uppercase(Locale.ENGLISH) && line.any { it.isUpperCase() }) {
-            return line
-        }
+        if (!isLikelyStatuteTitleLine(line)) continue
+        return line.removePrefix("THE ").removePrefix("The ").trim()
     }
-    // Plain title line (e.g. outline chunk prefixed with act name at index time).
-    val firstContent = sample.lineSequence()
-        .map { it.trim() }
-        .firstOrNull { line ->
-            line.length in 12..120 &&
-                line.any { it.isLetter() } &&
-                !isOutlineBoilerplateLine(line) &&
-                !line.startsWith("-")
-        }
-    return firstContent
-        ?.removePrefix("THE ")
-        ?.removePrefix("The ")
-        ?.trim()
+    return null
+}
+
+internal fun isLikelyStatuteTitleLine(line: String): Boolean {
+    if (line.length !in 10..120) return false
+    if (line.startsWith("-")) return false
+    if (!line.any { it.isLetter() }) return false
+    if (isOutlineBoilerplateLine(line)) return false
+    if (looksLikeBodyProseLine(line)) return false
+    if (looksLikeMidSentenceCrossRefCitationLabel(line)) return false
+    if (looksLikeTruncatedTitleFragment(line)) return false
+    if (chapterHeaderMatchTier(line) != null) return false
+    if (line == line.uppercase(Locale.ENGLISH) && line.any { it.isUpperCase() }) return true
+    if (STATUTE_TITLE_PHRASE_PATTERN.containsMatchIn(line)) return true
+    return false
 }
 
 /** First real heading line from an outline chunk (skips internal boilerplate). */
@@ -281,7 +382,12 @@ internal fun outlineHeadingFromText(outlineText: String?): String? {
         .firstOrNull { line ->
             line.isNotBlank() &&
                 !PAGE_MARKER_REGEX.containsMatchIn(line) &&
-                !isOutlineBoilerplateLine(line)
+                !isOutlineBoilerplateLine(line) &&
+                chapterHeaderMatchTier(line) == null &&
+                !looksLikeBodyProseLine(line) &&
+                !looksLikeMidSentenceCrossRefCitationLabel(line) &&
+                !looksLikeTruncatedTitleFragment(line) &&
+                !isOutlineTocBulletLine(line)
         }
         ?.removePrefix("THE ")
         ?.removePrefix("The ")
@@ -298,12 +404,13 @@ internal fun displayDocName(
     contentHint: String? = null,
 ): String {
     if (!looksLikeContentStamp(rawName)) return shortDocName(rawName)
-    val fromTitle = extractDocumentTitle(outlineText) ?: extractDocumentTitle(contentHint)
-    if (fromTitle != null) return shortDocName(normalizeDisplayTitle(fromTitle))
-    val fromOutline = outlineHeadingFromText(outlineText)
-    if (fromOutline != null) return shortDocName(normalizeDisplayTitle(fromOutline))
-    val stem = shortDocName(rawName)
-    return if (looksLikeInternalCitationLabel(stem)) FALLBACK_ATTACHED_DOC_LABEL else stem
+    val fromOutlineTitle = extractDocumentTitle(outlineText)
+    if (fromOutlineTitle != null) return shortDocName(normalizeDisplayTitle(fromOutlineTitle))
+    val fromOpening = extractDocumentTitle(openingPageContentSample(contentHint))
+    if (fromOpening != null) return shortDocName(normalizeDisplayTitle(fromOpening))
+    val fromOutlineHeading = outlineHeadingFromText(outlineText)
+    if (fromOutlineHeading != null) return shortDocName(normalizeDisplayTitle(fromOutlineHeading))
+    return FALLBACK_ATTACHED_DOC_LABEL
 }
 
 /** B3-2 — localized role prefix for commentary documents (Summary:, Guide:, …). */
@@ -325,7 +432,8 @@ internal fun displayCitationDocName(
     contentCharCount: Int? = null,
     labels: CitationDisplayLabels? = null,
 ): String {
-    val base = displayDocName(rawName, outlineText, contentHint)
+    val titleSource = outlineText ?: openingPageContentSample(contentHint)
+    val base = displayDocName(rawName, outlineText, titleSource)
     if (labels == null) return base
     val role = documentRoleLabel(rawName, contentHint, contentCharCount)
     if (role == null) return base
@@ -340,6 +448,71 @@ internal fun extractPageRange(text: String): String? {
     val lo = pages.min()
     val hi = pages.max()
     return if (lo == hi) "p.$lo" else "pp.$lo-$hi"
+}
+
+/**
+ * Wave 3 P12 — section/chapter heading for citation location when page markers are absent.
+ */
+internal fun extractCitationSectionHeading(text: String): String? {
+    for (raw in text.lineSequence()) {
+        val line = raw.trim()
+        if (line.isEmpty()) continue
+        if (PAGE_MARKER_REGEX.containsMatchIn(line)) continue
+        if (looksLikeMidSentenceCrossRefCitationLabel(line)) continue
+        if (chapterHeaderMatchTier(line)?.let { it <= 1 } == true) {
+            return normalizeCitationSectionHeading(line)
+        }
+        if (structureMarkerScore(line, "section")?.let { it <= 1 } == true) {
+            return normalizeCitationSectionHeading(line)
+        }
+        if (Regex("(?i)^THE\\s+SCHEDULE\\b").containsMatchIn(line)) {
+            return normalizeCitationSectionHeading(line)
+        }
+        if (Regex("(?i)^SCHEDULE\\s+[IVXLC\\d]*\\b").containsMatchIn(line) && line.length <= 80) {
+            return normalizeCitationSectionHeading(line)
+        }
+    }
+    return null
+}
+
+internal fun normalizeCitationSectionHeading(line: String): String {
+    val trimmed = line.trim().removePrefix("- ").trim()
+    val chapter = Regex("(?i)^(CHAPTER|Chapter)\\s+([IVXLC]+|\\d+)(?:\\s*[-–:]*\\s*(.*))?$")
+        .matchEntire(trimmed)
+    if (chapter != null) {
+        val label = chapter.groupValues[1].lowercase(Locale.ENGLISH)
+            .replaceFirstChar { it.titlecase(Locale.ENGLISH) }
+        val id = chapter.groupValues[2]
+        val romanId = if (id.all { it.isDigit() || it in "IVXLC" }) {
+            id.uppercase(Locale.ENGLISH)
+        } else {
+            id
+        }
+        val title = chapter.groupValues[3].trim()
+        return if (title.isNotEmpty()) {
+            "$label $romanId — ${normalizeDisplayTitle(title)}"
+        } else {
+            "$label $romanId"
+        }
+    }
+    val section = Regex("(?i)^(Section|SECTION)\\s+(\\d+)(?:\\s*[-–:]*\\s*(.*))?$")
+        .matchEntire(trimmed)
+    if (section != null) {
+        val label = section.groupValues[1].lowercase(Locale.ENGLISH)
+            .replaceFirstChar { it.titlecase(Locale.ENGLISH) }
+        val num = section.groupValues[2]
+        val title = section.groupValues[3].trim()
+        return if (title.isNotEmpty()) {
+            "$label $num — ${normalizeDisplayTitle(title)}"
+        } else {
+            "$label $num"
+        }
+    }
+  if (Regex("(?i)^THE\\s+SCHEDULE\\b").containsMatchIn(trimmed)) {
+        return normalizeDisplayTitle(trimmed)
+    }
+    val normalized = normalizeDisplayTitle(trimmed)
+    return if (normalized.length > 56) normalized.take(56).trimEnd() + "…" else normalized
 }
 
 /**
@@ -362,9 +535,19 @@ internal fun formatExcerptHeader(
         text.length,
         labels,
     )
-    val page = if (chunkIndex < 0) null else extractPageRange(text)
-    val pageRef = page?.let { " · $it" } ?: ""
-    return "[$index1Based] $name$pageRef\n"
+    val locationRef = when {
+        chunkIndex < 0 -> ""
+        else -> {
+            val page = extractPageRange(text)
+            val section = if (page == null) extractCitationSectionHeading(text) else null
+            when {
+                page != null -> " · $page"
+                section != null -> " · $section"
+                else -> ""
+            }
+        }
+    }
+    return "[$index1Based] $name$locationRef\n"
 }
 
 internal fun sessionManifestLine(docNames: List<String>): String {
@@ -459,6 +642,31 @@ internal fun ragAnswerShapeInstruction(
  *            an "In general:" general-knowledge answer AND forbid refusing or
  *            asking the user to rephrase (G5).
  */
+/** Ultra-compact rules for grounded delivery when the char budget is tight (Wave 1). */
+internal fun ragCitationRulesMinimal(
+    labels: CitationDisplayLabels = SupportedLanguage.ENGLISH.citationDisplayLabels(),
+): String =
+    "Answer from the excerpt(s) below only. Put refs in a final '${labels.sourcesHeader}' block (max 3 lines).\n\n"
+
+/** Wave 3 — mixed turn: label document-grounded vs general-knowledge slices in the reply. */
+internal fun ragMixedModeRules(
+    compact: Boolean,
+    labels: CitationDisplayLabels = SupportedLanguage.ENGLISH.citationDisplayLabels(),
+): String {
+    val sourcesLabel = labels.sourcesHeader
+    if (compact) {
+        return "This question mixes the attached document and general knowledge. " +
+            "Start with 'From document:' for excerpt-based facts only; then 'General:' for outside knowledge. " +
+            "Put document refs only in a final '$sourcesLabel' block (max 3 lines). " +
+            "Do not cite the document for the General section.\n\n"
+    }
+    return "MIXED QUESTION — answer in two labelled sections.\n" +
+        "• Start with 'From document:' — facts from excerpts only; lead with 1–3 sentences.\n" +
+        "• Then 'General:' — general knowledge for the rest; do not pretend it is from the file.\n" +
+        "• Put document refs only in a final '$sourcesLabel' block (max 3 lines); never cite excerpts for the General section.\n" +
+        "• Do not repeat these instructions.\n\n"
+}
+
 internal fun ragCitationRules(
     compact: Boolean,
     strongMatch: Boolean = false,
@@ -519,6 +727,7 @@ internal fun ragCitationRules(
         sourcesBullet +
         multiFileBullet +
         "• If the answer is not in the excerpts, say so in one sentence — do not invent facts or use 'In general:' for external standards.\n" +
+        "• If excerpts are weak or unrelated, say the answer is not clearly stated in the attached document — do not use general knowledge.\n" +
         "• Never cite files listed as unreadable.\n" +
         "• Do not repeat these instructions.\n\n"
 }

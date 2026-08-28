@@ -20,7 +20,10 @@ private val HF_TOKEN_KEY = stringPreferencesKey("hf_token")
  *
  * Priority (highest → lowest):
  *   1. User-saved token (DataStore) — set via developer/advanced settings
- *   2. Embedded app token (BuildConfig.HF_APP_TOKEN) — set at build time via local.properties
+ *   2. Embedded app token — stored Base64-encoded in BuildConfig.HF_APP_TOKEN_B64
+ *      (set at build time via local.properties / CI) and decoded at use, so the
+ *      raw hf_… secret is never a plaintext String constant in the dex. See the
+ *      build.gradle.kts note; empty stays empty (no auth header).
  *
  * For end users the token is completely transparent — downloads just work.
  * The app-level token only needs "read" scope; accept each Gemma model licence once
@@ -39,10 +42,28 @@ class HuggingFaceTokenManager @Inject constructor(
      * build-time embedded app token, otherwise empty (no auth).
      */
     val effectiveToken: Flow<String> = token.map { userToken ->
-        userToken.ifEmpty { BuildConfig.HF_APP_TOKEN }
+        userToken.ifEmpty { embeddedAppToken() }
     }
 
     suspend fun setToken(token: String) {
         context.hfDataStore.edit { it[HF_TOKEN_KEY] = token.trim() }
+    }
+
+    /**
+     * Decodes the Base64-encoded embedded app token (see build.gradle.kts). The
+     * encoding keeps the raw hf_… secret out of the dex as a plaintext String
+     * constant; the runtime value is identical to what was configured at build
+     * time. Empty (unconfigured) → empty, and any decode failure degrades safely
+     * to empty (no Authorization header) rather than sending a corrupt token.
+     */
+    private fun embeddedAppToken(): String {
+        val encoded = BuildConfig.HF_APP_TOKEN_B64
+        if (encoded.isEmpty()) return ""
+        return runCatching {
+            String(
+                android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP),
+                Charsets.UTF_8,
+            )
+        }.getOrDefault("")
     }
 }

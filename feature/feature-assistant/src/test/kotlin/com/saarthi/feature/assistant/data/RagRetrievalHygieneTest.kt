@@ -10,7 +10,8 @@ class RagRetrievalHygieneTest {
       uri: String,
       index: Int,
       score: Double,
-  ) = RetrievedChunk("text $index", "doc.pdf", score, index, uri)
+      structuralAnchor: StructuralAnchorKind? = null,
+  ) = RetrievedChunk("text $index", "doc.pdf", score, index, uri, structuralAnchor = structuralAnchor)
 
   @Test
   fun `collapseRedundantChunkRuns keeps two per adjacent run`() {
@@ -36,6 +37,34 @@ class RagRetrievalHygieneTest {
     val out = collapseRedundantChunkRuns(listOf(outline, body))
     assertEquals(2, out.size)
     assertEquals(-1, out.first().chunkIndex)
+  }
+
+  @Test
+  fun `collapse preserves anchored span up to cap when span preserving`() {
+    val hits = (10..21).map {
+      chunk("a", it, 0.0, StructuralAnchorKind.CHAPTER_SPAN)
+    }
+    val out = collapseRedundantChunkRuns(
+        hits,
+        preserveAnchoredSpans = true,
+        anchoredSpanMax = ANCHORED_SPAN_COLLAPSE_MAX,
+    )
+    assertEquals(12, out.size)
+    assertEquals(10, out.first().chunkIndex)
+    assertEquals(21, out.last().chunkIndex)
+  }
+
+  @Test
+  fun `effectiveRetrievalTopK widens narrow QA for chapter span queries`() {
+    val query = "highlights of chapter 3 in the attached document"
+    assertTrue(isSpanPreservingQuery(query))
+    assertEquals(SPAN_PRESERVING_TOP_K, effectiveRetrievalTopK(query, RagAnswerShape.NARROW_QA, false))
+  }
+
+  @Test
+  fun `effectiveRetrievalTopK stays narrow for plain chat shape`() {
+    val query = "what is photosynthesis"
+    assertEquals(4, effectiveRetrievalTopK(query, RagAnswerShape.NARROW_QA, false))
   }
 
   @Test

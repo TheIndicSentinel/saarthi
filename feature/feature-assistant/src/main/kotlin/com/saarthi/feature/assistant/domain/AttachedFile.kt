@@ -20,6 +20,11 @@ data class AttachedFile(
     val error: String? = null,
     /** True while extract is in flight — chip shows indexing, send is blocked. */
     val indexing: Boolean = false,
+    /**
+     * Wave 4 P20 — when PDF/page/char caps truncated indexing, surfaced in the
+     * RAG manifest so the model does not deny content that was never searched.
+     */
+    val indexTruncationNotice: String? = null,
 ) {
     val indexState: AttachmentIndexState
         get() = when {

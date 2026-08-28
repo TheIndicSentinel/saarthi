@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -24,23 +25,44 @@ android {
     }
 
     defaultConfig {
-        // Embedded read-only HuggingFace token — enables seamless Gemma model downloads.
-        // Users never see or enter this; ModelDownloadManager uses it for gated repos.
+        // Embedded read-only HuggingFace token — enables seamless download of the
+        // gated Gemma 3n repos (google/gemma-3n-*). The litert-community/* repos
+        // are public and need no auth; only the two google/* entries in
+        // ModelCatalog actually require a token.
         //   local.properties  →  hf.app.token=hf_xxxxxxxxxxxxxxxxxxxxxxxx
         //   CI secret         →  env HF_APP_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxx
+        //
+        // SECURITY: do NOT embed the raw token as a plaintext BuildConfig String
+        // constant — R8 inlines String constants into the dex, so `strings <apk>`
+        // trivially recovers an `hf_...`-prefixed secret. Store a Base64-encoded
+        // form and decode at runtime (HuggingFaceTokenManager.embeddedAppToken).
+        // This is defense-in-depth against trivial STATIC extraction only; it is
+        // not full remediation (a runtime attacker can still recover the token).
+        // The complete fix (per-user token / short-lived proxy) is tracked
+        // separately. Empty stays empty → no Authorization header is sent.
         val hfAppToken = localProps.getProperty("hf.app.token")
             ?: System.getenv("HF_APP_TOKEN")
             ?: ""
-        buildConfigField("String", "HF_APP_TOKEN", "\"$hfAppToken\"")
+        val hfAppTokenB64 = if (hfAppToken.isEmpty()) {
+            ""
+        } else {
+            Base64.getEncoder().encodeToString(hfAppToken.toByteArray(Charsets.UTF_8))
+        }
+        buildConfigField("String", "HF_APP_TOKEN_B64", "\"$hfAppTokenB64\"")
     }
 
-    // Debug log → public Downloads. saarthi_debug.log is how we diagnose RAG
-    // (path, boost, heading, scores) on a physical phone. Debug APKs write it
-    // to Downloads by default; Play/release keeps it app-private. Override
-    // either way with -Psaarthi.publicLog=true|false.
+    // Debug log → saarthi_debug.log is how we diagnose RAG (path, boost,
+    // heading, scores) on a physical phone. It ALWAYS lands app-private by
+    // default now (both debug and release) — readable via adb / Android Studio
+    // and attachable through the Support screen, but never written to the
+    // world-readable public Downloads folder where other apps could read
+    // filenames / response previews / device info. A developer who needs the
+    // file in public Downloads (e.g. a non-technical beta tester grabbing it
+    // with a file manager while onboarding is stuck) opts in explicitly per
+    // build with -Psaarthi.publicLog=true.
     buildTypes {
         named("debug") {
-            val publicLog = (project.findProperty("saarthi.publicLog") as String?)?.toBoolean() ?: true
+            val publicLog = (project.findProperty("saarthi.publicLog") as String?)?.toBoolean() ?: false
             buildConfigField("boolean", "PUBLIC_DEBUG_LOG", "$publicLog")
         }
         named("release") {

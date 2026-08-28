@@ -16,6 +16,7 @@ import com.saarthi.core.memory.db.ChatSessionDao
 import com.saarthi.core.memory.db.ChatSessionEntity
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.ConversationEntity
+import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.core.memory.domain.MemoryRepository
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
@@ -101,6 +102,7 @@ class ChatRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val conversationDao: ConversationDao,
     private val chatSessionDao: ChatSessionDao,
+    private val transactionRunner: DatabaseTransactionRunner,
     private val memoryRepository: MemoryRepository,
     private val languageManager: LanguageManager,
     private val inferenceEngine: InferenceEngine,
@@ -147,6 +149,10 @@ class ChatRepositoryImpl @Inject constructor(
     private var lastCitationOutlineByDoc: Map<String, String> = emptyMap()
     @Volatile
     private var lastCitationMultiFileFair: Boolean = false
+    @Volatile
+    private var lastCitationQuery: String = ""
+    @Volatile
+    private var lastCitationTurnMode: RagTurnMode = RagTurnMode.PLAIN_CHAT
 
     // LanguageManager.selectedLanguage is now a StateFlow that collects DataStore eagerly.
     // Reading .value gives the current language without any async race condition.
@@ -174,7 +180,9 @@ class ChatRepositoryImpl @Inject constructor(
                 sessionId,
                 ConversationDao.UI_HISTORY_LIMIT,
             )
-            if (saved.isNotEmpty()) _history.value = saved.map { it.toChatMessage() }
+            if (saved.isNotEmpty()) {
+                _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(saved.map { it.toChatMessage() })
+            }
             sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         }
     }
@@ -202,7 +210,7 @@ class ChatRepositoryImpl @Inject constructor(
             sessionId,
             ConversationDao.UI_HISTORY_LIMIT,
         )
-        _history.value = messages.map { it.toChatMessage() }
+        _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(messages.map { it.toChatMessage() })
         sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         // Reset engine session to prevent stale KV cache from previous chat
         runCatching { inferenceEngine.resetSession() }
@@ -212,13 +220,17 @@ class ChatRepositoryImpl @Inject constructor(
         // Cascade-delete every artefact tied to this chat. Without this,
         // memories/embeddings from a deleted chat would persist and surface
         // in future chats — that's the "states-in-India answer mentions
-        // groceries" bug class users reported.
-        conversationDao.deleteBySession(sessionId)
-        memoryRepository.deleteForSession(sessionId)
-        ragRepository.deleteForSession(sessionId)
+        // groceries" bug class users reported. Wrapped in a single Room
+        // transaction so a crash/SQLite error mid-cascade can't leave orphaned
+        // rows (e.g. messages gone but RAG chunks remaining).
+        transactionRunner.runInTransaction {
+            conversationDao.deleteBySession(sessionId)
+            memoryRepository.deleteForSession(sessionId)
+            ragRepository.deleteForSession(sessionId)
+            chatSessionDao.deleteById(sessionId)
+        }
         indexedDocsByUri.remove(sessionId)
         sessionHasIndexedDocs = false
-        chatSessionDao.deleteById(sessionId)
         if (_currentSessionId.value == sessionId) {
             val remaining = chatSessionDao.getAll()
             if (remaining.isNotEmpty()) {
@@ -380,16 +392,19 @@ class ChatRepositoryImpl @Inject constructor(
                     // Parse markers out of the raw accumulated text
                     val raw = accumulated.toString()
                     val parsed = ResponseMarkerParser.parse(raw)
+                    val citationLabels = currentLanguage.citationDisplayLabels()
                     val groundedText = if (lastCitationGrounded && lastCitationChunks.isNotEmpty()) {
                         applyDeterministicSourcesFooter(
                             parsed.cleanText,
                             lastCitationChunks,
                             lastCitationOutlineByDoc,
-                            currentLanguage.citationDisplayLabels(),
+                            citationLabels,
                             multiFileFairSources = lastCitationMultiFileFair,
+                            claimOverlapQuery = lastCitationQuery,
+                            claimOverlapTurnMode = lastCitationTurnMode,
                         )
                     } else {
-                        parsed.cleanText
+                        stripModelSourcesBlock(parsed.cleanText, citationLabels)
                     }
                     logRag(
                         ragGenerationLogLine(
@@ -493,18 +508,53 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun clearHistory() {
         val sessionId = _currentSessionId.value
         _history.update { emptyList() }
-        conversationDao.deleteBySession(sessionId)
         // Clearing history is also "wipe this chat's brain" — drop the
-        // session's memories so the next reply starts clean. Without this,
-        // the model could still see facts from messages the user just
-        // cleared.
-        memoryRepository.deleteForSession(sessionId)
-        ragRepository.deleteForSession(sessionId)
+        // session's messages, memories and RAG chunks together so the next
+        // reply starts clean and the model can't still see facts the user just
+        // cleared. Atomic so a mid-cascade failure can't leave a half-wiped
+        // chat (e.g. messages cleared but memories still present).
+        transactionRunner.runInTransaction {
+            conversationDao.deleteBySession(sessionId)
+            memoryRepository.deleteForSession(sessionId)
+            ragRepository.deleteForSession(sessionId)
+            chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
+        }
         indexedDocsByUri.remove(sessionId)
         sessionHasIndexedDocs = false
-        chatSessionDao.updateTitleAndTimestamp(sessionId, "New Chat", System.currentTimeMillis())
         // Reset engine session so cleared chat starts fresh
         runCatching { inferenceEngine.resetSession() }
+    }
+
+    override suspend fun deleteAllData() {
+        _history.update { emptyList() }
+        val sessions = chatSessionDao.getAll()
+        // Cascade every real chat session through the SAME per-session
+        // primitives used by deleteSession/clearHistory, so RAG token caches and
+        // active-doc state are invalidated correctly (not just the Room rows).
+        // Include the current session id too, in case it isn't yet a
+        // chat_sessions row (e.g. the initial "default" pseudo-session).
+        val sessionIds = (sessions.map { it.id } + _currentSessionId.value).toSet()
+        // Whole wipe in one transaction: either every session's artefacts AND
+        // the USER_SCOPE profile are gone, or nothing is — no partially-wiped
+        // state if a delete fails partway through.
+        transactionRunner.runInTransaction {
+            for (id in sessionIds) {
+                conversationDao.deleteBySession(id)
+                memoryRepository.deleteForSession(id)
+                ragRepository.deleteForSession(id)
+            }
+            // clearHistory/deleteSession never touch the durable cross-chat
+            // profile memory; a true "delete all" must clear USER_SCOPE too.
+            memoryRepository.deleteForSession(MemoryRepository.USER_SCOPE)
+            for (session in sessions) {
+                chatSessionDao.deleteById(session.id)
+            }
+        }
+        indexedDocsByUri.clear()
+        sessionHasIndexedDocs = false
+        runCatching { inferenceEngine.resetSession() }
+        // Leave the user on a clean, valid empty chat.
+        createSession()
     }
 
     override suspend fun exportAllData(): File = withContext(Dispatchers.IO) {
@@ -752,12 +802,22 @@ class ChatRepositoryImpl @Inject constructor(
             .onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
         val activeDocUri = ragRepository.resolveActiveDocUri(sessionId, sessionDocs)
+        val priorUserQuery = _history.value
+            .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
+            .dropLast(1)  // exclude the current turn being built
+            .lastOrNull()
+            ?.content
+            ?.take(200)
+        val priorForCarry = priorUserQuery?.takeIf {
+            attachments.isEmpty() && shouldPassPriorQueryToRetrieval(ragQuery, it)
+        }
+        val retrievalRoutingQuery = followUpScopeRoutingQuery(ragQuery, priorForCarry)
         val retrievalRoute = routeQuery(
-            ragQuery,
+            retrievalRoutingQuery,
             sessionDocs.map { it.uri to it.name },
         )
         val scopeDecision = resolveRetrievalScope(
-            query = ragQuery,
+            query = retrievalRoutingQuery,
             sessionDocs = sessionDocs.map { it.uri to it.name },
             attachmentUris = attachmentUris,
             activeDocUri = activeDocUri,
@@ -773,13 +833,21 @@ class ChatRepositoryImpl @Inject constructor(
                 effectiveMetaRouteReason(ragQuery, isFollowUp = false) != null,
             ),
             responseStyleManager.style.value.length,
+            query = ragQuery,
         )
         val unattachedExternal = detectUnattachedExternalQuery(
             ragQuery,
             sessionDocs.map { it.name },
         )
         val tabularAmountQuery = isTabularAmountQuery(ragQuery)
-        val retrievalTopK = topKForAnswerShape(ragAnswerShape, retrievalRoute.equalSlots)
+        val ragTurnMode = classifyRagTurnMode(
+            query = ragQuery,
+            sessionDocCount = sessionDocs.size,
+            attachmentsThisTurn = attachments.isNotEmpty(),
+            sessionDocNames = sessionDocs.map { it.name },
+            priorQuery = priorUserQuery,
+        )
+        val retrievalTopK = effectiveRetrievalTopK(ragQuery, ragAnswerShape, retrievalRoute.equalSlots)
         sessionHasIndexedDocs = sessionDocs.isNotEmpty()
         // NOTE: knowledge packs (Kisan etc.) are intentionally NOT merged
         // into the main chat here. Packs are a fully separate, modular
@@ -787,32 +855,33 @@ class ChatRepositoryImpl @Inject constructor(
         // them into the persona-driven main chat caused pack context to
         // bleed into normal conversations. The main chat only ever
         // retrieves the user's OWN attached documents for this session.
-        // Last completed user turn — passed to the retriever for two uses:
-        // (a) follow-up expansion: "also list X" → BM25("prior X also list X")
-        // (b) zero-hit retry: if BM25 finds nothing for the current query,
-        //     retry with prior query to surface the same evidence region.
-        val priorUserQuery = _history.value
-            .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
-            .dropLast(1)  // exclude the current turn being built
-            .lastOrNull()
-            ?.content
-            ?.take(200)
-
-        val retrieved = runCatching {
-            ragRepository.search(
-                sessionId = sessionId,
-                query = ragQuery,
-                topK = retrievalTopK,
-                boostDocUris = boostDocUris,
-                restrictDocUris = restrictDocUris,
-                retrievalScopeLabel = scopeDecision.scope.name,
-                priorQuery = priorUserQuery?.takeIf {
-                    attachments.isEmpty() && it != ragQuery && it.length > 8
-                },
-                wholeFileChars = wholeFileCharBudget(maxPromptChars),
-            )
-        }.onFailure { if (isSqliteUnusable(it)) throw it }
-            .getOrDefault(emptyList())
+        val retrieved = if (shouldRetrieveForRagTurnMode(ragTurnMode)) {
+            runCatching {
+                ragRepository.search(
+                    sessionId = sessionId,
+                    query = ragQuery,
+                    topK = retrievalTopK,
+                    boostDocUris = boostDocUris,
+                    restrictDocUris = restrictDocUris,
+                    retrievalScopeLabel = scopeDecision.scope.name,
+                    priorQuery = priorForCarry,
+                    wholeFileChars = wholeFileCharBudget(maxPromptChars),
+                )
+            }.onFailure { if (isSqliteUnusable(it)) throw it }
+                .getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        if (shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved) ||
+            shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved)
+        ) {
+            DebugLogger.log("RAG", "deterministic retrieval miss turnMode=${ragTurnMode.name}")
+            return buildDeterministicRetrievalMissMessage(ragQuery)
+        }
+        DebugLogger.log(
+            "RAG",
+            "turnMode=${ragTurnMode.name} sessionDocs=${sessionDocs.size} attach=${attachments.isNotEmpty()}",
+        )
         val unreadableThisTurn = attachments.filter {
             isUnreadableThisTurn(it.error, it.extractedText)
         }
@@ -908,14 +977,24 @@ class ChatRepositoryImpl @Inject constructor(
             val scaffolding = identity.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
             val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlockAndTrackCitation(
+            val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
+            val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
+                forceGroundedDelivery = forceGroundedDelivery,
+                ragTurnMode = ragTurnMode,
+                ragQuery = ragQuery,
+                attachmentsThisTurn = attachments.isNotEmpty(),
             )
+            if (ragAssembly.groundedDeliveryFailed) {
+                DebugLogger.log("PROMPT", "COMPACT grounded delivery failed — retry instruction")
+                return groundedDeliveryRetryInstruction(userMessage)
+            }
+            val fileContext = ragAssembly.block
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
             val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
             DebugLogger.log("PROMPT", "COMPACT turn ragChars=${fileContext.length} ragBudget=$ragBudget promptMs=${promptMs()}")
@@ -949,7 +1028,8 @@ class ChatRepositoryImpl @Inject constructor(
             // the compact grounded prompt (~962c) frees ~3400c, there is ample
             // room for the recent-questions recap, which lets the model treat
             // follow-ups as a continuing conversation instead of restarting.
-            val docsPinned = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty()
+            val docsPinned = shouldPinDocsForRagTurnMode(ragTurnMode)
+            val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
             // Recap policy per turn type:
             //  • New attach this turn → NO recap, so file A's Q&A cannot
             //    answer for file B. Name/facts still come from memory.
@@ -992,14 +1072,23 @@ class ChatRepositoryImpl @Inject constructor(
                 // saved 80 c is exactly enough for one extra chunk.
                 80                                                    // safety margin
             val ragBudget = (budget - systemPlusMargin).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlockAndTrackCitation(
+            val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
+                forceGroundedDelivery = forceGroundedDelivery,
+                ragTurnMode = ragTurnMode,
+                ragQuery = ragQuery,
+                attachmentsThisTurn = attachments.isNotEmpty(),
             )
+            if (ragAssembly.groundedDeliveryFailed) {
+                DebugLogger.log("PROMPT", "FRESH grounded delivery failed — retry instruction")
+                return groundedDeliveryRetryInstruction(userMessage)
+            }
+            val fileContext = ragAssembly.block
             DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
             buildString {
                 // Only emit the system block if non-blank — Compact tier
@@ -1049,14 +1138,24 @@ class ChatRepositoryImpl @Inject constructor(
             // budget is available for RAG, minus the user message.
             val budget = maxPromptChars
             val ragBudget = (budget - userMessage.length - 80).coerceAtLeast(0)
-            val fileContext = buildRagPromptBlockAndTrackCitation(
+            val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
+            val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
                 answerShape = ragAnswerShape,
                 multiFileFairSources = multiFileFairSources,
                 tabularAmount = tabularAmountQuery,
                 unattachedExternal = unattachedExternal,
+                forceGroundedDelivery = forceGroundedDelivery,
+                ragTurnMode = ragTurnMode,
+                ragQuery = ragQuery,
+                attachmentsThisTurn = attachments.isNotEmpty(),
             )
+            if (ragAssembly.groundedDeliveryFailed) {
+                DebugLogger.log("PROMPT", "CONTINUE grounded delivery failed — retry instruction")
+                return groundedDeliveryRetryInstruction(userMessage)
+            }
+            val fileContext = ragAssembly.block
             DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} shape=$ragAnswerShape promptMs=${promptMs()}")
             buildString {
                 if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
@@ -1093,145 +1192,73 @@ class ChatRepositoryImpl @Inject constructor(
         multiFileFairSources: Boolean = false,
         tabularAmount: Boolean = false,
         unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
-    ): String {
-        val block = buildRagPromptBlock(
-            retrieved,
-            unreadableThisTurn,
-            tier,
-            charBudget,
-            sessionDocs,
-            newThisTurnNames,
-            answerShape,
-            tabularAmount,
-            unattachedExternal,
+        forceGroundedDelivery: Boolean = false,
+        ragTurnMode: RagTurnMode = RagTurnMode.DOCUMENT_GROUNDED,
+        ragQuery: String = "",
+        attachmentsThisTurn: Boolean = false,
+    ): RagPromptAssemblyResult {
+        val citationLabels = currentLanguage.citationDisplayLabels()
+        val result = assembleRagPromptBlock(
+            retrieved = retrieved,
+            unreadableThisTurn = unreadableThisTurn,
+            tier = tier,
+            charBudget = charBudget,
+            sessionDocs = sessionDocs,
+            newThisTurnNames = newThisTurnNames,
+            answerShape = answerShape,
+            tabularAmount = tabularAmount,
+            unattachedExternal = unattachedExternal,
+            citationLabels = citationLabels,
+            forceGroundedDelivery = forceGroundedDelivery,
+            turnMode = ragTurnMode,
+            ragQuery = ragQuery,
+            attachmentsThisTurn = attachmentsThisTurn,
         )
-        updateCitationContext(retrieved, block, multiFileFairSources)
-        return block
+        updateCitationContext(
+            retrieved = retrieved,
+            ragBlock = result.block,
+            multiFileFairSources = multiFileFairSources,
+            ragTurnMode = ragTurnMode,
+            ragQuery = ragQuery,
+            attachmentsThisTurn = attachmentsThisTurn,
+        )
+        return result
     }
 
     private fun updateCitationContext(
         retrieved: List<RetrievedChunk>,
         ragBlock: String,
         multiFileFairSources: Boolean,
+        ragTurnMode: RagTurnMode,
+        ragQuery: String,
+        attachmentsThisTurn: Boolean,
     ) {
-        if (ragBlock.isEmpty() || retrieved.isEmpty()) {
+        val ragBlockChars = ragBlock.length
+        val shouldCite = shouldAttachDeterministicSources(
+            turnMode = ragTurnMode,
+            ragBlockChars = ragBlockChars,
+            retrieved = retrieved,
+            query = ragQuery,
+            attachmentsThisTurn = attachmentsThisTurn,
+        )
+        if (!shouldCite) {
             lastCitationGrounded = false
             lastCitationChunks = emptyList()
             lastCitationOutlineByDoc = emptyMap()
             lastCitationMultiFileFair = false
+            lastCitationQuery = ""
+            lastCitationTurnMode = RagTurnMode.PLAIN_CHAT
             return
         }
+        val citable = citableRetrievalChunks(retrieved, ragQuery)
         lastCitationGrounded = true
-        lastCitationChunks = interleaveExcerptsByDoc(retrieved)
+        lastCitationChunks = interleaveExcerptsByDoc(citable)
         lastCitationOutlineByDoc = retrieved
             .filter { it.chunkIndex < 0 }
             .associate { it.docName to it.text }
         lastCitationMultiFileFair = multiFileFairSources
-    }
-
-    private fun buildRagPromptBlock(
-        retrieved: List<com.saarthi.feature.assistant.data.RetrievedChunk>,
-        unreadableThisTurn: List<AttachedFile>,
-        tier: SystemPromptProvider.ModelTier,
-        charBudget: Int,
-        sessionDocs: List<SessionRagDocument> = emptyList(),
-        newThisTurnNames: List<String> = emptyList(),
-        answerShape: RagAnswerShape = RagAnswerShape.NARROW_QA,
-        tabularAmount: Boolean = false,
-        unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
-    ): String {
-        if (retrieved.isEmpty() && unreadableThisTurn.isEmpty()) return ""
-        // If there is literally no room for even the rule header + one
-        // small chunk, drop the block rather than emit a meaningless
-        // header-only fragment that wastes tokens.
-        if (charBudget < 200) return ""
-
-        val compact = tier == SystemPromptProvider.ModelTier.COMPACT
-        val shapeInstruction = ragAnswerShapeInstruction(
-            answerShape,
-            compact = compact,
-            tabularAmount = tabularAmount,
-            unattachedExternal = unattachedExternal,
-        )
-
-        // Relevance gate (G2/G5): a confident lexical hit on a real content
-        // chunk means the excerpts are on-topic, so the rules answer from
-        // them without the "ignore the document" escape hatch. Heading
-        // anchors (score 50) and boosted this-turn hits also clear the bar.
-        val strongMatch = retrieved.any { it.chunkIndex >= 0 && it.score >= STRONG_RAG_MATCH_SCORE }
-        val citationLabels = currentLanguage.citationDisplayLabels()
-        val rulesHeader = ragCitationRules(
-            compact = compact,
-            strongMatch = strongMatch,
-            labels = citationLabels,
-            blockExternalRegimes = true,
-        )
-
-        val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {
-            buildString {
-                appendLine(UNREADABLE_FILES_INTRO)
-                unreadableThisTurn.forEach { f ->
-                    val why = f.error ?: "unsupported format — Saarthi cannot read binary files yet"
-                    appendLine("  - ${f.name}: $why")
-                }
-            }.trimEnd() + "\n\n"
-        } else ""
-
-        val outlineByDocName = retrieved
-            .filter { it.chunkIndex < 0 }
-            .associate { it.docName to it.text }
-
-        val manifestLine = sessionManifestLine(
-            sessionDocs.map { doc ->
-                val outline = outlineByDocName[doc.name]
-                val bodyHint = retrieved.firstOrNull {
-                    it.docName == doc.name && it.chunkIndex >= 0
-                }?.text
-                val charEst = retrieved.filter { it.docName == doc.name }.sumOf { it.text.length }
-                displayCitationDocName(
-                    doc.name,
-                    outline,
-                    bodyHint,
-                    charEst.takeIf { it > 0 },
-                    citationLabels,
-                )
-            },
-        )
-        val newFilesLine = newFilesThisTurnNotice(newThisTurnNames)
-
-        var remaining = charBudget - rulesHeader.length - shapeInstruction.length -
-            unreadableBlock.length -
-            manifestLine.length - newFilesLine.length
-        val ordered = interleaveExcerptsByDoc(retrieved)
-        // Fair multi-file ordering (R7/G7): interleave positive hits across
-        // documents so a second file is not starved by a high-scoring first
-        // file when the budget runs out. No-op for single-document turns.
-        val chunksBlock = buildString {
-            for ((i, chunk) in ordered.withIndex()) {
-                val text = chunk.text.trim()
-                val header = formatExcerptHeader(
-                    i + 1,
-                    chunk.docName,
-                    text,
-                    chunk.chunkIndex,
-                    outlineByDocName[chunk.docName],
-                    citationLabels,
-                )
-                val total = header.length + text.length + 2  // +2 for trailing "\n\n"
-                if (total > remaining) break  // never half-emit a chunk
-                append(header)
-                append(text)
-                append("\n\n")
-                remaining -= total
-            }
-        }
-
-        // If the budget was so tight that not a single chunk fit, drop
-        // the whole RAG block — emitting rules with no excerpts puts the
-        // model into refusal mode on every question.
-        if (chunksBlock.isEmpty() && unreadableBlock.isEmpty()) return ""
-
-        return (rulesHeader + shapeInstruction + manifestLine + newFilesLine + chunksBlock + unreadableBlock).trimEnd()
+        lastCitationQuery = ragQuery
+        lastCitationTurnMode = ragTurnMode
     }
 
     /**

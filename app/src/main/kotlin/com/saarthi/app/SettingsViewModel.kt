@@ -27,7 +27,7 @@ class SettingsViewModel @Inject constructor(
 
     fun clearAllChatHistory(onDone: () -> Unit = {}) {
         viewModelScope.launch {
-            chatRepository.clearHistory()
+            chatRepository.deleteAllData()
             _toast.update { "All conversations cleared" }
             onDone()
         }

@@ -4,6 +4,7 @@ import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.citationDisplayLabels
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -333,5 +334,90 @@ class CitationContractTest {
             labels = labels,
         )
         assertTrue(header.contains("Sample:"))
+    }
+
+    // ── Wave 3 P12 citation labels ───────────────────────────────────────────
+
+    @Test
+    fun `body prose is not used as citation document title`() {
+        val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val prose = "the Board may, after giving the Data Principal an opportunity of being heard"
+        assertTrue(looksLikeBodyProseLine(prose))
+        assertEquals(
+            FALLBACK_ATTACHED_DOC_LABEL,
+            displayCitationDocName(hash, null, prose, prose.length),
+        )
+        assertTrue(looksLikeInternalCitationLabel("the Board may after giving"))
+    }
+
+    @Test
+    fun `chapter header is section context not document title`() {
+        assertTrue(isChapterOnlyCitationLabel("CHAPTER VII"))
+        assertTrue(looksLikeInternalCitationLabel("Chapter VII"))
+        val outline = "Document outline (auto-detected headings):\n- CHAPTER I\n- CHAPTER VII"
+        assertEquals(
+            FALLBACK_ATTACHED_DOC_LABEL,
+            displayDocName("2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf", outline, null),
+        )
+    }
+
+    @Test
+    fun `extractCitationSectionHeading finds chapter line`() {
+        val heading = extractCitationSectionHeading(
+            "CHAPTER VIII\nPENALTIES AND ADJUDICATION\n33. Penalty for failure",
+        )
+        assertTrue(heading != null && heading.contains("Chapter VIII", ignoreCase = true))
+    }
+
+    @Test
+    fun `txt without pages uses section heading in excerpt header`() {
+        val header = formatExcerptHeader(
+            1,
+            "act.pdf",
+            "CHAPTER II\nObligations of Data Fiduciary",
+            chunkIndex = 3,
+        )
+        assertTrue(header.contains("Chapter II"))
+        assertFalse(header.contains("location not marked"))
+    }
+
+    // ── Phase 2.3 title-eligibility residuals ───────────────────────────────
+
+    @Test
+    fun `cross-ref labels are not citation titles`() {
+        assertTrue(looksLikeInternalCitationLabel("Code 2016"))
+        assertTrue(looksLikeInternalCitationLabel("Income Tax Code 2016"))
+        assertTrue(looksLikeInternalCitationLabel("sub-sections 12 and 14"))
+        assertTrue(looksLikeInternalCitationLabel("Interim orders under Chapter VII"))
+        assertFalse(looksLikeInternalCitationLabel("Digital Personal Data Protection Act, 2023"))
+    }
+
+    @Test
+    fun `truncated fragments are not citation titles`() {
+        assertTrue(looksLikeTruncatedTitleFragment("Penalties and adjudication of"))
+        assertTrue(looksLikeTruncatedTitleFragment("Digital Personal Data Prote…"))
+        assertFalse(looksLikeTruncatedTitleFragment("Digital Personal Data"))
+    }
+
+    @Test
+    fun `displayDocName skips cross-ref opening line`() {
+        val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
+        val crossRefBody =
+            "--- Page 8 ---\n" +
+                "Section 108. Inquiry on interim orders under Chapter VII of this Act."
+        assertEquals(
+            FALLBACK_ATTACHED_DOC_LABEL,
+            displayDocName(hash, null, crossRefBody),
+        )
+    }
+
+    @Test
+    fun `extractCitationSectionHeading skips cross-ref line`() {
+        val crossRef = "Section 108. Inquiry on interim orders under Chapter VII of this Act."
+        assertNull(extractCitationSectionHeading(crossRef))
+        val header = extractCitationSectionHeading(
+            "CHAPTER VII\nAPPEAL AND ALTERNATE DISPUTE RESOLUTION",
+        )
+        assertTrue(header != null && header.contains("Chapter VII", ignoreCase = true))
     }
 }

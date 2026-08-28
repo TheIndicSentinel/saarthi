@@ -30,10 +30,17 @@ internal fun shouldFairMultiFileSources(
 
 private val SOURCES_TAIL_MARKERS_BASE = listOf("\nSources:", "\nस्रोत:", "\nस्त्रोत:", "\nSOURCES:")
 private val CITATION_INDEX_IN_TAIL = Regex("""\[\d{1,2}\]""")
+private val INLINE_PAGE_REF = Regex("""(?i)(?:\(|\s|,|;)p\.?\s*\d+""")
+private val INLINE_PAGE_WORD = Regex("""(?i)\bpage\s+\d+""")
+private val FILE_DISAMBIG_PREFIX = Regex("""(?i)^File\s+\d+:""")
+private val STATUTE_TITLE_IN_LINE = Regex(
+    "(?i)\\b(act|agreement|policy|law|rules|regulation|code|ordinance|notification|amendment)\\b",
+)
 
 /**
  * Removes a trailing model-written Sources block when it looks like citations
- * (numbered refs, page dots, hash filenames) — not user prose mentioning "sources".
+ * (numbered refs, page dots, hash filenames, prose-style act titles) — not user
+ * prose mentioning "sources" in the answer body.
  */
 internal fun stripModelSourcesBlock(text: String, labels: CitationDisplayLabels): String {
     var result = text.trimEnd()
@@ -48,11 +55,50 @@ internal fun stripModelSourcesBlock(text: String, labels: CitationDisplayLabels)
     return result
 }
 
+/** True when a line inside a trailing Sources block looks like a model citation attempt. */
+private fun looksLikeModelSourcesTailLine(line: String): Boolean {
+    val trimmed = line.trim()
+    if (trimmed.isEmpty()) return false
+    if (parseDisplaySourceLine(trimmed) != null) return true
+    if (looksLikeContentStamp(trimmed)) return true
+    if (CITATION_INDEX_IN_TAIL.containsMatchIn(trimmed)) return true
+    if (FILE_DISAMBIG_PREFIX.containsMatchIn(trimmed)) return true
+    if (INLINE_PAGE_REF.containsMatchIn(trimmed) || INLINE_PAGE_WORD.containsMatchIn(trimmed)) return true
+    if (trimmed.contains('·')) {
+        val dotIdx = trimmed.indexOf('·')
+        if (dotIdx in 1 until trimmed.lastIndex) {
+            val title = trimmed.substring(0, dotIdx).trim()
+            val location = trimmed.substring(dotIdx + 1).trim()
+            if (title.isNotBlank() && location.isNotBlank() && !looksLikeBodyProseLine(title)) {
+                if (
+                    INLINE_PAGE_WORD.containsMatchIn(location) ||
+                    location.equals("overview", ignoreCase = true) ||
+                    location.contains("पृष्ठ")
+                ) {
+                    return true
+                }
+            }
+        }
+    }
+    val titlePart = trimmed.substringBefore('(').substringBefore('·').trim()
+    if (titlePart.isNotBlank() && looksLikeInternalCitationLabel(titlePart)) return true
+    if (
+        trimmed.length in 8..140 &&
+        STATUTE_TITLE_IN_LINE.containsMatchIn(trimmed) &&
+        !looksLikeBodyProseLine(trimmed)
+    ) {
+        return true
+    }
+    return false
+}
+
 private fun looksLikeAutomatedSourcesTail(tail: String): Boolean {
     val lower = tail.lowercase()
     if (!lower.contains("sources:") && !tail.contains("स्रोत")) return false
     val afterLabel = tail.substringAfter(':', "").trim()
     if (afterLabel.isEmpty()) return true
+    val lines = afterLabel.lines().map { it.trim() }.filter { it.isNotBlank() }
+    if (lines.any { looksLikeModelSourcesTailLine(it) }) return true
     return CITATION_INDEX_IN_TAIL.containsMatchIn(afterLabel) ||
         afterLabel.contains("· p.") ||
         afterLabel.contains("· page") ||
@@ -72,6 +118,7 @@ internal fun formatPageRangeForUser(pageRange: String, labels: CitationDisplayLa
 internal fun formatCitationLocation(chunk: RetrievedChunk, labels: CitationDisplayLabels): String = when {
     chunk.chunkIndex < 0 -> labels.overview
     else -> extractPageRange(chunk.text)?.let { formatPageRangeForUser(it, labels) }
+        ?: extractCitationSectionHeading(chunk.text)
         ?: labels.locationUnknown
 }
 
@@ -129,12 +176,15 @@ internal fun buildDeterministicSourcesFooter(
     labels: CitationDisplayLabels,
     maxSources: Int = DETERMINISTIC_SOURCES_MAX,
     multiFileFairSources: Boolean = false,
+    claimPairAnswerBody: String? = null,
+    claimPairQuery: String? = null,
 ): String {
     if (chunks.isEmpty() || maxSources <= 0) return ""
     val ordered = interleaveExcerptsByDoc(chunks)
     val entries = ArrayList<Pair<RetrievedChunk, String>>(maxSources)
     val seenLines = LinkedHashSet<String>()
     val docOrder = ordered.map { citationChunkDocKey(it) }.distinct()
+    val requireClaimPairing = !claimPairAnswerBody.isNullOrBlank()
 
     fun lineFor(chunk: RetrievedChunk): String? {
         val line = formatUserCitationLine(chunk, outlineByDocName, labels)
@@ -144,6 +194,12 @@ internal fun buildDeterministicSourcesFooter(
     }
 
     fun tryAdd(chunk: RetrievedChunk): Boolean {
+        if (
+            requireClaimPairing &&
+            !chunkSharesTokensWithAnswer(chunk, claimPairAnswerBody!!, query = claimPairQuery)
+        ) {
+            return false
+        }
         val line = lineFor(chunk) ?: return false
         if (line in seenLines) return false
         seenLines += line
@@ -186,15 +242,41 @@ internal fun applyDeterministicSourcesFooter(
     labels: CitationDisplayLabels,
     maxSources: Int = DETERMINISTIC_SOURCES_MAX,
     multiFileFairSources: Boolean = false,
+    claimOverlapQuery: String? = null,
+    claimOverlapTurnMode: RagTurnMode? = null,
 ): String {
     if (chunks.isEmpty()) return modelText
     val body = stripModelSourcesBlock(modelText, labels)
+    if (
+        shouldAuditPostGenGroundedness(claimOverlapQuery, claimOverlapTurnMode) &&
+        hasAuditableLegalClaims(body)
+    ) {
+        val audit = auditPostGenGroundedness(body, buildRetrievalCorpus(chunks), claimOverlapQuery)
+        if (!audit.isFullyGrounded) {
+            logRag(
+                "post-gen-groundedness fail amounts=${audit.ungroundedAmounts} " +
+                    "sections=${audit.ungroundedSections} shall=${audit.ungroundedShall}",
+            )
+            val caveat = labels.groundednessCaveat
+            return if (body.isBlank()) caveat else "$body\n\n$caveat"
+        }
+    }
+    val claimPairingActive = shouldFilterSourcesByClaimOverlap(claimOverlapQuery, claimOverlapTurnMode)
+    val pairingBody = answerBodyForClaimOverlap(body, claimOverlapTurnMode)
+    val overlapChunks = if (claimPairingActive) {
+        filterChunksByClaimOverlap(chunks, pairingBody, query = claimOverlapQuery)
+    } else {
+        chunks
+    }
+    if (overlapChunks.isEmpty()) return body
     val footer = buildDeterministicSourcesFooter(
-        chunks,
+        overlapChunks,
         outlineByDocName,
         labels,
         maxSources,
         multiFileFairSources,
+        claimPairAnswerBody = pairingBody.takeIf { claimPairingActive },
+        claimPairQuery = claimOverlapQuery,
     )
     if (footer.isEmpty()) return body
     return if (body.isBlank()) footer else "$body\n\n$footer"

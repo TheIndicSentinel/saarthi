@@ -71,7 +71,7 @@ saarthi/
 
 - **LiteRT-LM over MediaPipe** — official Google AI Edge runtime, better Gemma support.
 - **Foreground Service for downloads** — WorkManager's 10-minute ceiling kills 2.5 GB+ model downloads.
-- **BM25 RAG, not vector embeddings** — fully offline, no embedding model, fast on low-end devices.
+- **BM25 RAG, not vector embeddings** — fully offline, no embedding model in production; dense spike flag-gated for eval only.
 - **Conversation recycled per turn** — works around a LiteRT-LM crash when reusing a live `Conversation` on some SoCs.
 - **Dark-only UI** — target users (offline/rural India), battery/OLED efficiency.
 
@@ -80,4 +80,4 @@ saarthi/
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module graph and runtime flow
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidelines
 - [docs/PRODUCTION.md](docs/PRODUCTION.md) — production notes
-- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) — release checklist
+- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) — release checklist (RAG ship eval + Phase 6 deferral gates)

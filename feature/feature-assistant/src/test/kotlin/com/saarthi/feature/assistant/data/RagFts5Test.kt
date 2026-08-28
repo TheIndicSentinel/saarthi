@@ -20,9 +20,10 @@ class RagFts5Test {
     }
 
     @Test
-    fun `shouldUseFtsPrefilter when over chunk threshold or fast path`() {
+    fun `shouldUseFtsPrefilter when over chunk threshold or large fast path corpus`() {
         assertTrue(shouldUseFtsPrefilter(FTS5_CHUNK_THRESHOLD + 1, sessionFastPath = false))
-        assertTrue(shouldUseFtsPrefilter(10, sessionFastPath = true))
+        assertTrue(shouldUseFtsPrefilter(FTS5_TYPICAL_DOC_MAX_CHUNKS + 1, sessionFastPath = true))
+        assertFalse(shouldUseFtsPrefilter(40, sessionFastPath = true))
         assertFalse(shouldUseFtsPrefilter(40, sessionFastPath = false))
     }
 

@@ -20,6 +20,8 @@ data class CitationDisplayLabels(
     val excerptOnlyRule: String,
     /** B3-3 — compact one-liner for 1B tier. */
     val excerptOnlyRuleCompact: String,
+    /** Wave 6 P27 — shown when amounts/section refs in the answer lack excerpt support. */
+    val groundednessCaveat: String,
 ) {
     /** Full multi-line example matching deterministic footer shape: header + one file line. */
     fun citationRulesFooterExample(): String =
@@ -46,6 +48,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "Do not add unstated details or outside knowledge as if they were in the attached files.",
         excerptOnlyRuleCompact =
             "Only use what appears in the excerpts; do not add unstated facts or terms.",
+        groundednessCaveat =
+            "Note: Some amounts or section references in this reply were not found in the excerpts. " +
+            "Please verify against the original document.",
     )
     SupportedLanguage.HINDI -> CitationDisplayLabels(
         sourcesHeader = "स्रोत:",
@@ -64,6 +69,8 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "अंशों में न लिखी बातें या बाहरी ज्ञान जोड़कर उसे फ़ाइल का हिस्सा न बताएं।",
         excerptOnlyRuleCompact =
             "केवल अंशों में लिखी बातें बताएं; अंशों में नहीं लिखी बातें न जोड़ें।",
+        groundednessCaveat =
+            "नोट: इस उत्तर में कुछ राशि या धारा संदर्भ अंशों में नहीं मिले। मूल दस्तावेज़ से सत्यापित करें।",
     )
     SupportedLanguage.TAMIL -> CitationDisplayLabels(
         sourcesHeader = "மூலம்:",
@@ -82,6 +89,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "அங்கங்களில் இல்லாத விவரங்கள் அல்லது வெளிப்புற அறிவை கோப்பின் பகுதியாகச் சொல்லாதீர்கள்.",
         excerptOnlyRuleCompact =
             "அங்கங்களில் இருப்பதையே கூறுங்கள்; அங்கங்களில் இல்லாத விவரங்கள் சேர்க்காதீர்கள்.",
+        groundednessCaveat =
+            "குறிப்பு: இந்த பதிலில் சில தொகை அல்லது பிரிவு குறிப்புகள் அங்கங்களில் காணப்படவில்லை. " +
+            "அசல் ஆவணத்தில் சரிபார்க்கவும்.",
     )
     SupportedLanguage.TELUGU -> CitationDisplayLabels(
         sourcesHeader = "మూలాలు:",
@@ -100,6 +110,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "ఉద్ధరణలలో లేని వివరాలు లేదా బాహ్య జ్ఞానాన్ని ఫైల్ భాగంగా చెప్పకండి.",
         excerptOnlyRuleCompact =
             "ఉద్ధరణలలో ఉన్నదాన్ని మాత్రమే చెప్పండి; లేని వివరాలు చేర్చకండి.",
+        groundednessCaveat =
+            "గమనిక: ఈ సమాధానంలో కొన్ని మొత్తాలు లేదా విభాగం సూచనలు ఉద్ధరణలలో కనిపించలేదు. " +
+            "మూల పత్రంలో ధృవీకరించండి.",
     )
     SupportedLanguage.BENGALI -> CitationDisplayLabels(
         sourcesHeader = "সূত্র:",
@@ -118,6 +131,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "উদ্ধৃতিপথে নেই এমন তথ্য বা বাইরের জ্ঞান ফাইলের অংশ বলে উপস্থাপ করবেন না।",
         excerptOnlyRuleCompact =
             "উদ্ধৃতিপথে যা লিখা আছে শুধু তাই বলুন; লিখা নেই এমন তথ্য যোগ করবেন না।",
+        groundednessCaveat =
+            "নোট: এই উত্তরের কিছু পরিমাণ বা ধারা উল্লেখ উদ্ধৃতিপথে পাওয়া যায়নি। " +
+            "মূল নথিতে যাচাই করুন।",
     )
     SupportedLanguage.MARATHI -> CitationDisplayLabels(
         sourcesHeader = "स्त्रोत:",
@@ -136,6 +152,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "अंशांमध्ये नसलेले तपशील किंवा बाह्य माहिती फाइलचा भाग म्हणून सांगू नका.",
         excerptOnlyRuleCompact =
             "अंशांमध्ये जे आहे तेच सांगा; अंशांमध्ये नसलेले तपशील जोडू नका.",
+        groundednessCaveat =
+            "टीप: या उत्तरातील काही रक्कम किंवा विभाग संदर्भ अंशांमध्ये सापडले नाहीत. " +
+            "मूळ दस्तऐवजात तपासा.",
     )
     SupportedLanguage.KANNADA -> CitationDisplayLabels(
         sourcesHeader = "ಮೂಲಗಳು:",
@@ -154,6 +173,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "ಉದ್ಧರಣಿಗಳಲ್ಲಿ ಇಲ್ಲದ ವಿವರಗಳು ಅಥವಾ ಬಾಹ್ಯ ಜ್ಞಾನವನ್ನು ಫೈಲ್ ಭಾಗವಾಗಿ ಹೇಳಬೇಡಿ.",
         excerptOnlyRuleCompact =
             "ಉದ್ಧರಣಿಗಳಲ್ಲಿರುವುದನ್ನು ಮಾತ್ರ ಹೇಳಿ; ಇಲ್ಲದ ವಿವರಗಳನ್ನು ಸೇರಿಸಬೇಡಿ.",
+        groundednessCaveat =
+            "ಗಮನಿಸಿ: ಈ ಉತ್ತರದಲ್ಲಿನ ಕೆಲವು ಮೊತ್ತಗಳು ಅಥವಾ ವಿಭಾಗ ಉಲ್ಲೇಖಗಳು ಉದ್ಧರಣಿಗಳಲ್ಲಿ ಕಂಡುಬಂದಿಲ್ಲ. " +
+            "ಮೂಲ ದಾಖಲೆಯಲ್ಲಿ ಪರಿಶೀಲಿಸಿ.",
     )
     SupportedLanguage.GUJARATI -> CitationDisplayLabels(
         sourcesHeader = "સ્રોત:",
@@ -172,6 +194,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "અંશોમાં ન લખેલી વિગતો અથવા બાહ્ય જ્ઞાન ફાઇલનો ભાગ કહેવા નહીં.",
         excerptOnlyRuleCompact =
             "અંશોમાં જે લખ્યું છે ફક્ત તે જ કહો; લખ્યું નથી તે વિગતો ઉમેરો નહીં.",
+        groundednessCaveat =
+            "નોંધ: આ જવાબમાં કેટલાક રકમ અથવા વિભાગ સંદર્ભ અંશોમાં મળ્યા નથી. " +
+            "મૂળ દસ્તાવેજમાં ચકાસો.",
     )
     SupportedLanguage.PUNJABI -> CitationDisplayLabels(
         sourcesHeader = "ਸਰੋਤ:",
@@ -190,6 +215,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "ਅੰਸ਼ਾਂ ਵਿੱਚ ਨਹੀਂ ਲਿਖੀ ਜਾਣਕਾਰੀ ਜਾਂ ਬਾਹਰਲੀ ਜਾਣਕਾਰੀ ਫਾਈਲ ਦਾ ਹਿੱਸਾ ਨਾ ਦੱਸੋ।",
         excerptOnlyRuleCompact =
             "ਅੰਸ਼ਾਂ ਵਿੱਚ ਜੋ ਲਿਖਾ ਹੈ ਸਿਰਫ਼ ਉਹ ਦੱਸੋ; ਨਾ ਲਿਖੀ ਜਾਣਕਾਰੀ ਨਾ ਜੋੜੋ।",
+        groundednessCaveat =
+            "ਨੋਟ: ਇਸ ਜਵਾਬ ਵਿੱਚ ਕੁਝ ਰਕਮਾਂ ਜਾਂ ਧਾਰਾ ਹਵਾਲੇ ਅੰਸ਼ਾਂ ਵਿੱਚ ਨਹੀਂ ਮਿਲੇ। " +
+            "ਮੂਲ ਦਸਤਾਵੇਜ਼ ਵਿੱਚ ਪੁਸ਼ਟੀ ਕਰੋ।",
     )
     SupportedLanguage.ODIA -> CitationDisplayLabels(
         sourcesHeader = "ସୂତ୍ର:",
@@ -208,6 +236,9 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "ଉଦ୍ଧୃତିଗୁଡ଼ିକରେ ନଥିବା ବିବରଣୀ କିମ୍ବା ବାହ୍ୟ ଜ୍ଞାନ ଫାଇଲର ଅଂଶ କହିବେ ନାହିଁ।",
         excerptOnlyRuleCompact =
             "ଉଦ୍ଧୃତିଗୁଡ଼ିକରେ ଲିଖିଥିବା କଥା ବ୍ୟବହାର କରନ୍ତୁ; ଲିଖିନଥିବା ବିବରଣୀ ଯୋଡ଼ନ୍ତୁ ନାହିଁ।",
+        groundednessCaveat =
+            "ଟିପ୍ପଣୀ: ଏହି ଉତ୍ତରର କେତେକ ରାଶି କିମ୍ବା ଧାରା ସନ୍ଦର୍ଭ ଉଦ୍ଧୃତିଗୁଡ଼ିକରେ ମିଳିଲା ନାହିଁ। " +
+            "ମୂଳ ଦଲିଲରେ ଯାଞ୍ଚ କରନ୍ତୁ।",
     )
 }
 

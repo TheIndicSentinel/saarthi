@@ -56,6 +56,7 @@ class CitationDisplayLabelsTest {
             val labels = lang.citationDisplayLabels()
             assertTrue(labels.excerptOnlyRule.isNotBlank())
             assertTrue(labels.excerptOnlyRuleCompact.isNotBlank())
+            assertTrue(labels.groundednessCaveat.isNotBlank())
         }
     }
 }

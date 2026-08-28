@@ -6,6 +6,10 @@ import kotlin.math.sqrt
 // Uses base Gemma to produce token-averaged embeddings.
 // Replace with a dedicated MiniLM ONNX model for production quality.
 // Not Hilt-wired — legacy reference implementation only.
+@Deprecated(
+    message = "Production RAG is BM25-only (RagDocumentRepository). Do not wire embeddings.",
+    level = DeprecationLevel.WARNING,
+)
 class GemmaEmbeddingModel(
     @Suppress("unused") private val engine: InferenceEngine,
 ) : EmbeddingModel {

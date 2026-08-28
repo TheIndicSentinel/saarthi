@@ -8,6 +8,30 @@ The items below are the human gates around that.
 ## Every build (beta or production)
 
 - [ ] `./gradlew test` passes locally and in CI (green check on the commit).
+- [ ] **RAG ship eval gate** (Phase 5.5): DPDPA golden replay for attach→ask, chapter
+      VI/VII + special provisions spans, and GK/opt-out citation-off paths. Focused
+      command (also included in full `testDebugUnitTest`):
+
+      ```bash
+      ./gradlew :feature:feature-assistant:testDebugUnitTest \
+        --tests "com.saarthi.feature.assistant.data.DpdpaShipEvalGateTest" \
+        --tests "com.saarthi.feature.assistant.data.AttachAskSmokeTest" \
+        --no-daemon
+      ```
+
+      **Phase 6 deferral gates** (lexical baseline before dense/cross-encoder spikes):
+
+      ```bash
+      ./gradlew :feature:feature-assistant:testDebugUnitTest \
+        --tests "com.saarthi.feature.assistant.data.DenseRetrievalEvalGateTest" \
+        --tests "com.saarthi.feature.assistant.data.CrossEncoderDeferralGateTest" \
+        --tests "com.saarthi.feature.assistant.data.Fts5AtScaleGoldenTest" \
+        --no-daemon
+      ```
+
+      Firebase Test Lab's `attach_demo_document_penalty_question_retrieves_a_hit` and
+      `attach_overview_scopes_to_newest_file` instrumented smokes cover the same attach
+      path on device (no model load).
 - [ ] Lint report reviewed (CI artifact `lint-report`) — no new Error-level findings.
 - [ ] `versionCode` / `versionName` bumped in `app/build.gradle.kts`.
       Store tag must be `v` + `versionName` (`release_aab.yml` fails otherwise).
@@ -15,6 +39,11 @@ The items below are the human gates around that.
       falls back to debug-signing only when they are absent).
 - [ ] Installed and smoke-tested on a real phone (see **Release device coverage** below).
 - [ ] Model download + resume + cancel tested on a real device/network.
+- [ ] **RAG index schema bumps** (Phase 4.3): after changes to chunk metadata sentinels
+      (`parentChunkIndex`, chapter registry row, document-role stamp, truncation notice),
+      existing sessions keep stale rows until users **re-attach** affected files (or clear
+      chat data). Spot-check one upgraded build: attach a known PDF, ask a section-span
+      question, confirm retrieval hits the right doc — not a silent no-op on old chunks.
 - [ ] Debug log reviewed for anything sensitive that should not ship
       (Point 9: user-sourced strings must be lengths/counts only — see
       [LogPrivacy]; no document names, memory keys, or reminder text in

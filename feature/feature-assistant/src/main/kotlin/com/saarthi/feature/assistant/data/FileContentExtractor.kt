@@ -142,12 +142,13 @@ class FileContentExtractor @Inject constructor(
             )
         }
 
+        val pdfOutcome = if (mime == "application/pdf") extractPdfOutcome(uri) else null
         val extractedText = when {
             isCsv -> extractCsvText(uri)
             isXlsx -> extractXlsxText(uri)
             isPptx -> extractPptxText(uri)
             isText -> readTextContent(uri, MAX_EXTRACTED_CHARS)
-            mime == "application/pdf" -> extractPdfText(uri)
+            mime == "application/pdf" -> pdfOutcome?.text
             isDocx -> extractDocxText(uri)
             isImage -> extractImageText(uri)
             else -> null
@@ -167,6 +168,7 @@ class FileContentExtractor @Inject constructor(
             extractedText = if (failure != null) null else extractedText,
             isImage = isImage,
             error = failure,
+            indexTruncationNotice = if (failure != null) null else pdfOutcome?.truncationNotice,
         )
     }
 
@@ -212,22 +214,38 @@ class FileContentExtractor @Inject constructor(
      * English digital PDFs now come back via stage 1 (better + faster); scanned
      * PDFs still hit the exact same OCR code as before. No regression.
      */
-    private suspend fun extractPdfText(uri: Uri): String = withContext(Dispatchers.Default) {
+    private data class PdfExtractOutcome(
+        val text: String,
+        val truncationNotice: String? = null,
+    )
+
+    private suspend fun extractPdfOutcome(uri: Uri): PdfExtractOutcome = withContext(Dispatchers.Default) {
         val textLayer = extractPdfTextLayer(uri)
-        val garbled = looksGarbledTextLayer(textLayer)
-        if (pdfExtractLooksUsable(textLayer) && !garbled) {
-            Timber.d("PDF text-layer: extracted ${textLayer!!.length} chars (no OCR needed)")
-            return@withContext textLayer.take(MAX_EXTRACTED_CHARS)
+        val garbled = looksGarbledTextLayer(textLayer?.text)
+        if (pdfExtractLooksUsable(textLayer?.text) && !garbled) {
+            Timber.d("PDF text-layer: extracted ${textLayer!!.text.length} chars (no OCR needed)")
+            return@withContext finalizePdfExtract(textLayer.text, textLayer.meta)
         }
         if (garbled) {
-            Timber.d("PDF text-layer garbled (${textLayer?.length ?: 0} chars) — forcing OCR")
+            Timber.d("PDF text-layer garbled (${textLayer?.text?.length ?: 0} chars) — forcing OCR")
         } else {
-            Timber.d("PDF text-layer empty/thin (${textLayer?.length ?: 0} chars) — falling back to OCR")
+            Timber.d("PDF text-layer empty/thin (${textLayer?.text?.length ?: 0} chars) — falling back to OCR")
         }
         val ocr = extractPdfViaOcr(uri)
-        if (pdfExtractLooksUsable(ocr)) return@withContext ocr.take(MAX_EXTRACTED_CHARS)
-        if (ocr.startsWith("[PDF:")) return@withContext ocr
-        "[PDF: Scan had little readable text]"
+        if (pdfExtractLooksUsable(ocr.text)) return@withContext finalizePdfExtract(ocr.text, ocr.meta)
+        if (ocr.text.startsWith("[PDF:")) return@withContext PdfExtractOutcome(ocr.text)
+        PdfExtractOutcome("[PDF: Scan had little readable text]")
+    }
+
+    private data class PdfLayerOutcome(
+        val text: String,
+        val meta: PdfTruncationMeta,
+    )
+
+    private fun finalizePdfExtract(text: String, meta: PdfTruncationMeta): PdfExtractOutcome {
+        val (capped, charCapped) = capExtractedText(text, MAX_EXTRACTED_CHARS)
+        val notice = buildPdfTruncationNotice(meta.copy(charCapped = meta.charCapped || charCapped))
+        return PdfExtractOutcome(capped, notice)
     }
 
     /**
@@ -235,12 +253,13 @@ class FileContentExtractor @Inject constructor(
      * time, so citation headers can show p.X the same way OCR already does.
      * Returns null on failure (encrypted, corrupt, or no text layer).
      */
-    private fun extractPdfTextLayer(uri: Uri): String? = runCatching {
+    private fun extractPdfTextLayer(uri: Uri): PdfLayerOutcome? = runCatching {
         com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
         context.contentResolver.openInputStream(uri)?.use { input ->
             com.tom_roush.pdfbox.pdmodel.PDDocument.load(input).use { doc ->
-                val last = minOf(doc.numberOfPages, MAX_PDF_PAGES)
-                if (last <= 0) return@use ""
+                val totalPages = doc.numberOfPages
+                val last = minOf(totalPages, MAX_PDF_PAGES)
+                if (last <= 0) return@use PdfLayerOutcome("", PdfTruncationMeta())
                 val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
                 val out = StringBuilder()
                 for (page in 1..last) {
@@ -252,19 +271,28 @@ class FileContentExtractor @Inject constructor(
                     out.appendLine("--- Page $page ---")
                     out.append(pageText)
                 }
-                out.toString().trim()
+                PdfLayerOutcome(
+                    text = out.toString().trim(),
+                    meta = PdfTruncationMeta(
+                        totalPages = totalPages,
+                        indexedPages = last,
+                        charCapped = false,
+                    ),
+                )
             }
         }
     }.onFailure { Timber.w(it, "PDF text-layer extraction failed — will try OCR") }.getOrNull()
 
-    private suspend fun extractPdfViaOcr(uri: Uri): String = withContext(Dispatchers.Default) {
+    private suspend fun extractPdfViaOcr(uri: Uri): PdfLayerOutcome = withContext(Dispatchers.Default) {
         runCatching {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
                 android.graphics.pdf.PdfRenderer(descriptor).use { renderer ->
-                    val pagesToScan = minOf(renderer.pageCount, MAX_PDF_PAGES)
+                    val totalPages = renderer.pageCount
+                    val pagesToScan = minOf(totalPages, MAX_PDF_PAGES)
                     if (pagesToScan == 0) throw IllegalStateException("PDF has no pages")
 
                     val extracted = StringBuilder()
+                    var charCapped = false
 
                     // Cap rendered bitmap to ~16 MP / ~64 MB so a high-DPI
                     // multi-page PDF can't OOM the process. Within that
@@ -314,18 +342,28 @@ class FileContentExtractor @Inject constructor(
                                 bitmap.recycle()
                             }
                         }
-                        if (extracted.length >= MAX_EXTRACTED_CHARS) break
+                        if (extracted.length >= MAX_EXTRACTED_CHARS) {
+                            charCapped = true
+                            break
+                        }
                     }
 
                     Timber.d("PDF OCR: extracted ${extracted.length} chars from $pagesToScan page(s)")
                     val finalResult = extracted.toString()
-                    if (finalResult.isBlank()) "[PDF: No readable text found]"
-                    else finalResult.take(MAX_EXTRACTED_CHARS)
+                    val text = if (finalResult.isBlank()) "[PDF: No readable text found]" else finalResult
+                    PdfLayerOutcome(
+                        text = text,
+                        meta = PdfTruncationMeta(
+                            totalPages = totalPages,
+                            indexedPages = pagesToScan,
+                            charCapped = charCapped || text.length >= MAX_EXTRACTED_CHARS,
+                        ),
+                    )
                 }
-            } ?: "[PDF: Could not open file descriptor]"
+            } ?: PdfLayerOutcome("[PDF: Could not open file descriptor]", PdfTruncationMeta())
         }.getOrElse { e ->
             Timber.e(e, "PDF OCR failed")
-            "[PDF: Could not read file contents]"
+            PdfLayerOutcome("[PDF: Could not read file contents]", PdfTruncationMeta())
         }
     }
 

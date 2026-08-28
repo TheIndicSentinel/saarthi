@@ -11,6 +11,10 @@ import kotlin.math.sqrt
 // SQLite-based cosine-similarity vector store.
 // For production, load the sqlite-vss extension (.so) from assets.
 // Not Hilt-wired — legacy reference implementation only.
+@Deprecated(
+    message = "Production RAG is BM25-only (RagDocumentRepository). Do not wire sqlite-vss.",
+    level = DeprecationLevel.WARNING,
+)
 class SqliteVectorStore(
     private val context: Context,
 ) : VectorStore {
