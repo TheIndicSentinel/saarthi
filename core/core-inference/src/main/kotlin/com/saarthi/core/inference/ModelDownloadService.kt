@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -111,6 +112,7 @@ class ModelDownloadService : Service() {
 
     @Inject lateinit var manager: ModelDownloadManager
     @Inject lateinit var languageManager: com.saarthi.core.i18n.LanguageManager
+    @Inject lateinit var hfTokenManager: HuggingFaceTokenManager
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -172,7 +174,6 @@ class ModelDownloadService : Service() {
                 val tmp     = intent.getStringExtra(EXTRA_TMP_PATH)
                 val dest    = intent.getStringExtra(EXTRA_DEST_PATH)
                 val title   = intent.getStringExtra(EXTRA_TITLE) ?: DEFAULT_TITLE
-                val token   = intent.getStringExtra(EXTRA_HF_TOKEN) ?: ""
                 val replace = intent.getBooleanExtra(EXTRA_REPLACE, false)
                 val expectedSha256 = intent.getStringExtra(EXTRA_EXPECTED_SHA256)
 
@@ -224,6 +225,7 @@ class ModelDownloadService : Service() {
                         // otherwise its final in-flight chunk could recreate the file
                         // and the new run would resume instead of starting over.
                         if (replace) File(tmp).delete()
+                        val token = hfTokenManager.effectiveToken.first()
                         runDownload(modelId, url, File(tmp), File(dest), token, title, expectedSha256)
                     }
                 }
@@ -702,7 +704,6 @@ class ModelDownloadService : Service() {
         private const val EXTRA_TMP_PATH = "tmp_path"
         private const val EXTRA_DEST_PATH = "dest_path"
         private const val EXTRA_TITLE    = "title"
-        private const val EXTRA_HF_TOKEN = "hf_token"
         private const val EXTRA_REPLACE  = "replace"
         private const val EXTRA_EXPECTED_SHA256 = "expected_sha256"
 
@@ -711,6 +712,10 @@ class ModelDownloadService : Service() {
          * context (it is — every caller is a user tap on the onboarding /
          * downloads screen) so the Android 12+ foreground-service start is
          * permitted.
+         *
+         * The HuggingFace Bearer token is resolved inside the service from
+         * [HuggingFaceTokenManager] — never placed on the start Intent
+         * (dumpsys / extras would otherwise expose it).
          *
          * [replace] = true restarts from zero: any in-flight transfer for this
          * model is cancelled and the new one waits for it to fully stop before
@@ -736,7 +741,6 @@ class ModelDownloadService : Service() {
             tmpPath: String,
             destPath: String,
             title: String,
-            token: String,
             replace: Boolean = false,
             expectedSha256: String? = null,
         ): Boolean {
@@ -747,7 +751,6 @@ class ModelDownloadService : Service() {
                 putExtra(EXTRA_TMP_PATH, tmpPath)
                 putExtra(EXTRA_DEST_PATH, destPath)
                 putExtra(EXTRA_TITLE, title)
-                putExtra(EXTRA_HF_TOKEN, token)
                 putExtra(EXTRA_REPLACE, replace)
                 if (expectedSha256 != null) putExtra(EXTRA_EXPECTED_SHA256, expectedSha256)
             }

@@ -54,7 +54,6 @@ private val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
 @Singleton
 class ModelDownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val hfTokenManager: HuggingFaceTokenManager,
     private val languageManager: com.saarthi.core.i18n.LanguageManager,
     private val failureStore: DownloadFailureStore,
     private val integrityStore: ModelIntegrityStore,
@@ -71,12 +70,6 @@ class ModelDownloadManager @Inject constructor(
      * without re-deriving them on every call.
      */
     private val trackedModels = ConcurrentHashMap<String, ModelEntry>()
-
-    @Volatile private var hfToken: String = ""
-
-    init {
-        scope.launch { hfTokenManager.effectiveToken.collect { hfToken = it } }
-    }
 
     // ── Directory / path helpers ──────────────────────────────────────────────
 
@@ -202,7 +195,6 @@ class ModelDownloadManager @Inject constructor(
             tmpPath = tmpPathFor(model).absolutePath,
             destPath = finalFile.absolutePath,
             title = "${languageManager.selectedLanguage.value.downloadingTitlePrefix} ${model.displayName}",
-            token = hfToken,
             replace = replace,
             expectedSha256 = model.expectedSha256,
         )

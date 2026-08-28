@@ -68,9 +68,6 @@ class ModelDownloadManagerTest {
         // not locally — no Android SDK in the dev sandbox to run this test).
         every { mockContext.getSystemService(ConnectivityManager::class.java) } returns null
 
-        val mockHfTokenManager = mockk<HuggingFaceTokenManager>(relaxed = true)
-        every { mockHfTokenManager.effectiveToken } returns MutableStateFlow("test-token")
-
         val mockLanguageManager = mockk<LanguageManager>(relaxed = true)
         every { mockLanguageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
 
@@ -78,7 +75,7 @@ class ModelDownloadManagerTest {
         mockIntegrityStore = mockk(relaxed = true)
 
         manager = ModelDownloadManager(
-            mockContext, mockHfTokenManager, mockLanguageManager, mockFailureStore, mockIntegrityStore,
+            mockContext, mockLanguageManager, mockFailureStore, mockIntegrityStore,
         )
     }
 
