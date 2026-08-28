@@ -17,6 +17,7 @@ import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.ConversationEntity
 import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.feature.assistant.data.ChatHistoryHygiene
+import com.saarthi.feature.assistant.data.toEntity
 import com.saarthi.feature.assistant.data.RagDocumentRepository
 import com.saarthi.feature.assistant.data.ResponseMarkerParser
 import com.saarthi.feature.assistant.data.RetrievedChunk
@@ -531,15 +532,6 @@ class PackChatViewModel @Inject constructor(
             if (langLine.isNotBlank()) { append("\n\n"); append(langLine) }
         }
     }
-
-    private fun ChatMessage.toEntity(sessionId: String) = ConversationEntity(
-        id = id,
-        content = content,
-        role = role.name,
-        timestamp = timestamp,
-        tokenCount = tokenCount,
-        sessionId = sessionId,
-    )
 
     private fun ConversationEntity.toChatMessage() = ChatMessage(
         id = id,

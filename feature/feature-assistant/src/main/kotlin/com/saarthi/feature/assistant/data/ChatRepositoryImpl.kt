@@ -15,7 +15,6 @@ import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ChatSessionDao
 import com.saarthi.core.memory.db.ChatSessionEntity
 import com.saarthi.core.memory.db.ConversationDao
-import com.saarthi.core.memory.db.ConversationEntity
 import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.core.memory.domain.MemoryRepository
 import com.saarthi.feature.assistant.domain.AttachedFile
@@ -1620,24 +1619,6 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     // ── Mapping ───────────────────────────────────────────────────────────────
-
-    private fun ChatMessage.toEntity(sessionId: String) = ConversationEntity(
-        id = id,
-        content = content,
-        role = role.name,
-        timestamp = timestamp,
-        tokenCount = tokenCount,
-        sessionId = sessionId,
-    )
-
-    private fun ConversationEntity.toChatMessage() = ChatMessage(
-        id = id,
-        content = content,
-        role = MessageRole.valueOf(role),
-        timestamp = timestamp,
-        tokenCount = tokenCount,
-        isStreaming = false,
-    )
 
     private fun ChatSessionEntity.toSession() = ChatSession(
         id = id,
