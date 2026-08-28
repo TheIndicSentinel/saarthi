@@ -135,10 +135,12 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
       production. Revisit only if crash volume post-launch proves this
       insufficient; don't silently re-add Crashlytics without updating the
       privacy-guardrails review and Data Safety form together.
-- [ ] **HuggingFace token**: confirm the embedded `hf.app.token` is a read-only,
-      low-scope token, and rotate it on the HF dashboard if it has been shared.
-      It is extractable from the APK — treat it as a download-quota token only,
-      never a write/billing token.
+- [ ] **HuggingFace token**: the APK must not embed `HF_APP_TOKEN_B64` (unit test
+      `HuggingFaceTokenNotInBuildConfigTest`). Gated Gemma 3n downloads use a
+      **user-pasted** read-only token stored in DataStore (Settings). Rotate any
+      token that was previously baked into shipped APKs — those builds remain
+      extractable. Treat any leftover dashboard token as download-quota only,
+      never write/billing.
 - [ ] **Play policy review** before submission:
   - No "Alarms & reminders" declaration needed — SCHEDULE_EXACT_ALARM isn't declared
     (verified 2026-07-13; see "Every build" section above).

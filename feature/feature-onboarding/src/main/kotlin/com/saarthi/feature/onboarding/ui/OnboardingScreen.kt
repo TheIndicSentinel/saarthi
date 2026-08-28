@@ -39,13 +39,20 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Spa
 import androidx.compose.material.icons.outlined.WifiOff
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +64,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,6 +74,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.onboarding
+import com.saarthi.core.i18n.settings
 import com.saarthi.core.inference.engine.isInsufficientRamForModelLoad
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
@@ -155,6 +165,44 @@ fun OnboardingScreen(
                 )
                 OnboardingStep.DONE -> {}
             }
+        }
+
+        if (state.showHfTokenDialog) {
+            val s = state.selectedLanguage.settings
+            var draft by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = viewModel::dismissHfTokenDialog,
+                containerColor = SaarthiColors.Bg2,
+                title = { Text(s.hfTokenDialogTitle, color = SaarthiColors.Text) },
+                text = {
+                    Column {
+                        Text(s.hfTokenDialogBody, color = SaarthiColors.Text2)
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text(s.hfTokenPlaceholder, color = SaarthiColors.Text4) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { viewModel.saveHfToken(draft) },
+                        enabled = draft.isNotBlank(),
+                    ) {
+                        Text(s.hfTokenSave, color = SaarthiColors.Text, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissHfTokenDialog) {
+                        Text(s.cancel, color = SaarthiColors.Text2)
+                    }
+                },
+            )
         }
     }
 }

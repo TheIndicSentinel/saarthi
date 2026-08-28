@@ -51,6 +51,7 @@ class ModelDownloadManagerTest {
     private lateinit var externalDir: File
     private lateinit var manager: ModelDownloadManager
     private lateinit var mockIntegrityStore: ModelIntegrityStore
+    private lateinit var mockHfTokenManager: HuggingFaceTokenManager
 
     @Before
     fun setUp() {
@@ -73,9 +74,11 @@ class ModelDownloadManagerTest {
 
         val mockFailureStore = mockk<DownloadFailureStore>(relaxed = true)
         mockIntegrityStore = mockk(relaxed = true)
+        mockHfTokenManager = mockk(relaxed = true)
+        every { mockHfTokenManager.savedToken } returns MutableStateFlow("")
 
         manager = ModelDownloadManager(
-            mockContext, mockLanguageManager, mockFailureStore, mockIntegrityStore,
+            mockContext, mockLanguageManager, mockFailureStore, mockIntegrityStore, mockHfTokenManager,
         )
     }
 
@@ -521,5 +524,30 @@ class ModelDownloadManagerTest {
         if (progress is DownloadProgress.Downloading) {
             assertEquals("A restart must not resume from the pre-restart partial", 0L, progress.bytesDownloaded)
         }
+    }
+
+    @Test
+    fun `gated google repo without a saved token fails before starting the service`() {
+        val model = testModel().copy(
+            downloadUrl = "https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/gated.litertlm",
+        )
+        manager.startDownload(model)
+        val progress = manager.allProgress.value[model.id]
+        assertTrue(progress is DownloadProgress.Failed)
+        assertEquals(
+            com.saarthi.core.inference.model.HF_TOKEN_REQUIRED_MESSAGE,
+            (progress as DownloadProgress.Failed).reason,
+        )
+    }
+
+    @Test
+    fun `public litert-community url does not require a saved token to pass the auth gate`() {
+        val model = testModel().copy(
+            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/public.litertlm",
+        )
+        assertEquals(
+            com.saarthi.core.inference.model.HuggingFaceAuthGate.ALLOW,
+            com.saarthi.core.inference.model.resolveHuggingFaceAuthGate(model.downloadUrl, ""),
+        )
     }
 }

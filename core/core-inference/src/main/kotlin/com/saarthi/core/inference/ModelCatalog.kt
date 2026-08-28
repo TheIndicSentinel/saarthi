@@ -89,10 +89,14 @@ class ModelCatalog @Inject constructor() {
     // 2.5 GB, 8192-token context, runs Kisan pack (Compact's 512-token limit
     // causes Kisan prompts to fail; E2B fixes that automatically).
     //
-    // HuggingFace sources (Google licence required + HF token):
-    //   Gemma 4   : litert-community/gemma-4-{E2B,E4B}-it-litert-lm
-    //   Gemma 3n  : google/gemma-3n-{E2B,E4B}-it-litert-lm
-    //   Gemma 3 1B: litert-community/Gemma3-1B-IT
+    // HuggingFace sources:
+    //   Gemma 4   : litert-community/gemma-4-{E2B,E4B}-it-litert-lm  (public)
+    //   Gemma 3n  : google/gemma-3n-{E2B,E4B}-it-litert-lm          (gated — user token)
+    //   Gemma 3 1B: litert-community/Gemma3-1B-IT                   (public)
+    //
+    // The APK does not embed a Hugging Face token. Public litert-community
+    // files download with no Authorization header. google/* (Gemma 3n) needs
+    // a read-only token the user pastes in Settings / onboarding.
     //
     // downloadUrl is pinned to a specific commit SHA (not resolve/main) with a
     // matching expectedSha256 on each entry — verified once, right after a

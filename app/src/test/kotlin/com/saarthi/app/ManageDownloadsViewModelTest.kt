@@ -180,10 +180,14 @@ class ManageDownloadsViewModelTest {
         val model = testModel(displayName = "Currently Active Model")
         every { mockInferenceEngine.activeModelName } returns "Currently Active Model"
         val viewModel = createViewModel()
-        advanceUntilIdle()
+        val readyDeadline = System.currentTimeMillis() + 2_000
+        while (viewModel.uiState.value.activeModelName == null &&
+            System.currentTimeMillis() < readyDeadline
+        ) {
+            Thread.sleep(20)
+        }
 
         viewModel.deleteModel(model) // blocked, sets error
-        advanceUntilIdle()
         assertTrue(viewModel.uiState.value.error != null)
 
         viewModel.refresh()

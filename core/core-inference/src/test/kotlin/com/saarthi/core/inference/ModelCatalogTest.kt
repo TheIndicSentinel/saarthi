@@ -153,4 +153,28 @@ class ModelCatalogTest {
             )
         }
     }
+
+    @Test
+    fun `Recommended catalog models do not require a Hugging Face token`() {
+        val recommended = catalog.allModels.filter { "Recommended" in it.tags }
+        assertTrue("catalog must have a Recommended model for first-run auto-pick", recommended.isNotEmpty())
+        recommended.forEach { model ->
+            assertFalse(
+                "${model.id} is Recommended (first-run auto-pick) so it must be a public repo, was: ${model.downloadUrl}",
+                model.requiresHuggingFaceAuth,
+            )
+        }
+    }
+
+    @Test
+    fun `only google-org catalog URLs require a Hugging Face token`() {
+        catalog.allModels.forEach { model ->
+            val google = model.downloadUrl.contains("huggingface.co/google/", ignoreCase = true)
+            assertEquals(
+                "${model.id} requiresHuggingFaceAuth must match google/ host, url=${model.downloadUrl}",
+                google,
+                model.requiresHuggingFaceAuth,
+            )
+        }
+    }
 }

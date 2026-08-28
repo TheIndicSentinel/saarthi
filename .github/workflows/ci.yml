@@ -38,8 +38,7 @@ jobs:
 
       - name: Write local.properties
         run: |
-          echo "sdk.dir=$ANDROID_HOME"                     > local.properties
-          echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}" >> local.properties
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       # testDebugUnitTest only — see build_apk.yml's comment: `test` also
       # builds+runs the RELEASE unit-test variant for zero extra coverage.

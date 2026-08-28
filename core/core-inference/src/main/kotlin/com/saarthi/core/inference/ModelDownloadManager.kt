@@ -5,7 +5,10 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.storage.StorageManager
 import com.saarthi.core.inference.model.DownloadProgress
+import com.saarthi.core.inference.model.HF_TOKEN_REQUIRED_MESSAGE
+import com.saarthi.core.inference.model.HuggingFaceAuthGate
 import com.saarthi.core.inference.model.ModelEntry
+import com.saarthi.core.inference.model.resolveHuggingFaceAuthGate
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +60,7 @@ class ModelDownloadManager @Inject constructor(
     private val languageManager: com.saarthi.core.i18n.LanguageManager,
     private val failureStore: DownloadFailureStore,
     private val integrityStore: ModelIntegrityStore,
+    private val hfTokenManager: HuggingFaceTokenManager,
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -150,6 +154,15 @@ class ModelDownloadManager @Inject constructor(
         val finalFile = resolveLocalFile(model)
         if (!replace && isFileComplete(finalFile, model.fileSizeBytes)) {
             _allProgress.update { it + (model.id to DownloadProgress.Completed(finalFile.absolutePath)) }
+            return
+        }
+
+        val token = hfTokenManager.savedToken.value
+        if (resolveHuggingFaceAuthGate(model.downloadUrl, token) == HuggingFaceAuthGate.NEED_TOKEN) {
+            DebugLogger.log("DOWNLOAD", "Blocked gated Hugging Face repo without a saved token  model=${model.id}")
+            _allProgress.update {
+                it + (model.id to DownloadProgress.Failed(HF_TOKEN_REQUIRED_MESSAGE))
+            }
             return
         }
 

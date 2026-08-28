@@ -149,6 +149,7 @@ class OnboardingViewModelTest {
         mockHfTokenManager = mockk(relaxed = true)
         every { mockHfTokenManager.token } returns MutableStateFlow("")
         every { mockHfTokenManager.effectiveToken } returns MutableStateFlow("")
+        every { mockHfTokenManager.savedToken } returns MutableStateFlow("")
 
         mockFunnel = mockk(relaxed = true)
 
@@ -387,6 +388,19 @@ class OnboardingViewModelTest {
 
         // This path DOES launch on Dispatchers.IO — await it explicitly.
         verify(timeout = 2_000) { mockDownloadManager.cancelDownload(model) }
+    }
+
+    @Test
+    fun `gated model without token shows the token dialog and does not start a download`() = runTest {
+        val gated = testModel(id = "gemma3n").copy(
+            downloadUrl = "https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/g.litertlm",
+        )
+        setUpDefaults(gated)
+        val viewModel = createViewModel()
+        viewModel.downloadModel(gated)
+        assertTrue(viewModel.uiState.value.showHfTokenDialog)
+        assertEquals("gemma3n", viewModel.uiState.value.pendingGatedDownloadId)
+        verify(exactly = 0) { mockDownloadManager.startDownload(any()) }
     }
 }
 

@@ -40,8 +40,7 @@ jobs:
 
       - name: Write local.properties
         run: |
-          echo "sdk.dir=$ANDROID_HOME"                       > local.properties
-          echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}"   >> local.properties
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       # Optional signing: if the upload-keystore secrets are set, sign with the
       # real key; otherwise app/build.gradle.kts falls back to debug signing,

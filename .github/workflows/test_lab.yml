@@ -52,8 +52,7 @@ jobs:
       - name: Write local.properties
         if: steps.creds.outputs.present == 'true'
         run: |
-          echo "sdk.dir=$ANDROID_HOME"                     > local.properties
-          echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}" >> local.properties
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Build debug + androidTest APKs
         if: steps.creds.outputs.present == 'true'

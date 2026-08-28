@@ -120,4 +120,23 @@ class SettingsPrivacyCopyTest {
             off.contains("allows", ignoreCase = true),
         )
     }
+
+    @Test
+    fun english_hf_token_copy_says_gated_models_and_not_in_the_apk() {
+        val s = SupportedLanguage.ENGLISH.settings
+        assertTrue(s.hfToken.isNotBlank())
+        assertTrue(
+            "hfTokenDialogBody must say Gemma 3n is gated. Got: '${s.hfTokenDialogBody}'",
+            s.hfTokenDialogBody.contains("Gemma 3n", ignoreCase = true) &&
+                s.hfTokenDialogBody.contains("gated", ignoreCase = true),
+        )
+        assertTrue(
+            "hfTokenDialogBody must say the token is not in the app file. Got: '${s.hfTokenDialogBody}'",
+            s.hfTokenDialogBody.contains("never put in the app file", ignoreCase = true),
+        )
+        assertTrue(
+            "hfTokenMissing must say Gemma 3n. Got: '${s.hfTokenMissing}'",
+            s.hfTokenMissing.contains("Gemma 3n", ignoreCase = true),
+        )
+    }
 }

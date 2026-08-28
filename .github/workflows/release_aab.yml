@@ -9,7 +9,6 @@ name: Release AAB (Play Store)
 #   KEYSTORE_PASSWORD   keystore password
 #   KEY_ALIAS           key alias
 #   KEY_PASSWORD        key password
-#   HF_APP_TOKEN        HuggingFace token used at build time (same as build_apk.yml)
 #   PLAY_SERVICE_ACCOUNT_JSON   (OPTIONAL, for auto-publish) — a Google Play
 #       service-account JSON with "Release manager" access. Needed only if you
 #       uncomment the "Upload to Google Play" step below.
@@ -69,8 +68,7 @@ jobs:
 
       - name: Write local.properties
         run: |
-          echo "sdk.dir=$ANDROID_HOME"                     > local.properties
-          echo "hf.app.token=${{ secrets.HF_APP_TOKEN }}" >> local.properties
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       # Tests gate the release — never ship a red build to the store.
       # testDebugUnitTest only: the release unit-test variant is a redundant

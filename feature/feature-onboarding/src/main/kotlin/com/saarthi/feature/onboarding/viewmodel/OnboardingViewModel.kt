@@ -32,11 +32,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -63,6 +61,8 @@ data class OnboardingUiState(
     /** Persisted reason the auto-picked model's download last failed, if any —
      *  survives a process restart, unlike [error] which clears on a fresh attempt. */
     val lastFailureNote: String? = null,
+    val showHfTokenDialog: Boolean = false,
+    val pendingGatedDownloadId: String? = null,
 )
 
 enum class OnboardingStep {
@@ -107,12 +107,22 @@ class OnboardingViewModel @Inject constructor(
     )
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
 
-    /** Current saved HuggingFace token (empty string = not set). */
-    val savedHfToken: StateFlow<String> = hfTokenManager.token
-        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    /** Current saved HuggingFace token (empty string = not set). Never log this. */
+    val savedHfToken: StateFlow<String> = hfTokenManager.savedToken
 
     fun saveHfToken(token: String) {
-        viewModelScope.launch { hfTokenManager.setToken(token) }
+        viewModelScope.launch {
+            hfTokenManager.setToken(token)
+            val pendingId = _uiState.value.pendingGatedDownloadId
+            val pending = _uiState.value.catalogModels.find { it.id == pendingId }
+                ?: pendingId?.let { modelCatalog.findById(it) }
+            _uiState.update { it.copy(showHfTokenDialog = false, pendingGatedDownloadId = null) }
+            if (pending != null) startCatalogDownload(pending)
+        }
+    }
+
+    fun dismissHfTokenDialog() {
+        _uiState.update { it.copy(showHfTokenDialog = false) }
     }
 
     private var modelPfd: ParcelFileDescriptor? = null
@@ -444,6 +454,16 @@ class OnboardingViewModel @Inject constructor(
     // ── Catalog download ──────────────────────────────────────────────────────
 
     fun downloadModel(model: ModelEntry) {
+        if (model.requiresHuggingFaceAuth && savedHfToken.value.isBlank()) {
+            _uiState.update {
+                it.copy(showHfTokenDialog = true, pendingGatedDownloadId = model.id)
+            }
+            return
+        }
+        startCatalogDownload(model)
+    }
+
+    private fun startCatalogDownload(model: ModelEntry) {
         funnel.track(com.saarthi.core.inference.FunnelEvent.MODEL_DOWNLOAD_STARTED)
         // Refresh the device profile at the actual action point, not just
         // whatever was current when the picker screen first loaded — RAM
@@ -705,6 +725,16 @@ class OnboardingViewModel @Inject constructor(
 
     /** Shared by [proceedFromModelPick] and [proceedWithAutoModel]. */
     private fun startDownloadAndAutoInit(model: ModelEntry) {
+        if (model.requiresHuggingFaceAuth && savedHfToken.value.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    step = OnboardingStep.MODEL_PICK,
+                    showHfTokenDialog = true,
+                    pendingGatedDownloadId = model.id,
+                )
+            }
+            return
+        }
         // Fresh profile at the action point — see downloadModel()'s comment;
         // same reasoning applies to the auto-pick flow's own trigger point.
         _uiState.update {

@@ -1,5 +1,3 @@
-import java.util.Base64
-import java.util.Properties
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
@@ -11,12 +9,6 @@ plugins {
 // llama.cpp native bridge had no Kotlin caller and was deleted in v1.0.19 —
 // no NDK / CMake / Vulkan-headers setup is required any more.
 
-val localProps = Properties().also { props ->
-    rootProject.file("local.properties")
-        .takeIf { it.exists() }
-        ?.inputStream()?.use { props.load(it) }
-}
-
 android {
     namespace  = "com.saarthi.core.inference"
 
@@ -24,32 +16,9 @@ android {
         buildConfig = true
     }
 
-    defaultConfig {
-        // Embedded read-only HuggingFace token — enables seamless download of the
-        // gated Gemma 3n repos (google/gemma-3n-*). The litert-community/* repos
-        // are public and need no auth; only the two google/* entries in
-        // ModelCatalog actually require a token.
-        //   local.properties  →  hf.app.token=hf_xxxxxxxxxxxxxxxxxxxxxxxx
-        //   CI secret         →  env HF_APP_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxx
-        //
-        // SECURITY: do NOT embed the raw token as a plaintext BuildConfig String
-        // constant — R8 inlines String constants into the dex, so `strings <apk>`
-        // trivially recovers an `hf_...`-prefixed secret. Store a Base64-encoded
-        // form and decode at runtime (HuggingFaceTokenManager.embeddedAppToken).
-        // This is defense-in-depth against trivial STATIC extraction only; it is
-        // not full remediation (a runtime attacker can still recover the token).
-        // The complete fix (per-user token / short-lived proxy) is tracked
-        // separately. Empty stays empty → no Authorization header is sent.
-        val hfAppToken = localProps.getProperty("hf.app.token")
-            ?: System.getenv("HF_APP_TOKEN")
-            ?: ""
-        val hfAppTokenB64 = if (hfAppToken.isEmpty()) {
-            ""
-        } else {
-            Base64.getEncoder().encodeToString(hfAppToken.toByteArray(Charsets.UTF_8))
-        }
-        buildConfigField("String", "HF_APP_TOKEN_B64", "\"$hfAppTokenB64\"")
-    }
+    // No HuggingFace token in BuildConfig. Gated google/* downloads use a
+    // user-pasted read-only token in DataStore (HuggingFaceTokenManager).
+    // Public litert-community models need no Authorization header.
 
     // Debug log → saarthi_debug.log is how we diagnose RAG (path, boost,
     // heading, scores) on a physical phone. It ALWAYS lands app-private by

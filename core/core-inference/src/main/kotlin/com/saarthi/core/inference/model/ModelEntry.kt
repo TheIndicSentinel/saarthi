@@ -90,6 +90,10 @@ data class ModelEntry(
     val fileSizeMb: Int get() = (fileSizeBytes / 1_048_576).toInt()
     val fileName: String get() = downloadUrl.substringAfterLast('/')
 
+    /** True when [downloadUrl] is a gated `huggingface.co/google/` repo. */
+    val requiresHuggingFaceAuth: Boolean
+        get() = huggingFaceDownloadRequiresAuth(downloadUrl)
+
     /**
      * Returns true when this model is safe to offer to a device.
      *

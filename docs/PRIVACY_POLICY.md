@@ -30,7 +30,10 @@ Saarthi is offline for AI — there is no server-side chat processing, and Saart
 no backend to send your data to. It does connect to the internet for:
 1. **Downloading the AI model** (one time) and **Kisan knowledge-pack updates**, fetched
    from public hosts (Hugging Face / GitHub). These are downloads to your device — no
-   personal data is sent.
+   personal data is sent. Saarthi does **not** ship a Hugging Face token in the app.
+   Gemma 4 and Compact are public downloads. Gemma 3n is on a gated Google repo: if you
+   choose it, you paste a read-only token (Settings → Hugging Face download token), stored
+   only on this phone.
 2. **Voice input**, only if you turn off **Settings → On-device voice only** and your
    device then uses its standard speech service — see above.
 3. **Crash & support reports you choose to send.** Saarthi has no automatic crash

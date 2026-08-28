@@ -82,10 +82,10 @@ not on-device inference proof; see `docs/RELEASE_CHECKLIST.md`.
 
 If you fork this repo and CI fails the first time, the most common causes
 are:
-- Missing repo secret `HF_APP_TOKEN` — `ci.yml` writes it into `local.properties`
-  when present; an empty token is fine for unit tests that do not hit the network.
 - Signing secrets (`KEYSTORE_*`) — only `release_aab.yml` / signed release builds
   need these. `ci.yml` and `build_apk.yml` (debug) do not.
+- The Hugging Face token is **not** baked into the APK. Unit tests do not need
+  `HF_APP_TOKEN`. Gated Gemma 3n downloads on a device use a user-pasted token.
 
 ## Writing tests
 
