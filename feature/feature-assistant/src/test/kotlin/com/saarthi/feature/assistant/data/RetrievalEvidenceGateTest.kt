@@ -84,4 +84,17 @@ class RetrievalEvidenceGateTest {
             ),
         )
     }
+
+    @Test
+    fun `follow-up scope upgrade grounds section follow-up after topical prior`() {
+        assertEquals(
+            RagTurnMode.DOCUMENT_GROUNDED,
+            classifyRagTurnMode(
+                query = "what about section 15",
+                sessionDocCount = 1,
+                attachmentsThisTurn = false,
+                priorQuery = "Is this applicable to processing",
+            ),
+        )
+    }
 }

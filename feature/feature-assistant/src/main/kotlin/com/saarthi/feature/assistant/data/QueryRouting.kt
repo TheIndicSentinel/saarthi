@@ -743,7 +743,7 @@ private val TOPICAL_QUESTION_LEADS = setOf(
 
 private val GENERAL_KNOWLEDGE_TOPIC_PATTERN = Regex(
     "(?i)\\b(" +
-        "black hole|photosynthesis|gravity|solar system|atom|molecule|evolution|" +
+        "black holes?|photosynthesis|gravity|solar system|atom|molecule|evolution|" +
         "dinosaurs|volcano|earthquake|pythagoras|newton|einstein|quantum|" +
         "school kid|school child|5 year old|five year old|beginner" +
         ")\\b",
@@ -858,6 +858,7 @@ internal fun isIndexedSessionTopicalQuestion(query: String): Boolean {
     if (NON_TOPICAL_CHAT_PATTERN.containsMatchIn(query)) return false
     if (isAssistantIdentityQuery(query) || isSmallTalkQuery(query)) return false
     if (hasGeneralKnowledgeTopicCues(query) || isDocumentOptOutQuery(query)) return false
+    if (hasAmbiguousTopicalSubjectCues(query)) return true
     val tokens = query.lowercase().split(QUERY_SPLIT).filter { it.isNotEmpty() }
     if (tokens.isEmpty() || tokens.size > 24) return false
     if (tokens.any { it in TOPICAL_QUESTION_LEADS }) return true
@@ -912,6 +913,10 @@ internal fun classifyRagTurnMode(
     }
 
     if (hasDocumentQueryCues(query)) {
+        return RagTurnMode.DOCUMENT_GROUNDED
+    }
+
+    if (!priorQuery.isNullOrBlank() && isFollowUpScopeUpgrade(query, priorQuery)) {
         return RagTurnMode.DOCUMENT_GROUNDED
     }
 

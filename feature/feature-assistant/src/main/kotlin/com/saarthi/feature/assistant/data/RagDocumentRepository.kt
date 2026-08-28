@@ -512,7 +512,7 @@ class RagDocumentRepository @Inject constructor(
         var headingChunkCount = 0
         var ftsPrefilterUsed = false
         val queryTokens = query.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
-        val isFollowUp = !priorQuery.isNullOrBlank() && queryTokens.take(4).any { it in FOLLOW_UP_TOKENS }
+        val isFollowUp = shouldMergePriorQueryInSearch(query, priorQuery)
         val metaReason = effectiveMetaRouteReason(query, isFollowUp)
         fun finish(hits: List<RetrievedChunk>): List<RetrievedChunk> {
             // All-zero / overview: rebuild per file (outline + contiguous
@@ -688,7 +688,7 @@ class RagDocumentRepository @Inject constructor(
 
         // Expand the query when following up on the prior turn.
         var effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
-            "${priorQuery.take(150)} ${route.expandedQuery}"
+            mergeFollowUpRetrievalQuery(priorQuery!!, route.expandedQuery)
         } else {
             route.expandedQuery
         }
