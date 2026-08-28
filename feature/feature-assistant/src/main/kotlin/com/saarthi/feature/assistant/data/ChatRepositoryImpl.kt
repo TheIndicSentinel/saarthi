@@ -1558,13 +1558,4 @@ class ChatRepositoryImpl @Inject constructor(
             .format(now.time)
         return "Current local time is $timeStr — it is $band."
     }
-
-    // ── Mapping ───────────────────────────────────────────────────────────────
-
-    private fun ChatSessionEntity.toSession() = ChatSession(
-        id = id,
-        title = title,
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-    )
 }
