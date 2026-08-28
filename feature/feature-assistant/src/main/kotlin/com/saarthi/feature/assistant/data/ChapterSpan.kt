@@ -186,7 +186,7 @@ internal fun resolveChapterSpanWindowRelaxed(
 ): ChapterSpanWindow? {
     val aliases = chapterIdAliases(chapterRef)
     val requestedNum = chapterNumericId(chapterRef) ?: return null
-  var bestIdx = -1
+    var bestIdx = -1
     var bestTier = Int.MAX_VALUE
     sorted.forEachIndexed { idx, chunk ->
         if (isTocLikeChunk(chunk)) return@forEachIndexed

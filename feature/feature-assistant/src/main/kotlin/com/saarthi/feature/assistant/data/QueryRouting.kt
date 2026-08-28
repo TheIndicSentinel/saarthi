@@ -381,7 +381,7 @@ internal fun isListRequest(query: String): Boolean {
     }
     val tokens = lower.split(QUERY_SPLIT).filter { it.isNotEmpty() }
     if (tokens.any { it == "list" || it == "lists" }) return true
-  // Devanagari list cues
+    // Devanagari list cues
     if (lower.contains("सूची") || lower.contains("सूचि") || lower.contains("सभी")) {
         return tokens.any { it == "list" || it == "lists" || it == "all" }
     }

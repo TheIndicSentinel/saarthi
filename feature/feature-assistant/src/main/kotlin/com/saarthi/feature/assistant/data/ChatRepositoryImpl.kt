@@ -1051,114 +1051,114 @@ class ChatRepositoryImpl @Inject constructor(
         // KV already holds them) is dead — if isFreshConversation were ever
         // false, identity and history would vanish for that turn.
         // Memory is scoped to THIS chat — never read another chat's memories.
-            val currentSession = _currentSessionId.value
-            val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
-            // Recap is now kept on doc-pinned turns too. The Conversation's
-            // KV cache is recycled after every reply, so EVERY turn is FRESH —
-            // the recap is the ONLY thing that carries conversation continuity.
-            // It used to be dropped here to save ~150–250c for chunks, back
-            // when the full ~4423c BASE prompt left almost no room. But that
-            // made document chat non-conversational: with no memory of the
-            // prior turn, a follow-up like "explain more" or "now the second
-            // one" just re-summarised the whole document every time. Now that
-            // the compact grounded prompt (~962c) frees ~3400c, there is ample
-            // room for the recent-questions recap, which lets the model treat
-            // follow-ups as a continuing conversation instead of restarting.
-            val docsPinned = shouldPinDocsForRagTurnMode(ragTurnMode)
-            val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
-            // Recap policy per turn type:
-            //  • New attach this turn → NO recap, so file A's Q&A cannot
-            //    answer for file B. Name/facts still come from memory.
-            //  • Grounded follow-up (docs pinned, no attach) → user QUESTIONS
-            //    only (buildPriorTurnsRecap). Re-injecting Saarthi's own prior
-            //    long answer here was destabilising grounded follow-ups into
-            //    deflection (G3); the document excerpts already carry the
-            //    substance, so the model only needs the earlier questions for
-            //    topical continuity, not a transcript of its own replies.
-            //  • Plain chat (no docs) → full transcript recap, which needs the
-            //    prior answers to resolve "explain more"-style follow-ups.
-            val priorTurns = when {
-                attachments.isNotEmpty() -> ""
-                docsPinned -> buildPriorTurnsRecap()
-                else -> buildConversationContext(grounded = false)
+        val currentSession = _currentSessionId.value
+        val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
+        // Recap is now kept on doc-pinned turns too. The Conversation's
+        // KV cache is recycled after every reply, so EVERY turn is FRESH —
+        // the recap is the ONLY thing that carries conversation continuity.
+        // It used to be dropped here to save ~150–250c for chunks, back
+        // when the full ~4423c BASE prompt left almost no room. But that
+        // made document chat non-conversational: with no memory of the
+        // prior turn, a follow-up like "explain more" or "now the second
+        // one" just re-summarised the whole document every time. Now that
+        // the compact grounded prompt (~962c) frees ~3400c, there is ample
+        // room for the recent-questions recap, which lets the model treat
+        // follow-ups as a continuing conversation instead of restarting.
+        val docsPinned = shouldPinDocsForRagTurnMode(ragTurnMode)
+        val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
+        // Recap policy per turn type:
+        //  • New attach this turn → NO recap, so file A's Q&A cannot
+        //    answer for file B. Name/facts still come from memory.
+        //  • Grounded follow-up (docs pinned, no attach) → user QUESTIONS
+        //    only (buildPriorTurnsRecap). Re-injecting Saarthi's own prior
+        //    long answer here was destabilising grounded follow-ups into
+        //    deflection (G3); the document excerpts already carry the
+        //    substance, so the model only needs the earlier questions for
+        //    topical continuity, not a transcript of its own replies.
+        //  • Plain chat (no docs) → full transcript recap, which needs the
+        //    prior answers to resolve "explain more"-style follow-ups.
+        val priorTurns = when {
+            attachments.isNotEmpty() -> ""
+            docsPinned -> buildPriorTurnsRecap()
+            else -> buildConversationContext(grounded = false)
+        }
+        lastPriorTurnsChars = priorTurns.length
+        // On doc-grounded turns swap the full ~4423c persona/tools/reminders
+        // prompt for a compact instruction set. The verbose prompt alone is
+        // ~1370 tokens — larger than E4B's entire 1536-token window once RAM
+        // is tight — so trimPrompt was butchering it and E4B produced no
+        // reply at all. The compact version (~160 tokens) both fits the
+        // small window AND frees ~1000 tokens for actual document chunks,
+        // which is the real lever for answer quality on E2B/3n.
+        val systemPromptBuild = buildSystemPrompt(memoryContext, priorTurns, grounded = docsPinned)
+        val systemInstructions = systemPromptBuild.prompt
+        val budget = maxPromptChars
+        // Size the RAG block to fit the remaining budget AFTER the
+        // system prompt and the user message have claimed their space.
+        // Without this, the verbose Gemma 4 BASE persona (~3700c) +
+        // 4 chunks (~2400c) overflowed the with-docs 5600c budget and
+        // trimPrompt sliced mid-chunk → repetition loop at 01:38:26
+        // and 01:41:26 in the user's log. The block builder now
+        // includes chunks greedily and never cuts one in half.
+        val systemPlusMargin = systemInstructions.length +
+            (if (systemInstructions.isNotBlank()) 2 else 0) +   // "\n\n"
+            userMessage.length + 1 +                              // userMessage + 1c
+            // Was 160 — too generous on STANDARD (Gemma 3n) where
+            // the with-docs budget is tight to begin with; the
+            // saved 80 c is exactly enough for one extra chunk.
+            80                                                    // safety margin
+        val ragBudget = groundedRagCharBudget(
+            totalBudget = budget,
+            reservedNonRagChars = systemPlusMargin,
+            hasRetrievedChunks = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty(),
+        )
+        val ragAssembly = buildRagPromptBlockAndTrackCitation(
+            retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
+            newThisTurnNames = newAttachDisplayNames,
+            answerShape = ragAnswerShape,
+            multiFileFairSources = multiFileFairSources,
+            tabularAmount = tabularAmountQuery,
+            unattachedExternal = unattachedExternal,
+            forceGroundedDelivery = forceGroundedDelivery,
+            ragTurnMode = ragTurnMode,
+            ragQuery = ragQuery,
+            attachmentsThisTurn = attachments.isNotEmpty(),
+        )
+        if (ragAssembly.groundedDeliveryFailed) {
+            DebugLogger.log("PROMPT", "FRESH grounded delivery failed — retry instruction")
+            return groundedDeliveryRetryInstruction(userMessage)
+        }
+        val fileContext = ragAssembly.block
+        DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
+        return buildString {
+            // Only emit the system block if non-blank — Compact tier
+            // returns empty (see SystemPromptProvider) and leading
+            // whitespace before the user message would look like garbage
+            // input to the model.
+            if (systemInstructions.isNotBlank()) {
+                append(systemInstructions)
+                append("\n\n")
             }
-            lastPriorTurnsChars = priorTurns.length
-            // On doc-grounded turns swap the full ~4423c persona/tools/reminders
-            // prompt for a compact instruction set. The verbose prompt alone is
-            // ~1370 tokens — larger than E4B's entire 1536-token window once RAM
-            // is tight — so trimPrompt was butchering it and E4B produced no
-            // reply at all. The compact version (~160 tokens) both fits the
-            // small window AND frees ~1000 tokens for actual document chunks,
-            // which is the real lever for answer quality on E2B/3n.
-            val systemPromptBuild = buildSystemPrompt(memoryContext, priorTurns, grounded = docsPinned)
-            val systemInstructions = systemPromptBuild.prompt
-            val budget = maxPromptChars
-            // Size the RAG block to fit the remaining budget AFTER the
-            // system prompt and the user message have claimed their space.
-            // Without this, the verbose Gemma 4 BASE persona (~3700c) +
-            // 4 chunks (~2400c) overflowed the with-docs 5600c budget and
-            // trimPrompt sliced mid-chunk → repetition loop at 01:38:26
-            // and 01:41:26 in the user's log. The block builder now
-            // includes chunks greedily and never cuts one in half.
-            val systemPlusMargin = systemInstructions.length +
-                (if (systemInstructions.isNotBlank()) 2 else 0) +   // "\n\n"
-                userMessage.length + 1 +                              // userMessage + 1c
-                // Was 160 — too generous on STANDARD (Gemma 3n) where
-                // the with-docs budget is tight to begin with; the
-                // saved 80 c is exactly enough for one extra chunk.
-                80                                                    // safety margin
-            val ragBudget = groundedRagCharBudget(
-                totalBudget = budget,
-                reservedNonRagChars = systemPlusMargin,
-                hasRetrievedChunks = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty(),
-            )
-            val ragAssembly = buildRagPromptBlockAndTrackCitation(
-                retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
-                newThisTurnNames = newAttachDisplayNames,
-                answerShape = ragAnswerShape,
-                multiFileFairSources = multiFileFairSources,
-                tabularAmount = tabularAmountQuery,
-                unattachedExternal = unattachedExternal,
-                forceGroundedDelivery = forceGroundedDelivery,
-                ragTurnMode = ragTurnMode,
-                ragQuery = ragQuery,
-                attachmentsThisTurn = attachments.isNotEmpty(),
-            )
-            if (ragAssembly.groundedDeliveryFailed) {
-                DebugLogger.log("PROMPT", "FRESH grounded delivery failed — retry instruction")
-                return groundedDeliveryRetryInstruction(userMessage)
+            if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
+            append(userMessage)
+        }.let { prompt ->
+            // trimPrompt() is now a safety net rather than the primary
+            // cutter — the RAG block was already sized to fit. When the
+            // min grounded budget forces excerpts that overflow, pin the
+            // RAG block + critical tail + user message so overflow drops
+            // the FRONT of the system prompt, not the document excerpts.
+            val criticalTail = systemPromptBuild.criticalTail
+            val pinnedTail = when {
+                fileContext.isNotEmpty() && criticalTail.isNotBlank() ->
+                    "$criticalTail\n\n$fileContext\n$userMessage"
+                fileContext.isNotEmpty() -> "$fileContext\n$userMessage"
+                criticalTail.isNotBlank() -> "$criticalTail\n\n$userMessage"
+                else -> userMessage
             }
-            val fileContext = ragAssembly.block
-            DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
-            return buildString {
-                // Only emit the system block if non-blank — Compact tier
-                // returns empty (see SystemPromptProvider) and leading
-                // whitespace before the user message would look like garbage
-                // input to the model.
-                if (systemInstructions.isNotBlank()) {
-                    append(systemInstructions)
-                    append("\n\n")
-                }
-                if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
-                append(userMessage)
-            }.let { prompt ->
-                // trimPrompt() is now a safety net rather than the primary
-                // cutter — the RAG block was already sized to fit. When the
-                // min grounded budget forces excerpts that overflow, pin the
-                // RAG block + critical tail + user message so overflow drops
-                // the FRONT of the system prompt, not the document excerpts.
-                val criticalTail = systemPromptBuild.criticalTail
-                val pinnedTail = when {
-                    fileContext.isNotEmpty() && criticalTail.isNotBlank() ->
-                        "$criticalTail\n\n$fileContext\n$userMessage"
-                    fileContext.isNotEmpty() -> "$fileContext\n$userMessage"
-                    criticalTail.isNotBlank() -> "$criticalTail\n\n$userMessage"
-                    else -> userMessage
-                }
-                val finalPrompt = trimPrompt(prompt, budget, pinnedTail = pinnedTail)
-                DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget promptMs=${promptMs()}")
-                finalPrompt
-            }
+            val finalPrompt = trimPrompt(prompt, budget, pinnedTail = pinnedTail)
+            DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget promptMs=${promptMs()}")
+            finalPrompt
+        }
     }
 
     /**

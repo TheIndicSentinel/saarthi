@@ -462,7 +462,7 @@ internal fun normalizeCitationSectionHeading(line: String): String {
             "$label $num"
         }
     }
-  if (Regex("(?i)^THE\\s+SCHEDULE\\b").containsMatchIn(trimmed)) {
+    if (Regex("(?i)^THE\\s+SCHEDULE\\b").containsMatchIn(trimmed)) {
         return normalizeDisplayTitle(trimmed)
     }
     val normalized = normalizeDisplayTitle(trimmed)

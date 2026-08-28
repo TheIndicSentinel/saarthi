@@ -42,7 +42,7 @@ internal fun shouldEmitDeterministicRetrievalMiss(
     if (isStructureCountQuery(query)) return false
     if (retrieved.isEmpty()) return true
     if (hasStrongLexicalRetrievalHit(query, retrieved)) return false
-  return isLowConfidenceAnchorOnlyRetrieval(query, retrieved) ||
+    return isLowConfidenceAnchorOnlyRetrieval(query, retrieved) ||
         !hasPositiveBodyRetrievalHit(retrieved.filter { !it.isStructuralAnchor() })
 }
 

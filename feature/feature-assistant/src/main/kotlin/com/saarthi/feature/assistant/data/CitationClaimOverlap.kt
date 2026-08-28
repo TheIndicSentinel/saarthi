@@ -27,7 +27,7 @@ internal fun shouldFilterSourcesByClaimOverlap(
     if (turnMode == RagTurnMode.GENERAL_KNOWLEDGE || turnMode == RagTurnMode.PLAIN_CHAT) return false
     if (isStructureCountQuery(query) || isStructureListQuery(query)) return false
     if (isDocumentMetaOverviewQuery(query)) return false
-  if (turnMode == RagTurnMode.MIXED && !hasDocumentQueryCues(query)) return false
+    if (turnMode == RagTurnMode.MIXED && !hasDocumentQueryCues(query)) return false
     return true
 }
 
