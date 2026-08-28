@@ -77,7 +77,7 @@ enum class SupportedLanguage(
      * night), chosen by [hour] (0..23). Used on the home header and fed into
      * the chat prompt's time context so both stay in sync.
      *
-     * Bands match [buildTimeContext] in ChatRepositoryImpl exactly — morning
+     * Bands match the chat prompt time-context line exactly — morning
      * 5–11, afternoon 12–16, evening 17–20, night otherwise. The previous
      * 3-band version had no night slot, so any hour before noon (incl. 2 AM)
      * resolved to "Good morning" — the bug the user hit at 01:59.
