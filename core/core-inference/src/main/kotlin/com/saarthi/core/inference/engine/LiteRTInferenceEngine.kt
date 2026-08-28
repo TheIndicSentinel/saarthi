@@ -17,7 +17,9 @@ import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
+import com.saarthi.core.inference.InferenceMetricsRecorder
 import com.saarthi.core.inference.InferenceService
+import com.saarthi.core.inference.InferenceTurnMetrics
 import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.model.PromptTier
@@ -255,6 +257,33 @@ class LiteRTInferenceEngine @Inject constructor(
         usingNpu -> "NPU"
         usingGpu -> "GPU"
         else     -> "CPU"
+    }
+
+    /**
+     * In-memory structured metrics for the just-finished turn. Filename only
+     * (same key nearby logs already use) — never prompt/response text.
+     * [InferenceMetricsRecorder.record] never throws.
+     */
+    private fun recordTurnMetrics(
+        tokenCount: Int,
+        elapsedMs: Long,
+        ttftMs: Long,
+        tps: Float,
+        decodeTps: Float,
+        completed: Boolean,
+    ) {
+        InferenceMetricsRecorder.record(
+            InferenceTurnMetrics(
+                modelId = loadedModelPath?.substringAfterLast('/') ?: "?",
+                backend = backendLabel(),
+                tokenCount = tokenCount,
+                elapsedMs = elapsedMs,
+                ttftMs = ttftMs,
+                tps = tps,
+                decodeTps = decodeTps,
+                completed = completed,
+            ),
+        )
     }
 
     // Returns true only when the model file has QNN-compiled layers for this SoC.
@@ -1145,6 +1174,14 @@ class LiteRTInferenceEngine @Inject constructor(
                                 "tps=${"%.1f".format(tps)}  decodeTps=${"%.1f".format(decodeTps)}  " +
                                 "backend=${backendLabel()}  conv=recycled",
                         )
+                        recordTurnMetrics(
+                            tokenCount = tokenCount,
+                            elapsedMs = elapsedMs,
+                            ttftMs = ttftMs,
+                            tps = tps,
+                            decodeTps = decodeTps,
+                            completed = true,
+                        )
                         // Drain BOTH deferred-close handles. Previously only
                         // closingEngine was closed here, so a closingConversation
                         // saved during a memory-pressure deferred close leaked until
@@ -1187,7 +1224,17 @@ class LiteRTInferenceEngine @Inject constructor(
                         if (error is java.util.concurrent.CancellationException || error is CancellationException) {
                             val elapsedMs = System.currentTimeMillis() - genStartTimeMs
                             val tps = if (elapsedMs > 0) tokenCount * 1000f / elapsedMs else 0f
+                            val decodeMs = if (ttftMs >= 0) elapsedMs - ttftMs else elapsedMs
+                            val decodeTps = if (decodeMs > 0 && tokenCount > 1) (tokenCount - 1) * 1000f / decodeMs else tps
                             DebugLogger.log("LITERT", "Stream cancelled  tokens=$tokenCount  elapsed=${elapsedMs/1000}s  tps=${"%.1f".format(tps)}  backend=${backendLabel()}")
+                            recordTurnMetrics(
+                                tokenCount = tokenCount,
+                                elapsedMs = elapsedMs,
+                                ttftMs = ttftMs,
+                                tps = tps,
+                                decodeTps = decodeTps,
+                                completed = false,
+                            )
                             crashRecoveryStore.resetCrashCount(loadedModelPath ?: "")
                             InferenceService.stop(context)
                             close()  // normal close — no error
