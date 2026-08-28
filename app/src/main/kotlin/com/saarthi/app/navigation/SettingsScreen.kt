@@ -647,6 +647,12 @@ fun PrivacyScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = Suppo
                 trailing = { Text(d.privacyLocal, style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3)) },
             )
             SaarthiListRow(
+                leadingIcon = { Icon(Icons.Outlined.Person, null) },
+                title = d.privacyRememberedFacts,
+                tone = ChipTone.Jade,
+                trailing = { Text(d.privacyLocal, style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3)) },
+            )
+            SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Memory, null) },
                 title = d.privacyModelWeights,
                 tone = ChipTone.Jade,
