@@ -2,7 +2,7 @@ package com.saarthi.feature.assistant.voice
 
 /**
  * Which Android speech path [com.saarthi.feature.assistant.viewmodel.AssistantViewModel]
- * should open for a voice turn (Point 6).
+ * should open for a voice turn.
  *
  * Pure decision — no Context / SpeechRecognizer — so unit tests pin the
  * on-device-only gate without Robolectric.
@@ -19,7 +19,8 @@ enum class SpeechRecognitionPath {
 /**
  * @param recognitionAvailable [android.speech.SpeechRecognizer.isRecognitionAvailable]
  * @param onDeviceAvailable API 33+ and [android.speech.SpeechRecognizer.isOnDeviceRecognitionAvailable]
- * @param onDeviceVoiceOnly user opted into Settings → "On-device voice only"
+ * @param onDeviceVoiceOnly Settings → "On-device voice only" (product default on;
+ *   user may turn it off to allow the phone speech service)
  */
 fun resolveSpeechRecognitionPath(
     recognitionAvailable: Boolean,

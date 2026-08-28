@@ -1,6 +1,6 @@
 # Saarthi — Privacy Policy
 
-_Last updated: 2026-07-14 • Applies to the Saarthi Android app (com.indicsentinel.saarthi)_
+_Last updated: 2026-08-28 • Applies to the Saarthi Android app (com.indicsentinel.saarthi)_
 
 > **Host this file at a public URL** (e.g. GitHub Pages, your site) and paste that
 > URL into Play Console → App content → Privacy policy. Fill in the **Contact**
@@ -17,14 +17,13 @@ Your conversations, attached files, and remembered facts (name, preferences, etc
 - **Chats & messages** — stored locally; deletable any time (Settings → Clear chat history).
 - **Remembered facts** (name, city, diet, likes, …) — local only; used to personalise replies.
 - **Attached documents / photos** — processed on-device for your question; not uploaded.
-- **Voice input** — Saarthi asks your device to transcribe speech to text and prefers
-  on-device transcription where your phone supports it. On devices without an on-device
-  speech model, Android's standard speech service is used instead, which may send the
-  audio to that service's provider (typically Google) for transcription — this is a
+- **Voice input** — Saarthi asks your device to transcribe speech to text and uses
+  on-device transcription **by default**. Voice works only when an on-device speech
+  model is available, unless you turn off **Settings → On-device voice only**. Turning
+  that setting off allows Android's standard speech service, which may send the audio
+  to that service's provider (typically Google) for transcription — this is a
   device/platform behavior, not something Saarthi's own servers ever see (Saarthi has
-  no servers). You can turn on **Settings → On-device voice only** to block that
-  fallback (voice input then works only when an on-device speech model is available).
-  Nothing is collected by us either way.
+  no servers). Nothing is collected by us either way.
 
 ## Network connections the app makes
 Saarthi is offline for AI — there is no server-side chat processing, and Saarthi has
@@ -32,7 +31,8 @@ no backend to send your data to. It does connect to the internet for:
 1. **Downloading the AI model** (one time) and **Kisan knowledge-pack updates**, fetched
    from public hosts (Hugging Face / GitHub). These are downloads to your device — no
    personal data is sent.
-2. **Voice input**, if your device doesn't have an on-device speech model — see above.
+2. **Voice input**, only if you turn off **Settings → On-device voice only** and your
+   device then uses its standard speech service — see above.
 3. **Crash & support reports you choose to send.** Saarthi has no automatic crash
    reporting or analytics of any kind — no Firebase, no telemetry. If something goes
    wrong, the on-device debug log (technical: timings, error codes, device model —
@@ -43,13 +43,13 @@ no backend to send your data to. It does connect to the internet for:
    device unless you choose to send that email.
 
 ## Permissions and why
-- **Microphone** — voice input (see above: on-device where supported, otherwise your
-  device's standard speech service).
+- **Microphone** — voice input (on-device by default; the phone’s speech service only
+  if you turn off Settings → On-device voice only).
 - **Photos/Media & files** — only files you attach to a chat.
 - **Notifications** — the daily wisdom card and download-progress updates.
 - **Foreground service** — keeps the large model download and AI responses running reliably.
-- **Internet / network state** — model & pack downloads, and voice input when on-device
-  transcription isn't available.
+- **Internet / network state** — model & pack downloads, and voice input only if you
+  have allowed the phone’s speech service (see above).
 
 We do **not** request contacts, location, or SMS.
 

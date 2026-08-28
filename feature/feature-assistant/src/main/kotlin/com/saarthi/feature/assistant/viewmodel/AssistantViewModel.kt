@@ -542,8 +542,8 @@ class AssistantViewModel @Inject constructor(
     fun startListening() {
         // Prefer on-device recognition. Standard createSpeechRecognizer() may
         // route through the device speech provider's cloud (often Google) —
-        // a narrow exception to "AI is 100% offline." Point 6: disclose when
-        // that path is used; Settings "On-device voice only" can block it.
+        // a narrow exception to "AI is 100% offline." On-device-only is the
+        // default; disclose when the user has allowed the cloud path.
         val recognitionAvailable = SpeechRecognizer.isRecognitionAvailable(context)
         val onDeviceAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(context) }.getOrDefault(false)

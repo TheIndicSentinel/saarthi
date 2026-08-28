@@ -91,4 +91,33 @@ class SettingsPrivacyCopyTest {
         )
         assertTrue(hindi.isNotBlank())
     }
+
+    @Test
+    fun english_privacy_copy_says_voice_is_on_device_by_default() {
+        val hero = SupportedLanguage.ENGLISH.settingsDetail.privacyHeroBody
+        assertTrue(
+            "privacyHeroBody must say on-device voice is the default. Got: '$hero'",
+            hero.contains("on-device", ignoreCase = true) &&
+                hero.contains("default", ignoreCase = true),
+        )
+        assertTrue(
+            "privacyHeroBody must tell users how to allow phone speech. Got: '$hero'",
+            hero.contains("On-device voice only", ignoreCase = true),
+        )
+        val noAccounts = SupportedLanguage.ENGLISH.settingsDetail.privacyNoAccountsSub
+        assertTrue(
+            "privacyNoAccountsSub must not treat cloud speech as the default. Got: '$noAccounts'",
+            noAccounts.contains("on-device", ignoreCase = true),
+        )
+        val detailsSub = SupportedLanguage.ENGLISH.settings.privacyDetailsSub
+        assertTrue(
+            "privacyDetailsSub must say voice is on-device by default. Got: '$detailsSub'",
+            detailsSub.contains("on-device by default", ignoreCase = true),
+        )
+        val off = SupportedLanguage.ENGLISH.settings.onDeviceVoiceOnlyOff
+        assertTrue(
+            "Off subtitle must say the user is allowing phone speech. Got: '$off'",
+            off.contains("allows", ignoreCase = true),
+        )
+    }
 }

@@ -16,7 +16,7 @@ data class SettingsDetailStrings(
     val privacyTitle: String = "Privacy",
     val privacyTopSub: String = "What stays on your device",
     val privacyHeroTitle: String = "AI stays on your phone",
-    val privacyHeroBody: String = "Saarthi has no server. Chat and the AI model run on your device. Voice input prefers on-device speech; if your phone has no on-device model, it may use the phone’s speech service (you can block that in Settings).",
+    val privacyHeroBody: String = "Saarthi has no server. Chat and the AI model run on your device. Voice input uses on-device speech by default. If your phone has no on-device model, turn off Settings → On-device voice only to use the phone’s speech service (which may send audio to that provider).",
     val privacyStoredHere: String = "Stored on this device only",
     val privacyChatHistory: String = "Your chat history",
     val privacyRememberedFacts: String = "Remembered personal facts",
@@ -26,7 +26,7 @@ data class SettingsDetailStrings(
     val privacyRunsHardware: String = "Runs on your hardware",
     val privacyRunsHardwareSub: String = "Gemma model, Vulkan / CPU inference",
     val privacyNoAccounts: String = "No accounts, no tracking",
-    val privacyNoAccountsSub: String = "AI works offline; voice may use phone speech",
+    val privacyNoAccountsSub: String = "AI works offline; voice stays on-device unless you allow phone speech",
     // About
     val aboutTitle: String = "About Saarthi",
     val aboutTagline: String = "A free, offline AI companion built for the next billion users — designed in India, for India.",

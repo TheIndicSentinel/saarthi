@@ -192,16 +192,16 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
 4. [ ] **Data safety form** — no Firebase (confirmed: never adopted, decision made
        2026-07-13 to keep it that way — see "Crash reporting" above). Declare:
        - On-device processing + local-only storage (chats, memories, attachments).
-       - Voice/audio data: as of 2026-07-13, on-device transcription is preferred
+       - Voice/audio data: as of 2026-08-28, on-device transcription is the **default**
          (`SpeechRecognizer.createOnDeviceSpeechRecognizer` when the platform confirms
-         a model is installed, API 33+); on devices without one, Android's standard
-         speech service is used, which may send audio to its provider (typically
-         Google) for transcription. Users can opt out via **Settings → On-device voice
-         only** (blocks the cloud/standard fallback). Declare audio data as
-         "collected, shared with a third party (device's speech service) for app
-         functionality, not used for any other purpose, user can opt out" — do NOT
-         declare "no data collected" for microphone, even though Saarthi itself has
-         no backend to receive it.
+         a model is installed, API 33+). Cloud / standard speech is blocked unless the
+         user turns off **Settings → On-device voice only**. If they do, Android's
+         standard speech service may send audio to its provider (typically Google).
+         Declare audio data as "collected, shared with a third party (device's speech
+         service) for app functionality, not used for any other purpose, user can
+         opt out" — the opt-out is the default; turning the setting off is opt-in to
+         sharing. Do NOT declare "no data collected" for microphone, even though
+         Saarthi itself has no backend to receive it, because the optional path exists.
        - No data sold, no advertising use, no data retained by Saarthi's own
          infrastructure (there isn't any — no servers).
 5. [ ] **Foreground service** `specialUse`: three services declared, each with its

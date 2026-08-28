@@ -684,8 +684,8 @@ enum class SupportedLanguage(
         ODIA     -> "ଭଏସ୍ ଇନପୁଟ୍ ଆରମ୍ଭ ହୋଇପାରିଲା ନାହିଁ। ଦୟାକରି ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।"
     }
     /**
-     * Voice error: Settings "On-device voice only" is on, but this phone has
-     * no on-device speech model — cloud fallback is blocked (Point 6).
+     * Voice error: Settings "On-device voice only" is on (the product default),
+     * but this phone has no on-device speech model — cloud fallback is blocked.
      */
     val voiceOnDeviceOnlyUnavailable: String get() = when (this) {
         ENGLISH  -> "On-device voice isn't available here. Turn off “On-device voice only” in Settings, or type instead."

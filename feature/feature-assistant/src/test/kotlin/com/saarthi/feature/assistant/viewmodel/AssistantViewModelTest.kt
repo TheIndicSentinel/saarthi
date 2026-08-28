@@ -88,7 +88,7 @@ class AssistantViewModelTest {
         every { mockTtsManager.isSpeaking } returns MutableStateFlow(false)
         every { mockTtsManager.ttsAvailable } returns ttsAvailableFlow
         every { mockTtsPreference.autoSpeakReplies } returns MutableStateFlow(false)
-        every { mockVoicePrivacyPreference.onDeviceVoiceOnly } returns MutableStateFlow(false)
+        every { mockVoicePrivacyPreference.onDeviceVoiceOnly } returns MutableStateFlow(true)
         every { mockPersonalityPreference.selected } returns MutableStateFlow(PersonalityCatalog.SAARTHI)
         every { mockEntitlements.isPro } returns MutableStateFlow(false)
     }

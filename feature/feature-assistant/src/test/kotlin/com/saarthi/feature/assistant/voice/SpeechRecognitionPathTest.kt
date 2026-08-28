@@ -1,11 +1,14 @@
 package com.saarthi.feature.assistant.voice
 
+import com.saarthi.core.i18n.DEFAULT_ON_DEVICE_VOICE_ONLY
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins Point 6 STT path selection: prefer on-device, optional block of cloud
- * fallback, never interrupt the default path when the user left the toggle off.
+ * Pins STT path selection: prefer on-device; block cloud when on-device-only
+ * is on (the product default); standard path only when the user turned the
+ * toggle off and no on-device model exists.
  */
 class SpeechRecognitionPathTest {
 
@@ -53,6 +56,19 @@ class SpeechRecognitionPathTest {
                 recognitionAvailable = true,
                 onDeviceAvailable = false,
                 onDeviceVoiceOnly = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `product default on-device-only blocks cloud when no on-device model`() {
+        assertTrue(DEFAULT_ON_DEVICE_VOICE_ONLY)
+        assertEquals(
+            SpeechRecognitionPath.UNAVAILABLE,
+            resolveSpeechRecognitionPath(
+                recognitionAvailable = true,
+                onDeviceAvailable = false,
+                onDeviceVoiceOnly = DEFAULT_ON_DEVICE_VOICE_ONLY,
             ),
         )
     }
