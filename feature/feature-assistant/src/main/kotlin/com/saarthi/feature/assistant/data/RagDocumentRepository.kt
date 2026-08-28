@@ -323,6 +323,22 @@ class RagDocumentRepository @Inject constructor(
             )
         }
 
+        val indexedCharCount = chunks.sumOf { it.length }
+        val roleContentHint = outlineText ?: openingPageContentSample(chunks.firstOrNull())
+        val indexedRole = documentRoleLabel(file.name, roleContentHint, indexedCharCount)
+        if (indexedRole != null) {
+            entities.add(
+                RagChunkEntity(
+                    sessionId = sessionId,
+                    docUri = uriKey,
+                    docName = file.name,
+                    mimeType = file.mimeType,
+                    chunkIndex = DOCUMENT_ROLE_CHUNK_INDEX,
+                    text = encodeIndexedDocumentRole(indexedRole),
+                ),
+            )
+        }
+
         indexedChunks.forEachIndexed { idx, indexed ->
             val meta = metadata[idx]
             entities.add(
@@ -378,6 +394,7 @@ class RagDocumentRepository @Inject constructor(
                     name = newest.docName,
                     lastIndexedAt = newest.createdAt,
                     indexTruncationNotice = truncation,
+                    indexedDocumentRole = resolveDocumentRoleFromChunks(chunks)?.name?.lowercase(),
                 )
             }
             .sortedBy { it.lastIndexedAt }
@@ -465,6 +482,7 @@ class RagDocumentRepository @Inject constructor(
             sessionRows
         }
         val all = scoped.filter { it.chunkIndex != FINGERPRINT_CHUNK_INDEX }
+        val docRoleByUri = documentRolesByUri(all)
         val sessionDocCount = all.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size
         if (all.isEmpty()) {
             val searchMs = (System.nanoTime() - t0) / 1_000_000
@@ -493,12 +511,23 @@ class RagDocumentRepository @Inject constructor(
         val anchorWindow = anchorWindowMax(query)
         var headingChunkCount = 0
         var ftsPrefilterUsed = false
+        val queryTokens = query.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
+        val isFollowUp = !priorQuery.isNullOrBlank() && queryTokens.take(4).any { it in FOLLOW_UP_TOKENS }
+        val metaReason = effectiveMetaRouteReason(query, isFollowUp)
         fun finish(hits: List<RetrievedChunk>): List<RetrievedChunk> {
             // All-zero / overview: rebuild per file (outline + contiguous
             // opening, or spaced samples for "which file"). Real BM25 hits
             // (body score > 0) are left as ranked.
             val resolved = if (hasPositiveBodyHit(hits)) hits
-                else structuralSample(all, effectiveTopK, query, spaced = route.whichFile)
+                else structuralSample(
+                    all,
+                    effectiveTopK,
+                    query,
+                    spaced = route.whichFile,
+                    docRoles = docRoleByUri,
+                    metaReason = metaReason,
+                    route = route,
+                )
             val docCount = resolved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size.coerceAtLeast(1)
             val minSlots = if (route.equalSlots) (effectiveTopK / docCount).coerceAtLeast(1) else 1
             val contentEntities = all.filter { isBm25SearchableChunk(it) }
@@ -539,15 +568,6 @@ class RagDocumentRepository @Inject constructor(
             }
         }
 
-        // Follow-up detection: if the query STARTS with a continuation
-        // token AND we have context from the prior turn, bypass meta-routing
-        // and use BM25 on the combined query. This handles "also list meaning
-        // of each mentioned" continuing "meaning of terms associated with
-        // hazards" — the combined BM25 query surfaces the same hazard chunks
-        // rather than a generic structural sample.
-        val queryTokens = query.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).filter { it.isNotEmpty() }
-        val isFollowUp = !priorQuery.isNullOrBlank() && queryTokens.take(4).any { it in FOLLOW_UP_TOKENS }
-        val metaReason = effectiveMetaRouteReason(query, isFollowUp)
         fun done(hits: List<RetrievedChunk>, path: RagSearchPath): List<RetrievedChunk> {
             val searchMs = (System.nanoTime() - t0) / 1_000_000
             logRag(
@@ -586,7 +606,13 @@ class RagDocumentRepository @Inject constructor(
         // BM25 sees only content chunks. The outline chunk is curated
         // meta, not evidence, so it should not be ranked against the
         // user's actual question.
-        val contentChunks = all.filter { isBm25SearchableChunk(it) }
+        val contentChunks = filterSubstanceContentChunks(
+            all.filter { isBm25SearchableChunk(it) },
+            docRoleByUri,
+            query,
+            route,
+            isFollowUp,
+        )
         if (contentChunks.isEmpty()) return done(emptyList(), RagSearchPath.empty)
 
         // Heading-anchored retrieval: if the query closely matches a
@@ -903,6 +929,9 @@ class RagDocumentRepository @Inject constructor(
         topK: Int,
         query: String = "",
         spaced: Boolean = false,
+        docRoles: Map<String, DocumentRoleLabel?> = emptyMap(),
+        metaReason: String? = null,
+        route: QueryRoute = QueryRoute(emptySet(), false, false, false, query),
     ): List<RetrievedChunk> {
         val queryLower = query.lowercase()
         val isTailQuery = TAIL_STRUCTURE_TOKENS.any { queryLower.contains(it) }
@@ -912,9 +941,18 @@ class RagDocumentRepository @Inject constructor(
             else -> ZeroScorePick.CONTIGUOUS
         }
         val byDoc = all.groupBy { it.docUri }
-        val perDoc = (topK / byDoc.size).coerceAtLeast(2)
+        val orderedUris = orderDocUrisForStructuralSample(
+            byDoc.keys.toList(),
+            docRoles,
+            metaReason,
+            spaced,
+            query,
+            route,
+        )
+        val perDoc = (topK / orderedUris.size.coerceAtLeast(1)).coerceAtLeast(2)
         val result = mutableListOf<RetrievedChunk>()
-        for ((_, docChunks) in byDoc) {
+        for (uri in orderedUris) {
+            val docChunks = byDoc[uri] ?: continue
             docChunks.firstOrNull { it.chunkIndex == OUTLINE_CHUNK_INDEX }?.let { o ->
                 result.add(o.toRetrieved(1.0))
             }
@@ -1306,6 +1344,8 @@ data class SessionRagDocument(
     val lastIndexedAt: Long,
     /** Wave 4 P20 — honest cap when PDF pages/chars were not fully indexed. */
     val indexTruncationNotice: String? = null,
+    /** Phase 4.1 — guide/summary/sample/circular stamp name; null = primary source. */
+    val indexedDocumentRole: String? = null,
 )
 
 private fun RagChunkEntity.toRetrieved(
