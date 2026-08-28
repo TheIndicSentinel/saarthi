@@ -176,6 +176,9 @@ class EngineLifecycleReleaseManagerTest {
         scheduler.runCurrent()
 
         assertEquals(false, conversationReleased)
+        // Wait-loop is still polling while generating; return to foreground
+        // so runTest's scheduler can go idle.
+        callbacks.onActivityStarted(mockk<Activity>())
     }
 
     @Test
@@ -196,6 +199,7 @@ class EngineLifecycleReleaseManagerTest {
         scheduler.runCurrent()
 
         assertEquals(false, conversationReleased)
+        callbacks.onActivityStarted(mockk<Activity>())
     }
 
     @Test
@@ -232,6 +236,68 @@ class EngineLifecycleReleaseManagerTest {
         scheduler.advanceTimeBy(2_000)
         scheduler.runCurrent()
         assertEquals(true, engineReleased)
+    }
+
+    @Test
+    fun `generation that outlasts the delay still releases after it ends while backgrounded`() = runTest(testDispatcher) {
+        val (app, slot) = mockApplication()
+        var generating = true
+        var conversationReleased = false
+        var engineReleased = false
+        val mgr = manager(
+            app,
+            isNativeGenerating = { generating },
+            onReleaseConversation = { conversationReleased = true },
+            onReleaseEngine = { engineReleased = true },
+        )
+        mgr.register()
+        val callbacks = slot.captured
+
+        callbacks.onActivityStarted(mockk<Activity>())
+        callbacks.onActivityStopped(mockk<Activity>())
+
+        scheduler.advanceTimeBy(61_000)
+        scheduler.runCurrent()
+        assertEquals(false, conversationReleased)
+        assertEquals(false, engineReleased)
+
+        // Old one-shot retry was 15s/30s and then gave up. A long CPU turn
+        // can last minutes — keep waiting, then release once idle.
+        generating = false
+        scheduler.advanceTimeBy(EngineLifecycleReleaseManager.WAIT_WHILE_BUSY_MS + 1_000)
+        scheduler.runCurrent()
+        assertEquals(true, conversationReleased)
+        assertEquals(false, engineReleased)
+
+        scheduler.advanceTimeBy(60_000)
+        scheduler.runCurrent()
+        assertEquals(true, engineReleased)
+    }
+
+    @Test
+    fun `returning to foreground during the busy-wait cancels the pending release`() = runTest(testDispatcher) {
+        val (app, slot) = mockApplication()
+        var generating = true
+        var conversationReleased = false
+        val mgr = manager(
+            app,
+            isNativeGenerating = { generating },
+            onReleaseConversation = { conversationReleased = true },
+        )
+        mgr.register()
+        val callbacks = slot.captured
+
+        callbacks.onActivityStarted(mockk<Activity>())
+        callbacks.onActivityStopped(mockk<Activity>())
+        scheduler.advanceTimeBy(61_000)
+        scheduler.runCurrent()
+
+        callbacks.onActivityStarted(mockk<Activity>())
+        generating = false
+        scheduler.advanceTimeBy(EngineLifecycleReleaseManager.WAIT_WHILE_BUSY_MS + 1_000)
+        scheduler.runCurrent()
+
+        assertEquals(false, conversationReleased)
     }
 
     @Test

@@ -142,22 +142,19 @@ class EngineLifecycleReleaseManager(
      *
      * Delays are RAM-tiered via [delaysForTotalRamMb]: tighter on ≤6 GB
      * phones so OEM killers are less likely to reclaim the process while a
-     * multi-GB mmap footprint is still resident. Foreground cancel +
-     * generation/init skip guards are unchanged.
+     * multi-GB mmap footprint is still resident. Foreground cancel is
+     * unchanged. If generation or init is still running when the delay
+     * elapses, wait until it ends while the app stays backgrounded.
      */
     private fun scheduleConversationRelease(conversationDelayMs: Long) {
         pendingConversationRelease?.cancel()
         pendingConversationRelease = lifecycleScope.launch {
             delay(conversationDelayMs)
             if (visibleActivityCount > 0) return@launch
-            if (!isNativeGenerating() && !isInitInProgress()) {
-                DebugLogger.log("LITERT",
-                    "App backgrounded for ${conversationDelayMs / 1000}s — releasing Conversation (KV-cache), engine stays resident")
-                releaseConversationOnly()
-            } else {
-                DebugLogger.log("LITERT", "Conversation release skipped — generation or load still in progress")
-                scheduleConversationReleaseRetry()
-            }
+            if (!awaitIdleWhileBackgrounded("Conversation")) return@launch
+            DebugLogger.log("LITERT",
+                "App backgrounded for ${conversationDelayMs / 1000}s — releasing Conversation (KV-cache), engine stays resident")
+            releaseConversationOnly()
         }
     }
 
@@ -167,7 +164,8 @@ class EngineLifecycleReleaseManager(
      * immediate: a quick app-switch (checking a notification, glancing at
      * another app) shouldn't pay the ~5-10s GPU reload cost the next time
      * the user returns. [engineDelayMs] is RAM-tiered (see
-     * [delaysForTotalRamMb]); generation/init skip guards are unchanged.
+     * [delaysForTotalRamMb]). If generation or init is still running when
+     * the delay elapses, wait until it ends while still backgrounded.
      */
     private fun scheduleBackgroundRelease(engineDelayMs: Long) {
         pendingBackgroundRelease?.cancel()
@@ -182,45 +180,30 @@ class EngineLifecycleReleaseManager(
             // in flight (isInitInProgress) — closeInternal() has no
             // equivalent deferred-close guard for that phase, so closing
             // the Engine out from under an active initialize() call could
-            // race. Both are narrow windows (generation/load are seconds,
-            // this delay is tens of seconds), so skipping this cycle and
-            // trying again on the next backgrounding (or an actual
-            // memory-pressure callback) is safe.
-            if (!isNativeGenerating() && !isInitInProgress()) {
-                DebugLogger.log("LITERT",
-                    "App backgrounded for ${engineDelayMs / 1000}s — releasing engine")
-                releaseEngine()
-            } else {
-                DebugLogger.log("LITERT", "Background release skipped — generation or load still in progress")
-                scheduleEngineReleaseRetry()
-            }
+            // race. Keep waiting while still backgrounded (not a one-shot
+            // retry): a CPU turn can outlast the old 15s/30s retry, and
+            // skipping then left a multi-GB mmap resident until the *next*
+            // backgrounding — which never comes if the user already left.
+            if (!awaitIdleWhileBackgrounded("Engine")) return@launch
+            DebugLogger.log("LITERT",
+                "App backgrounded for ${engineDelayMs / 1000}s — releasing engine")
+            releaseEngine()
         }
     }
 
-    /** One-shot retry when stage-1 release was skipped during init/generation. */
-    private fun scheduleConversationReleaseRetry() {
-        pendingConversationRelease?.cancel()
-        pendingConversationRelease = lifecycleScope.launch {
-            delay(15_000)
-            if (visibleActivityCount > 0) return@launch
-            if (!isNativeGenerating() && !isInitInProgress()) {
-                DebugLogger.log("LITERT", "Conversation release retry — releasing KV-cache")
-                releaseConversationOnly()
-            }
+    /**
+     * After the RAM-tiered debounce, wait until generation/init is idle
+     * while the app stays in the background. Returns false if the user
+     * came back first (caller must not release).
+     */
+    private suspend fun awaitIdleWhileBackgrounded(label: String): Boolean {
+        if (!isNativeGenerating() && !isInitInProgress()) return true
+        DebugLogger.log("LITERT", "$label release deferred — waiting until generation/load ends")
+        while (isNativeGenerating() || isInitInProgress()) {
+            delay(WAIT_WHILE_BUSY_MS)
+            if (visibleActivityCount > 0) return false
         }
-    }
-
-    /** One-shot retry when stage-2 release was skipped during init/generation. */
-    private fun scheduleEngineReleaseRetry() {
-        pendingBackgroundRelease?.cancel()
-        pendingBackgroundRelease = lifecycleScope.launch {
-            delay(30_000)
-            if (visibleActivityCount > 0) return@launch
-            if (!isNativeGenerating() && !isInitInProgress()) {
-                DebugLogger.log("LITERT", "Engine release retry — releasing model")
-                releaseEngine()
-            }
-        }
+        return visibleActivityCount == 0
     }
 
     companion object {
@@ -230,6 +213,8 @@ class EngineLifecycleReleaseManager(
         internal const val ENGINE_RELEASE_DELAY_LOW_RAM_MS = 90_000L
         internal const val CONVERSATION_RELEASE_DELAY_HIGH_RAM_MS = 60_000L
         internal const val ENGINE_RELEASE_DELAY_HIGH_RAM_MS = 120_000L
+        /** Poll interval while stage-1/2 wait for generation or init to finish. */
+        internal const val WAIT_WHILE_BUSY_MS = 5_000L
 
         /**
          * Conservative two-stage delays from total RAM (stable hardware spec,

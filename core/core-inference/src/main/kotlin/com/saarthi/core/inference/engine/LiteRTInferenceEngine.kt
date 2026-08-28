@@ -953,18 +953,22 @@ class LiteRTInferenceEngine @Inject constructor(
      * RECYCLED CONVERSATION (one per turn):
      *   • The first Conversation is created during [initialize] (so init-time
      *     shader warmup happens before the user sees a blank UI).
-     *   • After [onDone] / [onError], the Conversation is closed and a fresh
-     *     one is created immediately for the next turn. KV cache is therefore
-     *     empty at the start of every sendMessageAsync.
-     *   • Continuity across turns comes from a prompt-level recap built by
-     *     [ChatRepositoryImpl.buildPriorTurnsRecap] — NOT from KV-cache reuse.
+     *   • Immediately before every [Conversation.sendMessageAsync], the
+     *     current Conversation is closed and a fresh one is created. KV cache
+     *     is therefore empty at the start of every send.
+     *   • After [onDone] / [onError], the Conversation is closed (not kept
+     *     for a second send). Continuity across turns comes from a
+     *     prompt-level recap built by [ChatRepositoryImpl.buildPriorTurnsRecap]
+     *     — NOT from KV-cache reuse.
      *
      * Why we recycle (not stateful KV reuse):
      *   On Snapdragon 8 Gen 2 (SM8550) + Android 16, calling sendMessageAsync
      *   a second time on the same Conversation reliably SIGKILLs the process
      *   inside the litertlm GPU driver. Same failure pattern on the CPU
      *   backend. Recycling avoids the bug at the cost of a tiny per-turn
-     *   createConversation() (~30–50ms with cached shaders).
+     *   createConversation() (~30–50ms with cached shaders). Recycle happens
+     *   immediately before send so we do not depend on the previous turn's
+     *   onDone callback succeeding.
      */
     override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow<String> {
         val eng = engine
@@ -1035,27 +1039,18 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                 }
 
-                // Pick sampler based on whether this turn is RAG-grounded
-                // (prompt carries the strict-mode "ATTACHED EXCERPTS"
-                // header). When mode flips from the previously-cached
-                // conversation, recycle so the new sampler actually
-                // takes effect — `createConversation` is the only place
-                // the sampler is bound.
+                // Always a fresh Conversation immediately before sendMessageAsync.
+                // Second send on a live Conversation SIGKILLs SM8550/Android 16.
+                // Recycle here so we do not depend on the previous turn's onDone
+                // recycle succeeding (or on the init-time Conversation).
                 val groundedNow = samplerPolicy.isGroundedPrompt(prompt)
                 val desiredSampler = if (groundedNow) groundedSamplerFor()
                                      else samplerForActiveModel()
                 if (activeConversation != null && conversationIsGrounded != groundedNow) {
                     DebugLogger.log("LITERT", "[SAMPLER] mode flipped (grounded=$groundedNow) — recycling conversation")
-                    recycleConversation(desiredSampler)
-                    conversationIsGrounded = groundedNow
                 }
-                // Safety fallback when there's no conversation yet (very
-                // first send after init, or after a recycle failure).
-                if (activeConversation == null) {
-                    recycleConversation(desiredSampler)   // close-before-create handles a null active
-                    conversationIsGrounded = groundedNow
-                    DebugLogger.log("LITERT", "[GEN] Safety fallback: created new conversation  grounded=$groundedNow")
-                }
+                recycleConversation(desiredSampler)
+                conversationIsGrounded = groundedNow
                 val conversation = activeConversation
                     ?: throw IllegalStateException("Could not create a conversation (engine released or out of memory).")
 
@@ -1069,7 +1064,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     }
                 }
 
-                DebugLogger.log("LITERT", "[GEN] Starting sendMessageAsync on persistent conversation...")
+                DebugLogger.log("LITERT", "[GEN] Starting sendMessageAsync on recycled conversation...")
 
                 isNativeGenerating = true
 
@@ -1121,26 +1116,14 @@ class LiteRTInferenceEngine @Inject constructor(
                         watchdog?.cancel()
                         heartbeat?.cancel()
 
-                        // RECYCLE the Conversation after every turn.
-                        //
-                        // The stateful "reuse one Conversation across turns" pattern
-                        // crashes natively on Snapdragon 8 Gen 2 (SM8550) + Android 16:
-                        // the first sendMessageAsync succeeds, the second SIGKILLs the
-                        // process inside the litertlm GPU driver. Same pattern reproduces
-                        // on the CPU backend with watchdog kills. So we close the old
-                        // Conversation and create a fresh one — context continuity comes
-                        // from the prompt-level recap built by ChatRepositoryImpl, not
-                        // from the KV cache.
-                        //
-                        // Async to avoid native deadlock — onDone runs on the native
-                        // C++ inference thread, and createConversation() needs the same
-                        // mutex that LiteRT holds until this callback returns.
-                        // Preserve the sampler mode the just-completed turn used (a
-                        // doc-Q&A follow-up is very likely also grounded).
+                        // CLOSE the Conversation after every turn (do not keep it
+                        // for a second sendMessageAsync — that SIGKILLs SM8550).
+                        // The next turn creates a fresh Conversation immediately
+                        // before send. Async to avoid native deadlock — onDone
+                        // runs on the C++ inference thread, and close()/create
+                        // need the mutex LiteRT holds until this callback returns.
                         callbackScope.launch {
-                            val sc = if (conversationIsGrounded) groundedSamplerFor()
-                                     else samplerForActiveModel()
-                            recycleConversation(sc)
+                            releaseConversationOnly()
                             thisDone.complete(Unit)
                         }
 
@@ -1205,15 +1188,11 @@ class LiteRTInferenceEngine @Inject constructor(
                         heartbeat?.cancel()
 
                         // Errors and cancellations leave the Conversation in a half-finished
-                        // state — calling sendMessageAsync on it again throws FAILED_PRECONDITION.
-                        // Recycle it so the next turn starts fresh. The next turn is treated as
-                        // a brand-new conversation (system prompt re-sent).
-                        // Async to avoid native-thread deadlock (LiteRT holds an internal mutex
-                        // until this callback returns; createConversation() needs that mutex).
+                        // state — calling sendMessageAsync on it again throws FAILED_PRECONDITION
+                        // or SIGKILLs on SM8550. Close it; the next turn creates a fresh one
+                        // immediately before send. Async to avoid native-thread deadlock.
                         callbackScope.launch {
-                            val sc = if (conversationIsGrounded) groundedSamplerFor()
-                                     else samplerForActiveModel()
-                            recycleConversation(sc)
+                            releaseConversationOnly()
                             thisDone.complete(Unit)
                         }
 
