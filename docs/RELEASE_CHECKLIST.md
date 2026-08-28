@@ -19,6 +19,16 @@ The items below are the human gates around that.
         --no-daemon
       ```
 
+      **Phase 6 deferral gates** (lexical baseline before dense/cross-encoder spikes):
+
+      ```bash
+      ./gradlew :feature:feature-assistant:testDebugUnitTest \
+        --tests "com.saarthi.feature.assistant.data.DenseRetrievalEvalGateTest" \
+        --tests "com.saarthi.feature.assistant.data.CrossEncoderDeferralGateTest" \
+        --tests "com.saarthi.feature.assistant.data.Fts5AtScaleGoldenTest" \
+        --no-daemon
+      ```
+
       Firebase Test Lab's `attach_demo_document_penalty_question_retrieves_a_hit` and
       `attach_overview_scopes_to_newest_file` instrumented smokes cover the same attach
       path on device (no model load).

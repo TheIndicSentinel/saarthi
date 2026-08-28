@@ -20,7 +20,7 @@ Saarthi is a **100% offline** Android AI assistant for Indian users, powered by 
 - **Database:** Room 2.7.2 (memories, conversations, sessions, rag_chunks)
 - **Preferences:** DataStore 1.1.1
 - **On-device AI:** Google AI Edge LiteRT-LM (`litertlm-android` 0.11.0) — Gemma inference; GPU (OpenCL/Vulkan) with CPU fallback
-- **RAG:** BM25 over Room-persisted chunks (`RagDocumentRepository` + `Bm25Retriever`); embedding/vector path is deprecated
+- **RAG:** BM25 over Room-persisted chunks (`RagDocumentRepository` + `Bm25Retriever`); dense spike and cross-encoder flags off by default; embedding/vector path deprecated
 - **Downloads:** WorkManager 2.9.1 + OkHttp 4.12.0 (Range-header resumable downloads for 2.5 GB+ models); downloads run as a foreground Service (`ModelDownloadService`), NOT WorkManager — WorkManager's 10-min limit kills large downloads
 - **Monitoring:** Firebase Crashlytics + Analytics (google-services.json required to activate)
 - **Logging:** Timber
@@ -99,7 +99,7 @@ gemma4/
 ## Non-obvious gotchas
 - **Conversation must be recycled per turn** — calling `sendMessageAsync` twice on the same LiteRT `Conversation` instance crashes (SIGKILL) on SM8550/Android 16. Always create a new `Conversation` per turn.
 - **Downloads use `ModelDownloadService` (foreground Service), NOT WorkManager** — the 10-min WorkManager ceiling kills large model downloads. Do not migrate this to WorkManager.
-- **EmbeddingModel / SqliteVectorStore / RagPipeline are `@Deprecated`** — the production RAG path is BM25 only. Don't add callers.
+- **EmbeddingModel / SqliteVectorStore / RagPipeline are `@Deprecated`** — production RAG is BM25 only. `DENSE_RETRIEVAL_SPIKE_ENABLED` and `CROSS_ENCODER_RERANK_ENABLED` stay false until Phase 6 eval gates justify spikes. Don't add callers.
 - **NPU is gated off by default** — `DeviceProfiler` deliberately excludes NPU; GPU (OpenCL/Vulkan) → CPU fallback.
 - **`SCHEDULE_EXACT_ALARM` graceful degrade** — reminders use `AlarmManager` exact alarms; degrades to inexact when permission not granted. Don't assume exact timing.
 - **Firebase only activates with `google-services.json`** — Crashlytics/Analytics are no-ops without it. Don't assume crash data is flowing in debug builds.

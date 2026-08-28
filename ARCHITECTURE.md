@@ -106,7 +106,7 @@ Query → turn-mode routing (plain / GK / doc-grounded / mixed)
 | Index | `RagDocumentRepository.indexIfNeeded` | Idempotent per `(sessionId, docUri)`; legal sections at ~1800c, tables at 600c |
 | Retrieve | `RagDocumentRepository.search` | `Bm25Retriever` in `core-rag`; metadata from `chapterId`, `parentChunkIndex` |
 | Rerank | `FeatureRerank` | Additive bonuses on BM25 scores; **cross-encoder deferred** (Wave 6 P28) |
-| Eval | JVM golden harness (`GoldenSessionHarness`, `retrieveGoldenFull`) | No Room, no LLM — ship gate for retrieval regressions |
+| Eval | JVM golden harness (`GoldenSessionHarness`, `DpdpaShipEvalGate`, Phase 6 eval gates) | No Room, no LLM — ship + deferral gates before dense/cross-encoder spikes |
 | Citations | `DeterministicSourcesFooter`, `CitationGating`, `PostGenGroundedness` | System-built footer; drop when excerpts do not support claims |
 
 **Not in production:** MiniLM ONNX, `sqlite-vss`, cosine `SqliteVectorStore`, `GemmaEmbeddingModel`,
@@ -146,8 +146,8 @@ feature rerank + lexicon plateau **and** RAM/latency budget allows a second on-d
 | Milestone | What to add | Status |
 |-----------|-------------|--------|
 | Voice input | Whisper.cpp via JNI, new `core-voice` module | Planned |
-| Dense embeddings | MiniLM ONNX or tiny on-device encoder in `core-rag` | **Deferred** — BM25 + lexicon + feature rerank first; see golden harness |
-| Cross-encoder rerank | Second-stage neural reranker | **Deferred** — on-device RAM/latency; `FeatureRerank` covers ordering today |
+| Dense embeddings | MiniLM ONNX or tiny on-device encoder in `core-rag` | **Spike-only** (`DENSE_RETRIEVAL_SPIKE_ENABLED = false`); lexical eval gate must pass first |
+| Cross-encoder rerank | Second-stage neural reranker | **Deferred** (`CROSS_ENCODER_RERANK_ENABLED = false`); deferral gate + ship eval green |
 | SQLite-VSS | `SqliteVssVectorStore : VectorStore` | **Legacy only** — no Hilt wiring; do not enable without architecture review |
 | iOS port | KMP shared `domain` + `data` layers; only `presentation` changes | Planned |
 | New Pack | Add `PackType` + persona/RAG overlays in `feature-assistant` | Ongoing |
