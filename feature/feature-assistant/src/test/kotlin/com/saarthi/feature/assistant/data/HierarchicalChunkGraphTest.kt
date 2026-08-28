@@ -100,6 +100,7 @@ class HierarchicalChunkGraphTest {
     }
 
     @Test
+    fun `single chunk section does not expand`() {
         val entity = RagChunkEntity(
             id = 1,
             sessionId = "s",
