@@ -2,6 +2,9 @@ package com.saarthi.core.inference
 
 import com.saarthi.core.inference.model.PromptTier
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -14,6 +17,13 @@ import org.junit.Test
  * these, or editing one and leaving them stale) is exactly the "new model
  * silently inherits wrong config" failure class this migration closed —
  * this test is what would now catch it instead of a field report.
+ *
+ * Also locks the supply-chain pins on every production catalog entry:
+ * non-null lowercase SHA-256, Hugging Face URL pinned to an immutable
+ * 40-char commit (never resolve/main), and one hash per distinct fileName.
+ * [com.saarthi.core.inference.model.ModelEntry.expectedSha256] stays
+ * nullable so tests/helpers can skip verify; this class is the lock that
+ * the shipping catalog never ships a null hash or a mutable URL.
  */
 class ModelCatalogTest {
 
@@ -86,6 +96,61 @@ class ModelCatalogTest {
         // future catalog edit that silently changes it gets caught.
         catalog.allModels.forEach { model ->
             assertEquals("${model.id} topK", 64, model.topK)
+        }
+    }
+
+    @Test
+    fun `every catalog entry pins a lowercase hex SHA-256`() {
+        val sha256 = Regex("^[0-9a-f]{64}$")
+        assertTrue("catalog must not be empty", catalog.allModels.isNotEmpty())
+        catalog.allModels.forEach { model ->
+            assertNotNull(
+                "${model.id} expectedSha256 must be set — null skips verifyChecksum at download time",
+                model.expectedSha256,
+            )
+            assertTrue(
+                "${model.id} expectedSha256 must be lowercase hex SHA-256, was: ${model.expectedSha256}",
+                sha256.matches(model.expectedSha256!!),
+            )
+        }
+    }
+
+    @Test
+    fun `every catalog downloadUrl is pinned to an immutable Hugging Face revision`() {
+        val pinnedRevision = Regex("/resolve/[0-9a-f]{40}/")
+        assertTrue("catalog must not be empty", catalog.allModels.isNotEmpty())
+        catalog.allModels.forEach { model ->
+            assertTrue(
+                "${model.id} downloadUrl must contain /resolve/<40-char-hex-sha>/, was: ${model.downloadUrl}",
+                pinnedRevision.containsMatchIn(model.downloadUrl),
+            )
+            assertFalse(
+                "${model.id} downloadUrl must not use mutable /resolve/main/, was: ${model.downloadUrl}",
+                model.downloadUrl.contains("/resolve/main"),
+            )
+        }
+    }
+
+    @Test
+    fun `expectedSha256 is unique per distinct fileName`() {
+        val byFileName = catalog.allModels.groupBy { it.fileName }
+        byFileName.forEach { (fileName, entries) ->
+            val hashes = entries.map { it.expectedSha256 }.toSet()
+            assertEquals(
+                "two entries may not claim different hashes for fileName '$fileName': " +
+                    "$hashes (ids=${entries.map { it.id }})",
+                1,
+                hashes.size,
+            )
+        }
+        val byHash = catalog.allModels.groupBy { it.expectedSha256 }
+        byHash.forEach { (hash, entries) ->
+            val names = entries.map { it.fileName }.toSet()
+            assertEquals(
+                "expectedSha256 $hash claimed by multiple fileNames: $names (ids=${entries.map { it.id }})",
+                1,
+                names.size,
+            )
         }
     }
 }
