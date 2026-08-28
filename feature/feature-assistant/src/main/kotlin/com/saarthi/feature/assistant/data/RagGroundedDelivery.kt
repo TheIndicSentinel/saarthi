@@ -172,7 +172,7 @@ private fun tryAssemble(
                     citationLabels,
                 )
             },
-        )
+        ) + indexTruncationNoticeLine(sessionDocs.mapNotNull { it.indexTruncationNotice })
     } else {
         ""
     }

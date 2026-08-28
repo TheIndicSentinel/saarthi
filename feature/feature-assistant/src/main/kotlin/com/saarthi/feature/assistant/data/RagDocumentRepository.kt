@@ -105,6 +105,8 @@ class RagDocumentRepository @Inject constructor(
         // bump; the < 0 index is the only thing that distinguishes it
         // from a regular content chunk.
         private const val OUTLINE_CHUNK_INDEX = -1
+        /** Wave 4 P20 — user-visible truncation notice for capped PDF indexing. */
+        private const val INDEX_TRUNCATION_NOTICE_CHUNK_INDEX = INDEX_TRUNCATION_CHUNK_INDEX
 
         // Token triggers — if ANY of these tokens appears as a standalone
         // word in the query, route to structural sampling instead of BM25.
@@ -253,7 +255,7 @@ class RagDocumentRepository @Inject constructor(
             logRag("index-evict count=${evict.size} sessionIdLen=${sessionId.length}")
         }
 
-        val chunks = chunkText(text)
+        val chunks = chunkText(text, file.mimeType)
         if (chunks.isEmpty()) return
 
         var outlineText: String? = null
@@ -309,6 +311,19 @@ class RagDocumentRepository @Inject constructor(
             )
         }
 
+        file.indexTruncationNotice?.trim()?.takeIf { it.isNotEmpty() }?.let { notice ->
+            entities.add(
+                RagChunkEntity(
+                    sessionId = sessionId,
+                    docUri = uriKey,
+                    docName = file.name,
+                    mimeType = file.mimeType,
+                    chunkIndex = INDEX_TRUNCATION_NOTICE_CHUNK_INDEX,
+                    text = notice,
+                ),
+            )
+        }
+
         chunks.forEachIndexed { idx, chunk ->
             val meta = metadata[idx]
             entities.add(
@@ -355,7 +370,15 @@ class RagDocumentRepository @Inject constructor(
             .filter { (_, chunks) -> chunks.any { it.chunkIndex >= 0 } }
             .map { (uri, chunks) ->
                 val newest = chunks.maxBy { it.createdAt }
-                SessionRagDocument(uri = uri, name = newest.docName, lastIndexedAt = newest.createdAt)
+                val truncation = chunks.firstOrNull {
+                    it.chunkIndex == INDEX_TRUNCATION_CHUNK_INDEX
+                }?.text
+                SessionRagDocument(
+                    uri = uri,
+                    name = newest.docName,
+                    lastIndexedAt = newest.createdAt,
+                    indexTruncationNotice = truncation,
+                )
             }
             .sortedBy { it.lastIndexedAt }
     }
@@ -605,7 +628,12 @@ class RagDocumentRepository @Inject constructor(
             }) +
             anchoredTopicChunks(contentChunks, query, anchorWindow) +
             anchoredTabularChunks(contentChunks, query, preferDocUri = penaltyPreferDocUri, maxChunks = tabularMax) +
-            anchoredStructureListChunks(all, contentChunks, query, chapterRegistries)
+            anchoredStructureListChunks(all, contentChunks, query, chapterRegistries) +
+            if (requiresTabularContract(query)) {
+                tabularContractChunkEntities(contentChunks, penaltyPreferDocUri)
+            } else {
+                emptyList()
+            }
         headingChunkCount = anchoredEntities.size
 
         // Expand the query when following up on the prior turn.
@@ -632,14 +660,15 @@ class RagDocumentRepository @Inject constructor(
         }
 
         val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
-        val rankK = (effectiveTopK * uniqueDocs).coerceAtMost(contentChunks.size).coerceAtLeast(effectiveTopK)
+        val candidateK = featureRerankCandidatePoolSize(effectiveTopK, uniqueDocs, contentChunks.size)
+        val rerankCtx = buildFeatureRerankContext(query)
         var rankPool = contentChunks
         if (shouldUseFtsPrefilter(contentChunks.size, ftsFastPathSessions[sessionId] == true)) {
             val match = buildFtsMatchQuery(effectiveQuery)
             if (match != null) {
-                val limit = (rankK * FTS5_CANDIDATE_MULTIPLIER)
+                val limit = (candidateK * FTS5_CANDIDATE_MULTIPLIER)
                     .coerceAtMost(contentChunks.size)
-                    .coerceAtLeast(rankK)
+                    .coerceAtLeast(candidateK)
                 val ftsHits = runCatching {
                     sqliteWriteWithRetry {
                         ragChunkFtsSearch.searchContent(sessionId, match, limit)
@@ -648,15 +677,16 @@ class RagDocumentRepository @Inject constructor(
                 if (ftsHits.isNotEmpty()) {
                     val idSet = ftsHits.map { it.id }.toSet()
                     val filtered = contentChunks.filter { it.id in idSet }
-                    if (filtered.size >= rankK.coerceAtMost(4)) {
+                    if (filtered.size >= candidateK.coerceAtMost(4)) {
                         rankPool = filtered
                         ftsPrefilterUsed = true
                     }
                 }
             }
         }
+        val bm25Candidates = rankContentChunks(rankPool, sessionId, effectiveQuery, candidateK)
         val ranked = filterRankedByScoreGap(
-            rankContentChunks(rankPool, sessionId, effectiveQuery, rankK),
+            featureRerankBm25Candidates(bm25Candidates, rankPool, query, rerankCtx),
             effectiveTopK,
         )
 
@@ -693,20 +723,19 @@ class RagDocumentRepository @Inject constructor(
             }
         }
         for ((rank, scored) in ranked.withIndex()) {
-            val entity = contentChunks[scored.index]
+            val entity = rankPool[scored.index]
             if (usedIds.add(entity.id)) {
                 bm25Hits.add(entity.toRetrieved(scored.score))
             }
-            // Only the top-2 hits get neighbor expansion — beyond that
-            // BM25 itself is probably surfacing the relevant chunks.
-            if (rank < 2) {
-                val neighborId = nextSameDocNeighborId(entity.id, entity.docUri, orderedIdsByDoc)
-                    ?: continue
-                val neighbor = docChunksByUri[entity.docUri]?.firstOrNull { it.id == neighborId }
-                    ?: continue
-                if (usedIds.add(neighbor.id)) {
-                    bm25Hits.add(neighbor.toRetrieved(scored.score * 0.5))
-                }
+        }
+        for ((entity, score) in expandRerankedNeighborHits(
+            ranked = ranked,
+            pool = rankPool,
+            docChunksByUri = docChunksByUri,
+            orderedIdsByDoc = orderedIdsByDoc,
+        )) {
+            if (usedIds.add(entity.id)) {
+                bm25Hits.add(entity.toRetrieved(score))
             }
         }
 
@@ -730,14 +759,29 @@ class RagDocumentRepository @Inject constructor(
             // somehow empties it.
             val scope = retryDocScope(boostDocUris, route.namedDocUris, recencyUri)
             val retryPool = contentChunks.filter { it.docUri in scope }.ifEmpty { contentChunks }
+            val retryCandidates = rankContentChunks(retryPool, sessionId, priorQuery.take(150), candidateK)
             val retryRanked = filterRankedByScoreGap(
-                rankContentChunks(retryPool, sessionId, priorQuery.take(150), rankK),
+                featureRerankBm25Candidates(retryCandidates, retryPool, priorQuery, rerankCtx),
                 effectiveTopK,
             )
             for (scored in retryRanked) {
                 val entity = retryPool[scored.index]
                 if (usedIds.add(entity.id)) {
                     bm25Hits.add(entity.toRetrieved(scored.score * 0.5))
+                }
+            }
+            val retryDocChunksByUri = retryPool.groupBy { it.docUri }
+                .mapValues { (_, list) -> list.sortedBy { it.chunkIndex } }
+            val retryOrderedIds = retryDocChunksByUri.mapValues { (_, list) -> list.map { it.id } }
+            for ((entity, score) in expandRerankedNeighborHits(
+                ranked = retryRanked,
+                pool = retryPool,
+                docChunksByUri = retryDocChunksByUri,
+                orderedIdsByDoc = retryOrderedIds,
+                expansionScore = RERANK_EXPANSION_SCORE * 0.5,
+            )) {
+                if (usedIds.add(entity.id)) {
+                    bm25Hits.add(entity.toRetrieved(score))
                 }
             }
             if (bm25Hits.size >= effectiveTopK) return done(finish(bm25Hits), RagSearchPath.bm25)
@@ -1173,8 +1217,8 @@ class RagDocumentRepository @Inject constructor(
      * found — at a word boundary. The next chunk also starts at a word
      * boundary so the overlap window doesn't reintroduce the fragment.
      */
-    private fun chunkText(text: String): List<String> =
-        chunkDocumentText(text, CHUNK_SIZE, CHUNK_OVERLAP)
+    private fun chunkText(text: String, mimeType: String = ""): List<String> =
+        chunkDocumentTextForIndexing(text, mimeType)
 }
 
 /** Result of a [RagDocumentRepository.search] call. */
@@ -1198,6 +1242,8 @@ data class SessionRagDocument(
     val uri: String,
     val name: String,
     val lastIndexedAt: Long,
+    /** Wave 4 P20 — honest cap when PDF pages/chars were not fully indexed. */
+    val indexTruncationNotice: String? = null,
 )
 
 private fun RagChunkEntity.toRetrieved(score: Double) = RetrievedChunk(

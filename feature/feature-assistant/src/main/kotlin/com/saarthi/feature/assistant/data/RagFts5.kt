@@ -18,6 +18,17 @@ internal fun buildFtsMatchQuery(query: String): String? {
     return tokens.joinToString(" OR ") { it.replace("'", "''") }
 }
 
-/** Use FTS prefilter when the session is huge or a prior turn tripped the gate. */
+/** Use FTS prefilter when the session corpus is huge — not for a typical single act. */
+internal const val FTS5_TYPICAL_DOC_MAX_CHUNKS = 200
+
+/**
+ * Wave 4 P21 — FTS5 is a scale path for 500+ chunks, not hybrid search for a
+ * typical attached PDF. Fast-path only applies once the corpus exceeds a single
+ * large document.
+ */
 internal fun shouldUseFtsPrefilter(chunkCount: Int, sessionFastPath: Boolean): Boolean =
-    chunkCount > FTS5_CHUNK_THRESHOLD || sessionFastPath
+    when {
+        chunkCount > FTS5_CHUNK_THRESHOLD -> true
+        sessionFastPath && chunkCount > FTS5_TYPICAL_DOC_MAX_CHUNKS -> true
+        else -> false
+    }
