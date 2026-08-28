@@ -15,6 +15,11 @@ The items below are the human gates around that.
       falls back to debug-signing only when they are absent).
 - [ ] Installed and smoke-tested on a real phone (see **Release device coverage** below).
 - [ ] Model download + resume + cancel tested on a real device/network.
+- [ ] **RAG index schema bumps** (Phase 4.3): after changes to chunk metadata sentinels
+      (`parentChunkIndex`, chapter registry row, document-role stamp, truncation notice),
+      existing sessions keep stale rows until users **re-attach** affected files (or clear
+      chat data). Spot-check one upgraded build: attach a known PDF, ask a section-span
+      question, confirm retrieval hits the right doc — not a silent no-op on old chunks.
 - [ ] Debug log reviewed for anything sensitive that should not ship
       (Point 9: user-sourced strings must be lengths/counts only — see
       [LogPrivacy]; no document names, memory keys, or reminder text in
