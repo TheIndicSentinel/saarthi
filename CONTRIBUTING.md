@@ -92,7 +92,9 @@ are:
 Direct versions live in `gradle/libs.versions.toml`. Transitive versions are
 pinned in each module’s `gradle.lockfile`. Artifact SHA-256 checksums live in
 `gradle/verification-metadata.xml` (Gradle enables verification as soon as
-that file exists).
+that file exists). POM and Gradle module metadata files are trusted; JAR/AAR
+bytes are still checksummed. Kotlin/AGP on CI resolve extra BOM metadata that
+is not on the local compile graph.
 
 After adding or bumping a library:
 
