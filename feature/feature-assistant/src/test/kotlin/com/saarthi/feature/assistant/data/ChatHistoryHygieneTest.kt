@@ -41,4 +41,26 @@ class ChatHistoryHygieneTest {
         val onlyAssistant = listOf(assistant("a1"))
         assertEquals(listOf("a1"), ids(ChatHistoryHygiene.dropOrphanedUserTurns(onlyAssistant)))
     }
+
+    @Test
+    fun `prompt pairing keeps complete user to assistant pairs`() {
+        val history = listOf(user("u1"), assistant("a1"), user("u2"), assistant("a2"))
+        assertEquals(
+            listOf("u1", "a1", "u2", "a2"),
+            ids(ChatHistoryHygiene.completeUserAssistantPairs(history)),
+        )
+    }
+
+    @Test
+    fun `prompt pairing drops a trailing orphaned user turn`() {
+        val history = listOf(user("u1"), assistant("a1"), user("u2"))
+        assertEquals(listOf("u1", "a1"), ids(ChatHistoryHygiene.completeUserAssistantPairs(history)))
+    }
+
+    @Test
+    fun `prompt pairing drops a lone assistant unlike the display filter`() {
+        val history = listOf(assistant("a0"), user("u1"), assistant("a1"))
+        assertEquals(listOf("a0", "u1", "a1"), ids(ChatHistoryHygiene.dropOrphanedUserTurns(history)))
+        assertEquals(listOf("u1", "a1"), ids(ChatHistoryHygiene.completeUserAssistantPairs(history)))
+    }
 }

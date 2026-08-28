@@ -1296,7 +1296,7 @@ class ChatRepositoryImpl @Inject constructor(
      *    topic awareness without giving the model a template to copy.
      */
     private fun buildPriorTurnsRecap(): String {
-        val complete = buildCompleteHistoryPairs(
+        val complete = ChatHistoryHygiene.completeUserAssistantPairs(
             _history.value.filter { it.content.isNotBlank() && !it.isStreaming }.dropLast(1)
         )
         if (complete.isEmpty()) return ""
@@ -1382,7 +1382,7 @@ class ChatRepositoryImpl @Inject constructor(
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
         if (tier == SystemPromptProvider.ModelTier.COMPACT) return ""
 
-        val flat = buildCompleteHistoryPairs(
+        val flat = ChatHistoryHygiene.completeUserAssistantPairs(
             _history.value.filter { it.content.isNotBlank() && !it.isStreaming }.dropLast(1)
         )
         if (flat.size < 2) return ""
@@ -1477,30 +1477,6 @@ class ChatRepositoryImpl @Inject constructor(
             "ଆପଣ କିଏ", "ତୁମେ କିଏ", "ନିଜ ବିଷୟରେ", "ତୁମ ନାମ", "ଆପଣଙ୍କ ନାମ",
         )
         return native.any { message.contains(it) }
-    }
-
-    /**
-     * Returns only complete user→model pairs from [history].
-     * Orphaned user messages (no following model response) are dropped — they appear
-     * after a crash where the assistant never finished generating a reply, and including
-     * them creates consecutive same-role turns that violate Gemma's chat template.
-     */
-    private fun buildCompleteHistoryPairs(history: List<ChatMessage>): List<ChatMessage> {
-        val result = mutableListOf<ChatMessage>()
-        var i = 0
-        while (i < history.size) {
-            val msg = history[i]
-            if (msg.role == MessageRole.USER &&
-                i + 1 < history.size &&
-                history[i + 1].role == MessageRole.ASSISTANT) {
-                result.add(history[i])
-                result.add(history[i + 1])
-                i += 2
-            } else {
-                i++  // skip orphaned user message or lone assistant message
-            }
-        }
-        return result
     }
 
     /**
