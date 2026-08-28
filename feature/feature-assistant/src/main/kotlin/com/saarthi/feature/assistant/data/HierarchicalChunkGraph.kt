@@ -77,18 +77,33 @@ internal fun buildSectionGroupsByDoc(
 /**
  * When a hit lands in a multi-chunk legal section, pull every sibling chunk in
  * that section so the prompt gets the complete operative span (not one fragment).
+ *
+ * Phase 6.3 — also seeds from structural anchors (topic / chapter span) so a
+ * heading-only BM25 miss still expands the full special-provisions or schedule span.
  */
 internal fun expandHierarchicalSectionHits(
     ranked: List<Bm25Retriever.Scored>,
     pool: List<RagChunkEntity>,
     sectionGroupsByDoc: Map<String, Map<Int, List<RagChunkEntity>>>,
+    anchorSeeds: List<RagChunkEntity> = emptyList(),
     topHitCount: Int = RERANK_EXPANSION_TOP_HITS,
     expansionScoreMultiplier: Double = 0.5,
 ): List<Pair<RagChunkEntity, Double>> {
-    if (ranked.isEmpty() || pool.isEmpty()) return emptyList()
+    if (pool.isEmpty()) return emptyList()
+    val poolIndexById = pool.withIndex().associate { it.value.id to it.index }
+    val expansionSeeds = ArrayList<Bm25Retriever.Scored>(ranked.size + anchorSeeds.size)
+    expansionSeeds.addAll(ranked)
+    val anchorOrganic = (ranked.firstOrNull()?.score ?: 6.0) * expansionScoreMultiplier
+    for (anchor in anchorSeeds) {
+        val idx = poolIndexById[anchor.id]
+        if (idx != null && expansionSeeds.none { it.index == idx }) {
+            expansionSeeds.add(Bm25Retriever.Scored(idx, anchorOrganic))
+        }
+    }
+    if (expansionSeeds.isEmpty()) return emptyList()
     val expanded = mutableListOf<Pair<RagChunkEntity, Double>>()
     val usedIds = mutableSetOf<Long>()
-    for ((rank, scored) in ranked.withIndex()) {
+    for ((rank, scored) in expansionSeeds.withIndex()) {
         if (rank >= topHitCount) break
         val hit = pool.getOrNull(scored.index) ?: continue
         val expansionOrganic = scored.score * expansionScoreMultiplier

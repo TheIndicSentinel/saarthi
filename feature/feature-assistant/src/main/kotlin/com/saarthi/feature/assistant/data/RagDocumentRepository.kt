@@ -818,6 +818,7 @@ class RagDocumentRepository @Inject constructor(
             ranked = ranked,
             pool = rankPool,
             sectionGroupsByDoc = sectionGroupsByDoc,
+            anchorSeeds = anchoredEntities,
         )) {
             if (usedIds.add(entity.id)) {
                 bm25Hits.add(entity.toRetrieved(score, StructuralAnchorKind.HIERARCHICAL_SECTION))

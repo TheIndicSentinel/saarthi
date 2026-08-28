@@ -216,6 +216,7 @@ internal fun goldenSessionRetrieve(
         ranked = finalRanked,
         pool = contentChunks,
         sectionGroupsByDoc = sectionGroupsByDoc,
+        anchorSeeds = anchoredEntities,
     )) {
         if (usedIds.add(entity.id)) {
             hits.add(entity.toRetrievedChunk(score, StructuralAnchorKind.HIERARCHICAL_SECTION))
