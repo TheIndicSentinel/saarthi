@@ -9,6 +9,7 @@ import com.saarthi.core.i18n.citationDisplayLabels
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.InferenceService
+import com.saarthi.core.inference.LogPrivacy
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.prompt.SystemPromptProvider
@@ -332,7 +333,10 @@ class ChatRepositoryImpl @Inject constructor(
             }
             return@flow
         }
-        DebugLogger.log("CHAT", "streamResponse start  promptChars=${prompt.length}  session=$sessionId")
+        DebugLogger.log(
+            "CHAT",
+            "streamResponse start  promptChars=${prompt.length}  ${LogPrivacy.sessionIdLen(sessionId)}",
+        )
 
         val startTime = System.currentTimeMillis()
         var tokenCount = 0

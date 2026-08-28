@@ -1,6 +1,7 @@
 package com.saarthi.feature.assistant.data
 
 import com.saarthi.core.inference.DebugLogger
+import com.saarthi.core.inference.LogPrivacy
 import com.saarthi.core.memory.domain.MemoryRepository
 
 /**
@@ -43,7 +44,7 @@ internal class MemoryFactWriter(
         // proper keys, bloat prompt injection, and read as junk in the
         // Knowledge screen (field log 2026-07-03).
         if (key in JUNK_AGGREGATE_KEYS) {
-            DebugLogger.log("MEMORY", "write REJECTED (aggregate key) key=$key")
+            DebugLogger.log("MEMORY", "write REJECTED (aggregate key) ${LogPrivacy.keyLen(key)}")
             return
         }
         val target =
@@ -63,12 +64,12 @@ internal class MemoryFactWriter(
         val isNameKey = MemoryRepository.isNameKey(key)
         if (isNameKey) {
             if (!implicitFactExtractor.isPlausibleNameValue(v)) {
-                DebugLogger.log("MEMORY", "name write REJECTED (shape) key=$key valueLen=${v.length}")
+                DebugLogger.log("MEMORY", "name write REJECTED (shape) ${LogPrivacy.keyLen(key)} ${LogPrivacy.valueLen(v)}")
                 return
             }
             val existing = memoryRepository.get(sessionId = target, key = key)?.value?.trim()
             if (!existing.isNullOrBlank() && existing.length >= v.length) {
-                DebugLogger.log("MEMORY", "name write SKIPPED (existing more complete) key=$key")
+                DebugLogger.log("MEMORY", "name write SKIPPED (existing more complete) ${LogPrivacy.keyLen(key)}")
                 return
             }
         }
@@ -77,7 +78,7 @@ internal class MemoryFactWriter(
         // content (memory values can be PII, e.g. names) — length only.
         DebugLogger.log(
             "MEMORY",
-            "write key=$key scope=${if (target == MemoryRepository.USER_SCOPE) "USER" else "session"} valueLen=${v.length}",
+            "write ${LogPrivacy.keyLen(key)} scope=${if (target == MemoryRepository.USER_SCOPE) "USER" else "session"} ${LogPrivacy.valueLen(v)}",
         )
         // List-type facts ACCUMULATE instead of overwrite: "I like apples" then
         // "I like oranges" → both kept (dedup, capped, oldest dropped). Single

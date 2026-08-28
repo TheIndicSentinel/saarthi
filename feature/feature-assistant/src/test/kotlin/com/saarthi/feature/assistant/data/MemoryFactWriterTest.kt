@@ -11,6 +11,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
+import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -141,6 +142,34 @@ class MemoryFactWriterTest {
                 key = "likes",
                 value = expected,
                 packSource = "USER",
+            )
+        }
+    }
+
+    @Test
+    fun `memory logs use keyLen and never echo the raw key`() = runTest {
+        writer.persist(sessionId = SESSION, rawKey = "user_facts", value = "नाम: अर्जुन")
+        writer.persist(sessionId = SESSION, rawKey = "topic", value = "wheat prices")
+
+        verify {
+            DebugLogger.log(
+                "MEMORY",
+                match { msg ->
+                    msg.contains("keyLen=") &&
+                        !msg.contains("user_facts") &&
+                        !msg.contains("नाम")
+                },
+            )
+        }
+        verify {
+            DebugLogger.log(
+                "MEMORY",
+                match { msg ->
+                    msg.contains("keyLen=") &&
+                        msg.contains("valueLen=") &&
+                        !msg.contains("topic") &&
+                        !msg.contains("wheat")
+                },
             )
         }
     }
