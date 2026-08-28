@@ -19,6 +19,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Append-only debug log that lands in the device's public **Downloads** folder
@@ -112,17 +114,17 @@ object DebugLogger {
     // Unlimited so log() (called from 200+ call sites, many NOT in a
     // coroutine) never suspends or drops a line waiting for channel space —
     // it only formats + enqueues, an effectively-instant in-memory op.
-    private val lineChannel = Channel<String>(Channel.UNLIMITED)
+    private val lineChannel = Channel<LogWork>(Channel.UNLIMITED)
     @Volatile private var writerStarted = false
+
+    private sealed interface LogWork {
+        data class Line(val text: String) : LogWork
+        class Flush(val latch: CountDownLatch) : LogWork
+    }
 
     @Synchronized
     fun init(context: Context) {
-        if (!writerStarted) {
-            writerStarted = true
-            writerScope.launch {
-                for (line in lineChannel) writeLine(line)
-            }
-        }
+        ensureWriterStarted()
         if (mediaUri != null || fileSink != null) return
         val app = context.applicationContext
         resolverContext = app
@@ -200,7 +202,50 @@ object DebugLogger {
         // and only fails if the channel was closed (never happens here), so
         // this stays a fire-and-forget, non-suspending call every one of
         // this function's 200+ call sites can keep using exactly as before.
-        lineChannel.trySend(line)
+        lineChannel.trySend(LogWork.Line(line))
+    }
+
+    /**
+     * Block until every line already passed to [log] has been written to the
+     * file/MediaStore sink, or [timeoutMs] elapses — whichever first.
+     *
+     * Crash forensics only (the Application uncaught-exception handler).
+     * Normal [log] stays fire-and-forget so inference never waits on disk.
+     * The timeout is the hang-guard: a stuck writer must not freeze process
+     * death. FIFO channel order means a flush token is processed after every
+     * previously enqueued line.
+     */
+    fun flushBlocking(timeoutMs: Long = 250L) {
+        val latch = CountDownLatch(1)
+        if (!lineChannel.trySend(LogWork.Flush(latch)).isSuccess) return
+        runCatching { latch.await(timeoutMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS) }
+    }
+
+    /**
+     * JVM-test hook: point the file sink at a [TemporaryFolder] file and
+     * start the writer without Android [Context] / MediaStore. Production
+     * still only reaches the sink via [init].
+     */
+    internal fun bindFileSinkForTests(file: File) {
+        fileSink = file
+        mediaUri = null
+        resolverContext = null
+        pathLabel = file.absolutePath
+        ensureWriterStarted()
+    }
+
+    @Synchronized
+    private fun ensureWriterStarted() {
+        if (writerStarted) return
+        writerStarted = true
+        writerScope.launch {
+            for (work in lineChannel) {
+                when (work) {
+                    is LogWork.Line -> writeLine(work.text)
+                    is LogWork.Flush -> work.latch.countDown()
+                }
+            }
+        }
     }
 
     // ── internals ────────────────────────────────────────────────────────────

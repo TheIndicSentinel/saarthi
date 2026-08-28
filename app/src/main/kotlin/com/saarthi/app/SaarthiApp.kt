@@ -130,6 +130,11 @@ class SaarthiApp : Application() {
                 // Still pass to default so the process restarts
             }
 
+            // Drain the async writer so CRASH lines hit disk before the
+            // default handler kills the process. Short timeout: never hang
+            // the uncaught path if the writer is stuck.
+            DebugLogger.flushBlocking(timeoutMs = 500)
+
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }
