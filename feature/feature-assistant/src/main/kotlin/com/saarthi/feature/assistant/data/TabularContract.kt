@@ -44,14 +44,14 @@ internal fun tabularContractChunkEntities(
         if (chunks.isEmpty()) return emptyList()
         val schedule = chunks
             .filter { isScheduleContractChunk(it.text) }
-            .minWith(
+            .minWithOrNull(
                 compareBy<RagChunkEntity> { tabularChunkTier(it.text, it.mimeType) ?: Int.MAX_VALUE }
                     .thenByDescending { tabularAmountLineCount(it.text) }
                     .thenBy { it.chunkIndex },
             )
         val section33 = chunks.mapNotNull { chunk ->
             section33MatchTier(chunk.text)?.let { chunk to it }
-        }.minWith(
+        }.minWithOrNull(
             compareBy<Pair<RagChunkEntity, Int>> { it.second }
                 .thenBy { it.first.chunkIndex },
         )?.first

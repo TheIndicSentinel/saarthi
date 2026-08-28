@@ -40,6 +40,38 @@ internal fun retrieveGolden(
     }
 }
 
+/**
+ * Wave 5 P23 — full retrieve → prompt assembly metrics on the same fixtures as [retrieveGolden].
+ * Catches false greens when BM25-only passes but anchors, collapse, or assembly fail.
+ */
+internal data class GoldenFullMetrics(
+    val bm25TopUri: String?,
+    val pipelineTopUri: String?,
+    val ragChars: Int,
+    val chunkCount: Int,
+    val chapterIds: Set<String>,
+    val bm25Hits: List<GoldenHit>,
+)
+
+internal fun retrieveGoldenFull(
+    query: String,
+    docs: List<GoldenDoc>,
+    topK: Int = 8,
+    charBudget: Int = 4000,
+): GoldenFullMetrics {
+    val bm25Hits = retrieveGolden(query, docs, topK)
+    val metrics = runGoldenTurn(GoldenTurnSpec(query = query), docs, charBudget = charBudget)
+    val entities = goldenDocsToEntities(docs)
+    return GoldenFullMetrics(
+        bm25TopUri = bm25Hits.firstOrNull()?.docUri,
+        pipelineTopUri = goldenPipelinePrimaryDocUri(metrics.retrieved),
+        ragChars = metrics.ragChars,
+        chunkCount = metrics.chunkCount,
+        chapterIds = goldenRetrievedChapterIds(entities, metrics.retrieved),
+        bm25Hits = bm25Hits,
+    )
+}
+
 internal object GoldenFixtures {
     const val NDA_URI = "content://nda"
     const val STMT_URI = "content://stmt"

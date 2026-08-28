@@ -70,7 +70,8 @@ internal fun featureRerankBonus(
     }
 
     if (firstLine.isNotEmpty()) {
-        if (isLikelyHeadingLine(firstLine, nextLineBlank = false)) bonus += 1.2
+        val structureQuery = ctx.structureListQuery || ctx.structureCountQuery || ctx.chapterSpanQuery
+        if (structureQuery && isLikelyHeadingLine(firstLine, nextLineBlank = false)) bonus += 1.2
         if (LINE_START_STRUCTURE_RX.containsMatchIn(firstLine)) bonus += 1.6
         val lineScore = chapterTitleLineScore(query, firstLine)
         if (lineScore >= 0.45) bonus += lineScore * 3.0

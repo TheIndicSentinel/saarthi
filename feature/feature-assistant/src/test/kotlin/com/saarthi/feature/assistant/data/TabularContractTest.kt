@@ -63,6 +63,17 @@ class TabularContractTest {
     }
 
     @Test
+    fun `contract tolerates documents without THE SCHEDULE`() {
+        val uri = "content://nda"
+        val chunks = listOf(
+            chunk(uri, 0, "Penalty for breach of this clause is Rs 5 lakh."),
+            chunk(uri, 1, "Term is 24 months from the effective date."),
+        )
+        val picked = tabularContractChunkEntities(chunks)
+        assertTrue(picked.isEmpty())
+    }
+
+    @Test
     fun `requires tabular contract for penalty schedule queries`() {
         assertTrue(requiresTabularContract("What are the monetary penalties"))
         assertTrue(requiresTabularContract("cancellation fee tariff"))
