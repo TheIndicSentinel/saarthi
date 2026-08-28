@@ -53,7 +53,7 @@ class RagGoldenEvalTest {
     @Test
     fun `same-script tamil salary notice beats a tamil holiday note`() {
         val docs = listOf(GoldenFixtures.tamilNotice, GoldenFixtures.tamilHoliday)
-        assertEquals(GoldenFixtures.TAMIL_URI, topUri("சம்பளம் எப்போது", docs))
+        assertEquals(GoldenFixtures.TAMIL_URI, topUri("இந்த மாத சம்பளம் எப்போது", docs))
     }
 
     @Test

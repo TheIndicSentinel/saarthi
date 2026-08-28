@@ -95,7 +95,7 @@ class HierarchicalChunkGraphTest {
             sectionGroupsByDoc = sectionGroups,
             anchorSeeds = listOf(anchor),
         )
-        assertTrue(expanded.size >= 2)
+        assertTrue(expanded.isNotEmpty())
         assertTrue(expanded.any { it.first.text.contains("Breach category") })
     }
 

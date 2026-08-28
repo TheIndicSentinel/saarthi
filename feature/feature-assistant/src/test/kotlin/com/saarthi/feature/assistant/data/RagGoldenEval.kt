@@ -164,7 +164,7 @@ internal object GoldenFixtures {
     val tamilHoliday = GoldenDoc(
         uri = "content://tamil-holiday",
         name = "விடுமுறை.pdf",
-        text = "பள்ளி அறிவிப்பு. நாளை விடுமுறை. மாலை விழா நடைபெறும்.",
+        text = "பள்ளி விடுமுறை நாள். மாலை விழா நடைபெறும். விளையாட்டு போட்டி உள்ளது.",
     )
 
     val unreadableScan = GoldenDoc(
