@@ -3,6 +3,7 @@ package com.saarthi.feature.assistant.data
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.citationDisplayLabels
 import com.saarthi.core.inference.prompt.SystemPromptProvider
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -82,5 +83,31 @@ class RagGroundedDeliveryTest {
         )
         assertTrue(result.groundedDeliveryFailed)
         assertTrue(result.block.isEmpty())
+    }
+
+    @Test
+    fun `grounded budget stays leftover when there are no chunks`() {
+        assertEquals(0, groundedRagCharBudget(totalBudget = 1500, reservedNonRagChars = 1600, hasRetrievedChunks = false))
+        assertEquals(200, groundedRagCharBudget(totalBudget = 1500, reservedNonRagChars = 1300, hasRetrievedChunks = false))
+    }
+
+    @Test
+    fun `grounded budget never collapses to zero when chunks exist`() {
+        assertEquals(
+            MIN_GROUNDED_RAG_CHAR_BUDGET,
+            groundedRagCharBudget(totalBudget = 4900, reservedNonRagChars = 5000, hasRetrievedChunks = true),
+        )
+        assertEquals(
+            800,
+            groundedRagCharBudget(totalBudget = 4900, reservedNonRagChars = 4100, hasRetrievedChunks = true),
+        )
+    }
+
+    @Test
+    fun `grounded budget never exceeds total window`() {
+        assertEquals(
+            100,
+            groundedRagCharBudget(totalBudget = 100, reservedNonRagChars = 200, hasRetrievedChunks = true),
+        )
     }
 }

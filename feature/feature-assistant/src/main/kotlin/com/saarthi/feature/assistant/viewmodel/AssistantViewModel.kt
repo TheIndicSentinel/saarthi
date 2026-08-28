@@ -80,6 +80,12 @@ data class AssistantUiState(
      * Drives a one-line disclosure on the voice overlay — only when needed.
      */
     val voiceMayUseCloudSpeech: Boolean = false,
+    /**
+     * True when the on-screen thread is longer than the recap included in
+     * the next prompt. Compact never recaps; STANDARD/LARGE keep a bounded
+     * window. Drives a slim banner above the message list.
+     */
+    val olderMessagesOmitted: Boolean = false,
 )
 
 @HiltViewModel
@@ -164,6 +170,10 @@ class AssistantViewModel @Inject constructor(
     init {
         chatRepository.getTokensPerSecond()
             .onEach { tps -> _uiState.update { it.copy(tokensPerSecond = tps) } }
+            .launchIn(viewModelScope)
+
+        chatRepository.olderMessagesOmitted()
+            .onEach { omitted -> _uiState.update { it.copy(olderMessagesOmitted = omitted) } }
             .launchIn(viewModelScope)
 
         // Push-based isReady observation via StateFlow — no polling, no wakeup cost.

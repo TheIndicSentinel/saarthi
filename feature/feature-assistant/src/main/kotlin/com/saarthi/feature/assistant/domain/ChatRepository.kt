@@ -23,6 +23,13 @@ interface ChatRepository {
     suspend fun exportAllData(): File
     suspend fun deleteMessage(id: String)
     fun getTokensPerSecond(): Flow<Float>
+    /**
+     * True when the visible thread is longer than the recap the next prompt
+     * will include (compact never recaps; STANDARD/LARGE keep a bounded window).
+     * Emits when history or the loaded model changes so the chat UI can show
+     * a banner before the next send.
+     */
+    fun olderMessagesOmitted(): Flow<Boolean>
     /** Drop Room chunks for one attachment URI in the current session. */
     suspend fun removeIndexedDocument(docUri: String)
 }

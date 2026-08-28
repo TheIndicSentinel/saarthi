@@ -7,6 +7,28 @@ import com.saarthi.feature.assistant.domain.AttachedFile
 /** Minimum char budget to attempt a normal multi-chunk RAG block. */
 internal const val MIN_GROUNDED_RAG_CHAR_BUDGET = 400
 
+/**
+ * Remaining chars for the RAG excerpt block.
+ *
+ * When retrieval produced chunks, never collapse to 0: a system prompt that
+ * fills the window used to yield `ragBudget=0 ragChars=0` and the model
+ * answered from time-context instead of the document. Overflow is then
+ * handled by [trimPrompt] pinning the RAG block in the tail.
+ *
+ * With no chunks, returns leftover only (`coerceAtLeast(0)`), matching the
+ * historical empty-RAG path.
+ */
+internal fun groundedRagCharBudget(
+    totalBudget: Int,
+    reservedNonRagChars: Int,
+    hasRetrievedChunks: Boolean,
+    minWhenGrounded: Int = MIN_GROUNDED_RAG_CHAR_BUDGET,
+): Int {
+    val leftover = (totalBudget - reservedNonRagChars).coerceAtLeast(0)
+    if (!hasRetrievedChunks) return leftover
+    return leftover.coerceAtLeast(minWhenGrounded).coerceAtMost(totalBudget.coerceAtLeast(0))
+}
+
 /** Wave 1 — when excerpts cannot fit, ask the user to retry instead of "provide excerpts". */
 internal fun groundedDeliveryRetryInstruction(userMessage: String): String =
     "Reply with exactly this sentence and nothing else: " +

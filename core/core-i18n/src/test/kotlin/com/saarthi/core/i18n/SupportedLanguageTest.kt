@@ -285,6 +285,14 @@ class SupportedLanguageTest {
     }
 
     @Test
+    fun every_language_has_non_blank_older_messages_and_inference_support_strings() {
+        assertNonBlankForEveryLanguage("olderMessagesNotInReply") { olderMessagesNotInReply }
+        assertNonBlankForEveryLanguage("recentInferenceTitle") { recentInferenceTitle }
+        assertNonBlankForEveryLanguage("recentInferenceBody") { recentInferenceBody }
+        assertNonBlankForEveryLanguage("recentInferenceEmpty") { recentInferenceEmpty }
+    }
+
+    @Test
     fun non_Hindi_non_Marathi_languages_do_not_silently_fall_back_to_English() {
         // The exact bug: Telugu (and every language except Hindi/Marathi) was
         // getting the English string via a hidden `else` branch. Assert a

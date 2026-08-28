@@ -157,13 +157,10 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile private var usingNpu: Boolean = false
     @Volatile private var usingGpu: Boolean = false
 
-    // True when the active Conversation has no turns in its KV cache yet.
-    // Caller (ChatRepositoryImpl) reads this to decide whether to prepend the
-    // system prompt to the next user message — same pattern as AI Edge Gallery.
-    // Lifecycle:
-    //   • init / resetSession      → true   (conversation just created)
-    //   • after first onDone       → false  (KV cache now holds prior turns)
-    //   • after onError + recycle  → true   (corrupted state, started over)
+    // Always true: Conversation is recycled before every send, so KV is empty
+    // at the start of every turn. ChatRepositoryImpl always sends a FRESH
+    // prompt (system + recap + user) — do not add a CONTINUE path that skips
+    // the system prompt when this flag is true (it is always true).
     @Volatile private var _isFreshConversation: Boolean = true
     override val isFreshConversation: Boolean get() = _isFreshConversation
 

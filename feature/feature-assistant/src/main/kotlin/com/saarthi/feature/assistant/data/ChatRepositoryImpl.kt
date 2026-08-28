@@ -119,6 +119,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val _history = MutableStateFlow<List<ChatMessage>>(emptyList())
     private val _tokensPerSecond = MutableStateFlow(0f)
     private val _currentSessionId = MutableStateFlow("default")
+    private val _olderMessagesOmitted = MutableStateFlow(false)
     private val memoryFactWriter = MemoryFactWriter(memoryRepository, implicitFactExtractor)
 
 
@@ -185,11 +186,13 @@ class ChatRepositoryImpl @Inject constructor(
                 _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(saved.map { it.toChatMessage() })
             }
             sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
+            refreshOlderMessagesOmitted()
         }
     }
 
     override fun getHistory(): Flow<List<ChatMessage>> = _history.asStateFlow()
     override fun getTokensPerSecond(): Flow<Float> = _tokensPerSecond.asStateFlow()
+    override fun olderMessagesOmitted(): Flow<Boolean> = _olderMessagesOmitted.asStateFlow()
     override fun getCurrentSessionId(): Flow<String> = _currentSessionId.asStateFlow()
 
     override fun getSessions(): Flow<List<ChatSession>> =
@@ -213,6 +216,7 @@ class ChatRepositoryImpl @Inject constructor(
         )
         _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(messages.map { it.toChatMessage() })
         sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
+        refreshOlderMessagesOmitted()
         // Reset engine session to prevent stale KV cache from previous chat
         runCatching { inferenceEngine.resetSession() }
     }
@@ -282,6 +286,7 @@ class ChatRepositoryImpl @Inject constructor(
                 _history.update { history ->
                     history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false) else it }
                 }
+                refreshOlderMessagesOmitted()
                 return@flow
             }
 
@@ -331,6 +336,7 @@ class ChatRepositoryImpl @Inject constructor(
             _history.update { history ->
                 history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false) else it }
             }
+            refreshOlderMessagesOmitted()
             return@flow
         }
         DebugLogger.log(
@@ -365,6 +371,7 @@ class ChatRepositoryImpl @Inject constructor(
                             else msg
                         }
                     }
+                    refreshOlderMessagesOmitted()
                 }
                 .onEach { token ->
                     accumulated.append(token)
@@ -451,6 +458,7 @@ class ChatRepositoryImpl @Inject constructor(
                     _history.update { history ->
                         history.map { msg -> if (msg.id == streamingId) finalMsg else msg }
                     }
+                    refreshOlderMessagesOmitted()
                     // Persist only a REAL model reply — never the error / empty /
                     // stopped placeholders. Persisting them would pollute chat
                     // history AND the multi-turn transcript fed back into later
@@ -516,6 +524,7 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun clearHistory() {
         val sessionId = _currentSessionId.value
         _history.update { emptyList() }
+        refreshOlderMessagesOmitted()
         // Clearing history is also "wipe this chat's brain" — drop the
         // session's messages, memories and RAG chunks together so the next
         // reply starts clean and the model can't still see facts the user just
@@ -536,6 +545,7 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun deleteAllData() {
         _history.update { emptyList() }
+        refreshOlderMessagesOmitted()
         val sessions = chatSessionDao.getAll()
         // Cascade every real chat session through the SAME per-session
         // primitives used by deleteSession/clearHistory, so RAG token caches and
@@ -633,6 +643,7 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun deleteMessage(id: String) {
         _history.update { it.filterNot { msg -> msg.id == id } }
+        refreshOlderMessagesOmitted()
         conversationDao.deleteById(id)
     }
 
@@ -641,6 +652,7 @@ class ChatRepositoryImpl @Inject constructor(
         ragRepository.deleteByDoc(sessionId, docUri)
         indexedDocsByUri[sessionId]?.remove(docUri)
         sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
+        refreshOlderMessagesOmitted()
     }
 
     // ── Prompt builder ────────────────────────────────────────────────────────
@@ -786,7 +798,6 @@ class ChatRepositoryImpl @Inject constructor(
     private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
         val promptT0 = System.nanoTime()
         fun promptMs(): Long = (System.nanoTime() - promptT0) / 1_000_000
-        val isFresh = inferenceEngine.isFreshConversation
         val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
         val sessionId = _currentSessionId.value
 
@@ -956,6 +967,10 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
+        refreshOlderMessagesOmitted(
+            grounded = retrieved.isNotEmpty() || sessionHasIndexedDocs,
+        )
+
         // ── Compact (Gemma 3 1B) transcript priming ──────────────────────
         // litertlm wraps everything in <start_of_turn>user … <start_of_turn>model,
         // so we prime the 1B model via a "transcript" pattern: a narrative
@@ -976,10 +991,10 @@ class ChatRepositoryImpl @Inject constructor(
         //  • For uncertainty, we *show* the desired behaviour in the example
         //    rather than telling the model what to do.
         //
-        // isFreshConversation is always true here because the Conversation is
-        // recycled on every onDone() callback — see LiteRTInferenceEngine. The
-        // prior-turn recap compensates by injecting topic context so the model
-        // is not cold on turn 2+.
+        // Recycle-per-turn: Conversation is recycled before every send, so
+        // every turn is FRESH. The prior-turn recap compensates by injecting
+        // topic context so the model is not cold on turn 2+. Compact still
+        // omits recap (1B parrots any transcript).
         if (tier == com.saarthi.core.inference.prompt.SystemPromptProvider.ModelTier.COMPACT) {
             // 1B parroting fix: the previous FOUR-sentence THIRD-PERSON identity
             // ("Saarthi is a friendly… Saarthi runs… Saarthi replies…") read to
@@ -999,7 +1014,11 @@ class ChatRepositoryImpl @Inject constructor(
             lastPriorTurnsChars = recap.length
             val scaffolding = identity.length + recap.length +
                 userMessage.length + 40   // "\n\n…\n\nUser: …\nSaarthi:" markup
-            val ragBudget = (MAX_PROMPT_CHARS_COMPACT - scaffolding - 80).coerceAtLeast(0)
+            val ragBudget = groundedRagCharBudget(
+                totalBudget = MAX_PROMPT_CHARS_COMPACT,
+                reservedNonRagChars = scaffolding + 80,
+                hasRetrievedChunks = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty(),
+            )
             val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
             val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
@@ -1021,23 +1040,17 @@ class ChatRepositoryImpl @Inject constructor(
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
             val fullPrompt = "$identity$recap$ragPart\n\nUser: $userMessage\nSaarthi:"
             DebugLogger.log("PROMPT", "COMPACT turn ragChars=${fileContext.length} ragBudget=$ragBudget promptMs=${promptMs()}")
-            return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = "User: $userMessage\nSaarthi:")
+            val userTail = "User: $userMessage\nSaarthi:"
+            val pinnedTail = if (fileContext.isNotEmpty()) "$fileContext\n\n$userTail" else userTail
+            return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = pinnedTail)
         }
 
-        // OFFICIAL APPROACH (matches Google AI Edge Gallery's AI Chat):
-        // The Conversation maintains the chat history in its KV cache. Each turn we
-        // send ONLY the new user message and the engine wraps it in Gemma's native
-        // chat template (<start_of_turn>user … <start_of_turn>model …) automatically.
-        //
-        // FRESH turn = first message in this Conversation (brand-new chat, switched
-        // session, cleared history, or recycled after error). On a FRESH turn we send
-        // the full system prompt, plus — if the user is resuming a saved chat — a
-        // brief recap of the last 1–2 turns so the model picks up where they left off.
-        //
-        // CONTINUE turn = the model already has the prior turns in its KV cache; we
-        // just send the new user message.
-        return if (isFresh) {
-            // Memory is scoped to THIS chat — never read another chat's memories.
+        // Recycle-per-turn: every generateStream is a new Conversation (a second
+        // sendMessageAsync on a live Conversation SIGKILLs SM8550 / Android 16),
+        // so every turn is FRESH. CONTINUE (omit system prompt + recap because
+        // KV already holds them) is dead — if isFreshConversation were ever
+        // false, identity and history would vanish for that turn.
+        // Memory is scoped to THIS chat — never read another chat's memories.
             val currentSession = _currentSessionId.value
             val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
             // Recap is now kept on doc-pinned turns too. The Conversation's
@@ -1094,7 +1107,11 @@ class ChatRepositoryImpl @Inject constructor(
                 // the with-docs budget is tight to begin with; the
                 // saved 80 c is exactly enough for one extra chunk.
                 80                                                    // safety margin
-            val ragBudget = (budget - systemPlusMargin).coerceAtLeast(0)
+            val ragBudget = groundedRagCharBudget(
+                totalBudget = budget,
+                reservedNonRagChars = systemPlusMargin,
+                hasRetrievedChunks = retrieved.isNotEmpty() || unreadableThisTurn.isNotEmpty(),
+            )
             val ragAssembly = buildRagPromptBlockAndTrackCitation(
                 retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
                 newThisTurnNames = newAttachDisplayNames,
@@ -1113,7 +1130,7 @@ class ChatRepositoryImpl @Inject constructor(
             }
             val fileContext = ragAssembly.block
             DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
-            buildString {
+            return buildString {
                 // Only emit the system block if non-blank — Compact tier
                 // returns empty (see SystemPromptProvider) and leading
                 // whitespace before the user message would look like garbage
@@ -1126,65 +1143,22 @@ class ChatRepositoryImpl @Inject constructor(
                 append(userMessage)
             }.let { prompt ->
                 // trimPrompt() is now a safety net rather than the primary
-                // cutter — the RAG block was already sized to fit.
-                //
-                // When it DOES fire on an over-budget single-turn prompt, it
-                // keeps the user tail and take()s the FRONT of the system block
-                // — which silently drops the END of the system prompt, i.e. the
-                // BOTTOM (recency-anchored) language directive of the sandwich.
-                // On weaker models (Gemma 4 E2B) the bottom directive is what
-                // actually forces the reply language, so losing it made every
-                // reply revert to English regardless of the selected language.
-                //
-                // Originally this pin only covered the raw language directive
-                // (currentLanguage.systemPromptInstruction) — but overflow was
-                // also silently dropping persona behaviour rules and response
-                // -style constraints along with it, since neither was pinned,
-                // producing longer/off-persona replies once a long
-                // conversation's memory+recap pushed the prompt over budget.
-                // criticalTail is the exact tail build() assembled the prompt
-                // with (persona rules + style constraints + reasoning rules +
-                // the RESOLVED effective-language directive, which can differ
-                // from currentLanguage when Response Style forces English) —
-                // pinning it verbatim instead of reconstructing it here means
-                // this can never drift from what the prompt actually contains.
+                // cutter — the RAG block was already sized to fit. When the
+                // min grounded budget forces excerpts that overflow, pin the
+                // RAG block + critical tail + user message so overflow drops
+                // the FRONT of the system prompt, not the document excerpts.
                 val criticalTail = systemPromptBuild.criticalTail
-                val pinnedTail = if (fileContext.isEmpty() && criticalTail.isNotBlank())
-                    "$criticalTail\n\n$userMessage" else userMessage
+                val pinnedTail = when {
+                    fileContext.isNotEmpty() && criticalTail.isNotBlank() ->
+                        "$criticalTail\n\n$fileContext\n$userMessage"
+                    fileContext.isNotEmpty() -> "$fileContext\n$userMessage"
+                    criticalTail.isNotBlank() -> "$criticalTail\n\n$userMessage"
+                    else -> userMessage
+                }
                 val finalPrompt = trimPrompt(prompt, budget, pinnedTail = pinnedTail)
                 DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget promptMs=${promptMs()}")
                 finalPrompt
             }
-        } else {
-            // CONTINUE: KV cache already holds the system prompt + prior
-            // turns. Only RAG + user message go in this turn. The whole
-            // budget is available for RAG, minus the user message.
-            val budget = maxPromptChars
-            val ragBudget = (budget - userMessage.length - 80).coerceAtLeast(0)
-            val forceGroundedDelivery = requiresForceGroundedDelivery(ragTurnMode, retrieved.isNotEmpty())
-            val ragAssembly = buildRagPromptBlockAndTrackCitation(
-                retrieved, unreadableThisTurn, tier, ragBudget, sessionDocs,
-                newThisTurnNames = newAttachDisplayNames,
-                answerShape = ragAnswerShape,
-                multiFileFairSources = multiFileFairSources,
-                tabularAmount = tabularAmountQuery,
-                unattachedExternal = unattachedExternal,
-                forceGroundedDelivery = forceGroundedDelivery,
-                ragTurnMode = ragTurnMode,
-                ragQuery = ragQuery,
-                attachmentsThisTurn = attachments.isNotEmpty(),
-            )
-            if (ragAssembly.groundedDeliveryFailed) {
-                DebugLogger.log("PROMPT", "CONTINUE grounded delivery failed — retry instruction")
-                return groundedDeliveryRetryInstruction(userMessage)
-            }
-            val fileContext = ragAssembly.block
-            DebugLogger.log("PROMPT", "CONTINUE turn  attachments=${attachments.size}  ragBudget=$ragBudget  ragChars=${fileContext.length} shape=$ragAnswerShape promptMs=${promptMs()}")
-            buildString {
-                if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
-                append(userMessage)
-            }
-        }
     }
 
     /**
@@ -1282,6 +1256,27 @@ class ChatRepositoryImpl @Inject constructor(
         lastCitationMultiFileFair = multiFileFairSources
         lastCitationQuery = ragQuery
         lastCitationTurnMode = ragTurnMode
+    }
+
+    /**
+     * True when the visible thread is longer than the recap the next prompt
+     * will include. Compact never recaps; STANDARD/LARGE use
+     * [conversationContextMaxTurns]. Streaming rows are ignored so an
+     * in-progress reply is not counted as a completed pair.
+     */
+    private fun refreshOlderMessagesOmitted(grounded: Boolean = sessionHasIndexedDocs) {
+        val complete = ChatHistoryHygiene.completeUserAssistantPairs(
+            _history.value.filter { it.content.isNotBlank() && !it.isStreaming },
+        )
+        val pairCount = complete.size / 2
+        val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+        _olderMessagesOmitted.value = olderMessagesOmittedFromPrompt(
+            completedPairCount = pairCount,
+            isCompact = tier == SystemPromptProvider.ModelTier.COMPACT,
+            isLarge = tier == SystemPromptProvider.ModelTier.LARGE,
+            grounded = grounded,
+            roomy = maxPromptChars >= 7000,
+        )
     }
 
     /**

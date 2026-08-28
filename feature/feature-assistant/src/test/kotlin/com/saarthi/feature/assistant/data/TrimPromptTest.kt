@@ -97,4 +97,20 @@ class TrimPromptTest {
 
         assertTrue("Must end with the user message", out.endsWith(userMessage))
     }
+
+    @Test
+    fun `overflow preserves pinned RAG excerpts when they sit in the tail`() {
+        val criticalTail = "Always reply in Hindi."
+        val ragBlock = "EXCERPTS\nThe Digital Personal Data Protection Act, 2023."
+        val userMessage = "What is the short title?"
+        val pinnedTail = "$criticalTail\n\n$ragBlock\n$userMessage"
+        val bloatedSystemPrefix = "SYSTEM PROMPT PREFIX ".repeat(500)
+        val prompt = "$bloatedSystemPrefix\n\n$pinnedTail"
+
+        val out = trimPrompt(prompt, budget = 400, pinnedTail = pinnedTail)
+
+        assertTrue("Must end with RAG + user tail", out.endsWith(pinnedTail))
+        assertTrue("Must keep the document excerpt", out.contains("Digital Personal Data Protection Act"))
+        assertTrue("Must keep the language directive", out.contains("Always reply in Hindi."))
+    }
 }

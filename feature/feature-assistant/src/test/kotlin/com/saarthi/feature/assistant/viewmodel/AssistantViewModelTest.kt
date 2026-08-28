@@ -77,6 +77,7 @@ class AssistantViewModelTest {
         // Minimal stubs for flows consumed in the init block.
         every { mockChatRepository.getHistory() } returns flowOf(emptyList())
         every { mockChatRepository.getTokensPerSecond() } returns flowOf(0f)
+        every { mockChatRepository.olderMessagesOmitted() } returns flowOf(false)
         every { mockChatRepository.getSessions() } returns flowOf(emptyList())
         every { mockChatRepository.getCurrentSessionId() } returns flowOf("default")
         every { mockInferenceEngine.isReady } returns false
@@ -211,6 +212,19 @@ class AssistantViewModelTest {
         advanceUntilIdle()
 
         assertTrue("modelReady must reflect engine readiness", vm.uiState.value.modelReady)
+    }
+
+    @Test
+    fun `olderMessagesOmitted from repository is reflected in uiState`() = runTest {
+        val omitted = MutableStateFlow(false)
+        every { mockChatRepository.olderMessagesOmitted() } returns omitted
+        val vm = createViewModel()
+        assertFalse(vm.uiState.value.olderMessagesOmitted)
+
+        omitted.value = true
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.olderMessagesOmitted)
     }
 
     // ── Attachment gate (isCompactModel) ───────────────────────────────────────

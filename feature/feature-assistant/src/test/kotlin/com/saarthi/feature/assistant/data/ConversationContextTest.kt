@@ -148,4 +148,39 @@ class ConversationContextTest {
         assertTrue("Grounded LARGE block must stay within ~1100c. len=${grounded.length}",
             grounded.length <= 1100)
     }
+
+    @Test
+    fun `conversationContextMaxTurns matches format window`() {
+        assertEquals(2, conversationContextMaxTurns(isLarge = false, grounded = false))
+        assertEquals(3, conversationContextMaxTurns(isLarge = true, grounded = false))
+        assertEquals(3, conversationContextMaxTurns(isLarge = true, grounded = false, roomy = true))
+        assertEquals(6, conversationContextMaxTurns(isLarge = true, grounded = true, roomy = true))
+        assertEquals(3, conversationContextMaxTurns(isLarge = true, grounded = true, roomy = false))
+        assertEquals(2, conversationContextMaxTurns(isLarge = false, grounded = true, roomy = true))
+    }
+
+    @Test
+    fun `olderMessagesOmittedFromPrompt compact omits any completed pair`() {
+        assertFalse(olderMessagesOmittedFromPrompt(0, isCompact = true, isLarge = false, grounded = false))
+        assertTrue(olderMessagesOmittedFromPrompt(1, isCompact = true, isLarge = false, grounded = false))
+    }
+
+    @Test
+    fun `olderMessagesOmittedFromPrompt STANDARD banners after two pairs`() {
+        assertFalse(olderMessagesOmittedFromPrompt(2, isCompact = false, isLarge = false, grounded = false))
+        assertTrue(olderMessagesOmittedFromPrompt(3, isCompact = false, isLarge = false, grounded = false))
+    }
+
+    @Test
+    fun `olderMessagesOmittedFromPrompt LARGE roomy grounded uses six-turn window`() {
+        assertFalse(
+            olderMessagesOmittedFromPrompt(6, isCompact = false, isLarge = true, grounded = true, roomy = true),
+        )
+        assertTrue(
+            olderMessagesOmittedFromPrompt(7, isCompact = false, isLarge = true, grounded = true, roomy = true),
+        )
+        assertTrue(
+            olderMessagesOmittedFromPrompt(4, isCompact = false, isLarge = true, grounded = false, roomy = true),
+        )
+    }
 }

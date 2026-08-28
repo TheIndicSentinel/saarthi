@@ -1,6 +1,43 @@
 package com.saarthi.feature.assistant.data
 
 /**
+ * How many completed user→assistant pairs [formatConversationContext] keeps.
+ *
+ * `roomy` = a high-end device with the scaled 4096-token window (8000c
+ * budget). Only then do we deepen LARGE history; mid-range keeps the
+ * tighter caps so its prompt still fits the 2048-token window.
+ *
+ * Deepen only on DOCUMENT (grounded) turns. In plain chat, feeding a 2B
+ * model 6 turns of its own prior verbose answers back as context reliably
+ * triggers repetition loops. Normal chat keeps the tight LARGE caps
+ * (3 turns); only grounded follow-ups go deep (6).
+ */
+internal fun conversationContextMaxTurns(
+    isLarge: Boolean,
+    grounded: Boolean,
+    roomy: Boolean = false,
+): Int {
+    val deep = isLarge && roomy && grounded
+    return if (deep) 6 else if (isLarge) 3 else 2
+}
+
+/**
+ * True when the visible thread is longer than the recap the next prompt will
+ * actually include. Compact never recaps (1B parrots any transcript).
+ */
+internal fun olderMessagesOmittedFromPrompt(
+    completedPairCount: Int,
+    isCompact: Boolean,
+    isLarge: Boolean,
+    grounded: Boolean,
+    roomy: Boolean = false,
+): Boolean {
+    if (completedPairCount <= 0) return false
+    if (isCompact) return true
+    return completedPairCount > conversationContextMaxTurns(isLarge, grounded, roomy)
+}
+
+/**
  * Pure, dependency-free formatter for the multi-turn conversation context block.
  * Extracted as a top-level `internal` function so it is unit-testable without
  * constructing [ChatRepositoryImpl] and its 12 dependencies.
@@ -26,19 +63,8 @@ internal fun formatConversationContext(
 ): String {
     if (turns.isEmpty()) return ""
 
-    // `roomy` = a high-end device with the scaled 4096-token window (8000c
-    // budget). Only then do we deepen LARGE history; mid-range keeps the
-    // tighter caps so its prompt still fits the 2048-token window.
-    //
-    // BUT only deepen on DOCUMENT (grounded) turns. In plain chat, feeding a 2B
-    // model 6 turns / 3000c of its OWN prior verbose answers (Hindi bullets,
-    // math steps) back as context reliably triggers repetition loops — the very
-    // "enlarge the window then fill it" failure the small model can't absorb.
-    // Normal chat therefore keeps the tight isLarge caps (3 turns / 1500c) that
-    // worked before the high-RAM scaling; only grounded follow-ups (where the
-    // document anchors the model and "explain more" needs continuity) go deep.
-    val deep          = isLarge && roomy && grounded
-    val maxTurns      = if (deep) 6 else if (isLarge) 3 else 2
+    val deep = isLarge && roomy && grounded
+    val maxTurns = conversationContextMaxTurns(isLarge, grounded, roomy)
     val perUserChars  = if (isLarge) 160 else 110
     val perReplyChars = if (isLarge) { if (grounded) 220 else 320 } else { if (grounded) 150 else 200 }
     val blockBudget   = if (deep) { if (grounded) 2200 else 3000 } else if (isLarge) { if (grounded) 1100 else 1500 } else { if (grounded) 560 else 760 }

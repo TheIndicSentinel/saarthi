@@ -466,6 +466,56 @@ enum class SupportedLanguage(
     val reselectModel: String get() = when (this) { HINDI -> "मॉडल फिर चुनें"; MARATHI -> "मॉडेल पुन्हा निवडा"; else -> "Re-select Model" }
     /** Support screen: report an issue. */
     val reportIssue: String get() = when (this) { HINDI -> "समस्या बताएँ"; MARATHI -> "समस्या कळवा"; else -> "Report an issue" }
+    /** Chat: visible thread is longer than the recap in this prompt. */
+    val olderMessagesNotInReply: String get() = when (this) {
+        ENGLISH  -> "Older messages aren't in this reply — Saarthi only sees the recent turns."
+        HINDI    -> "पुराने संदेश इस जवाब में नहीं हैं — सारथी को हाल के दौर ही दिखते हैं।"
+        TAMIL    -> "பழைய செய்திகள் இந்த பதிலில் இல்லை — சாரதி சமீபத்திய சுற்றுகளையே பார்க்கிறார்."
+        TELUGU   -> "పాత సందేశాలు ఈ సమాధానంలో లేవు — సారథి ఇటీవలి మలుపులను మాత్రమే చూస్తుంది."
+        BENGALI  -> "পুরনো বার্তা এই উত্তরে নেই — সারথি শুধু সাম্প্রতিক পালা দেখে।"
+        MARATHI  -> "जुने संदेश या उत्तरात नाहीत — सारथीला अलीकडील फेऱ्याच दिसतात."
+        KANNADA  -> "ಹಳೆಯ ಸಂದೇಶಗಳು ಈ ಉತ್ತರದಲ್ಲಿ ಇಲ್ಲ — ಸಾರಥಿ ಇತ್ತೀಚಿನ ಸುತ್ತುಗಳನ್ನು ಮಾತ್ರ ನೋಡುತ್ತಾನೆ."
+        GUJARATI -> "જૂના સંદેશા આ જવાબમાં નથી — સારથીને તાજેતરના વળાંક જ દેખાય છે."
+        PUNJABI  -> "ਪੁਰਾਣੇ ਸੁਨੇਹੇ ਇਸ ਜਵਾਬ ਵਿੱਚ ਨਹੀਂ ਹਨ — ਸਾਰਥੀ ਨੂੰ ਹਾਲੀਆ ਵਾਰੀਆਂ ਹੀ ਦਿਖਦੀਆਂ ਹਨ।"
+        ODIA     -> "ପୁରୁଣା ସନ୍ଦେଶ ଏହି ଉତ୍ତରରେ ନାହିଁ — ସାରଥୀ କେବଳ ସାମ୍ପ୍ରତିକ ପାଳି ଦେଖେ।"
+    }
+    /** Support: last-32 on-device inference timings (no message text). */
+    val recentInferenceTitle: String get() = when (this) {
+        ENGLISH  -> "Recent inference (this device only)"
+        HINDI    -> "हाल की इन्फरेंस (केवल इस डिवाइस पर)"
+        TAMIL    -> "சமீபத்திய அனுமானம் (இந்த சாதனத்தில் மட்டும்)"
+        TELUGU   -> "ఇటీవలి ఇన్‌ఫరెన్స్ (ఈ పరికరంలో మాత్రమే)"
+        BENGALI  -> "সাম্প্রতিক ইনফারেন্স (শুধু এই ডিভাইসে)"
+        MARATHI  -> "अलीकडील इन्फरन्स (फक्त या डिव्हाइसवर)"
+        KANNADA  -> "ಇತ್ತೀಚಿನ ಇನ್‌ಫರೆನ್ಸ್ (ಈ ಸಾಧನದಲ್ಲಿ ಮಾತ್ರ)"
+        GUJARATI -> "તાજેતરની ઇન્ફરન્સ (ફક્ત આ ડિવાઇસ પર)"
+        PUNJABI  -> "ਹਾਲੀਆ ਇਨਫਰੈਂਸ (ਸਿਰਫ ਇਸ ਡਿਵਾਈਸ ਉੱਤੇ)"
+        ODIA     -> "ସାମ୍ପ୍ରତିକ ଇନଫରେନ୍ସ (କେବଳ ଏହି ଡିଭାଇସରେ)"
+    }
+    val recentInferenceBody: String get() = when (this) {
+        ENGLISH  -> "Last 32 turns on this phone. Never uploaded. No message text."
+        HINDI    -> "इस फ़ोन पर पिछले 32 दौर। कभी अपलोड नहीं। कोई संदेश पाठ नहीं।"
+        TAMIL    -> "இந்த தொலைபேசியில் கடைசி 32 சுற்றுகள். ஒருபோதும் பதிவேற்றப்படாது. செய்தி உரை இல்லை."
+        TELUGU   -> "ఈ ఫోన్‌లో చివరి 32 మలుపులు. ఎప్పుడూ అప్‌లోడ్ కావు. సందేశ పాఠం లేదు."
+        BENGALI  -> "এই ফোনে শেষ ৩২ পালা। কখনও আপলোড হয় না। কোনো বার্তার লেখা নেই।"
+        MARATHI  -> "या फोनवरील शेवटच्या 32 फेऱ्या. कधीही अपलोड होत नाहीत. संदेश मजकूर नाही."
+        KANNADA  -> "ಈ ಫೋನ್‌ನಲ್ಲಿ ಕೊನೆಯ 32 ಸುತ್ತುಗಳು. ಎಂದಿಗೂ ಅಪ್‌ಲೋಡ್ ಆಗುವುದಿಲ್ಲ. ಸಂದೇಶ ಪಠ್ಯವಿಲ್ಲ."
+        GUJARATI -> "આ ફોન પર છેલ્લા 32 વળાંક. ક્યારેય અપલોડ નથી. સંદેશ લખાણ નથી."
+        PUNJABI  -> "ਇਸ ਫੋਨ ਉੱਤੇ ਆਖਰੀ 32 ਵਾਰੀਆਂ। ਕਦੇ ਅੱਪਲੋਡ ਨਹੀਂ। ਕੋਈ ਸੁਨੇਹਾ ਲਿਖਤ ਨਹੀਂ।"
+        ODIA     -> "ଏହି ଫୋନରେ ଶେଷ 32 ପାଳି। କେବେ ଅପଲୋଡ୍ ହୁଏ ନାହିଁ। ସନ୍ଦେଶ ପାଠ ନାହିଁ।"
+    }
+    val recentInferenceEmpty: String get() = when (this) {
+        ENGLISH  -> "No inference turns recorded yet this session."
+        HINDI    -> "इस सत्र में अभी कोई इन्फरेंस दौर दर्ज नहीं हुआ।"
+        TAMIL    -> "இந்த அமர்வில் இன்னும் அனுமானச் சுற்றுகள் பதிவாகவில்லை."
+        TELUGU   -> "ఈ సెషన్‌లో ఇంకా ఇన్‌ఫరెన్స్ మలుపులు నమోదు కాలేదు."
+        BENGALI  -> "এই সেশনে এখনও কোনো ইনফারেন্স পালা রেকর্ড হয়নি।"
+        MARATHI  -> "या सत्रात अजून कोणतीही इन्फरन्स फेरी नोंदलेली नाही."
+        KANNADA  -> "ಈ ಸೆಷನ್‌ನಲ್ಲಿ ಇನ್ನೂ ಯಾವುದೇ ಇನ್‌ಫರೆನ್ಸ್ ಸುತ್ತು ದಾಖಲಾಗಿಲ್ಲ."
+        GUJARATI -> "આ સત્રમાં હજુ કોઈ ઇન્ફરન્સ વળાંક નોંધાયો નથી."
+        PUNJABI  -> "ਇਸ ਸੈਸ਼ਨ ਵਿੱਚ ਹਾਲੇ ਕੋਈ ਇਨਫਰੈਂਸ ਵਾਰੀ ਦਰਜ ਨਹੀਂ ਹੋਈ।"
+        ODIA     -> "ଏହି ଅଧିବେଶନରେ ଏପର୍ଯ୍ୟନ୍ତ କୌଣସି ଇନଫରେନ୍ସ ପାଳି ରେକର୍ଡ ହୋଇନାହିଁ।"
+    }
     /** Paywall labels (product name "Saarthi Pro" kept). */
     val proActive: String get() = when (this) { HINDI -> "Saarthi Pro सक्रिय है"; MARATHI -> "Saarthi Pro सक्रिय आहे"; else -> "Saarthi Pro is active" }
     val unlockBeta: String get() = when (this) { HINDI -> "अनलॉक करें (बीटा)"; MARATHI -> "अनलॉक करा (बीटा)"; else -> "Unlock (beta)" }

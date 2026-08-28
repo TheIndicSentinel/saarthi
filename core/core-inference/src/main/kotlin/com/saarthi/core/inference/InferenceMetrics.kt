@@ -69,3 +69,19 @@ object InferenceMetricsRecorder {
         }
     }
 }
+
+/**
+ * Compact diagnostic lines for Support — model id, backend, timings, token
+ * count. Never includes prompt or response text.
+ */
+fun formatInferenceMetricsLines(turns: List<InferenceTurnMetrics>): List<String> {
+    if (turns.isEmpty()) return emptyList()
+    return turns.mapIndexed { index, turn ->
+        val ttft = if (turn.ttftMs >= 0L) "${turn.ttftMs}ms" else "n/a"
+        val status = if (turn.completed) "ok" else "incomplete"
+        val tps = String.format(java.util.Locale.US, "%.1f", turn.tps)
+        val decode = String.format(java.util.Locale.US, "%.1f", turn.decodeTps)
+        "${index + 1}. ${turn.modelId} · ${turn.backend} · ttft $ttft · ${turn.tokenCount} tok · " +
+            "$tps t/s · decode $decode t/s · $status"
+    }
+}

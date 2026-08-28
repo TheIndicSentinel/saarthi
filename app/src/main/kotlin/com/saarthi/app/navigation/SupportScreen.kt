@@ -27,14 +27,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saarthi.app.BuildConfig
+import com.saarthi.core.inference.InferenceMetricsRecorder
+import com.saarthi.core.inference.formatInferenceMetricsLines
 import com.saarthi.core.ui.components.SaarthiTopBar
 import com.saarthi.core.ui.theme.SaarthiColors
 
@@ -115,6 +119,55 @@ fun SupportScreen(onBack: () -> Unit, language: com.saarthi.core.i18n.SupportedL
                     colors = ButtonDefaults.buttonColors(containerColor = SaarthiColors.Surface),
                 ) {
                     Text(language.reportIssue, color = SaarthiColors.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
+            }
+
+            val metricsLines = remember {
+                formatInferenceMetricsLines(InferenceMetricsRecorder.snapshot())
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SaarthiColors.Surface)
+                    .border(1.dp, SaarthiColors.Border, RoundedCornerShape(16.dp))
+                    .padding(16.dp),
+            ) {
+                Column {
+                    Text(
+                        language.recentInferenceTitle,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold, color = SaarthiColors.Text, fontSize = 16.sp,
+                        ),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        language.recentInferenceBody,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = SaarthiColors.Text2, fontSize = 13.sp,
+                        ),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    if (metricsLines.isEmpty()) {
+                        Text(
+                            language.recentInferenceEmpty,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = SaarthiColors.Text3, fontSize = 12.sp,
+                            ),
+                        )
+                    } else {
+                        metricsLines.forEach { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = SaarthiColors.Text2,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                ),
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
+                    }
                 }
             }
 

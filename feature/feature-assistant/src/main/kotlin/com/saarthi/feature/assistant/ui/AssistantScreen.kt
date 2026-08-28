@@ -346,6 +346,19 @@ fun AssistantScreen(
                     )
                 }
 
+                if (uiState.olderMessagesOmitted && messages.isNotEmpty()) {
+                    Text(
+                        text = currentLanguage.olderMessagesNotInReply,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = SaarthiColors.Text3,
+                            fontSize = 12.sp,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
+                }
+
                 if (messages.isEmpty()) {
                     EmptyState(
                         language = currentLanguage,

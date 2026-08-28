@@ -89,6 +89,43 @@ class InferenceMetricsRecorderTest {
         )
     }
 
+    @Test
+    fun `formatInferenceMetricsLines is empty when there are no turns`() {
+        assertTrue(formatInferenceMetricsLines(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `formatInferenceMetricsLines includes timings and never user text`() {
+        val line = formatInferenceMetricsLines(
+            listOf(
+                turn(
+                    modelId = "Gemma 4 E2B",
+                    backend = "GPU",
+                    tokenCount = 86,
+                    ttftMs = 420L,
+                    tps = 12.4f,
+                    decodeTps = 15.0f,
+                    completed = true,
+                ),
+            ),
+        ).single()
+        assertEquals(
+            "1. Gemma 4 E2B · GPU · ttft 420ms · 86 tok · 12.4 t/s · decode 15.0 t/s · ok",
+            line,
+        )
+        assertFalse(line.contains("User:"))
+        assertFalse(line.contains("prompt"))
+    }
+
+    @Test
+    fun `formatInferenceMetricsLines marks incomplete and unknown ttft`() {
+        val line = formatInferenceMetricsLines(
+            listOf(turn(modelId = "m", ttftMs = -1L, completed = false)),
+        ).single()
+        assertTrue(line.contains("ttft n/a"))
+        assertTrue(line.endsWith("incomplete"))
+    }
+
     private fun turn(
         modelId: String,
         backend: String = "CPU",
