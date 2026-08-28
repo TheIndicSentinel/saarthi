@@ -19,11 +19,10 @@ import org.gradle.api.attributes.Attribute
  *
  * ```
  * ./gradlew resolveAndLockAll --write-locks --no-configuration-cache
+ * ./gradlew --write-verification-metadata sha256 testDebugUnitTest lintDebug :app:assembleDebug --no-configuration-cache
  * ```
  *
- * Then commit every module `gradle.lockfile`. A root `settings-gradle.lockfile`
- * may appear as a version-catalog side effect; it is gitignored (plugin
- * versions stay catalog-pinned).
+ * Then commit every module `gradle.lockfile` and `gradle/verification-metadata.xml`.
  *
  * The included `build-logic` build is **not** locked (plugin versions are
  * catalog-pinned). Instrumented-test, lint, and Kotlin-compiler classpaths
