@@ -24,10 +24,8 @@ internal fun SupportedLanguage.tesseractCode(): String? = when (this) {
     SupportedLanguage.GUJARATI -> "guj"
     SupportedLanguage.PUNJABI -> "pan"
     SupportedLanguage.ODIA -> "ori"
-    SupportedLanguage.ENGLISH,
-    SupportedLanguage.HINDI,
-    SupportedLanguage.MARATHI,
-    -> null
+    SupportedLanguage.HINDI, SupportedLanguage.MARATHI -> "hin"
+    SupportedLanguage.ENGLISH -> null
 }
 
 /** Languages whose primary script is not covered well by ML Kit Devanagari alone. */

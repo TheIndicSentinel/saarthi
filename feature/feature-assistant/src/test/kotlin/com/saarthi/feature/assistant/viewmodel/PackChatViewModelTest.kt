@@ -1,6 +1,7 @@
 package com.saarthi.feature.assistant.viewmodel
 
 import com.saarthi.core.i18n.KisanPackPreference
+import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.chatInferenceNotReadyMessage
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.engine.InferenceEngine

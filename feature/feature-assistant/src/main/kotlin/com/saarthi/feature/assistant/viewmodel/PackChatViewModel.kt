@@ -7,6 +7,7 @@ import com.saarthi.core.common.isSqliteUnusable
 import com.saarthi.core.common.sqliteWriteWithRetry
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.PackId
+import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.chatInferenceNotReadyMessage
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.InferenceService

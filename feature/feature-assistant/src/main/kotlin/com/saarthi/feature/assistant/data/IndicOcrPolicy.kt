@@ -10,8 +10,8 @@ import com.saarthi.core.i18n.SupportedLanguage
  */
 internal object IndicOcrPolicy {
 
-    /** Tesseract traineddata codes for all non-Latin Saarthi UI scripts. */
-    const val COMBINED_REGIONAL_LANGS = "ben+tam+tel+kan+guj+pan+ori"
+/** Tesseract traineddata codes for non-Latin Saarthi UI scripts (+ Devanagari hin). */
+    const val COMBINED_REGIONAL_LANGS = "hin+ben+tam+tel+kan+guj+pan+ori"
 
     private const val MIN_SCRIPT_CHARS = 6
     private const val MIN_INDIC_CHARS = 8
@@ -28,7 +28,9 @@ internal object IndicOcrPolicy {
         }
 
         if (userLang == SupportedLanguage.HINDI || userLang == SupportedLanguage.MARATHI) {
-            return countDevanagariLetters(trimmed) < MIN_INDIC_CHARS && trimmed.length < 48
+            // ML Kit Latin can mis-read a Hindi scan as long English noise — do not
+            // gate on total length (old <48 cap blocked Tesseract on those pages).
+            return countDevanagariLetters(trimmed) < MIN_INDIC_CHARS
         }
 
         // English UI — run Tesseract when ML Kit did not recover real Indic text.
@@ -55,10 +57,13 @@ internal object IndicOcrPolicy {
      */
     fun detectRegionalTesseractCodes(text: String): List<String> {
         if (text.isBlank()) return emptyList()
-        val out = ArrayList<String>(4)
+        val out = ArrayList<String>(5)
+        if (countDevanagariLetters(text) >= MIN_SCRIPT_CHARS) {
+            out.add("hin")
+        }
         for (lang in REGIONAL_LANGUAGES) {
             if (countScriptLetters(text, lang) >= MIN_SCRIPT_CHARS) {
-                lang.tesseractCode()?.let { out.add(it) }
+                lang.tesseractCode()?.let { code -> if (code !in out) out.add(code) }
             }
         }
         return out

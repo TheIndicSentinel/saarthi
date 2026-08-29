@@ -616,6 +616,10 @@ internal fun pdfExtractLooksUsable(text: String?): Boolean {
     if (looksLikeStatement(body)) return true
     val letters = body.count { it.isLetter() }
     val digits = body.count { it.isDigit() }
+    val indicLetters = body.count(::isIndicLetter)
+    // Short Hindi/Tamil/etc. digital or OCR pages — Latin letter count alone was too strict.
+    if (indicLetters >= 24) return true
+    if (indicLetters >= 12 && body.length >= 48) return true
     if (letters >= 80) return true
     if (letters + digits >= 80 && body.length >= 80) return true
     if (body.length >= 400) return true
@@ -688,7 +692,7 @@ internal fun extractionFailureMessage(text: String): String? {
         t.startsWith("[PDF: No readable text found]") ->
             "No readable text found in this PDF."
         t.startsWith("[PDF: Scan had little readable text]") ->
-            "This PDF looks like a scan. On-device OCR found little readable text. Try a digital (selectable-text) PDF."
+            "This PDF looks like a scan. On-device OCR (English + Indian scripts) found little readable text. Try a clearer scan or a digital PDF with selectable text."
         t.startsWith("[PDF: Could not open file descriptor]") ->
             "Could not open this PDF."
         t.startsWith("[PDF: Could not read file contents]") ->

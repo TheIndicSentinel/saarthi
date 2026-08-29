@@ -52,6 +52,22 @@ class IndicOcrPolicyTest {
     }
 
     @Test
+    fun `Hindi UI escalates when ML Kit returned long Latin noise`() {
+        assertTrue(
+            IndicOcrPolicy.needsRegionalTesseractPass(
+                "Application Form Name Date Address Signature Photo Page One Two",
+                SupportedLanguage.HINDI,
+            ),
+        )
+    }
+
+    @Test
+    fun `detectRegionalTesseractCodes finds Devanagari hin pack`() {
+        val hindi = "किसान क्रेडिट कार्ड योजना के अंतर्गत लाभ"
+        assertEquals(listOf("hin"), IndicOcrPolicy.detectRegionalTesseractCodes(hindi))
+    }
+
+    @Test
     fun `tesseractLanguages uses detected document script not UI language`() {
         val bengali = "আবেদনপত্র নাম তারিখ দিন"
         assertEquals("ben", IndicOcrPolicy.tesseractLanguages(SupportedLanguage.TAMIL, bengali))
@@ -77,5 +93,7 @@ class IndicOcrPolicyTest {
     fun `truncated tessdata is not plausible`() {
         assertFalse(isPlausibleTessdataSize("tam.traineddata", 50_000L))
         assertTrue(isPlausibleTessdataSize("tam.traineddata", 2_600_000L))
+        assertFalse(isPlausibleTessdataSize("hin.traineddata", 50_000L))
+        assertTrue(isPlausibleTessdataSize("hin.traineddata", 1_000_000L))
     }
 }

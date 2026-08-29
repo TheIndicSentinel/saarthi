@@ -151,6 +151,7 @@ class RegionalTesseractOcr @Inject constructor(
  * of the tessdata_fast sizes shipped with this branch.
  */
 internal val TESSDATA_MIN_BYTES = mapOf(
+    "hin.traineddata" to 900_000L,
     "ben.traineddata" to 700_000L,
     "guj.traineddata" to 1_100_000L,
     "kan.traineddata" to 2_800_000L,

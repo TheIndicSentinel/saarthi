@@ -35,6 +35,12 @@ class PdfExtractUsableTest {
     }
 
     @Test
+    fun `short Hindi digital extract is usable`() {
+        val hindi = "यह एक वैध हिंदी दस्तावेज़ है जिसमें पर्याप्त पाठ है। ".repeat(2)
+        assertTrue(pdfExtractLooksUsable("--- Page 1 ---\n$hindi"))
+    }
+
+    @Test
     fun `indian rupee statement rows are usable`() {
         val body = """
             12/03/2026  UPI grocery  ₹1,250.00
