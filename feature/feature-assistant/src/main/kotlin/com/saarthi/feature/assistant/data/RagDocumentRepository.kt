@@ -2652,9 +2652,17 @@ internal fun matchHeadingStrict(query: String, headings: List<String>): String? 
     return best
 }
 
+/** Phase A1 — generic edu/doc terms alone must not fuzzy-anchor the wrong section. */
+internal val HEADING_MATCH_GENERIC_STOPWORDS = setOf(
+    "earth", "climate", "system", "systems", "document", "guide", "energy",
+    "primary", "source", "sources", "global", "world", "planet", "change",
+    "natural", "human", "environment", "environmental",
+)
+
 /**
  * T1-3 — partial overlap when strict match fails: at least two significant
  * tokens and ≥50% of the heading's significant tokens present in the query.
+ * Phase A1 — at least one overlapping token must be distinctive (not generic).
  */
 internal fun matchHeadingFuzzy(query: String, headings: List<String>): String? {
     val qTokens = headingTokens(query)
@@ -2666,6 +2674,11 @@ internal fun matchHeadingFuzzy(query: String, headings: List<String>): String? {
         if (significant.isEmpty() || significant.sumOf { it.length } < 6) continue
         val overlap = significant.count { it in qTokens }
         if (overlap < 2) continue
+        val distinctiveTokens = headingTokens(h).filter { it.length >= 3 }
+        val distinctiveOverlap = distinctiveTokens.count {
+            it in qTokens && it !in HEADING_MATCH_GENERIC_STOPWORDS
+        }
+        if (distinctiveOverlap < 1) continue
         val ratio = overlap.toDouble() / significant.size
         if (ratio < 0.5) continue
         val score = overlap * ratio

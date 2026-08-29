@@ -337,14 +337,24 @@ internal fun applyDeterministicSourcesFooter(
     } else {
         chunks
     }
-    if (overlapChunks.isEmpty()) return body
+    val overlapDroppedAll = claimPairingActive && overlapChunks.isEmpty() && chunks.isNotEmpty()
+    if (overlapDroppedAll) {
+        logRag(
+            ragCitationOverlapDropLogLine(
+                queryLen = claimOverlapQuery?.length ?: 0,
+                chunkCount = chunks.size,
+            ),
+        )
+    }
+  // Phase A5 — when claim overlap filters every chunk, fall back to retrieval-based Sources.
+    val footerChunks = if (overlapDroppedAll) chunks else overlapChunks
     val footer = buildDeterministicSourcesFooter(
-        overlapChunks,
+        footerChunks,
         outlineByDocName,
         labels,
         maxSources,
         multiFileFairSources,
-        claimPairAnswerBody = pairingBody.takeIf { claimPairingActive },
+        claimPairAnswerBody = pairingBody.takeIf { claimPairingActive && !overlapDroppedAll },
         claimPairQuery = claimOverlapQuery,
     )
     if (footer.isEmpty()) return body

@@ -618,9 +618,45 @@ internal fun bypassMetaForStructureQuery(query: String): Boolean = isStructureLi
  * B1 — legal-substance questions must not take the meta/structural path
  * (outline-only). Includes penalties, Schedule, fines, and structure queries.
  */
+/** Phase A2 — meta path only for true overview/structure; not absence/mechanism asks. */
+internal fun blocksMetaRouteForSubstanceClause(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+    if (Regex("(?i)\\b(not|except|without|excluding)\\b").containsMatchIn(lower)) return true
+    if (extractQueryFocusEntities(query).isNotEmpty()) return true
+    if (isCompareQuery(query)) return true
+    if (Regex("(?i)\\bexamples?\\b").containsMatchIn(lower)) return true
+    val hasSummarize = Regex("(?i)\\b(summar(?:y|ize|ise)|synopsis)\\b").containsMatchIn(lower)
+    val hasSubstanceCue = Regex(
+        "(?i)\\b(how|what|why|role|affect|difference|compare|interact|feedback|evidence|factor)\\b",
+    ).containsMatchIn(lower)
+    if (hasSummarize && hasSubstanceCue) return true
+    if (
+        Regex("(?i)\\bconclusions?\\b").containsMatchIn(lower) &&
+        !isBareConclusionsStructureQuery(query)
+    ) {
+        return true
+    }
+    if (
+        Regex("(?i)\\b(topics?|subjects?)\\b").containsMatchIn(lower) &&
+        Regex("(?i)\\b(about|regarding|related|climate|change|discuss|cover)\\b").containsMatchIn(lower)
+    ) {
+        return true
+    }
+    return false
+}
+
+internal fun isBareConclusionsStructureQuery(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower in setOf("conclusions", "conclusion")) return true
+    if (Regex("(?i)^(what are the )?conclusions?\\??$").matches(lower)) return true
+    return Regex("(?i)^(list|show) (the )?conclusions?").containsMatchIn(lower)
+}
+
 internal fun bypassMetaForSubstanceQuery(query: String): Boolean {
     if (bypassMetaForStructureQuery(query)) return true
     if (isTabularAmountQuery(query)) return true
+    if (blocksMetaRouteForSubstanceClause(query)) return true
     val lower = query.lowercase().trim()
     if (lower.isEmpty()) return false
     if (lower.contains("schedule")) return true

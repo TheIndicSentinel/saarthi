@@ -166,6 +166,19 @@ internal fun focusEntitiesCoveredInCorpus(
     return true
 }
 
+internal fun focusEntitiesCoveredInTopOrganic(
+    focusEntities: List<String>,
+    retrieved: List<RetrievedChunk>,
+    topOrganic: Int = 4,
+): Boolean {
+    val body = retrieved
+        .filter { it.chunkIndex >= 0 && !it.isStructuralAnchor() }
+        .sortedByDescending { it.score }
+        .take(topOrganic)
+    if (body.isEmpty()) return false
+    return focusEntitiesCoveredInCorpus(focusEntities, buildRetrievalCorpus(body))
+}
+
 internal fun isRetrievalAnswerableForQuery(
     query: String,
     retrieved: List<RetrievedChunk>,
@@ -174,9 +187,7 @@ internal fun isRetrievalAnswerableForQuery(
     if (isStructureListQuery(query) || isStructureCountQuery(query)) return true
     val focus = extractQueryFocusEntities(query)
     if (focus.isEmpty()) return true
-    val body = retrieved.filter { it.chunkIndex >= 0 && !it.isStructuralAnchor() }
-    if (body.isEmpty()) return false
-    return focusEntitiesCoveredInCorpus(focus, buildRetrievalCorpus(body))
+  return focusEntitiesCoveredInTopOrganic(focus, retrieved)
 }
 
 internal fun shouldRunAnswerabilityRetrievalRetry(
@@ -202,9 +213,7 @@ internal fun buildAnswerabilityPreviewChunks(
     anchoredEntities: List<RagChunkEntity>,
 ): List<RetrievedChunk> {
     val hits = ArrayList<RetrievedChunk>()
-    for (entity in anchoredEntities) {
-        hits.add(entity.toRetrievedChunk(0.0))
-    }
+    // Phase A3 — answerability gate uses organic BM25 hits only, not heading anchors.
     for (scored in ranked.take(10)) {
         if (scored.index in pool.indices) {
             hits.add(pool[scored.index].toRetrievedChunk(scored.score))
