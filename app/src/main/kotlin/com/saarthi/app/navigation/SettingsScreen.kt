@@ -1524,35 +1524,6 @@ fun ManageDownloadsScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
-
-    if (state.showResumeRiskDialog) {
-        val reasons = buildList {
-            if (state.resumeRiskCellular) add(currentLanguage.downloadRiskCellular)
-            if (state.resumeRiskLowBattery) add(currentLanguage.downloadRiskLowBattery)
-        }
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = viewModel::dismissResumeRiskDialog,
-            containerColor = SaarthiColors.Bg2,
-            title = { Text(currentLanguage.downloadRiskTitle, color = SaarthiColors.Text) },
-            text = {
-                Text(reasons.joinToString("\n\n"), color = SaarthiColors.Text2)
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = viewModel::confirmResumeRisk) {
-                    Text(
-                        currentLanguage.downloadAnywayLabel,
-                        color = SaarthiColors.Text,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = viewModel::dismissResumeRiskDialog) {
-                    Text(currentLanguage.notNowLabel, color = SaarthiColors.Text2)
-                }
-            },
-        )
-    }
 }
 
 @Composable
