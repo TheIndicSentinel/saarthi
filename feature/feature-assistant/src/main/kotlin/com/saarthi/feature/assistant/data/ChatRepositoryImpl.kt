@@ -416,7 +416,9 @@ class ChatRepositoryImpl @Inject constructor(
                             claimOverlapTurnMode = lastCitationTurnMode,
                         )
                     } else {
-                        stripModelSourcesBlock(parsed.cleanText, citationLabels)
+                        stripInlineCitationIndices(
+                            stripModelSourcesBlock(parsed.cleanText, citationLabels),
+                        )
                     }
                     logRag(
                         ragGenerationLogLine(

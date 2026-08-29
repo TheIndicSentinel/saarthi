@@ -174,6 +174,9 @@ internal fun openingPageContentSample(text: String?): String? {
 
 internal const val FALLBACK_ATTACHED_DOC_LABEL = "Attached document"
 
+/** Tier 3.11 — reject OCR garbage and year-like page noise from citation locations. */
+internal const val MAX_SANE_PAGE_NUMBER = 3_000
+
 /**
  * B3-1 — commentary vs primary document role for Sources/manifest labeling (B3-2).
  * [PRIMARY] is represented by null (no prefix on citations).
@@ -447,9 +450,32 @@ internal fun displayCitationDocName(
     return "${labels.rolePrefixFor(role)} $base"
 }
 
+/**
+ * Tier 3.10 — never surface mid-sentence chunk text as a citation document title.
+ */
+internal fun safeCitationDocTitle(
+    rawName: String,
+    outlineText: String? = null,
+    contentHint: String? = null,
+    contentCharCount: Int? = null,
+    labels: CitationDisplayLabels? = null,
+): String {
+    val title = displayCitationDocName(rawName, outlineText, contentHint, contentCharCount, labels)
+    val proseCheck = title.substringAfter(": ", missingDelimiterValue = title).trim()
+    if (!looksLikeInternalCitationLabel(proseCheck) && !looksLikeBodyProseLine(proseCheck)) {
+        return title
+    }
+    val stem = shortDocName(rawName)
+    val fallback = if (looksLikeContentStamp(stem)) FALLBACK_ATTACHED_DOC_LABEL else stem
+    if (labels == null) return fallback
+    val role = documentRoleLabel(rawName, contentHint, contentCharCount)
+    return if (role != null) "${labels.rolePrefixFor(role)} $fallback" else fallback
+}
+
 internal fun extractPageRange(text: String): String? {
     val pages = PAGE_MARKER_REGEX.findAll(text)
         .mapNotNull { it.groupValues[1].toIntOrNull() }
+        .filter { page -> page in 1..MAX_SANE_PAGE_NUMBER }
         .toList()
     if (pages.isEmpty()) return null
     val lo = pages.min()
@@ -535,7 +561,7 @@ internal fun formatExcerptHeader(
     outlineText: String? = null,
     labels: CitationDisplayLabels? = null,
 ): String {
-    val name = displayCitationDocName(
+    val name = safeCitationDocTitle(
         docName,
         outlineText,
         text,
