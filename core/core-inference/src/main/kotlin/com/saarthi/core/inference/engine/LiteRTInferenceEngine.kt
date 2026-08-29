@@ -124,6 +124,10 @@ class LiteRTInferenceEngine @Inject constructor(
     @Volatile private var loadedMaxTokens: Int = 0
     // The actual maxNumTokens passed to the Engine (≤ loadedMaxTokens which stores config value).
     @Volatile private var loadedEffectiveMaxTokens: Int = 0
+    // First successful window for [pinnedModelPath] this process — see
+    // [stabilizeEffectiveMaxTokens]. Survives background engine release.
+    @Volatile private var pinnedModelPath: String? = null
+    @Volatile private var pinnedEffectiveMaxTokens: Int = 0
     // The active model's catalog-provided sampler defaults (see ModelEntry.
     // defaultTemperature/topK) — captured at load time so samplerForActiveModel()
     // and activeModelDefaultTemperature can use them on later turns, once
@@ -141,6 +145,10 @@ class LiteRTInferenceEngine @Inject constructor(
     private val _isInitializingFlow = MutableStateFlow(false)
     override val isInitializingFlow: Flow<Boolean> = _isInitializingFlow.asStateFlow()
     override val isInitializing: Boolean get() = _isInitializingFlow.value
+
+    private val _isReloadingAfterReleaseFlow = MutableStateFlow(false)
+    override val isReloadingAfterReleaseFlow: Flow<Boolean> = _isReloadingAfterReleaseFlow.asStateFlow()
+    override val isReloadingAfterRelease: Boolean get() = _isReloadingAfterReleaseFlow.value
 
     private val _activeModelNameFlow = MutableStateFlow<String?>(null)
     override val activeModelNameFlow: Flow<String?> = _activeModelNameFlow.asStateFlow()
@@ -359,11 +367,17 @@ class LiteRTInferenceEngine @Inject constructor(
      * (success or thrown) clears the flag via finally.
      */
     override suspend fun initialize(config: InferenceConfig) {
+        val reloading = engine == null && lastInferenceConfig != null
+        _isReloadingAfterReleaseFlow.value = reloading
+        if (reloading) {
+            DebugLogger.log("LITERT", "Reloading model after background release — UI should show reload banner")
+        }
         _isInitializingFlow.value = true
         try {
             initializeInternal(config)
         } finally {
             _isInitializingFlow.value = false
+            _isReloadingAfterReleaseFlow.value = false
         }
     }
 
@@ -598,7 +612,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 // floor. See calculateEffectiveMaxTokens's kdoc for the full
                 // decision ladder and the field incidents behind each branch.
                 val headroomMb = profile.availableRamMb - residentEstimateMb
-                val effectiveMaxTokens: Int = calculateEffectiveMaxTokens(
+                val calculatedMaxTokens: Int = calculateEffectiveMaxTokens(
                     cpuCrashCount = cpuCrashCount,
                     isLargeTier = isLargeTier,
                     isCompactTier = isCompactTier,
@@ -607,6 +621,18 @@ class LiteRTInferenceEngine @Inject constructor(
                     sizeMb = sizeMb,
                     residentEstimateMb = residentEstimateMb,
                 )
+                val effectiveMaxTokens = stabilizeEffectiveMaxTokens(
+                    newlyCalculated = calculatedMaxTokens,
+                    pinnedForThisModel = pinnedEffectiveMaxTokens,
+                    sameModelAsPin = pinnedModelPath == config.modelPath,
+                    cpuCrashCount = cpuCrashCount,
+                )
+                if (effectiveMaxTokens != calculatedMaxTokens) {
+                    DebugLogger.log(
+                        "LITERT",
+                        "[TOKENS] maxTokens=$effectiveMaxTokens (pinned this process; ladder wanted $calculatedMaxTokens)",
+                    )
+                }
 
                 // Honour the threads the device profiler recommended (typically
                 // cpuCores − 2, clamped to 2..4 on Snapdragon 8 Gen 2 → 4). The
@@ -732,6 +758,8 @@ class LiteRTInferenceEngine @Inject constructor(
                     loadedModelPath = config.modelPath
                     loadedMaxTokens = config.maxTokens
                     loadedEffectiveMaxTokens = effectiveMaxTokens
+                    pinnedModelPath = config.modelPath
+                    pinnedEffectiveMaxTokens = effectiveMaxTokens
                     loadedTemperature = config.temperature
                     loadedTopK = config.topK
                     activeModelName = config.modelName

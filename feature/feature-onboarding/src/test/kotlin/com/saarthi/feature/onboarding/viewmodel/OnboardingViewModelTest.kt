@@ -341,6 +341,44 @@ class OnboardingViewModelTest {
     // ── Live RAM recheck at the download action point ───────────────────────
 
     @Test
+    fun `downloadModel on cellular with a large remaining file shows the risk dialog`() = runTest {
+        val model = testModel(fileSizeBytes = 2_500_000_000L)
+        setUpDefaults(model)
+        every { mockDownloadManager.remainingBytesFor(model, any()) } returns 2_500_000_000L
+        every { mockDownloadManager.isCellularOrMetered() } returns true
+        every { mockDownloadManager.batteryPercent() } returns 80
+        every { mockDownloadManager.isCharging() } returns false
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        viewModel.downloadModel(model)
+
+        assertTrue(viewModel.uiState.value.showDownloadRiskDialog)
+        assertTrue(viewModel.uiState.value.downloadRiskCellular)
+        verify(exactly = 0) { mockDownloadManager.startDownload(model) }
+
+        viewModel.confirmRiskyDownload()
+        verify(exactly = 1) { mockDownloadManager.startDownload(model) }
+        assertTrue(!viewModel.uiState.value.showDownloadRiskDialog)
+    }
+
+    @Test
+    fun `downloadModel dismisses the risk dialog without starting`() = runTest {
+        val model = testModel(fileSizeBytes = 2_500_000_000L)
+        setUpDefaults(model)
+        every { mockDownloadManager.remainingBytesFor(model, any()) } returns 2_500_000_000L
+        every { mockDownloadManager.isCellularOrMetered() } returns true
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        viewModel.downloadModel(model)
+        viewModel.dismissDownloadRiskDialog()
+
+        verify(exactly = 0) { mockDownloadManager.startDownload(model) }
+        assertTrue(!viewModel.uiState.value.showDownloadRiskDialog)
+    }
+
+    @Test
     fun `downloadModel refreshes the device profile instead of reusing the init-time snapshot`() = runTest {
         val model = testModel()
         setUpDefaults(model)

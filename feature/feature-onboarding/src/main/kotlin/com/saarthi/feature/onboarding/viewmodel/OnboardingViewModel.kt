@@ -26,6 +26,7 @@ import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.model.PromptTier
+import com.saarthi.core.inference.DownloadRiskPolicy
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -63,6 +64,12 @@ data class OnboardingUiState(
     val lastFailureNote: String? = null,
     val showHfTokenDialog: Boolean = false,
     val pendingGatedDownloadId: String? = null,
+    val showDownloadRiskDialog: Boolean = false,
+    val pendingRiskDownloadId: String? = null,
+    val pendingRiskDownloadAutoInit: Boolean = false,
+    val pendingRiskDownloadRestart: Boolean = false,
+    val downloadRiskCellular: Boolean = false,
+    val downloadRiskLowBattery: Boolean = false,
 )
 
 enum class OnboardingStep {
@@ -117,7 +124,7 @@ class OnboardingViewModel @Inject constructor(
             val pending = _uiState.value.catalogModels.find { it.id == pendingId }
                 ?: pendingId?.let { modelCatalog.findById(it) }
             _uiState.update { it.copy(showHfTokenDialog = false, pendingGatedDownloadId = null) }
-            if (pending != null) startCatalogDownload(pending)
+            if (pending != null) startDownloadAfterRiskCheck(pending, autoInit = false)
         }
     }
 
@@ -460,7 +467,7 @@ class OnboardingViewModel @Inject constructor(
             }
             return
         }
-        startCatalogDownload(model)
+        startDownloadAfterRiskCheck(model, autoInit = false)
     }
 
     private fun startCatalogDownload(model: ModelEntry) {
@@ -474,7 +481,76 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun restartDownload(model: ModelEntry) {
-        downloadManager.restartDownload(model)
+        startDownloadAfterRiskCheck(model, autoInit = false, restart = true)
+    }
+
+    fun confirmRiskyDownload() {
+        val id = _uiState.value.pendingRiskDownloadId
+        val autoInit = _uiState.value.pendingRiskDownloadAutoInit
+        val restart = _uiState.value.pendingRiskDownloadRestart
+        val model = _uiState.value.catalogModels.find { it.id == id }
+            ?: id?.let { modelCatalog.findById(it) }
+        clearDownloadRiskDialog()
+        if (model == null) return
+        when {
+            restart -> downloadManager.restartDownload(model)
+            autoInit -> startDownloadAndAutoInitUnchecked(model)
+            else -> startCatalogDownload(model)
+        }
+    }
+
+    fun dismissDownloadRiskDialog() {
+        clearDownloadRiskDialog()
+    }
+
+    private fun clearDownloadRiskDialog() {
+        _uiState.update {
+            it.copy(
+                showDownloadRiskDialog = false,
+                pendingRiskDownloadId = null,
+                pendingRiskDownloadAutoInit = false,
+                pendingRiskDownloadRestart = false,
+                downloadRiskCellular = false,
+                downloadRiskLowBattery = false,
+            )
+        }
+    }
+
+    private fun startDownloadAfterRiskCheck(
+        model: ModelEntry,
+        autoInit: Boolean,
+        restart: Boolean = false,
+    ) {
+        val remaining = downloadManager.remainingBytesFor(model, replace = restart)
+        val confirm = DownloadRiskPolicy.confirm(
+            isCellularOrMetered = downloadManager.isCellularOrMetered(),
+            batteryPercent = downloadManager.batteryPercent(),
+            isCharging = downloadManager.isCharging(),
+            remainingBytes = remaining,
+        )
+        if (confirm.shouldConfirm) {
+            DebugLogger.log(
+                "DOWNLOAD",
+                "Confirming large download  model=${model.id}  cellular=${confirm.becauseCellular}  " +
+                    "lowBattery=${confirm.becauseLowBattery}  remaining=${remaining / 1_048_576}MB",
+            )
+            _uiState.update {
+                it.copy(
+                    showDownloadRiskDialog = true,
+                    pendingRiskDownloadId = model.id,
+                    pendingRiskDownloadAutoInit = autoInit,
+                    pendingRiskDownloadRestart = restart,
+                    downloadRiskCellular = confirm.becauseCellular,
+                    downloadRiskLowBattery = confirm.becauseLowBattery,
+                )
+            }
+            return
+        }
+        when {
+            restart -> downloadManager.restartDownload(model)
+            autoInit -> startDownloadAndAutoInitUnchecked(model)
+            else -> startCatalogDownload(model)
+        }
     }
 
     fun cancelDownload(model: ModelEntry) {
@@ -725,6 +801,20 @@ class OnboardingViewModel @Inject constructor(
 
     /** Shared by [proceedFromModelPick] and [proceedWithAutoModel]. */
     private fun startDownloadAndAutoInit(model: ModelEntry) {
+        if (model.requiresHuggingFaceAuth && savedHfToken.value.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    step = OnboardingStep.MODEL_PICK,
+                    showHfTokenDialog = true,
+                    pendingGatedDownloadId = model.id,
+                )
+            }
+            return
+        }
+        startDownloadAfterRiskCheck(model, autoInit = true)
+    }
+
+    private fun startDownloadAndAutoInitUnchecked(model: ModelEntry) {
         if (model.requiresHuggingFaceAuth && savedHfToken.value.isBlank()) {
             _uiState.update {
                 it.copy(

@@ -3,6 +3,7 @@ package com.saarthi.core.inference
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.BatteryManager
 import android.os.storage.StorageManager
 import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.HF_TOKEN_REQUIRED_MESSAGE
@@ -573,6 +574,43 @@ class ModelDownloadManager @Inject constructor(
         runCatching { storageManager.allocateBytes(uuid, bytesNeeded) }
         storageManager.getAllocatableBytes(uuid) >= bytesNeeded
     }.getOrDefault(true)
+
+    /**
+     * Bytes still needed for [model] (catalog size minus a resumable tmp).
+     * 0 when the final file is already complete.
+     */
+    fun remainingBytesFor(model: ModelEntry, replace: Boolean = false): Long {
+        val finalFile = resolveLocalFile(model)
+        if (!replace && isFileComplete(finalFile, model.fileSizeBytes)) return 0L
+        val already = if (!replace) tmpPathFor(model).length() else 0L
+        return (model.fileSizeBytes - already).coerceAtLeast(0L)
+    }
+
+    /**
+     * True on cellular, or on a metered Wi-Fi/hotspot. Unmetered Wi-Fi is false.
+     * No active network → false (the transfer will fail on its own).
+     */
+    fun isCellularOrMetered(): Boolean {
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        val caps = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) } ?: return false
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        ) {
+            return false
+        }
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return true
+        return !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
+    fun batteryPercent(): Int? = runCatching {
+        context.getSystemService(BatteryManager::class.java)
+            .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            .takeIf { it in 0..100 }
+    }.getOrNull()
+
+    fun isCharging(): Boolean = runCatching {
+        context.getSystemService(BatteryManager::class.java).isCharging
+    }.getOrDefault(false)
 
     /**
      * Lightweight network snapshot for the start-of-download log line. Helps

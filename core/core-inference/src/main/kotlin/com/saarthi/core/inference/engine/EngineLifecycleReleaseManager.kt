@@ -73,6 +73,8 @@ class EngineLifecycleReleaseManager(
     private val lifecycleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     @Volatile private var pendingBackgroundRelease: Job? = null
     @Volatile private var pendingConversationRelease: Job? = null
+    /** Wait-until-idle job started when backgrounding during generate/init. */
+    @Volatile private var pendingIdleThenSchedule: Job? = null
     @Volatile private var visibleActivityCount = 0
     /** True after the last activity stopped (app left foreground). */
     @Volatile private var wasBackgrounded = false
@@ -81,6 +83,8 @@ class EngineLifecycleReleaseManager(
         override fun onActivityStarted(activity: Activity) {
             visibleActivityCount++
             if (visibleActivityCount == 1) {
+                pendingIdleThenSchedule?.cancel()
+                pendingIdleThenSchedule = null
                 pendingConversationRelease?.cancel()
                 pendingConversationRelease = null
                 pendingBackgroundRelease?.cancel()
@@ -98,14 +102,27 @@ class EngineLifecycleReleaseManager(
                 wasBackgrounded = true
                 val ramMb = totalRamMb()
                 val delays = delaysForTotalRamMb(ramMb)
-                DebugLogger.log(
-                    "LITERT",
-                    "App backgrounded — scheduling two-stage release " +
-                        "(conv=${delays.conversationReleaseDelayMs / 1000}s, " +
-                        "engine=${delays.engineReleaseDelayMs / 1000}s, totalRam=${ramMb}MB)",
-                )
-                scheduleConversationRelease(delays.conversationReleaseDelayMs)
-                scheduleBackgroundRelease(delays.engineReleaseDelayMs)
+                // Do not start the 60s/120s clocks while FGS generate (or model
+                // load) is in flight. Starting them during a long turn meant
+                // the engine was released the instant onDone fired — the user
+                // returning to a still-warm notification then paid a full reload.
+                if (isNativeGenerating() || isInitInProgress()) {
+                    DebugLogger.log(
+                        "LITERT",
+                        "App backgrounded during generate/load — deferring release timers until idle " +
+                            "(totalRam=${ramMb}MB)",
+                    )
+                    scheduleReleaseAfterBusy()
+                } else {
+                    DebugLogger.log(
+                        "LITERT",
+                        "App backgrounded — scheduling two-stage release " +
+                            "(conv=${delays.conversationReleaseDelayMs / 1000}s, " +
+                            "engine=${delays.engineReleaseDelayMs / 1000}s, totalRam=${ramMb}MB)",
+                    )
+                    scheduleConversationRelease(delays.conversationReleaseDelayMs)
+                    scheduleBackgroundRelease(delays.engineReleaseDelayMs)
+                }
             }
         }
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
@@ -146,6 +163,28 @@ class EngineLifecycleReleaseManager(
      * unchanged. If generation or init is still running when the delay
      * elapses, wait until it ends while the app stays backgrounded.
      */
+    /**
+     * FGS generate / init is still running: wait until idle *then* start the
+     * RAM-tiered debounce. Returning to the foreground cancels this job.
+     */
+    private fun scheduleReleaseAfterBusy() {
+        pendingIdleThenSchedule?.cancel()
+        pendingIdleThenSchedule = lifecycleScope.launch {
+            if (!awaitIdleWhileBackgrounded("Release-timer")) return@launch
+            if (visibleActivityCount > 0) return@launch
+            val ramMb = totalRamMb()
+            val delays = delaysForTotalRamMb(ramMb)
+            DebugLogger.log(
+                "LITERT",
+                "Generate/load idle while still backgrounded — starting two-stage release " +
+                    "(conv=${delays.conversationReleaseDelayMs / 1000}s, " +
+                    "engine=${delays.engineReleaseDelayMs / 1000}s, totalRam=${ramMb}MB)",
+            )
+            scheduleConversationRelease(delays.conversationReleaseDelayMs)
+            scheduleBackgroundRelease(delays.engineReleaseDelayMs)
+        }
+    }
+
     private fun scheduleConversationRelease(conversationDelayMs: Long) {
         pendingConversationRelease?.cancel()
         pendingConversationRelease = lifecycleScope.launch {
@@ -164,8 +203,9 @@ class EngineLifecycleReleaseManager(
      * immediate: a quick app-switch (checking a notification, glancing at
      * another app) shouldn't pay the ~5-10s GPU reload cost the next time
      * the user returns. [engineDelayMs] is RAM-tiered (see
-     * [delaysForTotalRamMb]). If generation or init is still running when
-     * the delay elapses, wait until it ends while still backgrounded.
+     * [delaysForTotalRamMb]). Timers are not started while FGS generate
+     * or init is in flight ([scheduleReleaseAfterBusy]); if they become
+     * busy after the clock started, still wait until idle.
      */
     private fun scheduleBackgroundRelease(engineDelayMs: Long) {
         pendingBackgroundRelease?.cancel()

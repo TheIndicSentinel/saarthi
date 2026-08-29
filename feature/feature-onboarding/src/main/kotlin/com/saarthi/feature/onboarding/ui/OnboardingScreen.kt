@@ -204,6 +204,38 @@ fun OnboardingScreen(
                 },
             )
         }
+
+        if (state.showDownloadRiskDialog) {
+            val reasons = buildList {
+                if (state.downloadRiskCellular) add(state.selectedLanguage.downloadRiskCellular)
+                if (state.downloadRiskLowBattery) add(state.selectedLanguage.downloadRiskLowBattery)
+            }
+            AlertDialog(
+                onDismissRequest = viewModel::dismissDownloadRiskDialog,
+                containerColor = SaarthiColors.Bg2,
+                title = { Text(state.selectedLanguage.downloadRiskTitle, color = SaarthiColors.Text) },
+                text = {
+                    Text(
+                        reasons.joinToString("\n\n"),
+                        color = SaarthiColors.Text2,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = viewModel::confirmRiskyDownload) {
+                        Text(
+                            state.selectedLanguage.downloadAnywayLabel,
+                            color = SaarthiColors.Text,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissDownloadRiskDialog) {
+                        Text(state.selectedLanguage.notNowLabel, color = SaarthiColors.Text2)
+                    }
+                },
+            )
+        }
     }
 }
 
