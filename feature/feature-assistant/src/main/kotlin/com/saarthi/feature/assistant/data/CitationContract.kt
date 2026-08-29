@@ -194,17 +194,19 @@ internal const val DOCUMENT_ROLE_LONG_DOC_CHARS = 12_000
 private val ROLE_FILENAME_TOKENS: Map<DocumentRoleLabel, Set<String>> = mapOf(
     DocumentRoleLabel.SUMMARY to setOf(
         "summary", "summaries", "synopsis", "saaransh", "saransh", "overview",
+        "brief", "onepage",
         "सारांश", "संक्षेप", "सारांशम्", "সারাংশ", "సారాంశం", "சுருக்கம்",
     ),
     DocumentRoleLabel.GUIDE to setOf(
         "guide", "handbook", "primer", "companion", "playbook",
+        "consulting", "advisory", "ey",
         "मार्गदर्शिका", "गाइड", "গাইড", "గైడ్",
     ),
     DocumentRoleLabel.SAMPLE to setOf(
         "sample", "demo", "specimen", "नमूना", "नमुना",
     ),
     DocumentRoleLabel.CIRCULAR to setOf(
-        "circular", "paripatra", "paripatr", "परिपत्र", "পরিপত্র", "పరిపత్ర",
+        "circular", "paripatra", "paripatr", "gazette", "परिपत्र", "পরিপত্র", "పరిపత్ర",
     ),
 )
 
@@ -243,12 +245,17 @@ private fun roleFilenameTokens(rawName: String): Set<String> =
 
 private fun scoreRoleFromFilename(rawName: String): Map<DocumentRoleLabel, Int> {
     val tokens = roleFilenameTokens(rawName)
-    return DocumentRoleLabel.entries.associateWith { role ->
+    val stem = shortDocName(rawName).lowercase().replace('_', ' ')
+    val base = DocumentRoleLabel.entries.associateWith { role ->
         val hits = ROLE_FILENAME_TOKENS[role].orEmpty().count { hint ->
             tokens.any { t -> t == hint || t.contains(hint) || hint.contains(t) }
         }
         if (hits > 0) 3 + (hits - 1) else 0
     }
+    var guideScore = base[DocumentRoleLabel.GUIDE]!!
+    if (Regex("(?i)(?:^|\\s)ey(?:\\s|$)").containsMatchIn(stem)) guideScore = maxOf(guideScore, 3)
+    if (stem.contains("consulting") || stem.contains("advisory")) guideScore = maxOf(guideScore, 3)
+    return base + (DocumentRoleLabel.GUIDE to guideScore)
 }
 
 private fun scoreRoleFromContent(contentHint: String?): Map<DocumentRoleLabel, Int> {

@@ -852,16 +852,21 @@ class ChatRepositoryImpl @Inject constructor(
             retrievalRoutingQuery,
             sessionDocs.map { it.uri to it.name },
         )
+        val recencyDocUri = sessionDocs.maxByOrNull { it.lastIndexedAt }?.uri
         val scopeDecision = resolveRetrievalScope(
             query = retrievalRoutingQuery,
             sessionDocs = sessionDocs.map { it.uri to it.name },
             attachmentUris = attachmentUris,
             activeDocUri = activeDocUri,
             route = retrievalRoute,
+            recencyDocUri = recencyDocUri,
         )
         val restrictDocUris = scopeDecision.restrictUris
-        if (retrievalRoute.namedDocUris.size == 1) {
-            ragRepository.setActiveDocUri(sessionId, retrievalRoute.namedDocUris.first())
+        when {
+            retrievalRoute.namedDocUris.size == 1 ->
+                ragRepository.setActiveDocUri(sessionId, retrievalRoute.namedDocUris.first())
+            retrievalRoute.thisDocument && recencyDocUri != null ->
+                ragRepository.setActiveDocUri(sessionId, recencyDocUri)
         }
         val ragAnswerShape = applyReplyLengthToAnswerShape(
             detectRagAnswerShape(
