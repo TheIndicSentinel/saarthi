@@ -511,6 +511,9 @@ class ModelDownloadManager @Inject constructor(
     internal fun emitCompleted(modelId: String, path: String) {
         trackedModels.remove(modelId)
         _allProgress.update { it + (modelId to DownloadProgress.Completed(path)) }
+        // Bridge FGS: keep an active foreground service while onboarding hands off to
+        // model load — avoids the zero-FGS gap that blocks InferenceService on Android 12+.
+        InferenceService.startLoading(context)
         scope.launch { failureStore.clear() }
     }
 

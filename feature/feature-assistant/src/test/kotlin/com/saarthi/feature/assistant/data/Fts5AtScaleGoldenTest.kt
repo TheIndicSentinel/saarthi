@@ -47,4 +47,32 @@ class Fts5AtScaleGoldenTest {
         val joined = hits.joinToString("\n") { it.text }
         assertTrue(joined.contains("THE SCHEDULE", ignoreCase = true))
     }
+
+    @Test
+    fun `large session with structured csv rows still retrieves amounts`() {
+        val rows = (1..30).joinToString("\n") { i ->
+            "Crop$i,MSP\nWheat$i,${2200 + i}"
+        }
+        val csvDoc = formatCsvDocument("Crop,MSP\n$rows", maxChars = 50_000)
+        val bulk = syntheticBulkChunks(FTS5_CHUNK_THRESHOLD)
+        val csvEntities = goldenDocsToEntities(
+            listOf(GoldenDoc(uri = "content://msp", name = "msp.csv", text = csvDoc)),
+            sessionId = "bulk-session",
+        ).map { it.copy(id = it.id + bulk.size.toLong()) }
+        val allEntities = bulk + csvEntities
+        val chunkCount = allEntities.count { it.chunkIndex >= 0 }
+        assertTrue(shouldUseFtsPrefilter(chunkCount, sessionFastPath = false))
+
+        val hits = goldenSessionRetrieve(
+            query = "What is the MSP amount for Wheat15",
+            entities = allEntities,
+            sessionFiles = listOf(
+                "content://bulk" to "bulk.pdf",
+                "content://msp" to "msp.csv",
+            ),
+            boostDocUris = setOf("content://msp"),
+        ).retrieved
+        val joined = hits.joinToString("\n")
+        assertTrue(joined.contains("2215") || joined.contains("Wheat15"))
+    }
 }

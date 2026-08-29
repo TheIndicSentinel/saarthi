@@ -204,6 +204,16 @@ object Bm25Retriever {
      */
     internal fun stemQueryToken(token: String): String = lightStem(token)
 
+    /**
+     * BM25-aligned query widening for FTS5 MATCH — same additive stem expansion
+     * as [rankTokenised], capped for bounded MATCH clauses.
+     */
+    fun expandQueryTermsForSearch(query: String, maxTerms: Int = 12): List<String> =
+        tokenise(query)
+            .flatMap { t -> listOf(t, lightStem(t)) }
+            .distinct()
+            .take(maxTerms)
+
     private fun indicStem(token: String): String {
         val first = token.first()
         return when (first.code) {

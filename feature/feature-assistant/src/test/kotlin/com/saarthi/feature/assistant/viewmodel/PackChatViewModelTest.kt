@@ -2,6 +2,7 @@ package com.saarthi.feature.assistant.viewmodel
 
 import com.saarthi.core.i18n.KisanPackPreference
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.chatInferenceNotReadyMessage
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.model.PackType
@@ -88,6 +89,10 @@ class PackChatViewModelTest {
 
         inferenceEngine = mockk(relaxed = true)
         every { inferenceEngine.isReady } returns true
+        every { inferenceEngine.isInitializing } returns false
+        every { inferenceEngine.isReloadingAfterRelease } returns false
+        every { inferenceEngine.isInitializingFlow } returns MutableStateFlow(false)
+        every { inferenceEngine.isReloadingAfterReleaseFlow } returns MutableStateFlow(false)
         every { inferenceEngine.isNativeGenerating } returns false
         every { inferenceEngine.activeModelName } returns "Gemma 3n E4B" // STANDARD+ tier
         every { inferenceEngine.maxContextTokens } returns 2048
@@ -252,6 +257,24 @@ class PackChatViewModelTest {
 
         assertEquals(SupportedLanguage.ENGLISH.packModelNotLoaded, vm.messages.value.last().content)
         verify(exactly = 0) { inferenceEngine.generateStream(any(), any()) }
+    }
+
+    @Test
+    fun `ask while model reloads shows reload banner not download hint`() = runTest {
+        every { inferenceEngine.isReady } returns false
+        every { inferenceEngine.isReloadingAfterRelease } returns true
+        val vm = viewModel()
+
+        vm.ask("What is PM-KISAN?")
+
+        assertEquals(
+            SupportedLanguage.ENGLISH.chatInferenceNotReadyMessage(
+                initializing = false,
+                reloadingAfterRelease = true,
+                modelNotReady = SupportedLanguage.ENGLISH.packModelNotLoaded,
+            ),
+            vm.messages.value.last().content,
+        )
     }
 
     @Test

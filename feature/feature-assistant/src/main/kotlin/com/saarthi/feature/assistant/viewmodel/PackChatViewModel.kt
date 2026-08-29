@@ -8,6 +8,7 @@ import com.saarthi.core.common.sqliteWriteWithRetry
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.PackId
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.chatInferenceNotReadyMessage
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.engine.InferenceEngine
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,6 +95,11 @@ class PackChatViewModel @Inject constructor(
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
+
+    val modelInitializing: StateFlow<Boolean> = inferenceEngine.isInitializingFlow
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), false)
+    val modelReloading: StateFlow<Boolean> = inferenceEngine.isReloadingAfterReleaseFlow
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), false)
 
     /** Id of the message currently being read aloud, or null. */
     private val _speakingMessageId = MutableStateFlow<String?>(null)
@@ -185,14 +192,15 @@ class PackChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             if (!inferenceEngine.isReady) {
-                // The model is downloaded during onboarding, so reaching here
-                // almost always means the engine was evicted under memory
-                // pressure (common on low-RAM devices — the budget SM-E625F log
-                // showed repeated "CRITICAL system pressure → engine closed"),
-                // NOT that no model exists. Telling such a user to "download a
-                // model" they already have is wrong and confusing. Give an
-                // accurate, actionable message instead.
-                finish(streamingId, languageManager.selectedLanguage.value.packModelNotLoaded)
+                val lang = languageManager.selectedLanguage.value
+                finish(
+                    streamingId,
+                    lang.chatInferenceNotReadyMessage(
+                        inferenceEngine.isInitializing,
+                        inferenceEngine.isReloadingAfterRelease,
+                        lang.packModelNotLoaded,
+                    ),
+                )
                 return@launch
             }
 

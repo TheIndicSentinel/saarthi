@@ -281,4 +281,12 @@ class Bm25RetrieverTest {
         // Generous ceiling for CI noise; real corpora are 100x smaller.
         assertTrue("Ranking 5000 chunks took ${elapsedMs}ms (budget 2000ms)", elapsedMs < 2000)
     }
+
+    @Test
+    fun `expandQueryTermsForSearch mirrors BM25 query widening`() {
+        val terms = Bm25Retriever.expandQueryTermsForSearch("penalties and किसानों")
+        assertTrue(terms.contains("penalties"))
+        assertTrue(terms.contains("penalty"))
+        assertTrue(terms.contains("किसानों") || terms.contains("किसान"))
+    }
 }

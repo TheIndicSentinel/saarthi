@@ -160,9 +160,11 @@ internal fun formatCitationLocation(chunk: RetrievedChunk, labels: CitationDispl
     chunk.chunkIndex < 0 -> labels.overview
     else -> {
         val page = extractPageRange(chunk.text)?.let { formatPageRangeForUser(it, labels) }
-        val section = if (page == null) extractCitationSectionHeading(chunk.text) else null
+        val office = if (page == null) extractOfficeStructureMarker(chunk.text) else null
+        val section = if (page == null && office == null) extractCitationSectionHeading(chunk.text) else null
         when {
             page != null -> page
+            office != null -> office
             section != null -> section
             chunk.chunkIndex >= 0 -> formatChunkPartLocation(chunk.chunkIndex)
             else -> labels.locationUnknown

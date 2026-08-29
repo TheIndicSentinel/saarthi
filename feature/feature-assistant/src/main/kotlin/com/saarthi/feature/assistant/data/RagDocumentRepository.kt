@@ -2269,6 +2269,9 @@ internal fun tabularChunkTier(text: String, mimeType: String = ""): Int? {
     if (mimeType.contains("csv", ignoreCase = true) && amountLines >= 1) {
         tiers.add(1)
     }
+    if (mimeType.contains("spreadsheet", ignoreCase = true) && amountLines >= 1) {
+        tiers.add(1)
+    }
     return tiers.minOrNull()
 }
 
@@ -2330,7 +2333,12 @@ internal fun tabularAmountLineCount(text: String): Int {
     val amountLineRx = Regex(
         "(?i)(₹|rs\\.?|inr|rupee|rupees|\\d+[,.]?\\d*\\s*(crore|lakh|lakhs|%))",
     )
-    return text.lines().count { amountLineRx.containsMatchIn(it) }
+    val officeAmountRx = Regex(
+        "(?i)(?:^|\\|)\\s*(?:amount|राशि|मूल्य|शुल्क|msp|price|fee|charge)[^\\d]{0,12}\\d",
+    )
+    return text.lines().count { line ->
+        amountLineRx.containsMatchIn(line) || officeAmountRx.containsMatchIn(line)
+    }
 }
 
 /** B1/B2-1 — backward-compatible alias for tabular amount pick. */

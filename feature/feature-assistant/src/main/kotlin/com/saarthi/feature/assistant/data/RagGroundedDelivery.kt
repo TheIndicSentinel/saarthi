@@ -169,7 +169,7 @@ private fun tryAssemble(
 
     val unreadableBlock = if (unreadableThisTurn.isNotEmpty()) {
         buildString {
-            appendLine(UNREADABLE_FILES_INTRO)
+            appendLine(citationLabels.unreadableFilesIntro)
             unreadableThisTurn.forEach { f ->
                 val why = f.error ?: "unsupported format — Saarthi cannot read binary files yet"
                 appendLine("  - ${f.name}: $why")
@@ -199,11 +199,16 @@ private fun tryAssemble(
                     citationLabels,
                 )
             },
+            citationLabels,
         ) + indexTruncationNoticeLine(sessionDocs.mapNotNull { it.indexTruncationNotice })
     } else {
         ""
     }
-    val newFilesLine = if (attempt.includeManifest) newFilesThisTurnNotice(newThisTurnNames) else ""
+    val newFilesLine = if (attempt.includeManifest) {
+        newFilesThisTurnNotice(newThisTurnNames, citationLabels)
+    } else {
+        ""
+    }
 
     var remaining = charBudget - rulesHeader.length - shapeInstruction.length -
         unreadableBlock.length - manifestLine.length - newFilesLine.length

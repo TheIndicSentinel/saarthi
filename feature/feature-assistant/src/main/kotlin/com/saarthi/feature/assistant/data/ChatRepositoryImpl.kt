@@ -5,6 +5,7 @@ import com.saarthi.core.common.isSqliteUnusable
 import com.saarthi.core.common.sqliteWriteWithRetry
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.chatInferenceNotReadyMessage
 import com.saarthi.core.i18n.citationDisplayLabels
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
@@ -286,11 +287,11 @@ class ChatRepositoryImpl @Inject constructor(
                 // load while GPU shaders compile) from a genuine failure — the
                 // previous message implied a crash for BOTH cases, which was
                 // actively misleading during ordinary load time.
-                val errMsg = if (inferenceEngine.isInitializing) {
-                    "⏳ The AI model is still loading. Please wait a few seconds and try again."
-                } else {
-                    "⚠️ Model not ready. If this model keeps crashing, please go back to setup and select a different model."
-                }
+                val errMsg = currentLanguage.chatInferenceNotReadyMessage(
+                    inferenceEngine.isInitializing,
+                    inferenceEngine.isReloadingAfterRelease,
+                    currentLanguage.chatModelNotReady,
+                )
                 InferenceService.stop(context)
                 _history.update { history ->
                     history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false) else it }

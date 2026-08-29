@@ -1439,6 +1439,19 @@ enum class SupportedLanguage(
         PUNJABI  -> "ਮੈਮੋਰੀ ਖਾਲੀ ਕਰਨ ਲਈ ਮਾਡਲ ਛੱਡਿਆ ਗਿਆ ਸੀ। ਮੁੜ ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ — ਕੁਝ ਸਕਿੰਟ।"
         ODIA     -> "ମେମୋରୀ ଖାଲି କରିବାକୁ ମଡେଲ ଛଡ଼ାଯାଇଥିଲା। ପୁଣି ଲୋଡ ହେଉଛି — କିଛି ସେକେଣ୍ଡ।"
     }
+    /** Main chat: model not loaded and not actively reloading. */
+    val chatModelNotReady: String get() = when (this) {
+        ENGLISH  -> "Model not ready. If this keeps happening, open setup and choose a different model."
+        HINDI    -> "मॉडल तैयार नहीं है। अगर यह बार-बार हो, तो सेटअप खोलें और दूसरा मॉडल चुनें।"
+        TAMIL    -> "மாடல் தயாராக இல்லை. இது தொடர்ந்து நடந்தால், அமைப்புகளில் வேறு மாடலைத் தேர்ந்தெடுக்கவும்."
+        TELUGU   -> "మోడల్ సిద్ధంలో లేదు. ఇది తరచుగా జరిగితే, సెటప్ తెరిచి వేరే మోడల్ ఎంచుకోండి."
+        BENGALI  -> "মডেল প্রস্তুত নয়। বারবার হলে সেটআপ খুলে অন্য মডেল বেছে নিন।"
+        MARATHI  -> "मॉडेल तयार नाही. वारंवार होत असेल तर सेटअप उघडा आणि दुसरे मॉडेल निवडा."
+        KANNADA  -> "ಮಾದರಿ ಸಿದ್ಧವಾಗಿಲ್ಲ. ಇದು ಪದೇ ಪದೇ ಆದರೆ, ಸೆಟಪ್ ತೆರೆದು ಬೇರೆ ಮಾದರಿ ಆಯ್ಕೆಮಾಡಿ."
+        GUJARATI -> "મોડેલ તૈયાર નથી. વારંવાર થાય તો સેટઅપ ખોલી અન્ય મોડેલ પસંદ કરો."
+        PUNJABI  -> "ਮਾਡਲ ਤਿਆਰ ਨਹੀਂ ਹੈ। ਜੇ ਵਾਰ-ਵਾਰ ਹੋਵੇ, ਤਾਂ ਸੈਟਅਪ ਖੋਲ੍ਹ ਕੇ ਹੋਰ ਮਾਡਲ ਚੁਣੋ।"
+        ODIA     -> "ମଡେଲ ପ୍ରସ୍ତୁତ ନାହିଁ। ବାରମ୍ବାର ହେଲେ ସେଟଅପ୍ ଖୋଲି ଅନ୍ୟ ମଡେଲ ବାଛନ୍ତୁ।"
+    }
     /** Inference foreground-service notification: shown while a response is streaming. */
     val generatingResponseTitle: String get() = when (this) {
         ENGLISH  -> "Saarthi is generating a response…"
