@@ -93,8 +93,9 @@ openssl dgst -sha256 -verify <(openssl pkey -pubin -inform DER -in /tmp/app_pub.
 ```
 
 ## 5. Confirm on device
-Install the P1 app build (with the v2 parser + verifier). On Wi-Fi, within the
-24h cycle (or trigger sooner in dev), `saarthi_debug.log` should show:
+Install the P1 app build (with the v2 parser + verifier). On any connected
+network (Wi-Fi or mobile), within the 24h cycle (or trigger sooner in
+dev), `saarthi_debug.log` should show:
 ```
 [PACK] Kisan pack update available: v7 → v8; downloading …
 [PACK] Kisan pack v8 (en, 34 entries) installed from manifest:v8

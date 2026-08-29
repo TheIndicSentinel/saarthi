@@ -1,6 +1,9 @@
 package com.saarthi.app.packs
 
+import androidx.work.NetworkType
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -23,5 +26,11 @@ class PackUpdateSchedulePolicyTest {
                 "https://example.com/kisan/manifest.json",
             ),
         )
+    }
+
+    @Test
+    fun `pack refresh uses any connected network not unmetered wifi`() {
+        assertEquals(NetworkType.CONNECTED, PackUpdateSchedulePolicy.requiredNetworkType)
+        assertNotEquals(NetworkType.UNMETERED, PackUpdateSchedulePolicy.requiredNetworkType)
     }
 }

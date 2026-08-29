@@ -14,7 +14,8 @@ Saarthi's core philosophy.
    app downloads a public, signed file. No user data, queries, or identifiers ever
    leave the phone.
 2. **Fully usable offline forever** on the bundled seed, even if the network is
-   never reached. Updates are opportunistic (Wi-Fi only), never required.
+   never reached. Updates are opportunistic (any connected network: Wi-Fi
+   if available, otherwise mobile), never required.
 3. **Every downloaded pack is verified** (SHA-256 + Ed25519 signature) before
    install; a failed check keeps the current pack.
 4. **No external AI APIs** anywhere in the pipeline (adjustment #1). Summaries are

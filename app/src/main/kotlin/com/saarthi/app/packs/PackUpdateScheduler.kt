@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.saarthi.app.BuildConfig
@@ -21,9 +20,9 @@ import javax.inject.Singleton
  * the worker.
  *
  * Constraints chosen for "respectful background data refresh":
- *  • Any network (Wi-Fi or mobile data) — see [schedule]'s own comment for
- *    why UNMETERED-only would be wrong here. The tiny pack size keeps
- *    cellular impact negligible either way.
+ *  • Any network (Wi-Fi or mobile data) — see
+ *    [PackUpdateSchedulePolicy.requiredNetworkType]. The tiny pack size
+ *    keeps cellular impact negligible either way.
  *  • Battery not low — won't run when the user is conserving power.
  *  • Periodic, 24-hour interval — a pack updates daily at most.
  *
@@ -51,14 +50,7 @@ class PackUpdateScheduler @Inject constructor(
             return
         }
         val constraints = Constraints.Builder()
-            // CONNECTED (any network: Wi-Fi or mobile data) per product
-            // intent — Saarthi is fully offline at runtime, so the only
-            // moments network is touched are explicit model downloads
-            // and pack-update polls; gating those on Wi-Fi-only would
-            // strand users on mobile-only plans without ever updating.
-            // The 24 h cadence + small pack size (a few KB to a couple
-            // of MB at most) keep cellular impact negligible.
-            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .setRequiredNetworkType(PackUpdateSchedulePolicy.requiredNetworkType)
             .setRequiresBatteryNotLow(true)
             .build()
         val request = PeriodicWorkRequestBuilder<PackUpdateWorker>(

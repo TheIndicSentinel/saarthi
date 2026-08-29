@@ -212,7 +212,9 @@ Hardening behaviors (debug CI does not cover these):
   - Data Safety form: on-device processing, local storage, optional model downloads,
     no data sold/shared; microphone (voice) and notifications usage disclosed.
   - AI / privacy disclosure: state that the model runs fully on-device and chats stay local.
-  - Model-download behavior: large downloads gated on Wi-Fi/validated network and surfaced to the user.
+  - Model-download behavior: starts immediately on the active network
+    (Wi-Fi if connected, otherwise mobile). Does not wait for Wi-Fi.
+    No extra confirm sheet for large / cellular / low-battery transfers.
 
 ---
 

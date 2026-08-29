@@ -94,6 +94,10 @@ private class RangeExhaustedException(val serverTotalBytes: Long?) :
  * a music player or active upload alive. This is what production apps
  * (WhatsApp, Telegram, Play Store) use for downloads.
  *
+ * Network: OkHttp uses the OS default route — Wi-Fi if connected, otherwise
+ * mobile. There is no WorkManager [androidx.work.NetworkType] constraint and
+ * no wait-for-Wi-Fi loop. Gating on UNMETERED would strand mobile-only users.
+ *
  * What is preserved from the previous WorkManager implementation:
  *  • OkHttp HTTP Range resume — byte-exact continuation from a partial tmp file.
  *  • Atomic tmp -> dest rename, GGUF/size validation (via [ModelDownloadManager]).
