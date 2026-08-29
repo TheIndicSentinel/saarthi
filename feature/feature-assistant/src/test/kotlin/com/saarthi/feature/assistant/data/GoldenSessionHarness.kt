@@ -15,6 +15,8 @@ internal data class GoldenTurnSpec(
     val priorQuery: String? = null,
     val attachmentsThisTurn: Boolean = false,
     val boostDocUris: Set<String> = emptySet(),
+    val attachmentUris: List<String> = emptyList(),
+    val activeDocUri: String? = null,
 )
 
 internal data class GoldenPromptMetrics(
@@ -25,6 +27,18 @@ internal data class GoldenPromptMetrics(
     val anchoredChunkCount: Int,
     val shouldCite: Boolean,
     val strongMatch: Boolean,
+    val retrievalScopeLabel: String,
+    val restrictDocUris: Set<String>,
+    val routeEqualSlots: Boolean,
+    val answerShape: RagAnswerShape,
+    val unattachedExternalActive: Boolean,
+)
+
+internal data class GoldenRetrieveResult(
+    val retrieved: List<RetrievedChunk>,
+    val scopeLabel: String,
+    val restrictDocUris: Set<String>,
+    val routeEqualSlots: Boolean,
 )
 
 internal fun goldenDocsToEntities(
@@ -85,48 +99,96 @@ internal fun goldenSessionRetrieve(
     priorQuery: String? = null,
     boostDocUris: Set<String> = emptySet(),
     attachmentsThisTurn: Boolean = false,
-): List<RetrievedChunk> {
+    activeDocUri: String? = null,
+    attachmentUris: List<String> = emptyList(),
+): GoldenRetrieveResult {
     val all = entities
     val rawContent = all.filter { it.chunkIndex >= 0 }
-    if (rawContent.isEmpty()) return emptyList()
+    if (rawContent.isEmpty()) {
+        return GoldenRetrieveResult(
+            retrieved = emptyList(),
+            scopeLabel = RetrievalScope.SESSION.name,
+            restrictDocUris = emptySet(),
+            routeEqualSlots = false,
+        )
+    }
 
     val priorForCarry = priorQuery?.takeIf { shouldPassPriorQueryToRetrieval(query, it) }
     val routingQuery = followUpScopeRoutingQuery(query, priorForCarry)
     val route = routeQuery(routingQuery, sessionFiles)
+    val recencyUri = rawContent.maxByOrNull { it.id }?.docUri.orEmpty()
+    val effectiveAttachmentUris = when {
+        attachmentsThisTurn -> attachmentUris.ifEmpty { boostDocUris.toList() }
+        else -> emptyList()
+    }
+    val scopeDecision = resolveRetrievalScope(
+        query = routingQuery,
+        sessionDocs = sessionFiles,
+        attachmentUris = effectiveAttachmentUris,
+        activeDocUri = activeDocUri,
+        route = route,
+        recencyDocUri = recencyUri.takeIf { it.isNotEmpty() },
+    )
+    val scopedAll = if (scopeDecision.restrictUris.isNotEmpty()) {
+        all.filter { it.docUri in scopeDecision.restrictUris }
+    } else {
+        all
+    }
+    val scopedRawContent = scopedAll.filter { it.chunkIndex >= 0 }
+    if (scopedRawContent.isEmpty()) {
+        return GoldenRetrieveResult(
+            retrieved = emptyList(),
+            scopeLabel = scopeDecision.scope.name,
+            restrictDocUris = scopeDecision.restrictUris,
+            routeEqualSlots = route.equalSlots,
+        )
+    }
+
     val isFollowUp = shouldMergePriorQueryInSearch(query, priorQuery)
     val metaReason = effectiveMetaRouteReason(query, isFollowUp)
     val spanPreserving = isSpanPreservingQuery(query)
     val shape = detectRagAnswerShape(query, metaOverview = metaReason != null)
     val effectiveTopK = effectiveRetrievalTopK(query, shape, route.equalSlots)
-    val recencyUri = rawContent.maxByOrNull { it.id }?.docUri.orEmpty()
-    val docRoles = documentRolesByUri(all)
+    val docRoles = documentRolesByUri(scopedAll)
 
     if (metaReason != null && !isFollowUp && !bypassMetaForSubstanceQuery(query)) {
-        val opening = rawContent.groupBy { it.docUri }.flatMap { (_, chunks) ->
+        val opening = scopedRawContent.groupBy { it.docUri }.flatMap { (_, chunks) ->
             chunks.sortedBy { it.chunkIndex }.take(6).map { e ->
                 RetrievedChunk(e.text, e.docName, 0.0, e.chunkIndex, e.docUri)
             }
         }.take(effectiveTopK)
-        return finishGoldenRetrieve(
-            opening,
-            query,
-            rawContent,
-            effectiveTopK,
-            boostDocUris,
-            route,
-            recencyUri,
-            spanPreserving,
+        return GoldenRetrieveResult(
+            retrieved = finishGoldenRetrieve(
+                opening,
+                query,
+                scopedRawContent,
+                effectiveTopK,
+                boostDocUris,
+                route,
+                recencyUri,
+                spanPreserving,
+            ),
+            scopeLabel = scopeDecision.scope.name,
+            restrictDocUris = scopeDecision.restrictUris,
+            routeEqualSlots = route.equalSlots,
         )
     }
 
     val contentChunks = filterSubstanceContentChunks(
-        rawContent,
+        scopedRawContent,
         docRoles,
         query,
         route,
         isFollowUp,
     )
-    if (contentChunks.isEmpty()) return emptyList()
+    if (contentChunks.isEmpty()) {
+        return GoldenRetrieveResult(
+            retrieved = emptyList(),
+            scopeLabel = scopeDecision.scope.name,
+            restrictDocUris = scopeDecision.restrictUris,
+            routeEqualSlots = route.equalSlots,
+        )
+    }
 
     val chapterSpanChunks = if (isChapterSpanQuery(query)) {
         resolveChapterSpanChunks(contentChunks, query, SPAN_ANCHOR_WINDOW)
@@ -242,15 +304,20 @@ internal fun goldenSessionRetrieve(
         }
     }
 
-    return finishGoldenRetrieve(
-        hits,
-        query,
-        contentChunks,
-        effectiveTopK,
-        boostDocUris,
-        route,
-        recencyUri,
-        spanPreserving,
+    return GoldenRetrieveResult(
+        retrieved = finishGoldenRetrieve(
+            hits,
+            query,
+            contentChunks,
+            effectiveTopK,
+            boostDocUris,
+            route,
+            recencyUri,
+            spanPreserving,
+        ),
+        scopeLabel = scopeDecision.scope.name,
+        restrictDocUris = scopeDecision.restrictUris,
+        routeEqualSlots = route.equalSlots,
     )
 }
 
@@ -299,15 +366,20 @@ internal fun runGoldenTurn(
         sessionDocNames = docs.map { it.name },
         priorQuery = spec.priorQuery,
     )
-    val retrieved = goldenSessionRetrieve(
+    val retrievedResult = goldenSessionRetrieve(
         query = spec.query,
         entities = entities,
         sessionFiles = sessionFiles,
         priorQuery = spec.priorQuery,
         boostDocUris = spec.boostDocUris,
         attachmentsThisTurn = spec.attachmentsThisTurn,
+        activeDocUri = spec.activeDocUri,
+        attachmentUris = spec.attachmentUris,
     )
-    val shape = detectRagAnswerShape(spec.query, metaOverview = false)
+    val retrieved = retrievedResult.retrieved
+    val metaOverview = effectiveMetaRouteReason(spec.query, isFollowUp = false) != null
+    val shape = detectRagAnswerShape(spec.query, metaOverview = metaOverview)
+    val unattachedExternal = detectUnattachedExternalQuery(spec.query, docs.map { it.name })
     val labels = SupportedLanguage.ENGLISH.citationDisplayLabels()
     val assembly = assembleRagPromptBlock(
         retrieved = retrieved,
@@ -344,6 +416,37 @@ internal fun runGoldenTurn(
         anchoredChunkCount = retrieved.count { it.isStructuralAnchor() },
         shouldCite = shouldCite,
         strongMatch = strongMatch,
+        retrievalScopeLabel = retrievedResult.scopeLabel,
+        restrictDocUris = retrievedResult.restrictDocUris,
+        routeEqualSlots = retrievedResult.routeEqualSlots,
+        answerShape = shape,
+        unattachedExternalActive = unattachedExternal.active,
+    )
+}
+
+internal fun goldenAnswerShapeInstruction(
+    query: String,
+    docNames: List<String>,
+    retrieved: List<RetrievedChunk>,
+    turnMode: RagTurnMode,
+    attachmentsThisTurn: Boolean,
+): String {
+    val metaOverview = effectiveMetaRouteReason(query, isFollowUp = false) != null
+    val shape = detectRagAnswerShape(query, metaOverview = metaOverview)
+    val strongMatch = shouldUseStrongMatchPromptRules(
+        retrieved = retrieved,
+        query = query,
+        turnMode = turnMode,
+        attachmentsThisTurn = attachmentsThisTurn,
+    )
+    val unattachedExternal = detectUnattachedExternalQuery(query, docNames)
+    return ragAnswerShapeInstruction(
+        shape = shape,
+        tabularAmount = isTabularAmountQuery(query),
+        unattachedExternal = unattachedExternal,
+        strongMatch = strongMatch,
+        structureCountQuery = isStructureCountQuery(query),
+        structureListQuery = isStructureListQuery(query),
     )
 }
 

@@ -43,7 +43,7 @@ class Fts5AtScaleGoldenTest {
                 DpdpaActFixture.URI to DpdpaActFixture.NAME,
             ),
             boostDocUris = setOf(DpdpaActFixture.URI),
-        )
+        ).retrieved
         val joined = hits.joinToString("\n") { it.text }
         assertTrue(joined.contains("THE SCHEDULE", ignoreCase = true))
     }

@@ -17,7 +17,7 @@ class DpdpaGoldenChatTest {
             query = "Highlights from chapter VI",
             entities = goldenDocsToEntities(docs),
             sessionFiles = docs.map { it.uri to it.name },
-        )
+        ).retrieved
         val body = retrieved.filter { it.chunkIndex >= 0 && it.docUri == act.uri }
             .sortedBy { it.chunkIndex }
         val viRun = body.filter { it.chunkIndex >= body.first { it.text.contains("CHAPTER VI") }.chunkIndex }
