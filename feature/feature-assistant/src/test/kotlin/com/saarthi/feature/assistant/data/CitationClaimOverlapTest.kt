@@ -127,17 +127,37 @@ class CitationClaimOverlapTest {
     }
 
     @Test
-    fun `overview query skips overlap filter`() {
+    fun `query terms count toward overlap pairing`() {
+        val chunk = RetrievedChunk(
+            text = "The ocean exerts a major control on climate through heat transport.",
+            docName = "guide.pdf",
+            score = 8.0,
+            chunkIndex = 4,
+            docUri = "content://guide",
+        )
+        val answer = "Oceans play a major role in regulating regional patterns."
+        assertFalse(chunkSharesTokensWithAnswer(chunk, answer, minShared = 2))
+        assertTrue(
+            chunkSharesTokensWithAnswer(
+                chunk,
+                claimOverlapPairingCorpus(answer, "How do oceans affect climate?"),
+                minShared = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun `shape route queries skip overlap filter`() {
         assertFalse(
             shouldFilterSourcesByClaimOverlap(
-                ATTACH_BRIEF_OVERVIEW_QUERY,
+                "What is the difference between weather and climate?",
                 RagTurnMode.DOCUMENT_GROUNDED,
             ),
         )
     }
 
     @Test
-    fun `applyDeterministicSourcesFooter drops footer on zero overlap`() {
+    fun `applyDeterministicSourcesFooter uses retrieval fallback when overlap empty`() {
         val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
         val outline = mapOf(hash to "Digital Personal Data Protection Act, 2023")
         val body = "Photosynthesis is how green plants make food from sunlight."
@@ -154,8 +174,8 @@ class CitationClaimOverlapTest {
             claimOverlapQuery = "Explain photosynthesis",
             claimOverlapTurnMode = RagTurnMode.DOCUMENT_GROUNDED,
         )
-        assertEquals(body, out)
-        assertFalse(out.contains("Sources:"))
+        assertTrue(out.contains("Sources:"))
+        assertTrue(out.contains("Photosynthesis"))
     }
 
     @Test

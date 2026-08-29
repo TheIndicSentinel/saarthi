@@ -72,7 +72,12 @@ internal fun probePhase0Citation(
     val overlapActive = shouldFilterSourcesByClaimOverlap(query, metrics.turnMode)
     val pairingBody = answerBodyForClaimOverlap(syntheticAnswerBody, metrics.turnMode)
     val overlapChunks = if (overlapActive) {
-        filterChunksByClaimOverlap(citable, pairingBody, query = query)
+        filterChunksByClaimOverlap(
+            citable,
+            pairingBody,
+            query = query,
+            turnMode = metrics.turnMode,
+        )
     } else {
         citable
     }
