@@ -116,7 +116,7 @@ internal fun goldenSessionRetrieve(
     val priorForCarry = priorQuery?.takeIf { shouldPassPriorQueryToRetrieval(query, it) }
     val routingQuery = followUpScopeRoutingQuery(query, priorForCarry)
     val route = routeQuery(routingQuery, sessionFiles)
-    val recencyUri = rawContent.maxByOrNull { it.id }?.docUri.orEmpty()
+    val recencyUri = sessionFiles.lastOrNull()?.first.orEmpty()
     val effectiveAttachmentUris = when {
         attachmentsThisTurn -> attachmentUris.ifEmpty { boostDocUris.toList() }
         else -> emptyList()
@@ -218,7 +218,7 @@ internal fun goldenSessionRetrieve(
         route.expandedQuery
     }
     if (isTabularAmountQuery(query)) {
-        effectiveQuery += tabularAmountQueryExpansion()
+        effectiveQuery += tabularAmountQueryExpansion(query)
     }
     if (isStructureListQuery(query) || isStructureCountQuery(query)) {
         effectiveQuery += structureMarkerBm25Expansion(query)
@@ -342,7 +342,13 @@ private fun finishGoldenRetrieve(
     val docCount = hits.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size.coerceAtLeast(1)
     val minSlots = if (route.equalSlots) (effectiveTopK / docCount).coerceAtLeast(1) else 1
     val allocated = allocatePerDocSlots(
-        applySessionBoost(hits, boostDocUris, recencyUri, route.namedDocUris),
+        applySessionBoost(
+            hits,
+            boostDocUris,
+            recencyUri,
+            route.namedDocUris,
+            shouldApplyRecencySessionBoost(query, route),
+        ),
         effectiveTopK,
         minSlots,
     )

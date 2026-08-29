@@ -401,13 +401,32 @@ internal fun resolveRetrievalScope(
 
     val active = activeDocUri?.takeIf { it in sessionUriSet }
         ?: sessionDocs.singleOrNull()?.first.takeIf { sessionUriSet.size == 1 }
-        ?: recencyDocUri?.takeIf { it in sessionUriSet && sessionUriSet.size > 1 }
 
     if (active != null) {
         return RetrievalScopeDecision(RetrievalScope.ACTIVE_DOC, setOf(active))
     }
 
     return RetrievalScopeDecision(RetrievalScope.SESSION, emptySet())
+}
+
+/**
+ * Mild recency boost only when the question does not name a file and is not a
+ * cross-session substance ask — otherwise BM25 should win, not last-indexed order.
+ */
+internal fun shouldApplyRecencySessionBoost(
+    query: String,
+    route: QueryRoute,
+): Boolean {
+    if (route.namedDocUris.isNotEmpty()) return false
+    if (route.equalSlots || route.whichFile) return false
+    if (route.thisDocument) return true
+    if (isAllSessionDocsQuery(query)) return false
+    if (isTabularAmountQuery(query)) return false
+    if (activeTopicCategories(query).isNotEmpty()) return false
+    if (extractSectionRefs(query).isNotEmpty()) return false
+    if (isStructureCountQuery(query) || isStructureListQuery(query)) return false
+    if (isIndexedSessionTopicalWithoutDocCues(query)) return false
+    return true
 }
 
 internal fun isDuplicateTurn(

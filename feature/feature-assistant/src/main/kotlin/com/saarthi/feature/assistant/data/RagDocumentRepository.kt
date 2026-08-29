@@ -576,7 +576,13 @@ class RagDocumentRepository @Inject constructor(
             val minSlots = if (route.equalSlots) (effectiveTopK / docCount).coerceAtLeast(1) else 1
             val contentEntities = all.filter { isBm25SearchableChunk(it) }
             val allocated = allocatePerDocSlots(
-                applySessionBoost(resolved, boostDocUris, recencyUri, route.namedDocUris),
+                applySessionBoost(
+                    resolved,
+                    boostDocUris,
+                    recencyUri,
+                    route.namedDocUris,
+                    shouldApplyRecencySessionBoost(query, route),
+                ),
                 effectiveTopK,
                 minSlots,
             )
@@ -755,7 +761,7 @@ class RagDocumentRepository @Inject constructor(
             effectiveQuery += topicExpansion
         }
         if (isTabularAmountQuery(query)) {
-            effectiveQuery += tabularAmountQueryExpansion()
+            effectiveQuery += tabularAmountQueryExpansion(query)
         }
         val lookupExpansion = explicitLookupLexicalExpansion(query)
         if (lookupExpansion.isNotBlank()) {
@@ -1602,13 +1608,17 @@ internal fun applySessionBoost(
     boostDocUris: Set<String>,
     recencyUri: String,
     namedDocUris: Set<String> = emptySet(),
+    recencyBoostEnabled: Boolean = true,
 ): List<RetrievedChunk> {
     if (hits.isEmpty()) return hits
     return hits.map { hit ->
         val multiplier = when {
             boostDocUris.isNotEmpty() && hit.docUri in boostDocUris -> THIS_TURN_BOOST
             namedDocUris.isNotEmpty() && hit.docUri in namedDocUris -> FILENAME_BOOST
-            boostDocUris.isEmpty() && namedDocUris.isEmpty() && hit.docUri == recencyUri -> RECENCY_BOOST
+            recencyBoostEnabled &&
+                boostDocUris.isEmpty() &&
+                namedDocUris.isEmpty() &&
+                hit.docUri == recencyUri -> RECENCY_BOOST
             else -> 1.0
         }
         if (multiplier == 1.0) hit else hit.copy(score = hit.score * multiplier)
@@ -2148,8 +2158,22 @@ internal fun chapterTitleLineScore(query: String, line: String): Double {
 }
 
 /** T1-4 — BM25 expansion for fee/schedule/amount retrieval. */
-internal fun tabularAmountQueryExpansion(): String =
-    " Schedule THE SCHEDULE monetary penalty fee tariff charge rupee crore lakh ₹ शुल्क अनुसूची"
+internal fun tabularAmountQueryExpansion(query: String = ""): String {
+    val lower = query.lowercase()
+    val scheduleMentioned = Regex("(?i)\\bschedule\\b").containsMatchIn(query) ||
+        query.contains("अनुसूची") ||
+        query.contains("अनुसुची")
+    val penaltyFocused = lower.contains("penalt") ||
+        lower.contains("fine") ||
+        lower.contains("jurmana") ||
+        lower.contains("jurmaana") ||
+        query.contains("जुर्माना") ||
+        query.contains("दंड")
+    if (penaltyFocused && !scheduleMentioned) {
+        return " monetary penalty fine breach damages जुर्माना दंड"
+    }
+    return " Schedule THE SCHEDULE monetary penalty fee tariff charge rupee crore lakh ₹ शुल्क अनुसूची"
+}
 
 /** T1-4 — tier for tabular / amount-heavy chunk text; lower = stronger signal. */
 internal fun tabularChunkTier(text: String, mimeType: String = ""): Int? {
