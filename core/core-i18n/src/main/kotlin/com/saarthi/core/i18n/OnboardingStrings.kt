@@ -41,7 +41,7 @@ data class OnboardingStrings(
     // Downloading
     val downloadingLabel: String = "DOWNLOADING",
     val initializingLabel: String = "INITIALIZING",
-    val initDesc: String = "Loading weights into memory…",
+    val initDesc: String = "Loading the model into memory…",
     val downloadDesc: String = "Setting up your AI brain. After this, Saarthi works fully offline — forever.",
     val downloadTip: String = "Tip: You can keep using your phone — we'll finish in the background.",
     val statusDownloading: String = "· Downloading",

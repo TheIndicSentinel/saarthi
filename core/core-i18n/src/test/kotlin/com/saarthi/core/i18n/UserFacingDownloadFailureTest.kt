@@ -122,4 +122,17 @@ class UserFacingDownloadFailureTest {
             )
         }
     }
+
+    @Test
+    fun initDesc_does_not_say_weights() {
+        assertEquals("Loading the model into memory…", OnboardingStrings().initDesc)
+        for (lang in SupportedLanguage.entries) {
+            val text = lang.onboarding.initDesc
+            assertTrue("${lang.englishName} initDesc must be non-blank", text.isNotBlank())
+            assertFalse(
+                "${lang.englishName} initDesc must not say weights. Got: '$text'",
+                text.contains("weight", ignoreCase = true),
+            )
+        }
+    }
 }
