@@ -538,7 +538,10 @@ class LiteRTInferenceEngine @Inject constructor(
                 }
 
                 val file = File(config.modelPath)
-                if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
+                if (!file.exists()) {
+                    DebugLogger.log("LITERT", "Model file not found: ${config.modelPath}")
+                    throw IllegalArgumentException(USER_FACING_MODEL_MISSING)
+                }
                 if (file.length() <= 1024) {
                     file.delete()
                     throw IllegalArgumentException("Model file is corrupted or incomplete. Please delete and download it again.")
@@ -794,9 +797,7 @@ class LiteRTInferenceEngine @Inject constructor(
                             "Your device could not load this model. " +
                             "This usually means the model requires hardware your phone does not support. " +
                             "Please try a different model."
-                        rawMsg.contains("LiteRT", ignoreCase = true) ->
-                            "Could not load the AI model. Please try again, or pick a different model."
-                        else -> rawMsg
+                        else -> userFacingLoadError(rawMsg)
                     }
                     DebugLogger.log("LITERT", "Load failed: $rawMsg")
                     Timber.e(e, "LiteRT model load failed")
@@ -1003,7 +1004,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 if (crashLoopBlocked)
                     "This model cannot run on your device. Please go back and choose a different model."
                 else
-                    "The AI is not ready yet. Wait a moment and try again."
+                    USER_FACING_ENGINE_NOT_READY
             )
 
         val timeoutMs = when {
@@ -1079,7 +1080,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 recycleConversation(desiredSampler)
                 conversationIsGrounded = groundedNow
                 val conversation = activeConversation
-                    ?: throw IllegalStateException("Could not create a conversation (engine released or out of memory).")
+                    ?: throw IllegalStateException(USER_FACING_ENGINE_NOT_READY)
 
                 watchdog = launch {
                     delay(timeoutMs)
@@ -1247,7 +1248,7 @@ class LiteRTInferenceEngine @Inject constructor(
                         } else {
                             DebugLogger.log("LITERT", "Generation error: ${error.message}")
                             InferenceService.stop(context)
-                            close(RuntimeException("Generation failed: ${error.message}", error))
+                            close(RuntimeException(userFacingGenerationError(error.message), error))
                         }
                     }
                 })
@@ -1273,7 +1274,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 watchdog?.cancel()
                 heartbeat?.cancel()
                 if (e is CancellationException) throw e
-                close(RuntimeException("Generation failed: ${e.message}", e))
+                close(RuntimeException(userFacingGenerationError(e.message), e))
             } finally {
                 isGenerating = false
             }

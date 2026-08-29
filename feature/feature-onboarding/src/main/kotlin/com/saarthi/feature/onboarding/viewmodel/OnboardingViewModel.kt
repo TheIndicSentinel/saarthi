@@ -21,6 +21,7 @@ import com.saarthi.core.inference.HuggingFaceTokenManager
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.ModelDownloadManager
 import com.saarthi.core.inference.engine.InferenceEngine
+import com.saarthi.core.inference.engine.userFacingLoadError
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.InferenceConfig
@@ -338,11 +339,13 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val file = File(path)
             if (!file.exists()) {
-                _uiState.update { it.copy(error = "File not found at: $path") }
+                _uiState.update { it.copy(error = "That file isn't on this phone.") }
                 return@launch
             }
             if (!file.canRead()) {
-                _uiState.update { it.copy(error = "Cannot read file at: $path — try granting All Files Access.") }
+                _uiState.update {
+                    it.copy(error = "This app can't read that file. Allow All files access and try again.")
+                }
                 return@launch
             }
             _uiState.update {
@@ -429,8 +432,9 @@ class OnboardingViewModel @Inject constructor(
                 return@launch
             }
 
+            DebugLogger.log("VMODEL", "Could not open picked file: $openError")
             _uiState.update {
-                it.copy(error = "Could not open file ($openError). Try using 'Enter path manually' below, or grant All Files Access and rescan.")
+                it.copy(error = "Could not open that file. Download a model from the list in the app.")
             }
         }
     }
@@ -645,11 +649,9 @@ class OnboardingViewModel @Inject constructor(
             val errorMsg = when {
                 e is OutOfMemoryError ->
                     "Not enough RAM to load this model.\n\nClose background apps and try again, or choose a smaller model."
-                e.message?.contains("RAM", ignoreCase = true) == true -> e.message!!
-                e.message?.isNotBlank() == true -> "Model load failed: ${e.message}"
-                else -> "Model load failed (${e.javaClass.simpleName}).\n\nThis model may be too large for your device. Try a smaller model."
+                else -> userFacingLoadError(e.message)
             }
-            DebugLogger.log("VMODEL", "Init failed: $errorMsg")
+            DebugLogger.log("VMODEL", "Init failed: ${e.javaClass.simpleName}: ${e.message}")
             _uiState.update { it.copy(step = OnboardingStep.MODEL_PICK, isLoading = false, error = errorMsg) }
         }
     }
