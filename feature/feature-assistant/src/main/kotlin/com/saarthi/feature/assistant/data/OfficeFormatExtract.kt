@@ -369,3 +369,44 @@ internal fun extractOfficeStructureMarker(text: String): String? {
     }
     return null
 }
+
+/** Max chars per indexed chunk for structured spreadsheet/slide blocks. */
+internal const val STRUCTURED_OFFICE_CHUNK_CHARS = 1800
+internal const val STRUCTURED_OFFICE_CHUNK_OVERLAP = 80
+
+/** True when text came from [formatCsvDocument] / XLSX / PPTX structured ingest. */
+internal fun isStructuredOfficeExtract(text: String): Boolean {
+    val t = text.trimStart()
+    return t.startsWith("--- CSV ---") ||
+        t.contains("--- Sheet:") ||
+        t.contains("--- Slide ") ||
+        t.contains("--- Rows ")
+}
+
+/**
+ * Chunk on sheet/slide/row block boundaries so large CSV/XLSX exports stay
+ * row-complete for BM25 and FTS5 at scale.
+ */
+internal fun chunkStructuredOfficeExtract(
+    text: String,
+    chunkSize: Int = STRUCTURED_OFFICE_CHUNK_CHARS,
+    overlap: Int = STRUCTURED_OFFICE_CHUNK_OVERLAP,
+): List<String> {
+    if (!isStructuredOfficeExtract(text)) return emptyList()
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return emptyList()
+    val sections = trimmed.split(
+        Regex("(?m)\n\n(?=--- (?:Rows \\d+-\\d+|Sheet:|Slide \\d+|CSV ---))"),
+    )
+    val out = ArrayList<String>(sections.size.coerceAtLeast(1))
+    for (section in sections) {
+        val block = section.trim()
+        if (block.isEmpty()) continue
+        if (block.length <= chunkSize) {
+            out.add(block)
+        } else {
+            out.addAll(chunkDocumentText(block, chunkSize, overlap))
+        }
+    }
+    return if (out.isEmpty()) listOf(trimmed) else out
+}

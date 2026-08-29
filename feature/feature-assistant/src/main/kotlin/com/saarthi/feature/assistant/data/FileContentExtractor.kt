@@ -738,6 +738,9 @@ internal fun looksLikeTableRow(line: String): Boolean {
     val t = line.trim()
     if (t.isEmpty()) return false
     if (DATE_TOKEN.containsMatchIn(t)) return true
+    // Structured office ingest: "Date: 1/3/26 | Amount: 2275" or Hindi headers.
+    if (t.contains(" | ") && Regex(":\\s*\\d").containsMatchIn(t)) return true
+    if (Regex("^[\\p{L}\\p{M}]+:").containsMatchIn(t) && t.count { it == '|' } >= 1) return true
     val tokens = t.split(Regex("\\s+"))
     return tokens.size >= 3 && AMOUNT_TOKEN.containsMatchIn(tokens.last())
 }

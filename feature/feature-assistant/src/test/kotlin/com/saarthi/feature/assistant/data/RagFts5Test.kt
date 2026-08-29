@@ -15,6 +15,13 @@ class RagFts5Test {
     }
 
     @Test
+    fun `buildFtsMatchQuery widens indic stems like BM25`() {
+        val match = buildFtsMatchQuery("किसानों की योजनाओं")
+        assertTrue(match != null)
+        assertTrue(match!!.contains("किसान") || match.contains("योजना"))
+    }
+
+    @Test
     fun `buildFtsMatchQuery returns null for blank query`() {
         assertNull(buildFtsMatchQuery("   "))
     }

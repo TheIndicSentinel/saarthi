@@ -13,7 +13,7 @@ internal const val FTS5_CANDIDATE_MULTIPLIER = 3
  * tokenisation). Returns null when the query has no searchable terms.
  */
 internal fun buildFtsMatchQuery(query: String): String? {
-    val tokens = Bm25Retriever.tokeniseDocument(query).take(FTS5_MATCH_TERM_CAP)
+    val tokens = Bm25Retriever.expandQueryTermsForSearch(query, FTS5_MATCH_TERM_CAP)
     if (tokens.isEmpty()) return null
     return tokens.joinToString(" OR ") { it.replace("'", "''") }
 }

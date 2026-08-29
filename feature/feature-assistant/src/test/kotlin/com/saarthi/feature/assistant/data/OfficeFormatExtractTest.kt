@@ -168,4 +168,29 @@ class OfficeFormatExtractTest {
         assertEquals("Slide 2", extractOfficeStructureMarker("--- Slide 2 ---\nMSP"))
         assertEquals("Rows 1-25", extractOfficeStructureMarker("--- Rows 1-25 ---\nDate: 1"))
     }
+
+    @Test
+    fun `structured office extract chunks on row block boundaries`() {
+        val block1 = formatStructuredTable(
+            listOf("Crop", "MSP"),
+            (1..30).map { listOf("Wheat", "${2000 + it}") },
+            title = "CSV",
+            maxChars = 8_000,
+        )
+        val chunks = chunkStructuredOfficeExtract(block1)
+        assertTrue(chunks.size >= 2)
+        assertTrue(chunks.any { it.contains("--- Rows 1-25 ---") })
+        assertTrue(chunks.any { it.contains("--- Rows 26-30 ---") })
+        assertTrue(chunks.any { it.contains("Crop: Wheat") })
+    }
+
+    @Test
+    fun `chunkDocumentForIndexing keeps office row blocks intact`() {
+        val raw = "Crop,MSP\nWheat,2275\nRice,3200"
+        val doc = formatCsvDocument(raw, maxChars = 4_000)
+        val indexed = chunkDocumentForIndexing(doc, mimeType = "text/csv")
+        assertTrue(indexed.isNotEmpty())
+        val joined = indexed.joinToString("\n") { it.text }
+        assertTrue(joined.contains("MSP: 2275") || joined.contains("Crop: Wheat"))
+    }
 }

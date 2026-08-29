@@ -18,6 +18,16 @@ internal fun sectionRootChunkIndex(entity: RagChunkEntity): Int =
     entity.parentChunkIndex ?: entity.chunkIndex
 
 internal fun chunkDocumentForIndexing(text: String, mimeType: String = ""): List<IndexedChunkText> {
+    if (isStructuredOfficeExtract(text) ||
+        mimeType.contains("spreadsheet", ignoreCase = true) ||
+        mimeType.contains("csv", ignoreCase = true) ||
+        mimeType.contains("presentation", ignoreCase = true)
+    ) {
+        val officeChunks = chunkStructuredOfficeExtract(text)
+        if (officeChunks.isNotEmpty()) {
+            return assignDefaultProseParentLinks(officeChunks)
+        }
+    }
     if (mimeType.contains("pdf", ignoreCase = true) || mimeType.contains("doc", ignoreCase = true)) {
         if (isLegalGazetteStyleDocument(text)) {
             return chunkLegalGazetteDocumentWithParents(text)
