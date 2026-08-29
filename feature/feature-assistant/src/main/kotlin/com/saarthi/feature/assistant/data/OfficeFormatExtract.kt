@@ -14,10 +14,14 @@ internal const val MAX_XLSX_SHEETS = 8
 internal const val MAX_PPTX_SLIDES = 40
 
 internal fun formatCsvDocument(raw: String, maxChars: Int): String {
-    val (headers, rows) = parseCsv(raw)
-    if (headers.isEmpty() || rows.isEmpty()) return raw.take(maxChars)
+    val normalized = stripUtf8Bom(raw)
+    val (headers, rows) = parseCsv(normalized)
+    if (headers.isEmpty() || rows.isEmpty()) return normalized.take(maxChars)
     return formatStructuredTable(headers, rows, title = "CSV", maxChars = maxChars)
 }
+
+/** Strip BOM from Excel-exported UTF-8 CSV (common on Indian Windows builds). */
+internal fun stripUtf8Bom(raw: String): String = raw.removePrefix("\uFEFF")
 
 internal fun parseCsv(raw: String): Pair<List<String>, List<List<String>>> {
     val lines = raw.replace("\r\n", "\n").replace('\r', '\n')
@@ -28,7 +32,7 @@ internal fun parseCsv(raw: String): Pair<List<String>, List<List<String>>> {
     val delim = detectCsvDelimiter(lines.take(5).joinToString("\n"))
     val records = lines.map { parseCsvLine(it, delim) }
     val first = records.first()
-    val headerLike = first.any { cell -> cell.any { it.isLetter() } }
+    val headerLike = first.any { isSubstantiveTableCell(it) }
     return if (headerLike && records.size >= 2) {
         first to records.drop(1)
     } else {
@@ -191,7 +195,7 @@ internal fun formatXlsxDocument(
         val rows = parseXlsxSheetRows(xml, shared)
         if (rows.isEmpty()) return@forEachIndexed
         val title = names.getOrNull(i)?.takeIf { it.isNotBlank() } ?: fallbackName
-        val (headers, data) = if (rows.size >= 2 && rows.first().any { cell -> cell.any { it.isLetter() } }) {
+        val (headers, data) = if (rows.size >= 2 && rows.first().any { isSubstantiveTableCell(it) }) {
             rows.first() to rows.drop(1)
         } else {
             rows.first().indices.map { c -> "Col${c + 1}" } to rows
@@ -209,12 +213,33 @@ internal fun formatXlsxDocument(
 
 internal fun parsePptxSlideXml(xml: String): String {
     if (xml.isEmpty()) return ""
-    val withBreaks = xml.replace(Regex("</a:p>", RegexOption.IGNORE_CASE), "\n")
-    val texts = Regex("<a:t(?:\\s[^>]*)?>(.*?)</a:t>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-        .findAll(withBreaks)
+    val parts = ArrayList<String>(8)
+    val tableRe = Regex("<a:tbl>(.*?)</a:tbl>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    val cellRe = Regex("<a:tc>(.*?)</a:tc>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    val textRe = Regex("<a:t(?:\\s[^>]*)?>(.*?)</a:t>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    for (table in tableRe.findAll(xml)) {
+        val rowCells = cellRe.findAll(table.groupValues[1]).map { cell ->
+            textRe.findAll(cell.groupValues[1])
+                .joinToString("") { decodeXmlEntities(it.groupValues[1]) }
+                .trim()
+        }.filter { it.isNotEmpty() }.toList()
+        if (rowCells.isNotEmpty()) {
+            parts.add(rowCells.joinToString(" | "))
+        }
+    }
+    val bodyXml = tableRe.replace(xml, "")
+    val withBreaks = bodyXml.replace(Regex("</a:p>", RegexOption.IGNORE_CASE), "\n")
+    val bodyTexts = textRe.findAll(withBreaks)
         .map { decodeXmlEntities(it.groupValues[1]) }
         .filter { it.isNotBlank() }
-    return texts.joinToString(" ").replace(Regex(" *\n *"), "\n").replace(Regex("\n{3,}"), "\n\n").trim()
+        .toList()
+    if (bodyTexts.isNotEmpty()) {
+        parts.add(bodyTexts.joinToString(" ").replace(Regex(" *\n *"), "\n").trim())
+    }
+    return parts.filter { it.isNotBlank() }
+        .joinToString("\n")
+        .replace(Regex("\n{3,}"), "\n\n")
+        .trim()
 }
 
 internal fun formatPptxDocument(slides: List<String>, maxChars: Int): String {
@@ -250,14 +275,33 @@ internal fun parseDocxXml(xml: String, maxChars: Int): String {
     return if (cleaned.length > maxChars) cleaned.take(maxChars) else cleaned
 }
 
-internal fun decodeXmlEntities(s: String): String = s
-    .replace("&amp;", "&")
-    .replace("&lt;", "<")
-    .replace("&gt;", ">")
-    .replace("&quot;", "\"")
-    .replace("&apos;", "'")
-    .replace("&#10;", "\n")
-    .replace("&#13;", "")
+internal fun decodeXmlEntities(s: String): String {
+    var out = s
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#10;", "\n")
+        .replace("&#13;", "")
+    out = Regex("&#x([0-9a-fA-F]+);").replace(out) { m ->
+        val code = m.groupValues[1].toIntOrNull(16)
+        if (code != null && code in 1..0x10FFFF) {
+            String(Character.toChars(code))
+        } else {
+            m.value
+        }
+    }
+    out = Regex("&#(\\d+);").replace(out) { m ->
+        val code = m.groupValues[1].toIntOrNull()
+        if (code != null && code in 1..0x10FFFF) {
+            String(Character.toChars(code))
+        } else {
+            m.value
+        }
+    }
+    return out
+}
 
 /**
  * Read selected ZIP entries as UTF-8 strings in a single pass. Caps each
@@ -295,9 +339,33 @@ internal fun readZipUtf8Entries(
 internal fun columnIndexFromRef(ref: String?): Int {
     if (ref.isNullOrEmpty()) return 0
     var n = 0
-    for (c in ref) {
+    for (c in ref.uppercase()) {
         if (c !in 'A'..'Z') break
         n = n * 26 + (c - 'A' + 1)
     }
     return (n - 1).coerceAtLeast(0)
+}
+
+/** Header / label cell: Latin, Indic script, or digits (₹ amounts, dates). */
+internal fun isSubstantiveTableCell(cell: String): Boolean =
+    cell.any { ch -> ch.isLetter() || isIndicLetter(ch) || ch.isDigit() }
+
+/**
+ * Sheet / slide / row markers from structured office ingest — used for Sources
+ * locations when page numbers do not exist.
+ */
+internal fun extractOfficeStructureMarker(text: String): String? {
+    for (raw in text.lineSequence()) {
+        val line = raw.trim()
+        when {
+            line.matches(Regex("^---\\s*Sheet:\\s*.+\\s*---$", RegexOption.IGNORE_CASE)) ->
+                return line.removePrefix("---").removeSuffix("---").trim()
+            line.matches(Regex("^---\\s*Slide\\s+\\d+\\s*---$", RegexOption.IGNORE_CASE)) ->
+                return line.removePrefix("---").removeSuffix("---").trim()
+            line.matches(Regex("^---\\s*Rows\\s+\\d+-\\d+\\s*---$", RegexOption.IGNORE_CASE)) ->
+                return line.removePrefix("---").removeSuffix("---").trim()
+            line.equals("--- CSV ---", ignoreCase = true) -> return "CSV"
+        }
+    }
+    return null
 }

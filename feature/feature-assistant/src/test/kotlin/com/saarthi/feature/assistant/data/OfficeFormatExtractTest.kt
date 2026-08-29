@@ -110,5 +110,62 @@ class OfficeFormatExtractTest {
         assertEquals(0, columnIndexFromRef("A1"))
         assertEquals(25, columnIndexFromRef("Z1"))
         assertEquals(26, columnIndexFromRef("AA1"))
+        assertEquals(0, columnIndexFromRef("a1"))
+    }
+
+    @Test
+    fun `decodeXmlEntities resolves indic numeric references`() {
+        val decoded = decodeXmlEntities("&#2361;&#2367;&#2344;&#2381;&#2342;&#2368;")
+        assertTrue(decoded.contains("ह"))
+        assertTrue(decoded.contains("ि"))
+    }
+
+    @Test
+    fun `csv utf8 bom is stripped`() {
+        val raw = "\uFEFFName,Amount\nWheat,2275"
+        val text = formatCsvDocument(raw, maxChars = 2_000)
+        assertTrue(text.contains("Name: Wheat"))
+        assertTrue(text.contains("Amount: 2275"))
+    }
+
+    @Test
+    fun `xlsx hindi shared strings decode to searchable rows`() {
+        val shared = "<sst><si><t>&#2325;&#2367;&#2360;&#2366;&#2344;</t></si><si><t>Amount</t></si></sst>"
+        val sheet = """
+            <sheetData>
+              <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+              <row r="2"><c r="A1" t="s"><v>0</v></c><c r="B2"><v>2275</v></c></row>
+            </sheetData>
+        """.trimIndent()
+        val workbook = """<workbook><sheets><sheet name="बिक्री" sheetId="1"/></sheets></workbook>"""
+        val text = formatXlsxDocument(shared, workbook, listOf("Sheet 1" to sheet), maxChars = 4_000)
+        assertTrue(text.contains("किसान"))
+        assertTrue(text.contains("Amount: 2275"))
+        assertTrue(text.contains("Sheet: बिक्री"))
+    }
+
+    @Test
+    fun `pptx table cells are pipe joined`() {
+        val xml = """
+            <a:tbl>
+              <a:tc><a:t>Crop</a:t></a:tc>
+              <a:tc><a:t>MSP</a:t></a:tc>
+              <a:tc><a:t>Wheat</a:t></a:tc>
+              <a:tc><a:t>2275</a:t></a:tc>
+            </a:tbl>
+            <a:p><a:t>Notes</a:t></a:p>
+        """.trimIndent()
+        val text = parsePptxSlideXml(xml)
+        assertTrue(text.contains("Crop | MSP"))
+        assertTrue(text.contains("Wheat | 2275"))
+        assertTrue(text.contains("Notes"))
+    }
+
+    @Test
+    fun `office structure marker extracts sheet and slide`() {
+        val chunk = "--- Sheet: Sales ---\nColumns: Date | Amount"
+        assertEquals("Sheet: Sales", extractOfficeStructureMarker(chunk))
+        assertEquals("Slide 2", extractOfficeStructureMarker("--- Slide 2 ---\nMSP"))
+        assertEquals("Rows 1-25", extractOfficeStructureMarker("--- Rows 1-25 ---\nDate: 1"))
     }
 }
