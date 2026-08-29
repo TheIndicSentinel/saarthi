@@ -31,8 +31,33 @@ internal fun shouldFilterSourcesByClaimOverlap(
     if (turnMode == RagTurnMode.GENERAL_KNOWLEDGE || turnMode == RagTurnMode.PLAIN_CHAT) return false
     if (isStructureCountQuery(query) || isStructureListQuery(query)) return false
     if (isDocumentMetaOverviewQuery(query)) return false
+    // Phase C — shape routes paraphrase; pairing would drop all Sources lines.
+    if (isInDocConceptComparisonQuery(query)) return false
+    if (isSetEnumerationQuery(query)) return false
+    if (isAbsenceInventoryQuery(query)) return false
     if (turnMode == RagTurnMode.MIXED && !hasDocumentQueryCues(query)) return false
     return true
+}
+
+internal fun claimOverlapPairingCorpus(answerBody: String, query: String?): String {
+    val body = answerBody.trim()
+    val q = query?.trim().orEmpty()
+    return when {
+        body.isEmpty() -> q
+        q.isEmpty() -> body
+        else -> "$body $q"
+    }
+}
+
+internal fun effectiveClaimOverlapMinShared(
+    chunk: RetrievedChunk,
+    turnMode: RagTurnMode?,
+): Int {
+    if (turnMode == RagTurnMode.DOCUMENT_GROUNDED && chunk.score >= STRONG_RAG_MATCH_SCORE) {
+        return 1
+    }
+    if (chunk.isStructuralAnchor()) return 1
+    return CLAIM_OVERLAP_MIN_SHARED_TOKENS
 }
 
 internal fun outlineChunkExemptFromClaimOverlap(query: String?): Boolean {
@@ -98,14 +123,19 @@ internal fun filterChunksByClaimOverlap(
     answerBody: String,
     minShared: Int = CLAIM_OVERLAP_MIN_SHARED_TOKENS,
     query: String? = null,
+    turnMode: RagTurnMode? = null,
 ): List<RetrievedChunk> {
     if (chunks.isEmpty()) return chunks
-    if (answerBody.isBlank()) {
+    val pairingCorpus = claimOverlapPairingCorpus(answerBody, query)
+    if (pairingCorpus.isBlank()) {
         return if (outlineChunkExemptFromClaimOverlap(query)) {
             chunks.filter { it.chunkIndex < 0 }
         } else {
             emptyList()
         }
     }
-    return chunks.filter { chunkSharesTokensWithAnswer(it, answerBody, minShared, query) }
+    return chunks.filter { chunk ->
+        val min = effectiveClaimOverlapMinShared(chunk, turnMode).coerceAtMost(minShared)
+        chunkSharesTokensWithAnswer(chunk, pairingCorpus, min, query)
+    }
 }

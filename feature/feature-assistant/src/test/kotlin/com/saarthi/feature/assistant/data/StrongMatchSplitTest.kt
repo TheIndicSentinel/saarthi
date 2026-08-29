@@ -92,4 +92,23 @@ class StrongMatchSplitTest {
                 result.block.contains("not about the document"),
         )
     }
+
+    @Test
+    fun `strong match blocked when top organic misses focus entity`() {
+        val windChunk = RetrievedChunk(
+            text = "Wind is the driving force of weather when temperature creates pressure variation.",
+            docName = "guide.pdf",
+            score = 9.0,
+            chunkIndex = 2,
+            docUri = "content://guide",
+        )
+        assertFalse(
+            shouldUseStrongMatchPromptRules(
+                retrieved = listOf(windChunk),
+                query = "How do oceans affect Earth's climate system?",
+                turnMode = RagTurnMode.DOCUMENT_GROUNDED,
+                attachmentsThisTurn = false,
+            ),
+        )
+    }
 }

@@ -196,6 +196,16 @@ internal fun goldenSessionRetrieve(
         emptyList()
     }
     val topicAnchored = pickTopicAnchorChunkEntities(contentChunks, query, TOPIC_ANCHOR_MAX)
+    val inDocCompareAnchored = if (isInDocConceptComparisonQuery(query)) {
+        pickInDocComparisonChunkEntities(contentChunks, query, maxPerSide = 2)
+    } else {
+        emptyList()
+    }
+    val absenceAnchored = if (isAbsenceInventoryQuery(query)) {
+        absenceInventoryOutlineChunks(scopedRawContent)
+    } else {
+        emptyList()
+    }
     val tabularPrefer = resolveTabularPreferDocUri(
         query = query,
         restrictUris = scopeDecision.restrictUris,
@@ -209,8 +219,11 @@ internal fun goldenSessionRetrieve(
     val anchorKinds = LinkedHashMap<Long, StructuralAnchorKind>()
     chapterSpanChunks.forEach { anchorKinds[it.id] = StructuralAnchorKind.CHAPTER_SPAN }
     topicAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.TOPIC }
+    inDocCompareAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.TOPIC }
+    absenceAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.STRUCTURE_LIST }
     tabularContract.forEach { anchorKinds[it.id] = StructuralAnchorKind.TABULAR_CONTRACT }
-    val anchoredEntities = chapterSpanChunks + topicAnchored + tabularContract
+    val anchoredEntities = chapterSpanChunks + topicAnchored + inDocCompareAnchored +
+        absenceAnchored + tabularContract
 
     var effectiveQuery = if (isFollowUp && !priorQuery.isNullOrBlank()) {
         mergeFollowUpRetrievalQuery(priorQuery!!, route.expandedQuery)
@@ -225,6 +238,12 @@ internal fun goldenSessionRetrieve(
     }
     val topicExpansion = topicAnchorQueryExpansion(query)
     if (topicExpansion.isNotEmpty()) effectiveQuery += topicExpansion
+    if (isInDocConceptComparisonQuery(query)) {
+        effectiveQuery += " ${inDocComparisonQueryExpansion(query)}"
+    }
+    if (isAbsenceInventoryQuery(query)) {
+        effectiveQuery += " ${absenceInventoryQueryExpansion()}"
+    }
 
     val uniqueDocs = contentChunks.map { it.docUri }.distinct().size.coerceAtLeast(1)
     val candidateK = featureRerankCandidatePoolSize(effectiveTopK, uniqueDocs, contentChunks.size)

@@ -144,4 +144,34 @@ class RetrievalAnswerabilityTest {
             ),
         )
     }
+
+    @Test
+    fun `top organic hits gate answerability not unrelated high-score chunks`() {
+        val windChunk = RetrievedChunk(
+            text = "Wind circulates when temperature differences create pressure variation.",
+            docName = "guide.pdf",
+            score = 9.0,
+            chunkIndex = 3,
+            docUri = "content://guide",
+        )
+        val oceanChunk = RetrievedChunk(
+            text = "The ocean exerts a major control on climate through currents.",
+            docName = "guide.pdf",
+            score = 1.0,
+            chunkIndex = 6,
+            docUri = "content://guide",
+        )
+        assertFalse(
+            isRetrievalAnswerableForQuery(
+                "How do oceans affect Earth's climate system?",
+                listOf(windChunk),
+            ),
+        )
+        assertTrue(
+            isRetrievalAnswerableForQuery(
+                "How do oceans affect Earth's climate system?",
+                listOf(oceanChunk),
+            ),
+        )
+    }
 }

@@ -21,6 +21,8 @@ internal fun isQueryAboutDocumentForCitation(
     turnMode: RagTurnMode,
     attachmentsThisTurn: Boolean,
 ): Boolean {
+    // Phase A5 Policy A — grounded indexed-session turns cite when retrieval supports it.
+    if (turnMode == RagTurnMode.DOCUMENT_GROUNDED && !isDocumentOptOutQuery(query)) return true
     if (turnMode == RagTurnMode.MIXED) return true
     if (attachmentsThisTurn) return true
     if (hasDocumentQueryCues(query)) return true
@@ -95,6 +97,13 @@ internal fun shouldUseStrongMatchPromptRules(
     if (turnMode == RagTurnMode.GENERAL_KNOWLEDGE || turnMode == RagTurnMode.PLAIN_CHAT) return false
     if (isDocumentOptOutQuery(query)) return false
     if (isLowConfidenceAnchorOnlyRetrieval(query, retrieved)) return false
-    return hasStrongLexicalRetrievalHit(query, retrieved) &&
-        isQueryAboutDocumentForCitation(query, turnMode, attachmentsThisTurn)
+    if (!hasStrongLexicalRetrievalHit(query, retrieved)) return false
+    if (!isQueryAboutDocumentForCitation(query, turnMode, attachmentsThisTurn)) return false
+    // Phase A4 — mechanism/role asks need entity coverage in top organic hits.
+    if (extractQueryFocusEntities(query).isNotEmpty() &&
+        !isRetrievalAnswerableForQuery(query, retrieved)
+    ) {
+        return false
+    }
+    return true
 }

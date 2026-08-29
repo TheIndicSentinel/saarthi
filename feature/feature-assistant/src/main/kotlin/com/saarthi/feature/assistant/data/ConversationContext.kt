@@ -66,8 +66,12 @@ internal fun formatConversationContext(
     val deep = isLarge && roomy && grounded
     val maxTurns = conversationContextMaxTurns(isLarge, grounded, roomy)
     val perUserChars  = if (isLarge) 160 else 110
-    val perReplyChars = if (isLarge) { if (grounded) 220 else 320 } else { if (grounded) 150 else 200 }
-    val blockBudget   = if (deep) { if (grounded) 2200 else 3000 } else if (isLarge) { if (grounded) 1100 else 1500 } else { if (grounded) 560 else 760 }
+    val perReplyChars = if (isLarge) { if (grounded) 180 else 320 } else { if (grounded) 120 else 200 }
+    val blockBudget   = if (deep) { if (grounded) 1800 else 3000 } else if (isLarge) {
+        if (grounded) 900 else 1500
+    } else {
+        if (grounded) 480 else 760
+    }
 
     fun trunc(s: String, n: Int): String {
         val c = s.trim()
