@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.HuggingFaceTokenManager
 import com.saarthi.core.inference.ModelCatalog
@@ -26,8 +27,6 @@ import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.model.PromptTier
-import com.saarthi.core.inference.DownloadRiskPolicy
-import com.saarthi.core.inference.DebugLogger
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -194,16 +193,34 @@ class OnboardingViewModel @Inject constructor(
                             "${autoModel.id}  complete=$alreadyComplete")
                         _uiState.update {
                             it.copy(
-                                step = OnboardingStep.DOWNLOADING,
                                 selectedModelPath = downloadManager.localPathFor(autoModel).absolutePath,
                             )
                         }
                         if (alreadyComplete) {
+                            _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING) }
                             confirmModelAndInit()
                         } else {
-                            // reattachActiveDownloads() further below resumes the
-                            // actual byte transfer; this just waits for it to finish.
-                            awaitDownloadThenInit(autoModel)
+                            val risk = downloadManager.remainingDownloadRisk(autoModel)
+                            if (risk.shouldConfirm) {
+                                // Do not await a transfer that reattach will skip.
+                                DebugLogger.log(
+                                    "ONBOARDING",
+                                    "Partial auto-model resume needs confirm: ${autoModel.id}",
+                                )
+                                _uiState.update {
+                                    it.copy(
+                                        showDownloadRiskDialog = true,
+                                        pendingRiskDownloadId = autoModel.id,
+                                        pendingRiskDownloadAutoInit = true,
+                                        pendingRiskDownloadRestart = false,
+                                        downloadRiskCellular = risk.becauseCellular,
+                                        downloadRiskLowBattery = risk.becauseLowBattery,
+                                    )
+                                }
+                            } else {
+                                _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING) }
+                                awaitDownloadThenInit(autoModel)
+                            }
                         }
                     } else {
                         // Nothing to resume for this model — surface whether the
@@ -522,12 +539,7 @@ class OnboardingViewModel @Inject constructor(
         restart: Boolean = false,
     ) {
         val remaining = downloadManager.remainingBytesFor(model, replace = restart)
-        val confirm = DownloadRiskPolicy.confirm(
-            isCellularOrMetered = downloadManager.isCellularOrMetered(),
-            batteryPercent = downloadManager.batteryPercent(),
-            isCharging = downloadManager.isCharging(),
-            remainingBytes = remaining,
-        )
+        val confirm = downloadManager.remainingDownloadRisk(model, replace = restart)
         if (confirm.shouldConfirm) {
             DebugLogger.log(
                 "DOWNLOAD",

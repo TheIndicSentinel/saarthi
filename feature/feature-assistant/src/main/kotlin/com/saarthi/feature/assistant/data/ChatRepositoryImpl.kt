@@ -428,7 +428,7 @@ class ChatRepositoryImpl @Inject constructor(
                             rawChars = raw.length,
                             priorTurnsChars = lastPriorTurnsChars,
                             uriLens = lastPromptUriLens,
-                            preview = if (ragLogDocNames()) ragRawModelPreview(groundedText) else null,
+                            preview = if (ragLogModelPreview()) ragRawModelPreview(groundedText) else null,
                         ),
                     )
 

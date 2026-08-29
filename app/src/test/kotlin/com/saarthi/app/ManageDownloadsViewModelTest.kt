@@ -3,6 +3,7 @@ package com.saarthi.app
 import android.app.Application
 import android.os.Environment
 import android.os.StatFs
+import com.saarthi.core.inference.LargeDownloadConfirm
 import com.saarthi.core.inference.ModelCatalog
 import com.saarthi.core.inference.ModelDownloadManager
 import com.saarthi.core.inference.engine.InferenceEngine
@@ -206,6 +207,31 @@ class ManageDownloadsViewModelTest {
         every { mockModelCatalog.allModels } returns models
         createViewModel()
         verify(timeout = 2_000) { mockDownloadManager.reattachActiveDownloads(models) }
+    }
+
+    @Test
+    fun `risky leftover partial shows the resume-confirm dialog instead of starting`() = runTest {
+        val model = testModel(id = "big")
+        every { mockModelCatalog.allModels } returns listOf(model)
+        every { mockDownloadManager.reattachActiveDownloads(listOf(model)) } returns listOf(model)
+        every { mockDownloadManager.remainingDownloadRisk(model, any()) } returns
+            LargeDownloadConfirm(becauseCellular = true, becauseLowBattery = false)
+        every { mockDownloadManager.remainingDownloadRisk(model) } returns
+            LargeDownloadConfirm(becauseCellular = true, becauseLowBattery = false)
+
+        val viewModel = createViewModel()
+        val deadline = System.currentTimeMillis() + 2_000
+        while (!viewModel.uiState.value.showResumeRiskDialog && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20)
+        }
+        assertTrue(viewModel.uiState.value.showResumeRiskDialog)
+        assertEquals(model.id, viewModel.uiState.value.pendingResumeModelId)
+        assertTrue(viewModel.uiState.value.resumeRiskCellular)
+        verify(exactly = 0) { mockDownloadManager.startDownload(model) }
+
+        viewModel.confirmResumeRisk()
+        verify(exactly = 1) { mockDownloadManager.startDownload(model) }
+        assertTrue(!viewModel.uiState.value.showResumeRiskDialog)
     }
 
     @Test

@@ -27,7 +27,7 @@ Saarthi runs Google's Gemma models *on-device* via [Google AI Edge LiteRT-LM](ht
 | DI / Data | Hilt + KSP · Room · DataStore |
 | Downloads | Foreground `Service` + OkHttp (resumable) |
 | Monitoring | On-device `saarthi_debug.log` (no Firebase Crashlytics / Analytics) |
-| Build | AGP 8.7.3 · convention plugins in `build-logic/` · minSdk 28, target/compile 35 |
+| Build | AGP 8.7.3 · convention plugins in `build-logic/` · minSdk 28, target/compile 36 |
 
 ## Build & run
 

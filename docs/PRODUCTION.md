@@ -118,13 +118,20 @@ some catch real regressions.
 
 ### 4. Saarthi DebugLogger (on-device)
 
-The app writes a structured log to
-`/storage/emulated/0/Download/saarthi_debug.log` on every run.
-This is the highest-signal artefact for any user-reported bug:
+Where the file lives depends on the build. Do not assume public Downloads
+on a Play / production APK.
 
-```bash
-adb pull /storage/emulated/0/Download/saarthi_debug.log -
-```
+- **Beta** (`PUBLIC_DEBUG_LOG=true`): public Downloads, so a non-technical
+  user can grab it with any file manager:
+
+  ```bash
+  adb pull /storage/emulated/0/Download/saarthi_debug.log -
+  ```
+
+- **Play production** (`PUBLIC_DEBUG_LOG=false`): app-private storage
+  (`filesDir` or `externalFilesDir`). Use Support → Report a problem
+  (FileProvider attach), or `adb` into the app's private dir. The path
+  label is on the session-start line in the log itself.
 
 Tags you'll see in there:
 

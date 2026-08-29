@@ -140,6 +140,11 @@ class OnboardingViewModelTest {
 
         mockDownloadManager = mockk(relaxed = true)
         every { mockDownloadManager.allProgress } returns MutableStateFlow(emptyMap())
+        every { mockDownloadManager.remainingDownloadRisk(any()) } returns
+            com.saarthi.core.inference.LargeDownloadConfirm.NONE
+        every { mockDownloadManager.remainingDownloadRisk(any(), any()) } returns
+            com.saarthi.core.inference.LargeDownloadConfirm.NONE
+        every { mockDownloadManager.reattachActiveDownloads(any()) } returns emptyList()
         if (autoModel != null) {
             every { mockDownloadManager.isDownloaded(autoModel) } returns false
             every { mockDownloadManager.tmpPathFor(autoModel) } returns File(tempFolder.root, "nonexistent.tmp")
@@ -345,9 +350,16 @@ class OnboardingViewModelTest {
         val model = testModel(fileSizeBytes = 2_500_000_000L)
         setUpDefaults(model)
         every { mockDownloadManager.remainingBytesFor(model, any()) } returns 2_500_000_000L
-        every { mockDownloadManager.isCellularOrMetered() } returns true
-        every { mockDownloadManager.batteryPercent() } returns 80
-        every { mockDownloadManager.isCharging() } returns false
+        every { mockDownloadManager.remainingDownloadRisk(model, any()) } returns
+            com.saarthi.core.inference.LargeDownloadConfirm(
+                becauseCellular = true,
+                becauseLowBattery = false,
+            )
+        every { mockDownloadManager.remainingDownloadRisk(model) } returns
+            com.saarthi.core.inference.LargeDownloadConfirm(
+                becauseCellular = true,
+                becauseLowBattery = false,
+            )
         val viewModel = createViewModel()
         advanceUntilIdle()
 
@@ -367,7 +379,16 @@ class OnboardingViewModelTest {
         val model = testModel(fileSizeBytes = 2_500_000_000L)
         setUpDefaults(model)
         every { mockDownloadManager.remainingBytesFor(model, any()) } returns 2_500_000_000L
-        every { mockDownloadManager.isCellularOrMetered() } returns true
+        every { mockDownloadManager.remainingDownloadRisk(model, any()) } returns
+            com.saarthi.core.inference.LargeDownloadConfirm(
+                becauseCellular = true,
+                becauseLowBattery = false,
+            )
+        every { mockDownloadManager.remainingDownloadRisk(model) } returns
+            com.saarthi.core.inference.LargeDownloadConfirm(
+                becauseCellular = true,
+                becauseLowBattery = false,
+            )
         val viewModel = createViewModel()
         advanceUntilIdle()
 
@@ -376,6 +397,35 @@ class OnboardingViewModelTest {
 
         verify(exactly = 0) { mockDownloadManager.startDownload(model) }
         assertTrue(!viewModel.uiState.value.showDownloadRiskDialog)
+    }
+
+    @Test
+    fun `partial auto-model on cellular shows the risk dialog instead of awaiting a silent resume`() = runTest {
+        val model = testModel(fileSizeBytes = 2_500_000_000L)
+        setUpDefaults(model)
+        every { mockDownloadManager.isDownloaded(model) } returns false
+        val partialTmp = File(tempFolder.newFolder("tmp-risk"), model.fileName).also {
+            it.writeBytes(ByteArray(3_000_000))
+        }
+        every { mockDownloadManager.tmpPathFor(model) } returns partialTmp
+        every { mockDownloadManager.localPathFor(model) } returns File(tempFolder.root, model.fileName)
+        every { mockDownloadManager.remainingDownloadRisk(model) } returns
+            com.saarthi.core.inference.LargeDownloadConfirm(
+                becauseCellular = true,
+                becauseLowBattery = false,
+            )
+        every { mockDownloadManager.remainingDownloadRisk(model, any()) } returns
+            com.saarthi.core.inference.LargeDownloadConfirm(
+                becauseCellular = true,
+                becauseLowBattery = false,
+            )
+
+        val viewModel = createViewModel()
+        awaitCondition { viewModel.uiState.value.showDownloadRiskDialog }
+
+        assertTrue(viewModel.uiState.value.downloadRiskCellular)
+        assertEquals(model.id, viewModel.uiState.value.pendingRiskDownloadId)
+        verify(exactly = 0) { mockDownloadManager.startDownload(model) }
     }
 
     @Test

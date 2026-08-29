@@ -150,6 +150,26 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
       on first launch after this change. Destructive fallback only from ancient
       dev schemas).
 
+Hardening behaviors (debug CI does not cover these):
+
+- [ ] Drawer re-tap of the **already-open** chat — no burst of
+      `[SESSION] Session reset` in the debug log.
+- [ ] Background during an in-progress generate (FGS notification showing) —
+      returning should not pay a full reload if still generating. After ~2 min
+      idle in background, the reload banner appears and chat works after restore.
+- [ ] Cellular or <30% unplugged + ≥200 MB remaining catalog download —
+      confirm dialog; Not now does not start; Download anyway proceeds.
+      Same dialog for a leftover large `.tmp` auto-resume (onboarding or
+      Settings → Manage downloads).
+- [ ] Settings delete-all — `saarthi_debug.log` has no prior session text
+      (wipe marker only).
+- [ ] Stock build (empty `KISAN_PACK_MANIFEST_URL`) after upgrade from an
+      older install — no periodic `[PACK] PackUpdateWorker enqueued`; leftover
+      unique work cancelled.
+- [ ] **Minified / R8** (`assembleRelease` or `bundleRelease`) on this phone —
+      onboarding, one chat, Stop, attach. A green `test-and-lint` check is not
+      this gate. Do not bump `versionCode` until cutting a store candidate.
+
 ## Production (Play Store) only
 
 - [ ] **Debug log gate**: build with `-Psaarthi.publicLog=false` so `saarthi_debug.log`
