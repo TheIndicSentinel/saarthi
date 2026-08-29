@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.onboarding
 import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.HuggingFaceTokenManager
@@ -555,7 +556,9 @@ class OnboardingViewModel @Inject constructor(
                 val sizeMb = if (file.exists()) file.length() / 1_048_576 else 0
                 val expectedMb = model.fileSizeBytes / 1_048_576
                 _uiState.update {
-                    it.copy(error = "Download incomplete: ${sizeMb}MB of ${expectedMb}MB. Please wait or re-download.")
+                    it.copy(
+                        error = "${_uiState.value.selectedLanguage.onboarding.downloadIncomplete} (${sizeMb}MB / ${expectedMb}MB)",
+                    )
                 }
             }
         }

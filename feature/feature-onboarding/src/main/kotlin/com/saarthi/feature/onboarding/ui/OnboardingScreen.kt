@@ -72,9 +72,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.saarthi.core.i18n.OnboardingStrings
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.onboarding
 import com.saarthi.core.i18n.settings
+import com.saarthi.core.i18n.userFacingDownloadFailure
 import com.saarthi.core.inference.engine.isInsufficientRamForModelLoad
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
@@ -817,6 +819,7 @@ private fun Onb4ModelPick(
                     insufficientStorage = insufficientStorage,
                     insufficientRam = insufficientRam,
                     likelyCpuOnly = likelyCpuOnly,
+                    strings = o,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -947,6 +950,7 @@ private fun ModelOption(
     insufficientStorage: Boolean = false,
     insufficientRam: Boolean = false,
     likelyCpuOnly: Boolean = false,
+    strings: OnboardingStrings = OnboardingStrings(),
 ) {
     val tone = when (toneIndex % 4) {
         0 -> ChipTone.Marigold
@@ -1035,14 +1039,14 @@ private fun ModelOption(
                     )
                     // Status text — always present so row height is uniform.
                     val status = when {
-                        progress is DownloadProgress.Downloading -> "· Downloading ${progress.percent}%"
-                        progress is DownloadProgress.Paused -> "· Paused"
-                        progress is DownloadProgress.Failed -> "· Failed"
-                        downloaded -> "· Ready to use"
-                        insufficientStorage -> "· Not enough space"
-                        insufficientRam -> "· May not load right now"
-                        likelyCpuOnly -> MODEL_STATUS_CPU_ONLY
-                        else -> "· Not downloaded"
+                        progress is DownloadProgress.Downloading -> "${strings.statusDownloading} ${progress.percent}%"
+                        progress is DownloadProgress.Paused -> strings.statusPaused
+                        progress is DownloadProgress.Failed -> strings.statusFailed
+                        downloaded -> strings.statusReady
+                        insufficientStorage -> strings.statusNoSpace
+                        insufficientRam -> strings.statusMayNotLoad
+                        likelyCpuOnly -> strings.statusCpuOnly
+                        else -> strings.statusNotDownloaded
                     }
                     val statusColor = when {
                         progress is DownloadProgress.Downloading -> SaarthiColors.Marigold
@@ -1083,14 +1087,14 @@ private fun ModelOption(
         if (progress is DownloadProgress.Paused) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "Paused · ${progress.reason}",
+                strings.pausedLabel,
                 style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Marigold),
             )
         }
         if (progress is DownloadProgress.Failed) {
             Spacer(Modifier.height(4.dp))
             Text(
-                "Download failed: ${progress.reason}",
+                "${strings.downloadFailedLabel}. ${userFacingDownloadFailure(progress.reason, strings)}",
                 style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Rose),
             )
         }
@@ -1210,7 +1214,7 @@ private fun DownloadingScreen(
             if (state.lastFailureNote != null) {
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Last attempt didn't finish: ${state.lastFailureNote}",
+                    "${o.lastAttemptLabel}. ${userFacingDownloadFailure(state.lastFailureNote, o)}",
                     style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
