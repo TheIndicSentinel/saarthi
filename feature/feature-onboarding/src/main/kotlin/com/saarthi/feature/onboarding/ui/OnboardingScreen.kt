@@ -837,14 +837,7 @@ private fun Onb4ModelPick(
 @Composable
 private fun DeviceTierBadge(profile: DeviceProfile?) {
     if (profile == null) return
-    val ram = "${profile.totalRamMb / 1024}GB RAM"
-    val storage = "${profile.availableStorageMb / 1024}GB free"
-    val label = when (profile.tier) {
-        DeviceTier.FLAGSHIP -> "Flagship · $ram · $storage · ${if (profile.hasVulkan) "Vulkan GPU" else "CPU"}"
-        DeviceTier.MID      -> "Mid-range · $ram · $storage"
-        DeviceTier.LOW      -> "Entry · $ram · $storage"
-        DeviceTier.MINIMAL  -> "Ultra-low · $ram · $storage"
-    }
+    val label = deviceBadgeLabel(profile.totalRamMb, profile.availableStorageMb)
     // Honest, plain-language expectation for THIS phone. Setting it before the
     // download decision is what keeps a mid/low-RAM user from picking the
     // heaviest model, getting slow/blank replies, and leaving a 1-star review.
@@ -925,10 +918,21 @@ internal fun deviceExpectationText(tier: DeviceTier, totalRamMb: Long): String =
     tier == DeviceTier.MID && totalRamMb >= 8_000 ->
         "Pick the recommended model for the best balance of speed and quality."
     tier == DeviceTier.MID ->
-        "Pick a lighter model, or close other apps first — this device has less headroom than newer phones."
+        "Pick a lighter model, or close other apps first — this phone has less spare memory than newer ones."
     tier == DeviceTier.LOW -> "Choose a lighter model for smooth replies — bigger ones may run slowly."
     else -> "Only the compact model will run well here; replies stay short and simple."
 }
+
+/** First-run badge: memory and free space only — no Flagship / Vulkan / CPU. */
+internal fun deviceBadgeLabel(totalRamMb: Long, availableStorageMb: Long): String {
+    val ramGb = totalRamMb / 1024
+    val freeGb = availableStorageMb / 1024
+    return "$ramGb GB memory · $freeGb GB free"
+}
+
+/** Model will load, but this phone is expected to run it slower (CPU path). */
+internal const val MODEL_STATUS_CPU_ONLY = "· Works on this phone, a bit slower"
+
 
 @Composable
 private fun ModelOption(
@@ -1037,7 +1041,7 @@ private fun ModelOption(
                         downloaded -> "· Ready to use"
                         insufficientStorage -> "· Not enough space"
                         insufficientRam -> "· May not load right now"
-                        likelyCpuOnly -> "· Runs in compatibility mode (slower)"
+                        likelyCpuOnly -> MODEL_STATUS_CPU_ONLY
                         else -> "· Not downloaded"
                     }
                     val statusColor = when {

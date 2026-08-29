@@ -9,7 +9,7 @@ import org.junit.Test
 
 /**
  * [isLikelyCpuOnly] drives the onboarding model picker's third status state
- * ("Runs in compatibility mode (slower)") — the model WILL load, but this
+ * ([MODEL_STATUS_CPU_ONLY]) — the model WILL load, but this
  * device is expected to run it on CPU rather than GPU. It must exactly
  * mirror LiteRTInferenceEngine's isGpuRestrictedToCompactOnLowTier gate (via
  * DeviceProfile.gpuSafe/tier/isLowRamDevice + ModelEntry.requiredTier) or the
@@ -229,7 +229,7 @@ class OnboardingScreenGpuMessagingTest {
     @Test
     fun `MID tier just under 8GB gets the lighter-model caution instead`() {
         assertEquals(
-            "Pick a lighter model, or close other apps first — this device has less headroom than newer phones.",
+            "Pick a lighter model, or close other apps first — this phone has less spare memory than newer ones.",
             deviceExpectationText(DeviceTier.MID, 7_999),
         )
     }
@@ -237,7 +237,7 @@ class OnboardingScreenGpuMessagingTest {
     @Test
     fun `MID tier at the 6GB floor gets the lighter-model caution`() {
         assertEquals(
-            "Pick a lighter model, or close other apps first — this device has less headroom than newer phones.",
+            "Pick a lighter model, or close other apps first — this phone has less spare memory than newer ones.",
             deviceExpectationText(DeviceTier.MID, 6_000),
         )
     }
@@ -256,5 +256,23 @@ class OnboardingScreenGpuMessagingTest {
             "Only the compact model will run well here; replies stay short and simple.",
             deviceExpectationText(DeviceTier.MINIMAL, 2_000),
         )
+    }
+
+    @Test
+    fun `device badge is memory and free space with no engine jargon`() {
+        val label = deviceBadgeLabel(totalRamMb = 12_288, availableStorageMb = 64_000)
+        assertEquals("12 GB memory · 62 GB free", label)
+        assertFalse(label.contains("Vulkan", ignoreCase = true))
+        assertFalse(label.contains("GPU", ignoreCase = true))
+        assertFalse(label.contains("CPU", ignoreCase = true))
+        assertFalse(label.contains("Flagship", ignoreCase = true))
+        assertFalse(label.contains("RAM", ignoreCase = true))
+    }
+
+    @Test
+    fun `cpu-only model status does not say compatibility mode`() {
+        assertFalse(MODEL_STATUS_CPU_ONLY.contains("compatibility", ignoreCase = true))
+        assertFalse(MODEL_STATUS_CPU_ONLY.contains("GPU", ignoreCase = true))
+        assertTrue(MODEL_STATUS_CPU_ONLY.contains("slower", ignoreCase = true))
     }
 }
