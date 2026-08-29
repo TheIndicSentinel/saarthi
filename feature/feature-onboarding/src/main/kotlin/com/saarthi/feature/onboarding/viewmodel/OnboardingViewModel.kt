@@ -63,12 +63,6 @@ data class OnboardingUiState(
     val lastFailureNote: String? = null,
     val showHfTokenDialog: Boolean = false,
     val pendingGatedDownloadId: String? = null,
-    val showDownloadRiskDialog: Boolean = false,
-    val pendingRiskDownloadId: String? = null,
-    val pendingRiskDownloadAutoInit: Boolean = false,
-    val pendingRiskDownloadRestart: Boolean = false,
-    val downloadRiskCellular: Boolean = false,
-    val downloadRiskLowBattery: Boolean = false,
 )
 
 enum class OnboardingStep {
@@ -123,7 +117,7 @@ class OnboardingViewModel @Inject constructor(
             val pending = _uiState.value.catalogModels.find { it.id == pendingId }
                 ?: pendingId?.let { modelCatalog.findById(it) }
             _uiState.update { it.copy(showHfTokenDialog = false, pendingGatedDownloadId = null) }
-            if (pending != null) startDownloadAfterRiskCheck(pending, autoInit = false)
+            if (pending != null) startCatalogDownload(pending)
         }
     }
 
@@ -200,27 +194,8 @@ class OnboardingViewModel @Inject constructor(
                             _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING) }
                             confirmModelAndInit()
                         } else {
-                            val risk = downloadManager.remainingDownloadRisk(autoModel)
-                            if (risk.shouldConfirm) {
-                                // Do not await a transfer that reattach will skip.
-                                DebugLogger.log(
-                                    "ONBOARDING",
-                                    "Partial auto-model resume needs confirm: ${autoModel.id}",
-                                )
-                                _uiState.update {
-                                    it.copy(
-                                        showDownloadRiskDialog = true,
-                                        pendingRiskDownloadId = autoModel.id,
-                                        pendingRiskDownloadAutoInit = true,
-                                        pendingRiskDownloadRestart = false,
-                                        downloadRiskCellular = risk.becauseCellular,
-                                        downloadRiskLowBattery = risk.becauseLowBattery,
-                                    )
-                                }
-                            } else {
-                                _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING) }
-                                awaitDownloadThenInit(autoModel)
-                            }
+                            _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING) }
+                            awaitDownloadThenInit(autoModel)
                         }
                     } else {
                         // Nothing to resume for this model — surface whether the
@@ -484,7 +459,7 @@ class OnboardingViewModel @Inject constructor(
             }
             return
         }
-        startDownloadAfterRiskCheck(model, autoInit = false)
+        startCatalogDownload(model)
     }
 
     private fun startCatalogDownload(model: ModelEntry) {
@@ -498,71 +473,7 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun restartDownload(model: ModelEntry) {
-        startDownloadAfterRiskCheck(model, autoInit = false, restart = true)
-    }
-
-    fun confirmRiskyDownload() {
-        val id = _uiState.value.pendingRiskDownloadId
-        val autoInit = _uiState.value.pendingRiskDownloadAutoInit
-        val restart = _uiState.value.pendingRiskDownloadRestart
-        val model = _uiState.value.catalogModels.find { it.id == id }
-            ?: id?.let { modelCatalog.findById(it) }
-        clearDownloadRiskDialog()
-        if (model == null) return
-        when {
-            restart -> downloadManager.restartDownload(model)
-            autoInit -> startDownloadAndAutoInitUnchecked(model)
-            else -> startCatalogDownload(model)
-        }
-    }
-
-    fun dismissDownloadRiskDialog() {
-        clearDownloadRiskDialog()
-    }
-
-    private fun clearDownloadRiskDialog() {
-        _uiState.update {
-            it.copy(
-                showDownloadRiskDialog = false,
-                pendingRiskDownloadId = null,
-                pendingRiskDownloadAutoInit = false,
-                pendingRiskDownloadRestart = false,
-                downloadRiskCellular = false,
-                downloadRiskLowBattery = false,
-            )
-        }
-    }
-
-    private fun startDownloadAfterRiskCheck(
-        model: ModelEntry,
-        autoInit: Boolean,
-        restart: Boolean = false,
-    ) {
-        val remaining = downloadManager.remainingBytesFor(model, replace = restart)
-        val confirm = downloadManager.remainingDownloadRisk(model, replace = restart)
-        if (confirm.shouldConfirm) {
-            DebugLogger.log(
-                "DOWNLOAD",
-                "Confirming large download  model=${model.id}  cellular=${confirm.becauseCellular}  " +
-                    "lowBattery=${confirm.becauseLowBattery}  remaining=${remaining / 1_048_576}MB",
-            )
-            _uiState.update {
-                it.copy(
-                    showDownloadRiskDialog = true,
-                    pendingRiskDownloadId = model.id,
-                    pendingRiskDownloadAutoInit = autoInit,
-                    pendingRiskDownloadRestart = restart,
-                    downloadRiskCellular = confirm.becauseCellular,
-                    downloadRiskLowBattery = confirm.becauseLowBattery,
-                )
-            }
-            return
-        }
-        when {
-            restart -> downloadManager.restartDownload(model)
-            autoInit -> startDownloadAndAutoInitUnchecked(model)
-            else -> startCatalogDownload(model)
-        }
+        downloadManager.restartDownload(model)
     }
 
     fun cancelDownload(model: ModelEntry) {
@@ -823,7 +734,7 @@ class OnboardingViewModel @Inject constructor(
             }
             return
         }
-        startDownloadAfterRiskCheck(model, autoInit = true)
+        startDownloadAndAutoInitUnchecked(model)
     }
 
     private fun startDownloadAndAutoInitUnchecked(model: ModelEntry) {

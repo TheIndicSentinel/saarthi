@@ -157,10 +157,9 @@ Hardening behaviors (debug CI does not cover these):
 - [ ] Background during an in-progress generate (FGS notification showing) —
       returning should not pay a full reload if still generating. After ~2 min
       idle in background, the reload banner appears and chat works after restore.
-- [ ] Cellular or <30% unplugged + ≥200 MB remaining catalog download —
-      confirm dialog; Not now does not start; Download anyway proceeds.
-      Same dialog for a leftover large `.tmp` auto-resume (onboarding or
-      Settings → Manage downloads).
+- [ ] Leftover large `.tmp` auto-resumes on the next open (onboarding or
+      Settings → Manage downloads) with no extra confirm sheet — Wi-Fi if
+      connected, otherwise mobile data.
 - [ ] Settings delete-all — `saarthi_debug.log` has no prior session text
       (wipe marker only).
 - [ ] Stock build (empty `KISAN_PACK_MANIFEST_URL`) after upgrade from an

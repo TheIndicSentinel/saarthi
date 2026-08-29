@@ -256,10 +256,6 @@ class SupportedLanguageTest {
         assertNonBlankForEveryLanguage("resumeInterruptedDownloadTitle") { resumeInterruptedDownloadTitle }
         assertNonBlankForEveryLanguage("resumeInterruptedDownloadBody") { resumeInterruptedDownloadBody }
         assertNonBlankForEveryLanguage("reloadingModelBanner") { reloadingModelBanner }
-        assertNonBlankForEveryLanguage("downloadRiskTitle") { downloadRiskTitle }
-        assertNonBlankForEveryLanguage("downloadRiskCellular") { downloadRiskCellular }
-        assertNonBlankForEveryLanguage("downloadRiskLowBattery") { downloadRiskLowBattery }
-        assertNonBlankForEveryLanguage("downloadAnywayLabel") { downloadAnywayLabel }
     }
 
     @Test
@@ -308,7 +304,6 @@ class SupportedLanguageTest {
             assertNotEquals("${lang.englishName} notifPermTitle", SupportedLanguage.ENGLISH.notifPermTitle, lang.notifPermTitle)
             assertNotEquals("${lang.englishName} batteryOptExplanation", SupportedLanguage.ENGLISH.batteryOptExplanation, lang.batteryOptExplanation)
             assertNotEquals("${lang.englishName} reloadingModelBanner", SupportedLanguage.ENGLISH.reloadingModelBanner, lang.reloadingModelBanner)
-            assertNotEquals("${lang.englishName} downloadRiskTitle", SupportedLanguage.ENGLISH.downloadRiskTitle, lang.downloadRiskTitle)
             assertNotEquals("${lang.englishName} allowLabel", SupportedLanguage.ENGLISH.allowLabel, lang.allowLabel)
             assertNotEquals("${lang.englishName} notNowLabel", SupportedLanguage.ENGLISH.notNowLabel, lang.notNowLabel)
         }

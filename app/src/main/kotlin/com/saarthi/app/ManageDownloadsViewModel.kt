@@ -34,10 +34,6 @@ data class ManageDownloadsUiState(
     val phoneFreeBytes: Long = 0,
     val activeModelName: String? = null,
     val error: String? = null,
-    val showResumeRiskDialog: Boolean = false,
-    val pendingResumeModelId: String? = null,
-    val resumeRiskCellular: Boolean = false,
-    val resumeRiskLowBattery: Boolean = false,
 )
 
 @HiltViewModel
@@ -50,7 +46,6 @@ class ManageDownloadsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ManageDownloadsUiState())
     val uiState: StateFlow<ManageDownloadsUiState> = _uiState.asStateFlow()
-    private val pendingRiskyResumes = ArrayDeque<ModelEntry>()
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -58,53 +53,9 @@ class ManageDownloadsViewModel @Inject constructor(
             // kill is Range-resumed here so Settings → Manage Downloads works
             // without opening onboarding again. Not on refresh() — delete then
             // refresh must not restart a download of a model the user just removed.
-            // Large remaining transfers on cellular / low unplugged battery are
-            // skipped here and surfaced via [showResumeRiskDialog].
-            val skipped = downloadManager.reattachActiveDownloads(modelCatalog.allModels)
-            if (skipped.isNotEmpty()) {
-                pendingRiskyResumes.clear()
-                pendingRiskyResumes.addAll(skipped)
-                presentNextResumeRisk()
-            }
+            downloadManager.reattachActiveDownloads(modelCatalog.allModels)
         }
         refresh()
-    }
-
-    fun confirmResumeRisk() {
-        val id = _uiState.value.pendingResumeModelId
-        clearResumeRiskDialog()
-        val model = modelCatalog.allModels.find { it.id == id } ?: return
-        downloadManager.startDownload(model)
-        if (pendingRiskyResumes.isNotEmpty()) presentNextResumeRisk()
-    }
-
-    fun dismissResumeRiskDialog() {
-        pendingRiskyResumes.clear()
-        clearResumeRiskDialog()
-    }
-
-    private fun presentNextResumeRisk() {
-        val next = pendingRiskyResumes.removeFirstOrNull() ?: return
-        val risk = downloadManager.remainingDownloadRisk(next)
-        _uiState.update {
-            it.copy(
-                showResumeRiskDialog = true,
-                pendingResumeModelId = next.id,
-                resumeRiskCellular = risk.becauseCellular,
-                resumeRiskLowBattery = risk.becauseLowBattery,
-            )
-        }
-    }
-
-    private fun clearResumeRiskDialog() {
-        _uiState.update {
-            it.copy(
-                showResumeRiskDialog = false,
-                pendingResumeModelId = null,
-                resumeRiskCellular = false,
-                resumeRiskLowBattery = false,
-            )
-        }
     }
 
     fun refresh() {

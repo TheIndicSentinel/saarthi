@@ -550,26 +550,4 @@ class ModelDownloadManagerTest {
             com.saarthi.core.inference.model.resolveHuggingFaceAuthGate(model.downloadUrl, ""),
         )
     }
-
-    @Test
-    fun `reattach skips a large remaining transfer when risk policy asks to confirm`() {
-        val model = testModel(fileSizeBytes = 2_500_000_000L)
-        writeFile(manager.tmpModelsDir(), model.fileName, sizeBytes = 3_000_000)
-        mockkObject(DownloadRiskPolicy)
-        try {
-            every {
-                DownloadRiskPolicy.confirm(any(), any(), any(), any())
-            } returns LargeDownloadConfirm(becauseCellular = true, becauseLowBattery = false)
-
-            val skipped = manager.reattachActiveDownloads(listOf(model))
-
-            assertEquals(listOf(model.id), skipped.map { it.id })
-            assertNull(
-                "Risky auto-resume must not start the FGS before the user confirms",
-                manager.allProgress.value[model.id],
-            )
-        } finally {
-            unmockkObject(DownloadRiskPolicy)
-        }
-    }
 }
