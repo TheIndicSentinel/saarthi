@@ -32,7 +32,7 @@ jobs:
     permissions:
       contents: write   # publish the APK as a Release asset (raw download)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
