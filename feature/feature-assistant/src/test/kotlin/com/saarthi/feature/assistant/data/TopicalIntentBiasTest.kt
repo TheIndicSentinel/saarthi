@@ -84,7 +84,25 @@ class TopicalIntentBiasTest {
     }
 
     @Test
-    fun `strong topical hit does not emit weak miss`() {
+    fun `weak topical miss when body lacks subject tokens`() {
+        val unrelated = RetrievedChunk(
+            text = "Wind circulates when temperature differences create pressure variation.",
+            docName = "guide.pdf",
+            score = 4.0,
+            chunkIndex = 2,
+            docUri = "uri",
+        )
+        assertTrue(
+            shouldEmitIndexedTopicalWeakMiss(
+                "Does it apply to minors",
+                RagTurnMode.DOCUMENT_GROUNDED,
+                listOf(unrelated),
+            ),
+        )
+    }
+
+    @Test
+    fun `topical subject covered when breach token in corpus`() {
         val body = RetrievedChunk(
             text = "Processing of personal data of children requires parental consent",
             docName = "act.pdf",

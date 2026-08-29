@@ -53,8 +53,37 @@ internal fun shouldEmitIndexedTopicalWeakMiss(
     if (!isIndexedSessionTopicalWithoutDocCues(query)) return false
     if (isDocumentMetaOverviewQuery(query)) return false
     if (retrieved.isEmpty()) return true
+    if (!topicalSubjectCoveredInRetrieval(query, retrieved)) return true
     return isLowConfidenceAnchorOnlyRetrieval(query, retrieved)
 }
+
+/** Topical subject tokens from the question should appear in retrieved body text. */
+internal fun topicalSubjectCoveredInRetrieval(
+    query: String,
+    retrieved: List<RetrievedChunk>,
+): Boolean {
+    val subjectTokens = topicalSubjectTokensFromQuery(query)
+    if (subjectTokens.isEmpty()) return true
+    val body = retrieved.filter { it.chunkIndex >= 0 && !it.isStructuralAnchor() }
+    if (body.isEmpty()) return false
+    val corpusTokens = significantTokensForClaimOverlap(buildRetrievalCorpus(body))
+    val searchTokens = expandEntityAliasTokens(subjectTokens)
+    return searchTokens.any { token -> token in corpusTokens }
+}
+
+internal fun topicalSubjectTokensFromQuery(query: String): Set<String> {
+    val tokens = LinkedHashSet<String>()
+    for (match in TOPICAL_SUBJECT_PATTERN.findAll(query)) {
+        val raw = match.value.lowercase()
+        raw.split(Regex("[^a-z]+")).filter { it.length >= 4 }.forEach { tokens.add(it) }
+        if (raw.length >= 4) tokens.add(raw)
+    }
+    return tokens
+}
+
+internal fun buildIndexedTopicalWeakMissMessage(query: String): String =
+    "I couldn't find a clear answer to that in the attached document(s). " +
+        "Try naming a chapter, section, or a specific phrase from the file."
 
 /** Topical indexed-session turn eligible for document citation when hits are strong enough. */
 internal fun isIndexedTopicalCitationIntent(

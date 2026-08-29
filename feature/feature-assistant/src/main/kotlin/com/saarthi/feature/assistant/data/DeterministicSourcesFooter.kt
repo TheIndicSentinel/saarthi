@@ -42,15 +42,49 @@ private val STATUTE_TITLE_IN_LINE = Regex(
  * (numbered refs, page dots, hash filenames, prose-style act titles) — not user
  * prose mentioning "sources" in the answer body.
  */
-internal fun stripModelSourcesBlock(text: String, labels: CitationDisplayLabels): String {
+private val INLINE_HASH_PAGE_CITE = Regex(
+    """\(\s*[0-9A-Fa-f]{12,}[^)]*(?:p\.?\s*\d+|page\s+\d+)[^)]*\)""",
+)
+private val INLINE_HASH_ONLY_CITE = Regex(
+    """\(\s*[0-9A-Fa-f]{20,}[^)]*\)""",
+)
+
+/**
+ * Removes inline model citation attempts from the answer body (hash parentheticals)
+ * before the deterministic footer is applied. Does not touch Sources blocks — those
+ * are handled by [stripModelSourcesBlock].
+ */
+internal fun stripInlineModelCitationAttempts(text: String): String {
     var result = text.trimEnd()
-    val markers = SOURCES_TAIL_MARKERS_BASE + "\n${labels.sourcesHeader}"
-    for (marker in markers) {
-        val idx = result.lastIndexOf(marker, ignoreCase = true)
-        if (idx < 0) continue
-        val tail = result.substring(idx)
-        if (!looksLikeAutomatedSourcesTail(tail)) continue
-        result = result.substring(0, idx).trimEnd()
+    result = INLINE_HASH_PAGE_CITE.replace(result, "")
+    result = INLINE_HASH_ONLY_CITE.replace(result, "")
+    return result.trimEnd()
+}
+
+internal fun stripModelSourcesBlock(text: String, labels: CitationDisplayLabels): String {
+    var result = stripInlineModelCitationAttempts(text)
+    val markers = SOURCES_TAIL_MARKERS_BASE + "\n${labels.sourcesHeader}" +
+        listOf(" Sources:", " ${labels.sourcesHeader}")
+    var changed = true
+    while (changed) {
+        changed = false
+        for (marker in markers) {
+            val idx = result.lastIndexOf(marker, ignoreCase = true)
+            if (idx < 0) continue
+            val tail = result.substring(idx)
+            if (!looksLikeAutomatedSourcesTail(tail)) continue
+            result = result.substring(0, idx).trimEnd()
+            changed = true
+            break
+        }
+        val sameLineIdx = result.lastIndexOf(" Sources:", ignoreCase = true)
+        if (sameLineIdx > 0) {
+            val tail = result.substring(sameLineIdx).trimStart()
+            if (looksLikeAutomatedSourcesTail(tail)) {
+                result = result.substring(0, sameLineIdx).trimEnd()
+                changed = true
+            }
+        }
     }
     return result
 }

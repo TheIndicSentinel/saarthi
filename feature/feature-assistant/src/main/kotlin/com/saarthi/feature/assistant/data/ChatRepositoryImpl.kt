@@ -908,14 +908,43 @@ class ChatRepositoryImpl @Inject constructor(
         } else {
             emptyList()
         }
-        if (shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved) ||
+        val outlineByDocName = retrieved
+            .filter { it.chunkIndex < 0 }
+            .associate { it.docName to it.text }
+        val sessionDocPairs = sessionDocs.map { it.uri to it.name }
+        val citationLabels = currentLanguage.citationDisplayLabels()
+        if (shouldEmitNamedStatuteDocumentMismatch(
+                ragQuery,
+                ragTurnMode,
+                restrictDocUris,
+                sessionDocPairs,
+                outlineByDocName,
+                retrieved,
+            ) ||
+            shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved) ||
             shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved) ||
             shouldEmitAnswerabilityRetrievalMiss(ragQuery, ragTurnMode, retrieved)
         ) {
             DebugLogger.log("RAG", "deterministic retrieval miss turnMode=${ragTurnMode.name}")
             return when {
+                shouldEmitNamedStatuteDocumentMismatch(
+                    ragQuery,
+                    ragTurnMode,
+                    restrictDocUris,
+                    sessionDocPairs,
+                    outlineByDocName,
+                    retrieved,
+                ) -> buildNamedStatuteDocumentMismatchMessage(
+                    ragQuery,
+                    restrictDocUris,
+                    sessionDocPairs,
+                    outlineByDocName,
+                    citationLabels,
+                )
                 shouldEmitAnswerabilityRetrievalMiss(ragQuery, ragTurnMode, retrieved) ->
                     buildAnswerabilityRetrievalMissMessage(ragQuery)
+                shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved) ->
+                    buildIndexedTopicalWeakMissMessage(ragQuery)
                 else -> buildDeterministicRetrievalMissMessage(ragQuery)
             }
         }
@@ -928,10 +957,6 @@ class ChatRepositoryImpl @Inject constructor(
         }
         lastPromptUriLens = retrieved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().map { it.length }
         lastPriorTurnsChars = 0
-        val outlineByDocName = retrieved
-            .filter { it.chunkIndex < 0 }
-            .associate { it.docName to it.text }
-        val citationLabels = currentLanguage.citationDisplayLabels()
         val newAttachDisplayNames = attachments.map { file ->
             displayCitationDocName(
                 file.name,
