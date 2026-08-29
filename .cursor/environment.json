@@ -1,0 +1,4 @@
+{
+  "name": "Saarthi Android",
+  "install": "bash .cursor/install.sh"
+}
