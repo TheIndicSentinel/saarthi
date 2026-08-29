@@ -182,6 +182,25 @@ internal fun goldenSessionRetrieve(
         finalRanked = mergeRankedBm25Results(ranked, paraphraseRanked, effectiveTopK)
     }
 
+    val focusEntities = extractQueryFocusEntities(query)
+    if (shouldRunAnswerabilityRetrievalRetry(
+            query = query,
+            ranked = finalRanked,
+            pool = contentChunks,
+            anchoredEntities = anchoredEntities,
+            priorQuery = priorQuery,
+        )
+    ) {
+        val focusExpansion = answerabilityQueryExpansion(focusEntities, priorQuery)
+        val answerabilityQuery = "$effectiveQuery $focusExpansion"
+        val retryCandidates = Bm25Retriever.rankTokenised(tokenised, answerabilityQuery, candidateK)
+        val answerabilityRanked = filterRankedByScoreGap(
+            featureRerankBm25Candidates(retryCandidates, contentChunks, query, rerankCtx),
+            effectiveTopK,
+        )
+        finalRanked = mergeRankedBm25Results(finalRanked, answerabilityRanked, effectiveTopK)
+    }
+
     val docChunksByUri = contentChunks.groupBy { it.docUri }.mapValues { (_, list) -> list.sortedBy { it.chunkIndex } }
     val orderedIdsByDoc = docChunksByUri.mapValues { (_, list) -> list.map { it.id } }
     val sectionGroupsByDoc = buildSectionGroupsByDoc(contentChunks)

@@ -763,6 +763,29 @@ class RagDocumentRepository @Inject constructor(
             )
         }
 
+        val focusEntities = extractQueryFocusEntities(query)
+        if (shouldRunAnswerabilityRetrievalRetry(
+                query = query,
+                ranked = ranked,
+                pool = rankPool,
+                anchoredEntities = anchoredEntities,
+                priorQuery = priorQuery,
+            )
+        ) {
+            val focusExpansion = answerabilityQueryExpansion(focusEntities, priorQuery)
+            val answerabilityQuery = "$effectiveQuery $focusExpansion"
+            val retryCandidates = rankContentChunks(rankPool, sessionId, answerabilityQuery, candidateK)
+            val answerabilityRanked = filterRankedByScoreGap(
+                featureRerankBm25Candidates(retryCandidates, rankPool, query, rerankCtx),
+                effectiveTopK,
+            )
+            ranked = mergeRankedBm25Results(ranked, answerabilityRanked, effectiveTopK)
+            logRag(
+                "answerability-retry focusLen=${focusEntities.joinToString().length} " +
+                    "top=${answerabilityRanked.firstOrNull()?.score ?: 0.0}",
+            )
+        }
+
         // Neighbor expansion: for the top BM25 hits, also include the
         // *next* chunk in the same document. Answers often straddle a
         // chunk boundary — the keyword lands in chunk 5 but the actual

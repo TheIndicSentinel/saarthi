@@ -909,10 +909,15 @@ class ChatRepositoryImpl @Inject constructor(
             emptyList()
         }
         if (shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved) ||
-            shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved)
+            shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved) ||
+            shouldEmitAnswerabilityRetrievalMiss(ragQuery, ragTurnMode, retrieved)
         ) {
             DebugLogger.log("RAG", "deterministic retrieval miss turnMode=${ragTurnMode.name}")
-            return buildDeterministicRetrievalMissMessage(ragQuery)
+            return when {
+                shouldEmitAnswerabilityRetrievalMiss(ragQuery, ragTurnMode, retrieved) ->
+                    buildAnswerabilityRetrievalMissMessage(ragQuery)
+                else -> buildDeterministicRetrievalMissMessage(ragQuery)
+            }
         }
         DebugLogger.log(
             "RAG",
