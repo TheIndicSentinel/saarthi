@@ -498,6 +498,17 @@ internal fun extractCitationSectionHeading(text: String): String? {
         if (structureMarkerScore(line, "section")?.let { it <= 1 } == true) {
             return normalizeCitationSectionHeading(line)
         }
+        // Phase C — educator-guide style "Section IV — …" headings.
+        if (
+            Regex("(?i)^Section\\s+[IVXLC\\d]+").containsMatchIn(line) &&
+            line.length <= 96
+        ) {
+            return normalizeCitationSectionHeading(line)
+        }
+        // Numbered section lead-in ("1. The Sun is the primary source…").
+        if (Regex("^\\d+\\.\\s+\\p{L}").containsMatchIn(line) && line.length <= 96) {
+            return normalizeCitationSectionHeading(line)
+        }
         if (Regex("(?i)^THE\\s+SCHEDULE\\b").containsMatchIn(line)) {
             return normalizeCitationSectionHeading(line)
         }

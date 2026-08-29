@@ -153,14 +153,18 @@ internal fun formatPageRangeForUser(pageRange: String, labels: CitationDisplayLa
     else -> pageRange
 }
 
+/** Phase C — last-resort location before "unknown" when page/heading absent. */
+internal fun formatChunkPartLocation(chunkIndex: Int): String = "part ${chunkIndex + 1}"
+
 internal fun formatCitationLocation(chunk: RetrievedChunk, labels: CitationDisplayLabels): String = when {
     chunk.chunkIndex < 0 -> labels.overview
     else -> {
         val page = extractPageRange(chunk.text)?.let { formatPageRangeForUser(it, labels) }
-        val section = extractCitationSectionHeading(chunk.text)
+        val section = if (page == null) extractCitationSectionHeading(chunk.text) else null
         when {
             page != null -> page
             section != null -> section
+            chunk.chunkIndex >= 0 -> formatChunkPartLocation(chunk.chunkIndex)
             else -> labels.locationUnknown
         }
     }
@@ -333,18 +337,33 @@ internal fun applyDeterministicSourcesFooter(
     val claimPairingActive = shouldFilterSourcesByClaimOverlap(claimOverlapQuery, claimOverlapTurnMode)
     val pairingBody = answerBodyForClaimOverlap(body, claimOverlapTurnMode)
     val overlapChunks = if (claimPairingActive) {
-        filterChunksByClaimOverlap(chunks, pairingBody, query = claimOverlapQuery)
+        filterChunksByClaimOverlap(
+            chunks,
+            pairingBody,
+            query = claimOverlapQuery,
+            turnMode = claimOverlapTurnMode,
+        )
     } else {
         chunks
     }
-    if (overlapChunks.isEmpty()) return body
+    val overlapDroppedAll = claimPairingActive && overlapChunks.isEmpty() && chunks.isNotEmpty()
+    if (overlapDroppedAll) {
+        logRag(
+            ragCitationOverlapDropLogLine(
+                queryLen = claimOverlapQuery?.length ?: 0,
+                chunkCount = chunks.size,
+            ),
+        )
+    }
+  // Phase A5 — when claim overlap filters every chunk, fall back to retrieval-based Sources.
+    val footerChunks = if (overlapDroppedAll) chunks else overlapChunks
     val footer = buildDeterministicSourcesFooter(
-        overlapChunks,
+        footerChunks,
         outlineByDocName,
         labels,
         maxSources,
         multiFileFairSources,
-        claimPairAnswerBody = pairingBody.takeIf { claimPairingActive },
+        claimPairAnswerBody = pairingBody.takeIf { claimPairingActive && !overlapDroppedAll },
         claimPairQuery = claimOverlapQuery,
     )
     if (footer.isEmpty()) return body

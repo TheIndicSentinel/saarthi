@@ -79,10 +79,9 @@ private const val MAX_PROMPT_CHARS_STANDARD = 5_000   // Gemma 3n E2B/E4B
 private const val MAX_PROMPT_CHARS_2048     = 5_500   // Gemma 2
 private const val MAX_PROMPT_CHARS_LARGE    = 8_000   // Gemma 4
 
-// Hard ceiling on the prior-turns recap block. Keeps total prompt fill well
-// under the tier budget so a long chat can't push Gemma 3n into the
-// high-fill repetition loops observed in production (19:37:30 / 19:42:01).
-private const val RECAP_MAX_CHARS = 280
+// Hard ceiling on the prior-turns recap block for grounded document follow-ups.
+private const val RECAP_MAX_CHARS_GROUNDED_STANDARD = 220
+private const val RECAP_MAX_CHARS_GROUNDED_LARGE = 380
 
 // Reasoning-quality rules injected ONLY on the roomy high-RAM path (4096 window,
 // budget >= 7000). On the tight 2048 path this is never added, so it cannot push
@@ -1369,12 +1368,12 @@ class ChatRepositoryImpl @Inject constructor(
         }
         // STANDARD / LARGE — give the model continuity in a BOUNDED size.
         //
-        // Tier-aware budget. STANDARD (Gemma 3n) stays at RECAP_MAX_CHARS=280 —
-        // a larger window pushed fill past 95% and triggered the repetition loops
-        // observed in production (19:37:30, 19:42:01). LARGE (Gemma 4) has an
-        // 8000c prompt budget; giving it 500c here is still only 6% of that
-        // ceiling and allows 3–4 meaningful questions instead of barely 1.
-        val recapBudget = if (tier == SystemPromptProvider.ModelTier.LARGE) 500 else RECAP_MAX_CHARS
+        // Phase C — tighter recap on grounded factual turns (chunks carry substance).
+        val recapBudget = if (tier == SystemPromptProvider.ModelTier.LARGE) {
+            RECAP_MAX_CHARS_GROUNDED_LARGE
+        } else {
+            RECAP_MAX_CHARS_GROUNDED_STANDARD
+        }
         // 85c truncates most real questions mid-sentence. 120c preserves the
         // full text of the vast majority of queries, including Hindi/Telugu ones
         // where the same semantic content is expressed in fewer code units.

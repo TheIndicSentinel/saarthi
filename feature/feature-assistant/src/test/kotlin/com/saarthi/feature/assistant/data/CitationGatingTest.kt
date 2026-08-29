@@ -69,7 +69,7 @@ class CitationGatingTest {
         val anchored = bodyChunk(score = 0.0).copy(
             structuralAnchor = StructuralAnchorKind.HEADING,
         )
-        assertFalse(
+        assertTrue(
             isQueryAboutDocumentForCitation(
                 query = "Explain black holes",
                 turnMode = RagTurnMode.DOCUMENT_GROUNDED,
@@ -82,6 +82,26 @@ class CitationGatingTest {
                 ragBlockChars = 400,
                 retrieved = listOf(anchored),
                 query = "Explain black holes",
+                attachmentsThisTurn = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `policy A cites grounded how question with strong organic hit`() {
+        val oceanChunk = RetrievedChunk(
+            text = "The ocean exerts a major control on climate through heat transport.",
+            docName = "guide.pdf",
+            score = 8.0,
+            chunkIndex = 5,
+            docUri = "content://guide",
+        )
+        assertTrue(
+            shouldAttachDeterministicSources(
+                turnMode = RagTurnMode.DOCUMENT_GROUNDED,
+                ragBlockChars = 600,
+                retrieved = listOf(oceanChunk),
+                query = "How do oceans affect Earth's climate system?",
                 attachmentsThisTurn = false,
             ),
         )

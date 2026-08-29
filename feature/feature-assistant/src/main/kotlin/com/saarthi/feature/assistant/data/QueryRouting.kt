@@ -152,7 +152,7 @@ private fun matchNamedDocsByFilenameTokens(query: String, docs: List<Pair<String
     for ((uri, name) in docs) {
         val fTokens = filenameTokens(name)
         val hit = fTokens.any { ft ->
-            qTokens.any { qt -> qt == ft || (qt.length >= 4 && ft.length >= 4 && (qt.contains(ft) || ft.contains(qt))) }
+            qTokens.any { qt -> filenameTokenMatchesQuery(qt, ft) }
         }
         if (hit) matched += uri
     }
@@ -208,20 +208,19 @@ internal fun matchNamedDocsByRoleCues(query: String, docs: List<Pair<String, Str
     for ((uri, name) in docs) {
         val fTokens = filenameTokens(name)
         val hit = fTokens.any { ft ->
-            filenameTokenSets.any { hint ->
-                ft == hint || (ft.length >= 4 && hint.length >= 4 && (ft.contains(hint) || hint.contains(ft)))
-            }
+            filenameTokenSets.any { hint -> filenameTokenMatchesQuery(hint, ft) }
         }
         if (hit) matched += uri
     }
     return matched
 }
 
-/** Tier 2.8 — equal-slot compare only for explicit multi-doc compare, not in-doc section contrast. */
+/** Tier 2.8 — equal-slot compare only for explicit multi-doc compare, not in-doc contrast. */
 internal fun shouldUseEqualSlotsCompare(query: String, docCount: Int): Boolean {
     if (docCount < 2) return false
     if (!isCompareQuery(query)) return false
     if (isInDocumentSectionContrast(query)) return false
+    if (isInDocConceptComparisonQuery(query)) return false
     return true
 }
 
@@ -521,6 +520,7 @@ internal fun detectRagAnswerShape(query: String, metaOverview: Boolean): RagAnsw
     }
     if (isListRequest(query)) return RagAnswerShape.LIST
     if (isTabularAmountQuery(query)) return RagAnswerShape.LIST
+    if (isSetEnumerationQuery(query)) return RagAnswerShape.LIST
     return RagAnswerShape.NARROW_QA
 }
 
@@ -618,9 +618,45 @@ internal fun bypassMetaForStructureQuery(query: String): Boolean = isStructureLi
  * B1 — legal-substance questions must not take the meta/structural path
  * (outline-only). Includes penalties, Schedule, fines, and structure queries.
  */
+/** Phase A2 — meta path only for true overview/structure; not absence/mechanism asks. */
+internal fun blocksMetaRouteForSubstanceClause(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower.isEmpty()) return false
+    if (Regex("(?i)\\b(not|except|without|excluding)\\b").containsMatchIn(lower)) return true
+    if (extractQueryFocusEntities(query).isNotEmpty()) return true
+    if (isCompareQuery(query)) return true
+    if (Regex("(?i)\\bexamples?\\b").containsMatchIn(lower)) return true
+    val hasSummarize = Regex("(?i)\\b(summar(?:y|ize|ise)|synopsis)\\b").containsMatchIn(lower)
+    val hasSubstanceCue = Regex(
+        "(?i)\\b(how|what|why|role|affect|difference|compare|interact|feedback|evidence|factor)\\b",
+    ).containsMatchIn(lower)
+    if (hasSummarize && hasSubstanceCue) return true
+    if (
+        Regex("(?i)\\bconclusions?\\b").containsMatchIn(lower) &&
+        !isBareConclusionsStructureQuery(query)
+    ) {
+        return true
+    }
+    if (
+        Regex("(?i)\\b(topics?|subjects?)\\b").containsMatchIn(lower) &&
+        Regex("(?i)\\b(about|regarding|related|climate|change|discuss|cover)\\b").containsMatchIn(lower)
+    ) {
+        return true
+    }
+    return false
+}
+
+internal fun isBareConclusionsStructureQuery(query: String): Boolean {
+    val lower = query.lowercase().trim()
+    if (lower in setOf("conclusions", "conclusion")) return true
+    if (Regex("(?i)^(what are the )?conclusions?\\??$").matches(lower)) return true
+    return Regex("(?i)^(list|show) (the )?conclusions?").containsMatchIn(lower)
+}
+
 internal fun bypassMetaForSubstanceQuery(query: String): Boolean {
     if (bypassMetaForStructureQuery(query)) return true
     if (isTabularAmountQuery(query)) return true
+    if (blocksMetaRouteForSubstanceClause(query)) return true
     val lower = query.lowercase().trim()
     if (lower.isEmpty()) return false
     if (lower.contains("schedule")) return true
@@ -698,6 +734,9 @@ internal fun isSpanPreservingQuery(query: String): Boolean {
     if (extractSectionRefs(query).isNotEmpty()) return true
     if (isTabularAmountQuery(query)) return true
     if (activeTopicCategories(query).isNotEmpty()) return true
+    if (isInDocConceptComparisonQuery(query)) return true
+    if (isSetEnumerationQuery(query)) return true
+    if (isAbsenceInventoryQuery(query)) return true
     if (isStructureListQuery(query)) return true
     if (isStructureCountQuery(query)) return false
     return hasDocumentQueryCues(query)

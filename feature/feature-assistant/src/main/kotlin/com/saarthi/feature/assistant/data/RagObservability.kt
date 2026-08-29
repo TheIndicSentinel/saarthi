@@ -124,6 +124,10 @@ internal fun fts5IsWarranted(chunkCount: Int, searchMs: Long): Boolean =
 internal fun ragFts5CandidateLogLine(chunkCount: Int, searchMs: Long): String =
     "fts5-candidate chunks=$chunkCount searchMs=$searchMs"
 
+/** Phase 0 — claim overlap removed every Sources line for this turn. */
+internal fun ragCitationOverlapDropLogLine(queryLen: Int, chunkCount: Int): String =
+    "citation overlap-drop queryLen=$queryLen chunks=$chunkCount"
+
 internal fun logRag(line: String) {
     DebugLogger.log("RAG", line)
     Timber.d("RAG: $line")
