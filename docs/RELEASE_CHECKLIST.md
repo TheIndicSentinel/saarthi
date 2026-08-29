@@ -196,7 +196,8 @@ Hardening behaviors (debug CI does not cover these):
       privacy-guardrails review and Data Safety form together.
 - [ ] **HuggingFace token**: the APK must not embed `HF_APP_TOKEN_B64` (unit test
       `HuggingFaceTokenNotInBuildConfigTest`). Gated Gemma 3n downloads use a
-      **user-pasted** read-only token stored in DataStore (Settings). Rotate any
+      **user-pasted** read-only token stored in DataStore (onboarding / change-model
+      when picking gated Gemma 3n — not a Settings row). Rotate any
       token that was previously baked into shipped APKs — those builds remain
       extractable. Treat any leftover dashboard token as download-quota only,
       never write/billing.
@@ -212,7 +213,9 @@ Hardening behaviors (debug CI does not cover these):
   - Data Safety form: on-device processing, local storage, optional model downloads,
     no data sold/shared; microphone (voice) and notifications usage disclosed.
   - AI / privacy disclosure: state that the model runs fully on-device and chats stay local.
-  - Model-download behavior: large downloads gated on Wi-Fi/validated network and surfaced to the user.
+  - Model-download behavior: starts immediately on the active network
+    (Wi-Fi if connected, otherwise mobile). Does not wait for Wi-Fi.
+    No extra confirm sheet for large / cellular / low-battery transfers.
 
 ---
 
@@ -257,16 +260,14 @@ Hardening behaviors (debug CI does not cover these):
 4. [ ] **Data safety form** — no Firebase (confirmed: never adopted, decision made
        2026-07-13 to keep it that way — see "Crash reporting" above). Declare:
        - On-device processing + local-only storage (chats, memories, attachments).
-       - Voice/audio data: as of 2026-08-28, on-device transcription is the **default**
-         (`SpeechRecognizer.createOnDeviceSpeechRecognizer` when the platform confirms
-         a model is installed, API 33+). Cloud / standard speech is blocked unless the
-         user turns off **Settings → On-device voice only**. If they do, Android's
-         standard speech service may send audio to its provider (typically Google).
-         Declare audio data as "collected, shared with a third party (device's speech
-         service) for app functionality, not used for any other purpose, user can
-         opt out" — the opt-out is the default; turning the setting off is opt-in to
-         sharing. Do NOT declare "no data collected" for microphone, even though
-         Saarthi itself has no backend to receive it, because the optional path exists.
+       - Voice/audio data: as of 2026-08-29, on-device transcription is the
+         product path (`SpeechRecognizer.createOnDeviceSpeechRecognizer` when
+         the platform confirms a model is installed, API 33+). There is no
+         Settings toggle to allow cloud / standard speech. Phones without an
+         on-device model use typing. An older install that stored “allow phone
+         speech” still uses Android's standard speech service, which may send
+         audio to its provider (typically Google). Declare microphone usage;
+         do NOT declare "no data collected" for microphone.
        - No data sold, no advertising use, no data retained by Saarthi's own
          infrastructure (there isn't any — no servers).
 5. [ ] **Foreground service** `specialUse`: three services declared, each with its

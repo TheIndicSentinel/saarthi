@@ -6,7 +6,7 @@ import org.junit.Test
 
 /**
  * Pins the product default: unset installs are on-device-only; an explicit
- * stored false (user allowed phone speech) is preserved.
+ * stored false (older install allowed phone speech) is preserved.
  */
 class VoicePrivacyPreferenceTest {
 

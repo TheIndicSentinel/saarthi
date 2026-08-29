@@ -7,8 +7,8 @@ import org.junit.Test
 
 /**
  * Pins STT path selection: prefer on-device; block cloud when on-device-only
- * is on (the product default); standard path only when the user turned the
- * toggle off and no on-device model exists.
+ * is on (the product default); standard path only when an older install
+ * stored off and no on-device model exists.
  */
 class SpeechRecognitionPathTest {
 
@@ -37,7 +37,7 @@ class SpeechRecognitionPathTest {
     }
 
     @Test
-    fun `no on-device model uses standard path when toggle is off`() {
+    fun `no on-device model uses standard path when preference is off`() {
         assertEquals(
             SpeechRecognitionPath.STANDARD_MAY_USE_CLOUD,
             resolveSpeechRecognitionPath(
@@ -74,7 +74,7 @@ class SpeechRecognitionPathTest {
     }
 
     @Test
-    fun `no recognition at all is unavailable regardless of toggle`() {
+    fun `no recognition at all is unavailable regardless of preference`() {
         assertEquals(
             SpeechRecognitionPath.UNAVAILABLE,
             resolveSpeechRecognitionPath(

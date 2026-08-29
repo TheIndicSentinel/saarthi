@@ -115,9 +115,8 @@ val LocalSaarthiColors = staticCompositionLocalOf {
 }
 
 /**
- * Apply the Saarthi theme. The active palette is keyed off [mode]; flipping
- * it re-runs [SaarthiColors.applyPalette] and the snapshot system propagates
- * the new colors through every composable that reads from `SaarthiColors`.
+ * Apply the Saarthi theme. The shipped app is dark-only ([ThemeMode.DARK]).
+ * [ThemeMode.LIGHT] remains for previews and tests.
  */
 @Composable
 fun SaarthiTheme(

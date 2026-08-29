@@ -186,7 +186,7 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.timber)
     // WorkManager — used by PackUpdateWorker to periodically refresh
-    // the Kisan knowledge pack on UNMETERED Wi-Fi.
+    // the Kisan knowledge pack on any connected network (Wi-Fi or mobile).
     implementation(libs.workmanager)
 
     // Core modules

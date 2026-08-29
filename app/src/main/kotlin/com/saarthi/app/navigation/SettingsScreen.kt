@@ -36,15 +36,12 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Public
@@ -65,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -91,16 +89,12 @@ fun SettingsScreen(
     currentLanguage: com.saarthi.core.i18n.SupportedLanguage = com.saarthi.core.i18n.SupportedLanguage.HINDI,
     onChangeLanguage: (com.saarthi.core.i18n.SupportedLanguage) -> Unit = {},
     settingsViewModel: com.saarthi.app.SettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
-    themeViewModel: com.saarthi.app.ThemeViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val s = currentLanguage.settings
     val context = androidx.compose.ui.platform.LocalContext.current
     var showLangPicker by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
-    var showHfTokenDialog by remember { mutableStateOf(false) }
-    val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
-    val darkOn = themeMode == com.saarthi.core.ui.theme.ThemeMode.DARK
     // Daily wisdom notification — preference-backed (DataStore) and tied
     // to AlarmManager via WisdomNotificationScheduler. Previously this was
     // a `mutableStateOf` that did nothing; now the toggle actually
@@ -108,9 +102,6 @@ fun SettingsScreen(
     val wisdomVm: com.saarthi.app.wisdom.WisdomSettingsViewModel =
         androidx.hilt.navigation.compose.hiltViewModel()
     val notifOn by wisdomVm.enabled.collectAsStateWithLifecycle()
-    val hfTokenVm: com.saarthi.app.HuggingFaceTokenSettingsViewModel =
-        androidx.hilt.navigation.compose.hiltViewModel()
-    val hfTokenSaved by hfTokenVm.hasToken.collectAsStateWithLifecycle()
 
     // Bug fix: settingsViewModel.toast (e.g. "All conversations cleared"
     // after Clear-all) was emitted but never collected anywhere, so it
@@ -213,12 +204,6 @@ fun SettingsScreen(
                 subtitle = if (notifOn) s.wisdomOn else s.wisdomOff,
                 trailing = { SaarthiToggle(on = notifOn, onToggle = { wisdomVm.setEnabled(!notifOn) }) },
             )
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.DarkMode, null) },
-                title = s.darkTheme,
-                subtitle = if (darkOn) s.darkOn else s.darkOff,
-                trailing = { SaarthiToggle(on = darkOn, onToggle = { themeViewModel.toggle() }) },
-            )
             // Read replies aloud (TTS) — hands-free auto-read is a Pro feature;
             // manual "Listen" on a reply stays free for everyone.
             val ttsVm: com.saarthi.app.TtsSettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
@@ -248,29 +233,6 @@ fun SettingsScreen(
             }
 
             SectionLabel(s.sectionPrivacy)
-            val voicePrivacyVm: com.saarthi.app.VoicePrivacySettingsViewModel =
-                androidx.hilt.navigation.compose.hiltViewModel()
-            val onDeviceVoiceOnly by voicePrivacyVm.onDeviceVoiceOnly.collectAsStateWithLifecycle()
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.Mic, null) },
-                title = s.onDeviceVoiceOnly,
-                subtitle = if (onDeviceVoiceOnly) s.onDeviceVoiceOnlyOn else s.onDeviceVoiceOnlyOff,
-                tone = ChipTone.Jade,
-                trailing = {
-                    SaarthiToggle(
-                        on = onDeviceVoiceOnly,
-                        onToggle = { voicePrivacyVm.toggle() },
-                    )
-                },
-            )
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.Lock, null) },
-                title = s.hfToken,
-                subtitle = if (hfTokenSaved) s.hfTokenSaved else s.hfTokenMissing,
-                tone = ChipTone.Jade,
-                trailing = { ChevronRight() },
-                onClick = { showHfTokenDialog = true },
-            )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Shield, null) },
                 title = s.privacyDetails,
@@ -466,75 +428,6 @@ fun SettingsScreen(
             },
         )
     }
-
-    if (showHfTokenDialog) {
-        HuggingFaceTokenDialog(
-            strings = s,
-            tokenAlreadySaved = hfTokenSaved,
-            onSave = { token ->
-                hfTokenVm.save(token)
-                showHfTokenDialog = false
-            },
-            onClear = {
-                hfTokenVm.clear()
-                showHfTokenDialog = false
-            },
-            onDismiss = { showHfTokenDialog = false },
-        )
-    }
-}
-
-@Composable
-private fun HuggingFaceTokenDialog(
-    strings: com.saarthi.core.i18n.SettingsStrings,
-    tokenAlreadySaved: Boolean,
-    onSave: (String) -> Unit,
-    onClear: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var draft by remember { mutableStateOf("") }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = SaarthiColors.Bg2,
-        title = { Text(strings.hfTokenDialogTitle, color = SaarthiColors.Text) },
-        text = {
-            Column {
-                Text(strings.hfTokenDialogBody, color = SaarthiColors.Text2)
-                Spacer(Modifier.height(12.dp))
-                androidx.compose.material3.OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text(strings.hfTokenPlaceholder, color = SaarthiColors.Text4) },
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
-                    ),
-                )
-            }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(
-                onClick = { onSave(draft) },
-                enabled = draft.isNotBlank(),
-            ) {
-                Text(strings.hfTokenSave, color = SaarthiColors.Text, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            Row {
-                if (tokenAlreadySaved) {
-                    androidx.compose.material3.TextButton(onClick = onClear) {
-                        Text(strings.hfTokenClear, color = SaarthiColors.Rose)
-                    }
-                }
-                androidx.compose.material3.TextButton(onClick = onDismiss) {
-                    Text(strings.cancel, color = SaarthiColors.Text2)
-                }
-            }
-        },
-    )
 }
 
 @Composable
@@ -764,6 +657,12 @@ fun PrivacyScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = Suppo
 @Composable
 fun AboutScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = SupportedLanguage.HINDI) {
     val d = currentLanguage.settingsDetail
+    val context = LocalContext.current
+    val versionLabel = remember(context) {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        // minSdk 28 = P, so longVersionCode is always available.
+        aboutVersionLabel(info.versionName, info.longVersionCode)
+    }
     Box(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
         Box(
             modifier = Modifier
@@ -798,7 +697,7 @@ fun AboutScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = Support
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "v 1.4.0 · build 187",
+                    versionLabel,
                     style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3),
                 )
                 Spacer(Modifier.height(16.dp))
@@ -824,13 +723,11 @@ fun AboutScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = Support
                         leadingIcon = { Icon(Icons.Outlined.Memory, null) },
                         title = "Google Gemma",
                         subtitle = d.aboutGemmaSub,
-                        trailing = { SaarthiChip(text = "Apache 2.0", small = true) },
                     )
                     SaarthiListRow(
                         leadingIcon = { Icon(Icons.Outlined.Bolt, null) },
-                        title = "LiteRT",
+                        title = d.aboutEngineTitle,
                         subtitle = d.aboutLiteRtSub,
-                        trailing = { SaarthiChip(text = "Apache 2.0", small = true) },
                     )
                 }
 

@@ -72,9 +72,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.saarthi.core.i18n.OnboardingStrings
 import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.i18n.onboarding
 import com.saarthi.core.i18n.settings
+import com.saarthi.core.i18n.userFacingDownloadFailure
 import com.saarthi.core.inference.engine.isInsufficientRamForModelLoad
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
@@ -92,6 +94,7 @@ import com.saarthi.core.ui.theme.SaarthiDisplayFont
 import com.saarthi.feature.onboarding.viewmodel.OnboardingStep
 import com.saarthi.feature.onboarding.viewmodel.OnboardingViewModel
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 @Composable
 fun OnboardingScreen(
@@ -766,7 +769,7 @@ private fun Onb4ModelPick(
                 style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
             )
             Spacer(Modifier.height(14.dp))
-            DeviceTierBadge(profile = state.deviceProfile)
+            DeviceTierBadge(profile = state.deviceProfile, strings = o)
             Spacer(Modifier.height(14.dp))
             state.catalogModels.forEachIndexed { i, model ->
                 val progress = state.downloadProgress[model.id]
@@ -817,6 +820,7 @@ private fun Onb4ModelPick(
                     insufficientStorage = insufficientStorage,
                     insufficientRam = insufficientRam,
                     likelyCpuOnly = likelyCpuOnly,
+                    strings = o,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -835,20 +839,13 @@ private fun Onb4ModelPick(
 }
 
 @Composable
-private fun DeviceTierBadge(profile: DeviceProfile?) {
+private fun DeviceTierBadge(profile: DeviceProfile?, strings: OnboardingStrings) {
     if (profile == null) return
-    val ram = "${profile.totalRamMb / 1024}GB RAM"
-    val storage = "${profile.availableStorageMb / 1024}GB free"
-    val label = when (profile.tier) {
-        DeviceTier.FLAGSHIP -> "Flagship · $ram · $storage · ${if (profile.hasVulkan) "Vulkan GPU" else "CPU"}"
-        DeviceTier.MID      -> "Mid-range · $ram · $storage"
-        DeviceTier.LOW      -> "Entry · $ram · $storage"
-        DeviceTier.MINIMAL  -> "Ultra-low · $ram · $storage"
-    }
+    val label = deviceBadgeLabel(profile.totalRamMb, profile.availableStorageMb, strings)
     // Honest, plain-language expectation for THIS phone. Setting it before the
     // download decision is what keeps a mid/low-RAM user from picking the
     // heaviest model, getting slow/blank replies, and leaving a 1-star review.
-    val expectation = deviceExpectationText(profile.tier, profile.totalRamMb)
+    val expectation = deviceExpectationText(profile.tier, profile.totalRamMb, strings)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -920,15 +917,32 @@ internal fun isLikelyCpuOnly(
  * and a natural boundary matching real device RAM SKUs (6/8/12GB), not an
  * arbitrary number.
  */
-internal fun deviceExpectationText(tier: DeviceTier, totalRamMb: Long): String = when {
-    tier == DeviceTier.FLAGSHIP -> "Runs the best models smoothly."
-    tier == DeviceTier.MID && totalRamMb >= 8_000 ->
-        "Pick the recommended model for the best balance of speed and quality."
-    tier == DeviceTier.MID ->
-        "Pick a lighter model, or close other apps first — this device has less headroom than newer phones."
-    tier == DeviceTier.LOW -> "Choose a lighter model for smooth replies — bigger ones may run slowly."
-    else -> "Only the compact model will run well here; replies stay short and simple."
+internal fun deviceExpectationText(
+    tier: DeviceTier,
+    totalRamMb: Long,
+    strings: OnboardingStrings = OnboardingStrings(),
+): String = when {
+    tier == DeviceTier.FLAGSHIP -> strings.expectFlagship
+    tier == DeviceTier.MID && totalRamMb >= 8_000 -> strings.expectMidRecommended
+    tier == DeviceTier.MID -> strings.expectMidTight
+    tier == DeviceTier.LOW -> strings.expectLow
+    else -> strings.expectMinimal
 }
+
+/** First-run badge: memory and free space only — no Flagship / Vulkan / CPU. */
+internal fun deviceBadgeLabel(
+    totalRamMb: Long,
+    availableStorageMb: Long,
+    strings: OnboardingStrings = OnboardingStrings(),
+): String {
+    val ramGb = totalRamMb / 1024
+    val freeGb = availableStorageMb / 1024
+    return "${String.format(Locale.US, strings.badgeMemory, ramGb)} · ${String.format(Locale.US, strings.badgeFree, freeGb)}"
+}
+
+/** Model will load, but this phone is expected to run it slower (CPU path). */
+internal const val MODEL_STATUS_CPU_ONLY = "· Works on this phone, a bit slower"
+
 
 @Composable
 private fun ModelOption(
@@ -943,6 +957,7 @@ private fun ModelOption(
     insufficientStorage: Boolean = false,
     insufficientRam: Boolean = false,
     likelyCpuOnly: Boolean = false,
+    strings: OnboardingStrings = OnboardingStrings(),
 ) {
     val tone = when (toneIndex % 4) {
         0 -> ChipTone.Marigold
@@ -950,7 +965,7 @@ private fun ModelOption(
         2 -> ChipTone.Indigo
         else -> ChipTone.Terracotta
     }
-    val tag = model.tags.firstOrNull() ?: "Model"
+    val tag = model.tags.firstOrNull() ?: strings.modelTagFallback
 
     val bg = if (selected) SaarthiColors.MarigoldSoft else SaarthiColors.Surface
     val borderColor = if (selected) SaarthiColors.MarigoldBd else SaarthiColors.Border
@@ -1031,14 +1046,14 @@ private fun ModelOption(
                     )
                     // Status text — always present so row height is uniform.
                     val status = when {
-                        progress is DownloadProgress.Downloading -> "· Downloading ${progress.percent}%"
-                        progress is DownloadProgress.Paused -> "· Paused"
-                        progress is DownloadProgress.Failed -> "· Failed"
-                        downloaded -> "· Ready to use"
-                        insufficientStorage -> "· Not enough space"
-                        insufficientRam -> "· May not load right now"
-                        likelyCpuOnly -> "· Runs in compatibility mode (slower)"
-                        else -> "· Not downloaded"
+                        progress is DownloadProgress.Downloading -> "${strings.statusDownloading} ${progress.percent}%"
+                        progress is DownloadProgress.Paused -> strings.statusPaused
+                        progress is DownloadProgress.Failed -> strings.statusFailed
+                        downloaded -> strings.statusReady
+                        insufficientStorage -> strings.statusNoSpace
+                        insufficientRam -> strings.statusMayNotLoad
+                        likelyCpuOnly -> strings.statusCpuOnly
+                        else -> strings.statusNotDownloaded
                     }
                     val statusColor = when {
                         progress is DownloadProgress.Downloading -> SaarthiColors.Marigold
@@ -1079,14 +1094,14 @@ private fun ModelOption(
         if (progress is DownloadProgress.Paused) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "Paused · ${progress.reason}",
+                strings.pausedLabel,
                 style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Marigold),
             )
         }
         if (progress is DownloadProgress.Failed) {
             Spacer(Modifier.height(4.dp))
             Text(
-                "Download failed: ${progress.reason}",
+                "${strings.downloadFailedLabel}. ${userFacingDownloadFailure(progress.reason, strings)}",
                 style = MaterialTheme.typography.labelSmall.copy(color = SaarthiColors.Rose),
             )
         }
@@ -1151,7 +1166,7 @@ private fun DownloadingScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                activeModel?.displayName ?: "AI Model",
+                activeModel?.displayName ?: o.aiModelFallback,
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
@@ -1206,7 +1221,7 @@ private fun DownloadingScreen(
             if (state.lastFailureNote != null) {
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Last attempt didn't finish: ${state.lastFailureNote}",
+                    "${o.lastAttemptLabel}. ${userFacingDownloadFailure(state.lastFailureNote, o)}",
                     style = MaterialTheme.typography.bodySmall.copy(color = SaarthiColors.Text3),
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),

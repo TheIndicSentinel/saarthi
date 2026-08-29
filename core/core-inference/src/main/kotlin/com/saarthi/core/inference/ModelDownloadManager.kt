@@ -147,6 +147,9 @@ class ModelDownloadManager @Inject constructor(
      * MUST be called from a foreground context (it always is — every caller is
      * a user tap on the onboarding / downloads screen) so the foreground-service
      * start is permitted on Android 12+.
+     *
+     * Uses the OS active network (Wi-Fi if connected, otherwise mobile).
+     * Does not wait for unmetered / Wi-Fi-only.
      */
     fun startDownload(model: ModelEntry) = launchDownload(model, replace = false)
 
