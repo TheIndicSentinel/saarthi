@@ -136,6 +136,9 @@ class ModelDownloadService : Service() {
     private val latest = ConcurrentHashMap<String, Pair<Long, Long>>()
     private val titles = ConcurrentHashMap<String, String>()
 
+    /** True once [startForeground] succeeded — onCreate promotes early to beat the ~5s deadline. */
+    @Volatile private var foregroundEstablished = false
+
     private val http by lazy {
         OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -150,6 +153,9 @@ class ModelDownloadService : Service() {
     override fun onCreate() {
         super.onCreate()
         ensureChannel()
+        // Promote immediately so startForegroundService()'s deadline is met even if
+        // onStartCommand is delayed by binder/IO work on a cold service start.
+        foregroundEstablished = startForegroundCompat(buildNotification(DEFAULT_TITLE, 0L, 0L))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -566,8 +572,16 @@ class ModelDownloadService : Service() {
 
     // ── Foreground notification ────────────────────────────────────────────────
 
-    private fun promoteToForeground(title: String): Boolean =
-        startForegroundCompat(buildNotification(title, 0L, 0L))
+    private fun promoteToForeground(title: String): Boolean {
+        val notification = buildNotification(title, 0L, 0L)
+        if (foregroundEstablished) {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIF_ID, notification)
+            return true
+        }
+        foregroundEstablished = startForegroundCompat(notification)
+        return foregroundEstablished
+    }
 
     private fun refreshForeground() {
         val entry = latest.entries.firstOrNull()
@@ -687,7 +701,8 @@ class ModelDownloadService : Service() {
         private const val DEFAULT_TITLE = "Downloading AI model…"
         private const val PROGRESS_INTERVAL_MS = 800L
         private const val MAX_ATTEMPTS = 6
-        private const val STOP_GRACE_MS = 3_000L
+        /** Covers download-complete → InferenceService.startLoading handoff on slow devices. */
+        private const val STOP_GRACE_MS = 8_000L
 
         private const val ACTION_START  = "com.saarthi.core.inference.action.DOWNLOAD_START"
         private const val ACTION_CANCEL = "com.saarthi.core.inference.action.DOWNLOAD_CANCEL"

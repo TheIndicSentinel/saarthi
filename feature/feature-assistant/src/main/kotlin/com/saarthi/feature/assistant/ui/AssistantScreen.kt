@@ -347,6 +347,19 @@ fun AssistantScreen(
                     )
                 }
 
+                if (uiState.modelInitializing && !uiState.isStreaming) {
+                    Text(
+                        text = currentLanguage.loadingModelBody,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = SaarthiColors.Text3,
+                            fontSize = 12.sp,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
+                }
+
                 if (uiState.modelReloading && !uiState.isStreaming) {
                     Text(
                         text = currentLanguage.reloadingModelBanner,

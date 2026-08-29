@@ -256,6 +256,7 @@ class SupportedLanguageTest {
         assertNonBlankForEveryLanguage("resumeInterruptedDownloadTitle") { resumeInterruptedDownloadTitle }
         assertNonBlankForEveryLanguage("resumeInterruptedDownloadBody") { resumeInterruptedDownloadBody }
         assertNonBlankForEveryLanguage("reloadingModelBanner") { reloadingModelBanner }
+        assertNonBlankForEveryLanguage("chatModelNotReady") { chatModelNotReady }
     }
 
     @Test

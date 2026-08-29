@@ -51,6 +51,7 @@ class InferenceService : Service() {
 
     private val binder = LocalBinder()
     private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile private var foregroundEstablished = false
 
     inner class LocalBinder : Binder() {
         fun getService(): InferenceService = this@InferenceService
@@ -61,6 +62,8 @@ class InferenceService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        // Meet startForegroundService deadline before onStartCommand runs (model load / generate).
+        foregroundEstablished = enterForeground(buildNotification(NotificationState.LOADING))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -69,7 +72,16 @@ class InferenceService : Service() {
             ?: NotificationState.GENERATING
 
         val notification = buildNotification(state)
-        if (!enterForeground(notification)) {
+        val entered = if (foregroundEstablished) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                val nm = getSystemService(NotificationManager::class.java)
+                nm.notify(NOTIFICATION_ID, notification)
+            }
+            true
+        } else {
+            enterForeground(notification).also { ok -> if (ok) foregroundEstablished = true }
+        }
+        if (!entered) {
             // We could NOT legally become a foreground service right now — e.g. on
             // a low-RAM budget device the app was pushed to the background during a
             // memory-pressure storm (the Android 13 SM-E625F log showed exactly
