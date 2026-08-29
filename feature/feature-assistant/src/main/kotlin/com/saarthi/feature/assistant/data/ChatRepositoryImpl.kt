@@ -12,6 +12,7 @@ import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.LogPrivacy
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.engine.shouldResetEngineOnSessionSwitch
+import com.saarthi.core.inference.engine.userFacingGenerationError
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ChatSessionDao
@@ -369,9 +370,9 @@ class ChatRepositoryImpl @Inject constructor(
                     // the native thread actually finishes.
                     if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
                     // Surface engine errors as a visible assistant message — never crash the app.
-                    val errMsg = e.message?.takeIf { it.isNotBlank() }
-                        ?: currentLanguage.errorGeneric
-                    DebugLogger.log("CHAT", "streamResponse ERROR: $errMsg")
+                    val errMsg = userFacingGenerationError(e.message)
+                        .ifBlank { currentLanguage.errorGeneric }
+                    DebugLogger.log("CHAT", "streamResponse ERROR: ${e.javaClass.simpleName}: ${e.message}")
                     _history.update { history ->
                         history.map { msg ->
                             if (msg.id == streamingId)

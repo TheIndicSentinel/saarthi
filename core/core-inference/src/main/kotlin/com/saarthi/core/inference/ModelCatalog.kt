@@ -96,7 +96,7 @@ class ModelCatalog @Inject constructor() {
     //
     // The APK does not embed a Hugging Face token. Public litert-community
     // files download with no Authorization header. google/* (Gemma 3n) needs
-    // a read-only token the user pastes in Settings / onboarding.
+    // a read-only token the user pastes when picking that model.
     //
     // downloadUrl is pinned to a specific commit SHA (not resolve/main) with a
     // matching expectedSha256 on each entry — verified once, right after a

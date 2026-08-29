@@ -54,14 +54,24 @@ class InferenceEngineSelectorTest {
     }
 
     @Test
-    fun `fd path error message mentions the models folder`() = runTest {
+    fun `fd path error message tells the user to download in the app`() = runTest {
         val config = InferenceConfig(modelPath = "/proc/self/fd/5.litertlm")
 
         val ex = runCatching { selector.initialize(config) }.exceptionOrNull()
 
         assertNotNull("Must throw for fd path", ex)
-        assertTrue("Error must mention the models folder, got: ${ex?.message}",
-            ex!!.message?.contains("models folder", ignoreCase = true) == true)
+        assertTrue(
+            "Error must tell the user to download in the app, got: ${ex?.message}",
+            ex!!.message?.contains("download", ignoreCase = true) == true,
+        )
+        assertTrue(
+            "Error must not mention LiteRT, got: ${ex.message}",
+            ex.message?.contains("LiteRT", ignoreCase = true) != true,
+        )
+        assertTrue(
+            "Error must not mention the models folder, got: ${ex.message}",
+            ex.message?.contains("models folder", ignoreCase = true) != true,
+        )
     }
 
     // ── Unsupported formats → UnsupportedOperationException ─────────────────────
@@ -95,6 +105,14 @@ class InferenceEngineSelectorTest {
         assertNotNull("Must throw for unsupported format", ex)
         assertTrue("Error must include the unknown extension, got: ${ex?.message}",
             ex!!.message?.contains("safetensors", ignoreCase = true) == true)
+        assertTrue(
+            "Error must not mention LiteRT, got: ${ex.message}",
+            ex.message?.contains("LiteRT", ignoreCase = true) != true,
+        )
+        assertTrue(
+            "Error must not mention .litertlm, got: ${ex.message}",
+            ex.message?.contains("litertlm", ignoreCase = true) != true,
+        )
     }
 
     // ── Edge case: bare fd path with NO extension ──────────────────────────────

@@ -94,6 +94,10 @@ private class RangeExhaustedException(val serverTotalBytes: Long?) :
  * a music player or active upload alive. This is what production apps
  * (WhatsApp, Telegram, Play Store) use for downloads.
  *
+ * Network: OkHttp uses the OS default route — Wi-Fi if connected, otherwise
+ * mobile. There is no WorkManager [androidx.work.NetworkType] constraint and
+ * no wait-for-Wi-Fi loop. Gating on UNMETERED would strand mobile-only users.
+ *
  * What is preserved from the previous WorkManager implementation:
  *  • OkHttp HTTP Range resume — byte-exact continuation from a partial tmp file.
  *  • Atomic tmp -> dest rename, GGUF/size validation (via [ModelDownloadManager]).
@@ -485,7 +489,7 @@ class ModelDownloadService : Service() {
             response.close()
             if (code == 401 || code == 403 || code == 404) {
                 val msg = when (code) {
-                    401, 403 -> "Access denied (HTTP $code) — add or replace the Hugging Face token in Settings."
+                    401, 403 -> "Access denied (HTTP $code) — the Hugging Face token is missing or invalid. Choose this model again and paste a read-only token."
                     404      -> "Model not found at download URL (HTTP 404)."
                     else     -> "HTTP $code: ${response.message}"
                 }

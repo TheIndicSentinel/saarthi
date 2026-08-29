@@ -24,7 +24,7 @@ enum class HuggingFaceAuthGate {
 }
 
 const val HF_TOKEN_REQUIRED_MESSAGE =
-    "This model is on a gated Hugging Face repo. Add a read-only Hugging Face token in Settings, then try again."
+    "This model is on a gated Hugging Face repo. Choose it again and paste a read-only token when asked."
 
 fun resolveHuggingFaceAuthGate(
     downloadUrl: String,

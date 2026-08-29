@@ -41,16 +41,16 @@ class InferenceEngineSelector @Inject constructor(
             // cannot resolve them — reject early with a user-readable message.
             if (isFdPath(path)) {
                 throw IllegalArgumentException(
-                    "LiteRT models must be downloaded to the app's models folder.\n\n" +
-                    "Please use the catalog download button instead of the file browser."
+                    "This model has to be downloaded in the app.\n\n" +
+                    "Use Download on the model list instead of picking a file."
                 )
             }
             liteRtEngine.initialize(config)
         } else {
             val ext = path.substringAfterLast('.', "unknown")
             throw UnsupportedOperationException(
-                "Unsupported model format: .$ext\n\n" +
-                "Please use official .litertlm models from the catalog."
+                "This file type isn't supported (.$ext).\n\n" +
+                "Download a model from the list in the app."
             )
         }
     }

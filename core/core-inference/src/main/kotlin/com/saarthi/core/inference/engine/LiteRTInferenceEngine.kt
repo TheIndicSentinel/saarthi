@@ -532,13 +532,16 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 if (config.modelPath.startsWith("/proc/self/fd/")) {
                     throw IllegalArgumentException(
-                        "LiteRT models must be in the app's models folder with a real file path.\n\n" +
-                        "Please download the model using the catalog instead of picking it from the file browser."
+                        "This model has to be downloaded in the app.\n\n" +
+                        "Use Download on the model list instead of picking a file."
                     )
                 }
 
                 val file = File(config.modelPath)
-                if (!file.exists()) throw IllegalArgumentException("Model file not found: ${config.modelPath}")
+                if (!file.exists()) {
+                    DebugLogger.log("LITERT", "Model file not found: ${config.modelPath}")
+                    throw IllegalArgumentException(USER_FACING_MODEL_MISSING)
+                }
                 if (file.length() <= 1024) {
                     file.delete()
                     throw IllegalArgumentException("Model file is corrupted or incomplete. Please delete and download it again.")
@@ -784,7 +787,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "Load failed: $rawMsg")
                     Timber.e(e, "LiteRT model load failed")
                     InferenceService.stop(context)
-                    throw RuntimeException("LiteRT failed to load model: $msg", e)
+                    throw RuntimeException(msg, e)
                 } catch (e: Throwable) {
                     crashRecoveryStore.markInitEnded()
                     val rawMsg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
@@ -794,12 +797,12 @@ class LiteRTInferenceEngine @Inject constructor(
                             "Your device could not load this model. " +
                             "This usually means the model requires hardware your phone does not support. " +
                             "Please try a different model."
-                        else -> rawMsg
+                        else -> userFacingLoadError(rawMsg)
                     }
                     DebugLogger.log("LITERT", "Load failed: $rawMsg")
                     Timber.e(e, "LiteRT model load failed")
                     InferenceService.stop(context)
-                    throw RuntimeException("LiteRT failed to load model: $msg", e)
+                    throw RuntimeException(msg, e)
                 }
             }
         }
@@ -1001,7 +1004,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 if (crashLoopBlocked)
                     "This model cannot run on your device. Please go back and choose a different model."
                 else
-                    "LiteRT engine not initialised."
+                    USER_FACING_ENGINE_NOT_READY
             )
 
         val timeoutMs = when {
@@ -1077,7 +1080,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 recycleConversation(desiredSampler)
                 conversationIsGrounded = groundedNow
                 val conversation = activeConversation
-                    ?: throw IllegalStateException("Could not create a conversation (engine released or out of memory).")
+                    ?: throw IllegalStateException(USER_FACING_ENGINE_NOT_READY)
 
                 watchdog = launch {
                     delay(timeoutMs)
@@ -1245,7 +1248,7 @@ class LiteRTInferenceEngine @Inject constructor(
                         } else {
                             DebugLogger.log("LITERT", "Generation error: ${error.message}")
                             InferenceService.stop(context)
-                            close(RuntimeException("Generation failed: ${error.message}", error))
+                            close(RuntimeException(userFacingGenerationError(error.message), error))
                         }
                     }
                 })
@@ -1271,7 +1274,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 watchdog?.cancel()
                 heartbeat?.cancel()
                 if (e is CancellationException) throw e
-                close(RuntimeException("Generation failed: ${e.message}", e))
+                close(RuntimeException(userFacingGenerationError(e.message), e))
             } finally {
                 isGenerating = false
             }

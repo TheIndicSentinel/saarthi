@@ -1,5 +1,6 @@
 package com.saarthi.core.i18n
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -93,38 +94,79 @@ class SettingsPrivacyCopyTest {
     }
 
     @Test
-    fun english_privacy_copy_says_voice_is_on_device_by_default() {
+    fun english_privacy_copy_says_voice_is_on_device() {
         val hero = SupportedLanguage.ENGLISH.settingsDetail.privacyHeroBody
         assertTrue(
-            "privacyHeroBody must say on-device voice is the default. Got: '$hero'",
-            hero.contains("on-device", ignoreCase = true) &&
-                hero.contains("default", ignoreCase = true),
+            "privacyHeroBody must say voice is on-device. Got: '$hero'",
+            hero.contains("on-device", ignoreCase = true),
         )
         assertTrue(
-            "privacyHeroBody must tell users how to allow phone speech. Got: '$hero'",
-            hero.contains("On-device voice only", ignoreCase = true),
+            "privacyHeroBody must not point at a Settings voice toggle. Got: '$hero'",
+            !hero.contains("On-device voice only", ignoreCase = true) &&
+                !hero.contains("turn off Settings", ignoreCase = true),
+        )
+        assertTrue(
+            "privacyHeroBody must tell users they can type if voice is missing. Got: '$hero'",
+            hero.contains("type", ignoreCase = true),
         )
         val noAccounts = SupportedLanguage.ENGLISH.settingsDetail.privacyNoAccountsSub
         assertTrue(
-            "privacyNoAccountsSub must not treat cloud speech as the default. Got: '$noAccounts'",
-            noAccounts.contains("on-device", ignoreCase = true),
+            "privacyNoAccountsSub must say voice stays on this device. Got: '$noAccounts'",
+            noAccounts.contains("on this device", ignoreCase = true) ||
+                noAccounts.contains("on-device", ignoreCase = true),
+        )
+        assertTrue(
+            "privacyNoAccountsSub must not offer a phone-speech opt-in. Got: '$noAccounts'",
+            !noAccounts.contains("unless you allow", ignoreCase = true),
         )
         val detailsSub = SupportedLanguage.ENGLISH.settings.privacyDetailsSub
         assertTrue(
-            "privacyDetailsSub must say voice is on-device by default. Got: '$detailsSub'",
-            detailsSub.contains("on-device by default", ignoreCase = true),
+            "privacyDetailsSub must say voice is on-device. Got: '$detailsSub'",
+            detailsSub.contains("Voice on-device", ignoreCase = false) ||
+                detailsSub.contains("voice on-device", ignoreCase = true),
         )
-        val off = SupportedLanguage.ENGLISH.settings.onDeviceVoiceOnlyOff
         assertTrue(
-            "Off subtitle must say the user is allowing phone speech. Got: '$off'",
-            off.contains("allows", ignoreCase = true),
+            "privacyDetailsSub must not say by default (no toggle). Got: '$detailsSub'",
+            !detailsSub.contains("by default", ignoreCase = true),
         )
+    }
+
+    @Test
+    fun voice_unavailable_copy_does_not_point_at_a_settings_toggle() {
+        for (lang in SupportedLanguage.entries) {
+            val s = lang.voiceOnDeviceOnlyUnavailable
+            assertTrue("${lang.englishName} voiceOnDeviceOnlyUnavailable must be non-blank", s.isNotBlank())
+            assertTrue(
+                "${lang.englishName} voiceOnDeviceOnlyUnavailable must not mention Settings. Got: '$s'",
+                !s.contains("Settings", ignoreCase = true),
+            )
+            val detailsSub = lang.settings.privacyDetailsSub
+            assertTrue(
+                "${lang.englishName} privacyDetailsSub must not mention a Settings voice option. Got: '$detailsSub'",
+                !detailsSub.contains("Settings", ignoreCase = true),
+            )
+        }
+    }
+
+    @Test
+    fun english_privacy_hardware_copy_has_no_engine_jargon() {
+        val d = SupportedLanguage.ENGLISH.settingsDetail
+        assertTrue(
+            "privacyRunsHardware must say the model runs on this phone. Got: '${d.privacyRunsHardware}'",
+            d.privacyRunsHardware.contains("phone", ignoreCase = true),
+        )
+        for (lang in SupportedLanguage.entries) {
+            val sub = lang.settingsDetail.privacyRunsHardwareSub
+            assertTrue(
+                "${lang.englishName} privacyRunsHardwareSub must not mention Vulkan. Got: '$sub'",
+                !sub.contains("Vulkan", ignoreCase = true),
+            )
+        }
     }
 
     @Test
     fun english_hf_token_copy_says_gated_models_and_not_in_the_apk() {
         val s = SupportedLanguage.ENGLISH.settings
-        assertTrue(s.hfToken.isNotBlank())
         assertTrue(
             "hfTokenDialogBody must say Gemma 3n is gated. Got: '${s.hfTokenDialogBody}'",
             s.hfTokenDialogBody.contains("Gemma 3n", ignoreCase = true) &&
@@ -134,9 +176,55 @@ class SettingsPrivacyCopyTest {
             "hfTokenDialogBody must say the token is not in the app file. Got: '${s.hfTokenDialogBody}'",
             s.hfTokenDialogBody.contains("never put in the app file", ignoreCase = true),
         )
-        assertTrue(
-            "hfTokenMissing must say Gemma 3n. Got: '${s.hfTokenMissing}'",
-            s.hfTokenMissing.contains("Gemma 3n", ignoreCase = true),
+    }
+
+    @Test
+    fun about_copy_has_no_engine_or_license_jargon() {
+        val english = SupportedLanguage.ENGLISH
+        assertEquals(
+            "English aboutEngineTitle must be plain language",
+            "On-device AI",
+            english.settingsDetail.aboutEngineTitle,
         )
+        assertEquals(
+            "English aboutLiteRtSub must say the model runs on this phone",
+            "Runs the model on this phone",
+            english.settingsDetail.aboutLiteRtSub,
+        )
+        assertEquals(
+            "English aboutSaarthiSub must not mention source code",
+            "Version and credits",
+            english.settings.aboutSaarthiSub,
+        )
+        for (lang in SupportedLanguage.entries) {
+            val d = lang.settingsDetail
+            val aboutBits = listOf(
+                d.aboutEngineTitle,
+                d.aboutLiteRtSub,
+                d.aboutGemmaSub,
+                d.aboutBuiltWith,
+                lang.settings.aboutSaarthiSub,
+                lang.settings.aboutSaarthi,
+            )
+            for (bit in aboutBits) {
+                assertTrue(
+                    "${lang.englishName} About copy must not mention LiteRT. Got: '$bit'",
+                    !bit.contains("LiteRT", ignoreCase = true),
+                )
+                assertTrue(
+                    "${lang.englishName} About copy must not mention Apache. Got: '$bit'",
+                    !bit.contains("Apache", ignoreCase = true),
+                )
+                assertTrue(
+                    "${lang.englishName} About copy must not mention inference runtime. Got: '$bit'",
+                    !bit.contains("inference", ignoreCase = true),
+                )
+                assertTrue(
+                    "${lang.englishName} About copy must not mention source code. Got: '$bit'",
+                    !bit.contains("source code", ignoreCase = true) &&
+                        !bit.contains("sourcecode", ignoreCase = true),
+                )
+            }
+        }
     }
 }
