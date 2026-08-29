@@ -11,6 +11,7 @@ import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.LogPrivacy
 import com.saarthi.core.inference.engine.InferenceEngine
+import com.saarthi.core.inference.engine.shouldResetEngineOnSessionSwitch
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ChatSessionDao
@@ -209,6 +210,7 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     override suspend fun switchSession(sessionId: String) {
+        val resetEngine = shouldResetEngineOnSessionSwitch(_currentSessionId.value, sessionId)
         _currentSessionId.value = sessionId
         val messages = conversationDao.getRecentBySession(
             sessionId,
@@ -221,8 +223,11 @@ class ChatRepositoryImpl @Inject constructor(
             val docs = ragRepository.listSessionDocuments(sessionId)
             ragRepository.loadActiveDocUri(sessionId, docs)
         }
-        // Reset engine session to prevent stale KV cache from previous chat
-        runCatching { inferenceEngine.resetSession() }
+        // Skip when the drawer re-selects the already-open chat. generateStream
+        // already recycles per turn; a no-op tap must not JNI-create a session.
+        if (resetEngine) {
+            runCatching { inferenceEngine.resetSession() }
+        }
     }
 
     override suspend fun deleteSession(sessionId: String) {
@@ -429,7 +434,7 @@ class ChatRepositoryImpl @Inject constructor(
                             rawChars = raw.length,
                             priorTurnsChars = lastPriorTurnsChars,
                             uriLens = lastPromptUriLens,
-                            preview = if (ragLogDocNames()) ragRawModelPreview(groundedText) else null,
+                            preview = if (ragLogModelPreview()) ragRawModelPreview(groundedText) else null,
                         ),
                     )
 
@@ -582,6 +587,9 @@ class ChatRepositoryImpl @Inject constructor(
         // empty row. SQLite forbids VACUUM inside a transaction; the new
         // session is a tiny insert and does not need reclaiming first.
         vacuumAfterCommittedBulkDelete()
+        // Diagnostic log can outlive Room; wipe it after the DB commit so a
+        // failed log wipe cannot roll back the already-deleted chats.
+        runCatching { DebugLogger.wipe() }
         // Leave the user on a clean, valid empty chat.
         createSession()
     }

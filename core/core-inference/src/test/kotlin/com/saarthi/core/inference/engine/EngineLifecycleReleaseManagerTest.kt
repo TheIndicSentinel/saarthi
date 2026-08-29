@@ -172,7 +172,7 @@ class EngineLifecycleReleaseManagerTest {
 
         callbacks.onActivityStarted(mockk<Activity>())
         callbacks.onActivityStopped(mockk<Activity>())
-        scheduler.advanceTimeBy(61_000)
+        scheduler.advanceTimeBy(200_000)
         scheduler.runCurrent()
 
         assertEquals(false, conversationReleased)
@@ -239,7 +239,7 @@ class EngineLifecycleReleaseManagerTest {
     }
 
     @Test
-    fun `generation that outlasts the delay still releases after it ends while backgrounded`() = runTest(testDispatcher) {
+    fun `generation that outlasts the delay starts the 60s-120s clocks only after it ends`() = runTest(testDispatcher) {
         val (app, slot) = mockApplication()
         var generating = true
         var conversationReleased = false
@@ -256,15 +256,20 @@ class EngineLifecycleReleaseManagerTest {
         callbacks.onActivityStarted(mockk<Activity>())
         callbacks.onActivityStopped(mockk<Activity>())
 
-        scheduler.advanceTimeBy(61_000)
+        // Timers must not run during FGS generate — 200s later still held.
+        scheduler.advanceTimeBy(200_000)
         scheduler.runCurrent()
         assertEquals(false, conversationReleased)
         assertEquals(false, engineReleased)
 
-        // Old one-shot retry was 15s/30s and then gave up. A long CPU turn
-        // can last minutes — keep waiting, then release once idle.
         generating = false
         scheduler.advanceTimeBy(EngineLifecycleReleaseManager.WAIT_WHILE_BUSY_MS + 1_000)
+        scheduler.runCurrent()
+        // Clocks start now; stage-1 is still 60s away on FLAGSHIP RAM.
+        assertEquals(false, conversationReleased)
+        assertEquals(false, engineReleased)
+
+        scheduler.advanceTimeBy(61_000)
         scheduler.runCurrent()
         assertEquals(true, conversationReleased)
         assertEquals(false, engineReleased)

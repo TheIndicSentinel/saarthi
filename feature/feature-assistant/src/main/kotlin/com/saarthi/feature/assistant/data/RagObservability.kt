@@ -72,11 +72,19 @@ internal fun ragIndexLogLine(
 internal fun ragIndexFailLogLine(nameLen: Int, exceptionName: String): String =
     "index failed nameLen=$nameLen ex=$exceptionName"
 
-/** First ~200c of raw model text, whitespace-collapsed. Debug APKs only. */
+/** First ~200c of raw model text, whitespace-collapsed. Test helper only. */
 internal const val RAG_RAW_PREVIEW_CHARS = 200
 
 internal fun ragRawModelPreview(raw: String, maxChars: Int = RAG_RAW_PREVIEW_CHARS): String =
     raw.replace(Regex("\\s+"), " ").trim().take(maxChars)
+
+/**
+ * Whether to append a model-text preview to the RAG generation **file** log.
+ * Always false: beta `PUBLIC_DEBUG_LOG` is world-readable Downloads, and
+ * Support attachments must not replay model/user text. Lengths stay
+ * (`rawChars`, `uriLens`).
+ */
+internal fun ragLogModelPreview(): Boolean = false
 
 /**
  * Prompt-side correlators without document text: recap size and each
@@ -89,8 +97,8 @@ internal fun ragPromptObsLogLine(priorTurnsChars: Int, uriLens: List<Int>): Stri
 
 /**
  * End-of-turn line so a Downloads log can show whether the model deflected
- * without re-running. [preview] is the collapsed raw prefix (debug only);
- * release callers pass null.
+ * without re-running. [preview] is only for tests; production callers must
+ * pass null ([ragLogModelPreview] is false).
  */
 internal fun ragGenerationLogLine(
     rawChars: Int,

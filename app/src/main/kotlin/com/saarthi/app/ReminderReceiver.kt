@@ -22,15 +22,13 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * BroadcastReceiver for both one-off reminders and the daily wisdom card.
+ * BroadcastReceiver for the daily wisdom card.
  *
- * Two actions live behind one receiver because they share notification
- * channel, permission check, tap-to-open intent, and overall builder
- * style — duplicating them across two receivers would only spread the
- * permission gate + builder boilerplate.
+ * Wisdom reuses the same notification channel, permission check, tap-to-open
+ * intent, and builder as leftover reminder plumbing (channel id kept
+ * stable). The reminder action itself is no longer handled — only
+ * [WisdomNotificationScheduler.ACTION_DAILY_WISDOM] remains.
  *
- *   action = REMINDER       — fired by ReminderManager for a single
- *                              user-requested reminder (delay or HH:MM).
  *   action = DAILY_WISDOM   — fired by WisdomNotificationScheduler each
  *                              day at 8 AM; after posting the wisdom we
  *                              re-arm tomorrow's alarm in the same call.
@@ -86,16 +84,16 @@ class ReminderReceiver : BroadcastReceiver() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
-                // File-visible so a "reminder didn't show" report is diagnosable:
+                // File-visible so a "wisdom didn't show" report is diagnosable:
                 // the alarm DID fire, but the OS suppressed the notification
                 // because the user hasn't granted POST_NOTIFICATIONS.
                 com.saarthi.core.inference.DebugLogger.log(
-                    "REMINDER", "fired id=$id but SUPPRESSED — POST_NOTIFICATIONS not granted",
+                    "WISDOM", "fired id=$id but SUPPRESSED — POST_NOTIFICATIONS not granted",
                 )
                 return
             }
         }
-        com.saarthi.core.inference.DebugLogger.log("REMINDER", "fired id=$id — posting notification")
+        com.saarthi.core.inference.DebugLogger.log("WISDOM", "fired id=$id — posting notification")
 
         // Tap → open the app, preferring an existing task.
         val tapIntent = context.packageManager

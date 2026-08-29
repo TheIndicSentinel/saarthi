@@ -190,4 +190,4 @@ Tiny pointer file the app polls. Stable URL via GitHub:
 1. Content repo name + org for `saarthi-packs` (public).
 2. Refresh cadence per section (schemes monthly · MSP on announcement · mandi prices excluded or daily delta?).
 3. Offline-sign vs CI-secret-sign (recommend offline).
-4. Firebase: drop analytics / opt-in Crashlytics / none (see audit).
+4. Crash reporting: none — on-device `saarthi_debug.log` only (Firebase Crashlytics/Analytics rejected; see `docs/RELEASE_CHECKLIST.md`).

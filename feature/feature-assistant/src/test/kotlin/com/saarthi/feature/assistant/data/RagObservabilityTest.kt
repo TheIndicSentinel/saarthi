@@ -99,6 +99,11 @@ class RagObservabilityTest {
     }
 
     @Test
+    fun `model text preview is off for the file log`() {
+        assertFalse(ragLogModelPreview())
+    }
+
+    @Test
     fun `generation debug preview is appended without URIs`() {
         val line = ragGenerationLogLine(
             rawChars = 12,

@@ -59,6 +59,11 @@ data class AssistantUiState(
      *  model…" instead of an alarming "not ready" state during ordinary,
      *  expected load time (see [com.saarthi.core.inference.engine.InferenceEngine.isInitializing]). */
     val modelInitializing: Boolean = false,
+    /**
+     * True while the engine is reloading after a background memory release.
+     * Drives the reload banner so a 5–10s restore is not a silent offline state.
+     */
+    val modelReloading: Boolean = false,
     val activeModelName: String? = null,
     /**
      * False when the active model is the COMPACT tier (Gemma 3 1B etc.) —
@@ -137,7 +142,11 @@ class AssistantViewModel @Inject constructor(
     // Kotlin's property-initializer order.
 
     private val _uiState = MutableStateFlow(
-        AssistantUiState(modelReady = inferenceEngine.isReady, modelInitializing = inferenceEngine.isInitializing),
+        AssistantUiState(
+            modelReady = inferenceEngine.isReady,
+            modelInitializing = inferenceEngine.isInitializing,
+            modelReloading = inferenceEngine.isReloadingAfterRelease,
+        ),
     )
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
 
@@ -183,6 +192,10 @@ class AssistantViewModel @Inject constructor(
 
         inferenceEngine.isInitializingFlow
             .onEach { loading -> _uiState.update { it.copy(modelInitializing = loading) } }
+            .launchIn(viewModelScope)
+
+        inferenceEngine.isReloadingAfterReleaseFlow
+            .onEach { reloading -> _uiState.update { it.copy(modelReloading = reloading) } }
             .launchIn(viewModelScope)
 
         // Observe active model name changes — and derive the attachment

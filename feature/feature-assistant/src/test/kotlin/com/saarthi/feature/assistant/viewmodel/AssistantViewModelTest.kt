@@ -82,6 +82,10 @@ class AssistantViewModelTest {
         every { mockChatRepository.getCurrentSessionId() } returns flowOf("default")
         every { mockInferenceEngine.isReady } returns false
         every { mockInferenceEngine.isReadyFlow } returns isReadyFlow
+        every { mockInferenceEngine.isInitializing } returns false
+        every { mockInferenceEngine.isInitializingFlow } returns MutableStateFlow(false)
+        every { mockInferenceEngine.isReloadingAfterRelease } returns false
+        every { mockInferenceEngine.isReloadingAfterReleaseFlow } returns MutableStateFlow(false)
         every { mockInferenceEngine.activeModelNameFlow } returns activeModelNameFlow
         every { mockLanguageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
         every { mockMemoryRepository.observeAll() } returns flowOf(emptyList())

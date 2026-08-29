@@ -1,6 +1,5 @@
 package com.saarthi.core.inference
 
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -14,22 +13,23 @@ import javax.inject.Singleton
  * only the event NAME and a timestamp — never prompt text, filenames, or any
  * user content. That keeps it consistent with the offline-privacy promise.
  *
- * [trackOnce] de-dupes "first_*" milestones within a process so a single
- * session's activation isn't counted on every send.
+ * [trackOnce] de-dupes "first_*" milestones across process death via
+ * [FunnelOnceStore] (DataStore in production) so a swipe-away / LMK restart
+ * does not re-count `first_chat_sent` / `first_doc_attached`.
  */
 @Singleton
-class FunnelTracker @Inject constructor() {
-
-    private val firedOnce = ConcurrentHashMap.newKeySet<String>()
+class FunnelTracker @Inject constructor(
+    private val onceStore: FunnelOnceStore,
+) {
 
     /** Record an event every time it happens. */
     fun track(event: FunnelEvent) {
         DebugLogger.log("FUNNEL", event.id)
     }
 
-    /** Record an event at most once per process — for first-time milestones. */
+    /** Record an event at most once per install — for first-time milestones. */
     fun trackOnce(event: FunnelEvent) {
-        if (firedOnce.add(event.id)) {
+        if (onceStore.recordOnce(event.id)) {
             DebugLogger.log("FUNNEL", "${event.id} (first)")
         }
     }

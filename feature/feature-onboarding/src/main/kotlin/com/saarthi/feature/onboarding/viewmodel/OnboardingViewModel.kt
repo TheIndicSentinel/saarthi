@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.HuggingFaceTokenManager
 import com.saarthi.core.inference.ModelCatalog
@@ -26,7 +27,6 @@ import com.saarthi.core.inference.model.InferenceConfig
 import com.saarthi.core.inference.model.ModelEntry
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.model.PromptTier
-import com.saarthi.core.inference.DebugLogger
 import com.saarthi.feature.onboarding.domain.OnboardingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -63,6 +63,12 @@ data class OnboardingUiState(
     val lastFailureNote: String? = null,
     val showHfTokenDialog: Boolean = false,
     val pendingGatedDownloadId: String? = null,
+    val showDownloadRiskDialog: Boolean = false,
+    val pendingRiskDownloadId: String? = null,
+    val pendingRiskDownloadAutoInit: Boolean = false,
+    val pendingRiskDownloadRestart: Boolean = false,
+    val downloadRiskCellular: Boolean = false,
+    val downloadRiskLowBattery: Boolean = false,
 )
 
 enum class OnboardingStep {
@@ -117,7 +123,7 @@ class OnboardingViewModel @Inject constructor(
             val pending = _uiState.value.catalogModels.find { it.id == pendingId }
                 ?: pendingId?.let { modelCatalog.findById(it) }
             _uiState.update { it.copy(showHfTokenDialog = false, pendingGatedDownloadId = null) }
-            if (pending != null) startCatalogDownload(pending)
+            if (pending != null) startDownloadAfterRiskCheck(pending, autoInit = false)
         }
     }
 
@@ -187,16 +193,34 @@ class OnboardingViewModel @Inject constructor(
                             "${autoModel.id}  complete=$alreadyComplete")
                         _uiState.update {
                             it.copy(
-                                step = OnboardingStep.DOWNLOADING,
                                 selectedModelPath = downloadManager.localPathFor(autoModel).absolutePath,
                             )
                         }
                         if (alreadyComplete) {
+                            _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING) }
                             confirmModelAndInit()
                         } else {
-                            // reattachActiveDownloads() further below resumes the
-                            // actual byte transfer; this just waits for it to finish.
-                            awaitDownloadThenInit(autoModel)
+                            val risk = downloadManager.remainingDownloadRisk(autoModel)
+                            if (risk.shouldConfirm) {
+                                // Do not await a transfer that reattach will skip.
+                                DebugLogger.log(
+                                    "ONBOARDING",
+                                    "Partial auto-model resume needs confirm: ${autoModel.id}",
+                                )
+                                _uiState.update {
+                                    it.copy(
+                                        showDownloadRiskDialog = true,
+                                        pendingRiskDownloadId = autoModel.id,
+                                        pendingRiskDownloadAutoInit = true,
+                                        pendingRiskDownloadRestart = false,
+                                        downloadRiskCellular = risk.becauseCellular,
+                                        downloadRiskLowBattery = risk.becauseLowBattery,
+                                    )
+                                }
+                            } else {
+                                _uiState.update { it.copy(step = OnboardingStep.DOWNLOADING) }
+                                awaitDownloadThenInit(autoModel)
+                            }
                         }
                     } else {
                         // Nothing to resume for this model — surface whether the
@@ -460,7 +484,7 @@ class OnboardingViewModel @Inject constructor(
             }
             return
         }
-        startCatalogDownload(model)
+        startDownloadAfterRiskCheck(model, autoInit = false)
     }
 
     private fun startCatalogDownload(model: ModelEntry) {
@@ -474,7 +498,71 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun restartDownload(model: ModelEntry) {
-        downloadManager.restartDownload(model)
+        startDownloadAfterRiskCheck(model, autoInit = false, restart = true)
+    }
+
+    fun confirmRiskyDownload() {
+        val id = _uiState.value.pendingRiskDownloadId
+        val autoInit = _uiState.value.pendingRiskDownloadAutoInit
+        val restart = _uiState.value.pendingRiskDownloadRestart
+        val model = _uiState.value.catalogModels.find { it.id == id }
+            ?: id?.let { modelCatalog.findById(it) }
+        clearDownloadRiskDialog()
+        if (model == null) return
+        when {
+            restart -> downloadManager.restartDownload(model)
+            autoInit -> startDownloadAndAutoInitUnchecked(model)
+            else -> startCatalogDownload(model)
+        }
+    }
+
+    fun dismissDownloadRiskDialog() {
+        clearDownloadRiskDialog()
+    }
+
+    private fun clearDownloadRiskDialog() {
+        _uiState.update {
+            it.copy(
+                showDownloadRiskDialog = false,
+                pendingRiskDownloadId = null,
+                pendingRiskDownloadAutoInit = false,
+                pendingRiskDownloadRestart = false,
+                downloadRiskCellular = false,
+                downloadRiskLowBattery = false,
+            )
+        }
+    }
+
+    private fun startDownloadAfterRiskCheck(
+        model: ModelEntry,
+        autoInit: Boolean,
+        restart: Boolean = false,
+    ) {
+        val remaining = downloadManager.remainingBytesFor(model, replace = restart)
+        val confirm = downloadManager.remainingDownloadRisk(model, replace = restart)
+        if (confirm.shouldConfirm) {
+            DebugLogger.log(
+                "DOWNLOAD",
+                "Confirming large download  model=${model.id}  cellular=${confirm.becauseCellular}  " +
+                    "lowBattery=${confirm.becauseLowBattery}  remaining=${remaining / 1_048_576}MB",
+            )
+            _uiState.update {
+                it.copy(
+                    showDownloadRiskDialog = true,
+                    pendingRiskDownloadId = model.id,
+                    pendingRiskDownloadAutoInit = autoInit,
+                    pendingRiskDownloadRestart = restart,
+                    downloadRiskCellular = confirm.becauseCellular,
+                    downloadRiskLowBattery = confirm.becauseLowBattery,
+                )
+            }
+            return
+        }
+        when {
+            restart -> downloadManager.restartDownload(model)
+            autoInit -> startDownloadAndAutoInitUnchecked(model)
+            else -> startCatalogDownload(model)
+        }
     }
 
     fun cancelDownload(model: ModelEntry) {
@@ -725,6 +813,20 @@ class OnboardingViewModel @Inject constructor(
 
     /** Shared by [proceedFromModelPick] and [proceedWithAutoModel]. */
     private fun startDownloadAndAutoInit(model: ModelEntry) {
+        if (model.requiresHuggingFaceAuth && savedHfToken.value.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    step = OnboardingStep.MODEL_PICK,
+                    showHfTokenDialog = true,
+                    pendingGatedDownloadId = model.id,
+                )
+            }
+            return
+        }
+        startDownloadAfterRiskCheck(model, autoInit = true)
+    }
+
+    private fun startDownloadAndAutoInitUnchecked(model: ModelEntry) {
         if (model.requiresHuggingFaceAuth && savedHfToken.value.isBlank()) {
             _uiState.update {
                 it.copy(

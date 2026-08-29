@@ -22,7 +22,7 @@ Saarthi is a **100% offline** Android AI assistant for Indian users, powered by 
 - **On-device AI:** Google AI Edge LiteRT-LM (`litertlm-android` 0.11.0) — Gemma inference; GPU (OpenCL/Vulkan) with CPU fallback
 - **RAG:** BM25 over Room-persisted chunks (`RagDocumentRepository` + `Bm25Retriever`); dense spike and cross-encoder flags off by default; embedding/vector path deprecated
 - **Downloads:** WorkManager 2.9.1 + OkHttp 4.12.0 (Range-header resumable downloads for 2.5 GB+ models); downloads run as a foreground Service (`ModelDownloadService`), NOT WorkManager — WorkManager's 10-min limit kills large downloads
-- **Monitoring:** Firebase Crashlytics + Analytics (google-services.json required to activate)
+- **Monitoring:** On-device `saarthi_debug.log` via `CrashReporter` / `LocalCrashReporter` — no Firebase Crashlytics or Analytics
 - **Logging:** Timber
 - **Build:** AGP 8.7.3, convention plugins in `build-logic/`
 - **CI/CD:** GitHub Actions in `.github/workflows/` — `ci.yml` (`testDebugUnitTest` + `lintDebug` on every pull request and `workflow_dispatch`), `build_apk.yml` (debug APK on push to `main`/`master`), `release_aab.yml` (signed Play `.aab` on a `v*` tag), optional `test_lab.yml`. Green CI is not LiteRT/GPU/SIGKILL proof; physical-phone smoke in `docs/RELEASE_CHECKLIST.md` is still required before Play.
@@ -101,8 +101,8 @@ gemma4/
 - **Downloads use `ModelDownloadService` (foreground Service), NOT WorkManager** — the 10-min WorkManager ceiling kills large model downloads. Do not migrate this to WorkManager.
 - **EmbeddingModel / SqliteVectorStore / RagPipeline are `@Deprecated`** — production RAG is BM25 only. `DENSE_RETRIEVAL_SPIKE_ENABLED` and `CROSS_ENCODER_RERANK_ENABLED` stay false until Phase 6 eval gates justify spikes. Don't add callers.
 - **NPU is gated off by default** — `DeviceProfiler` deliberately excludes NPU; GPU (OpenCL/Vulkan) → CPU fallback.
-- **`SCHEDULE_EXACT_ALARM` graceful degrade** — reminders use `AlarmManager` exact alarms; degrades to inexact when permission not granted. Don't assume exact timing.
-- **Firebase only activates with `google-services.json`** — Crashlytics/Analytics are no-ops without it. Don't assume crash data is flowing in debug builds.
+- **`SCHEDULE_EXACT_ALARM` graceful degrade** — daily wisdom uses `AlarmManager`; degrades to inexact when exact-alarm permission is not granted. Don't assume exact timing. User-set reminders were removed.
+- **No Firebase** — `CrashReporter` writes only to on-device `saarthi_debug.log`. Crashlytics/Analytics are not in the app; don't assume crash data is flowing anywhere off-device.
 
 ---
 

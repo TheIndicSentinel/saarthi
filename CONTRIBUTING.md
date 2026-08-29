@@ -57,7 +57,7 @@ in every module's `build.gradle.kts`. The plugins live in `build-logic/`:
 | Plugin id                  | What it does                                                              |
 |----------------------------|---------------------------------------------------------------------------|
 | `saarthi.android.application` | Configures `:app` (release signing, packaging, FGS).                  |
-| `saarthi.android.library`     | All `core-*` and `feature-*` modules. Sets `compileSdk = 35`, `minSdk = 28`, JDK 17, **and adds the standard test classpath**: `junit`, `mockk`, `coroutines-test`, `turbine`. |
+| `saarthi.android.library`     | All `core-*` and `feature-*` modules. Sets `compileSdk = 36`, `minSdk = 28`, JDK 17, **and adds the standard test classpath**: `junit`, `mockk`, `coroutines-test`, `turbine`. |
 | `saarthi.android.compose`     | Compose BOM, Compose plugin, ui-tooling.                              |
 | `saarthi.android.feature`     | Applies `library` + `compose` + `hilt`, adds nav + viewmodel + core-* deps. |
 | `saarthi.hilt`                | Hilt + KSP.                                                           |

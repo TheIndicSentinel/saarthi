@@ -120,6 +120,7 @@ object DebugLogger {
     private sealed interface LogWork {
         data class Line(val text: String) : LogWork
         class Flush(val latch: CountDownLatch) : LogWork
+        class Wipe(val latch: CountDownLatch) : LogWork
     }
 
     @Synchronized
@@ -222,6 +223,29 @@ object DebugLogger {
     }
 
     /**
+     * Settings "delete all conversations" must also clear this diagnostic
+     * file: `saarthi_debug.log` can outlive Room and a later Support
+     * attachment would otherwise replay prior session text. Best-effort —
+     * never throws; a failed wipe must not undo an already-committed
+     * chat delete.
+     *
+     * Previously enqueued lines are written, then discarded, so wipe is
+     * not racing the background writer. After the sinks are empty a
+     * one-line marker is appended so later [log] calls still have a
+     * session header.
+     */
+    fun wipe() {
+        ensureWriterStarted()
+        val latch = CountDownLatch(1)
+        if (lineChannel.trySend(LogWork.Wipe(latch)).isSuccess) {
+            runCatching { latch.await(1_000L, TimeUnit.MILLISECONDS) }
+        } else {
+            wipeSinks()
+        }
+        log("APP", "=== Saarthi debug log wiped (delete-all) ===")
+    }
+
+    /**
      * JVM-test hook: point the file sink at a [TemporaryFolder] file and
      * start the writer without Android [Context] / MediaStore. Production
      * still only reaches the sink via [init].
@@ -243,6 +267,10 @@ object DebugLogger {
                 when (work) {
                     is LogWork.Line -> writeLine(work.text)
                     is LogWork.Flush -> work.latch.countDown()
+                    is LogWork.Wipe -> {
+                        wipeSinks()
+                        work.latch.countDown()
+                    }
                 }
             }
         }
@@ -354,6 +382,56 @@ object DebugLogger {
             // Truncate the primary in place ("wt" = write + truncate) so the
             // next appended line begins a fresh generation.
             resolver.openOutputStream(uri, "wt")?.use { /* truncate to empty */ }
+        }
+    }
+
+    /**
+     * Delete/truncate every `saarthi_debug.log` generation we own. File
+     * sink: primary + single `<name>.1` backup. MediaStore sink: truncate
+     * the current URI in place (so the cached entry stays writable) and
+     * best-effort-delete floating `saarthi_debug*.log` siblings including
+     * the backup. Never throws.
+     */
+    private fun wipeSinks() {
+        val f = fileSink
+        if (f != null) {
+            runCatching {
+                val backup = File(f.parentFile, "${f.name}.1")
+                if (backup.exists()) backup.delete()
+                if (f.exists()) f.delete()
+            }
+        }
+        val uri = mediaUri
+        val ctx = resolverContext
+        if (uri != null && ctx != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            wipeMediaStoreSinks(ctx, uri)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun wipeMediaStoreSinks(ctx: Context, keepUri: Uri) {
+        runCatching {
+            val resolver = ctx.contentResolver
+            // Truncate the live entry in place so [mediaUri] stays valid.
+            resolver.openOutputStream(keepUri, "wt")?.use { /* empty */ }
+            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val keepId = runCatching { ContentUris.parseId(keepUri) }.getOrNull()
+            resolver.query(
+                collection,
+                arrayOf(MediaStore.Downloads._ID),
+                "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
+                arrayOf("saarthi_debug%.log"),
+                null,
+            )?.use { c ->
+                val idCol = c.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                while (c.moveToNext()) {
+                    val id = c.getLong(idCol)
+                    if (keepId != null && id == keepId) continue
+                    runCatching {
+                        resolver.delete(ContentUris.withAppendedId(collection, id), null, null)
+                    }
+                }
+            }
         }
     }
 

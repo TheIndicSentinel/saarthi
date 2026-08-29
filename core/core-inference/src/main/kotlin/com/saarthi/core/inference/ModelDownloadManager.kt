@@ -3,6 +3,7 @@ package com.saarthi.core.inference
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.BatteryManager
 import android.os.storage.StorageManager
 import com.saarthi.core.inference.model.DownloadProgress
 import com.saarthi.core.inference.model.HF_TOKEN_REQUIRED_MESSAGE
@@ -291,8 +292,14 @@ class ModelDownloadManager @Inject constructor(
      * After a reboot Android 12+ will not let [BootReceiver] start the
      * download FGS — that path only posts a tap-to-open notification via
      * [findResumablePartials].
+     *
+     * @return models that still have a resumable partial but were **not**
+     * started because [remainingDownloadRisk] asked for a confirm (cellular
+     * or low unplugged battery with ≥200 MB remaining). The tmp stays on
+     * disk; the caller must show the existing risk dialog then
+     * [startDownload]. Tiny Range-resumes still start immediately.
      */
-    fun reattachActiveDownloads(models: List<ModelEntry>) {
+    fun reattachActiveDownloads(models: List<ModelEntry>): List<ModelEntry> {
         val resumable = findResumablePartials(models)
         models.forEach { model ->
             val destFile = resolveLocalFile(model)
@@ -300,7 +307,19 @@ class ModelDownloadManager @Inject constructor(
                 verifyExistingFileInBackground(model, destFile)
             }
         }
+        val skipped = mutableListOf<ModelEntry>()
         resumable.forEach { model ->
+            val risk = remainingDownloadRisk(model)
+            if (risk.shouldConfirm) {
+                DebugLogger.log(
+                    "DOWNLOAD",
+                    "Skipped auto-resume pending confirm  model=${model.id}  " +
+                        "cellular=${risk.becauseCellular}  lowBattery=${risk.becauseLowBattery}  " +
+                        "remaining=${remainingBytesFor(model) / 1_048_576}MB",
+                )
+                skipped += model
+                return@forEach
+            }
             DebugLogger.log(
                 "DOWNLOAD",
                 "Resuming interrupted download ${model.id}  partial=${tmpPathFor(model).length() / 1_048_576}MB",
@@ -308,6 +327,7 @@ class ModelDownloadManager @Inject constructor(
             startDownload(model)
         }
         sweepOrphanedTmpFiles(models)
+        return skipped
     }
 
     /**
@@ -573,6 +593,52 @@ class ModelDownloadManager @Inject constructor(
         runCatching { storageManager.allocateBytes(uuid, bytesNeeded) }
         storageManager.getAllocatableBytes(uuid) >= bytesNeeded
     }.getOrDefault(true)
+
+    /**
+     * Bytes still needed for [model] (catalog size minus a resumable tmp).
+     * 0 when the final file is already complete.
+     */
+    fun remainingBytesFor(model: ModelEntry, replace: Boolean = false): Long {
+        val finalFile = resolveLocalFile(model)
+        if (!replace && isFileComplete(finalFile, model.fileSizeBytes)) return 0L
+        val already = if (!replace) tmpPathFor(model).length() else 0L
+        return (model.fileSizeBytes - already).coerceAtLeast(0L)
+    }
+
+    /** Same bar as a user tap: large remaining + (cellular or low unplugged battery). */
+    fun remainingDownloadRisk(model: ModelEntry, replace: Boolean = false): LargeDownloadConfirm =
+        DownloadRiskPolicy.confirm(
+            isCellularOrMetered = isCellularOrMetered(),
+            batteryPercent = batteryPercent(),
+            isCharging = isCharging(),
+            remainingBytes = remainingBytesFor(model, replace),
+        )
+
+    /**
+     * True on cellular, or on a metered Wi-Fi/hotspot. Unmetered Wi-Fi is false.
+     * No active network → false (the transfer will fail on its own).
+     */
+    fun isCellularOrMetered(): Boolean {
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        val caps = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) } ?: return false
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        ) {
+            return false
+        }
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return true
+        return !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
+    fun batteryPercent(): Int? = runCatching {
+        context.getSystemService(BatteryManager::class.java)
+            .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            .takeIf { it in 0..100 }
+    }.getOrNull()
+
+    fun isCharging(): Boolean = runCatching {
+        context.getSystemService(BatteryManager::class.java).isCharging
+    }.getOrDefault(false)
 
     /**
      * Lightweight network snapshot for the start-of-download log line. Helps

@@ -47,6 +47,18 @@ adb logcat *:E
 adb pull /storage/emulated/0/Download/saarthi_debug.log
 ```
 
+Minified release (Phase 4 device gate — R8 + resource shrinking). Debug
+CI and a debug GPU chat do not prove this binary. When `KEYSTORE_PATH` is
+unset, the APK is signed with `ci/debug.keystore` (installable over the
+debug APK; not Play). Do not add this to every-PR CI (`release_apk.yml`
+is `workflow_dispatch` only — R8 OOMs a 2-core runner if it shares the
+job with tests).
+
+```bash
+./gradlew :app:assembleRelease -Psaarthi.publicLog=false --no-parallel --max-workers=2
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
 If you want a single command that mirrors what CI runs:
 
 ```bash
@@ -84,7 +96,7 @@ than treating any number in this table as current.
 | `core-memory`       | Room helpers, memory/chat hygiene |
 | `core-rag`          | BM25 retrieval, chunking |
 | `core-inference`    | Download policy, crash recovery, engine lifecycle, catalog |
-| `feature-assistant` | Chat mapping, reminders, pack chat |
+| `feature-assistant` | Chat mapping, pack chat |
 | `feature-onboarding`| Onboarding download/init flow |
 | `app`               | Manage-downloads, boot/wisdom wiring |
 
@@ -118,13 +130,20 @@ some catch real regressions.
 
 ### 4. Saarthi DebugLogger (on-device)
 
-The app writes a structured log to
-`/storage/emulated/0/Download/saarthi_debug.log` on every run.
-This is the highest-signal artefact for any user-reported bug:
+Where the file lives depends on the build. Do not assume public Downloads
+on a Play / production APK.
 
-```bash
-adb pull /storage/emulated/0/Download/saarthi_debug.log -
-```
+- **Beta** (`PUBLIC_DEBUG_LOG=true`): public Downloads, so a non-technical
+  user can grab it with any file manager:
+
+  ```bash
+  adb pull /storage/emulated/0/Download/saarthi_debug.log -
+  ```
+
+- **Play production** (`PUBLIC_DEBUG_LOG=false`): app-private storage
+  (`filesDir` or `externalFilesDir`). Use Support → Report a problem
+  (FileProvider attach), or `adb` into the app's private dir. The path
+  label is on the session-start line in the log itself.
 
 Tags you'll see in there:
 
@@ -136,7 +155,7 @@ Tags you'll see in there:
 | `CHAT`     | Stream start / done / token rate              |
 | `PROMPT`   | Tier, recap state, language line              |
 | `MEMORY`   | Memory facts injected per turn                 |
-| `REMINDER` | When a marker is dropped vs. scheduled         |
+| `WISDOM`   | Daily wisdom alarm fired vs. notification suppressed |
 | `DOWNLOAD` | Model download progress + reattach            |
 | `CRASH`    | Uncaught exception + 30 frames of stack       |
 

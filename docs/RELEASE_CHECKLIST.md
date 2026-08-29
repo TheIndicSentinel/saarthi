@@ -141,7 +141,7 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
 - [ ] Model load failure path shows a graceful message (not a crash).
 - [ ] Chat: send a message, watch it stream, press Stop mid-stream.
 - [ ] App restart after a generation — history and the selected model persist.
-- [ ] Notification permission denied — reminders degrade gracefully, no crash.
+- [ ] Notification permission denied — daily wisdom is suppressed, no crash.
 - [ ] Attachment → OCR/RAG path: attach a PDF, ask about it, get a grounded answer.
 - [ ] Voice: mic turn + read a long reply aloud (>4000 chars) — chunked TTS speaks fully.
 - [ ] Background ~1–2 min during/after load, return — no freeze; generation still works.
@@ -149,6 +149,35 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
       (Room migrations; plaintext `saarthi.db` is exported once into SQLCipher
       on first launch after this change. Destructive fallback only from ancient
       dev schemas).
+
+Hardening behaviors (debug CI does not cover these):
+
+- [ ] Drawer re-tap of the **already-open** chat — no burst of
+      `[SESSION] Session reset` in the debug log.
+- [ ] Background during an in-progress generate (FGS notification showing) —
+      returning should not pay a full reload if still generating. After ~2 min
+      idle in background, the reload banner appears and chat works after restore.
+- [ ] Cellular or <30% unplugged + ≥200 MB remaining catalog download —
+      confirm dialog; Not now does not start; Download anyway proceeds.
+      Same dialog for a leftover large `.tmp` auto-resume (onboarding or
+      Settings → Manage downloads).
+- [ ] Settings delete-all — `saarthi_debug.log` has no prior session text
+      (wipe marker only).
+- [ ] Stock build (empty `KISAN_PACK_MANIFEST_URL`) after upgrade from an
+      older install — no periodic `[PACK] PackUpdateWorker enqueued`; leftover
+      unique work cancelled.
+- [ ] **Minified / R8** (`assembleRelease` or `bundleRelease`) on this phone —
+      onboarding, one chat, Stop, attach. A green `test-and-lint` check is not
+      this gate. Do not bump `versionCode` until cutting a store candidate.
+
+      ```bash
+      ./gradlew :app:assembleRelease -Psaarthi.publicLog=false --no-parallel --max-workers=2
+      adb install -r app/build/outputs/apk/release/app-release.apk
+      ```
+
+      Sideload uses `ci/debug.keystore` when `KEYSTORE_PATH` is unset
+      (installable; not Play). Same APK: Actions → **Build Release APK
+      (test)** (`release_apk.yml`, manual). Do not put R8 on every PR.
 
 ## Production (Play Store) only
 

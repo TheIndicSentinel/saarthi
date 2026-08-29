@@ -38,9 +38,10 @@ android {
         // model is on disk — the app is fully offline out of the box. The
         // Kisan pack itself still works offline: the seed pack ships in assets
         // and is installed on first launch (KisanPackInstaller.installSeedIfAbsent).
-        // When the URL is blank, PackUpdateChecker short-circuits to
-        // Unavailable (no network) and PackUpdateWorker returns success (no
-        // retry) — see PackUpdateScheduler / PackUpdateWorker.
+        // When the URL is blank, PackUpdateScheduler does not enqueue and
+        // cancels leftover unique work from older builds. If a leftover job
+        // still fires once, PackUpdateChecker short-circuits to Unavailable
+        // (no HTTP) and PackUpdateWorker returns success.
         //
         // The signed auto-update channel is OPT-IN — enable it for a release by
         // supplying the manifest URL via either:

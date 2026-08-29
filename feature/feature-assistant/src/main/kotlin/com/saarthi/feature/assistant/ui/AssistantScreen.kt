@@ -293,6 +293,7 @@ fun AssistantScreen(
                     tokensPerSecond = uiState.tokensPerSecond,
                     modelReady = uiState.modelReady,
                     modelInitializing = uiState.modelInitializing,
+                    modelReloading = uiState.modelReloading,
                     activeModelName = uiState.activeModelName,
                     onClearChat = viewModel::showClearDialog,
                     isSearchMode = uiState.isSearchMode,
@@ -338,11 +339,24 @@ fun AssistantScreen(
                     .imePadding(),
             ) {
                 // Background loading indicator
-                if (uiState.modelInitializing && !uiState.isStreaming) {
+                if ((uiState.modelInitializing || uiState.modelReloading) && !uiState.isStreaming) {
                     LinearProgressIndicator(
                         modifier = Modifier.fillMaxWidth().height(2.dp),
                         color = SaarthiColors.Gold,
                         trackColor = Color.Transparent,
+                    )
+                }
+
+                if (uiState.modelReloading && !uiState.isStreaming) {
+                    Text(
+                        text = currentLanguage.reloadingModelBanner,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = SaarthiColors.Text3,
+                            fontSize = 12.sp,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
                     )
                 }
 
@@ -795,6 +809,7 @@ private fun ChatTopBar(
     tokensPerSecond: Float,
     modelReady: Boolean,
     modelInitializing: Boolean,
+    modelReloading: Boolean = false,
     activeModelName: String?,
     onClearChat: () -> Unit,
     isSearchMode: Boolean,
@@ -885,7 +900,9 @@ private fun ChatTopBar(
                         // minutes on a first-ever load while GPU shaders
                         // compile) — say so instead of the generic idle
                         // tagline, which gave no sign anything was happening.
-                        modelInitializing -> language.loadingModelTitle
+                        // Reload-after-release uses the same title; the banner
+                        // below the bar explains why.
+                        modelInitializing || modelReloading -> language.loadingModelTitle
                         else -> language.chatOfflineSubtitle
                     },
                     style = MaterialTheme.typography.labelMedium.copy(

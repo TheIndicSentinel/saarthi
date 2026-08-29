@@ -5,6 +5,7 @@ import com.saarthi.core.i18n.LanguageManager
 import com.saarthi.core.i18n.PersonalityPreference
 import com.saarthi.core.i18n.ResponseStyleManager
 import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.inference.DebugLogger
 import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.prompt.SystemPromptProvider
@@ -13,13 +14,20 @@ import com.saarthi.core.memory.db.ChatSessionEntity
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.core.memory.domain.MemoryRepository
+import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
+import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -29,7 +37,8 @@ import org.junit.Test
  * only clears the CURRENT session and never touches the durable USER_SCOPE
  * profile memory — despite the UI promising "permanently delete all
  * conversations". [ChatRepositoryImpl.deleteAllData] must cascade EVERY chat
- * session AND wipe USER_SCOPE.
+ * session AND wipe USER_SCOPE. It must also wipe [DebugLogger] so
+ * `saarthi_debug.log` cannot outlive the deleted chats.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class DeleteAllDataTest {
@@ -48,6 +57,18 @@ class DeleteAllDataTest {
     private val ragRepository: RagDocumentRepository = mockk(relaxed = true)
     private val implicitFactExtractor: ImplicitFactExtractor = mockk(relaxed = true)
     private val responseStyleInstructionCompiler: ResponseStyleInstructionCompiler = mockk(relaxed = true)
+
+    @Before
+    fun setUp() {
+        mockkObject(DebugLogger)
+        every { DebugLogger.wipe() } just Runs
+        every { DebugLogger.log(any(), any()) } just Runs
+    }
+
+    @After
+    fun tearDown() {
+        unmockkObject(DebugLogger)
+    }
 
     private fun session(id: String) = ChatSessionEntity(
         id = id,
@@ -108,6 +129,9 @@ class DeleteAllDataTest {
 
         // Unused SQLite pages reclaimed after the wipe commits — never inside the txn.
         coVerify(exactly = 1) { transactionRunner.vacuum() }
+
+        // Diagnostic log must not outlive the deleted chats.
+        verify(exactly = 1) { DebugLogger.wipe() }
     }
 
     @Test
@@ -134,6 +158,7 @@ class DeleteAllDataTest {
         repo.clearHistory()
 
         coVerify(exactly = 1) { transactionRunner.vacuum() }
+        verify(exactly = 0) { DebugLogger.wipe() }
     }
 
     @Test
@@ -146,5 +171,6 @@ class DeleteAllDataTest {
         repo.deleteSession("s1")
 
         coVerify(exactly = 1) { transactionRunner.vacuum() }
+        verify(exactly = 0) { DebugLogger.wipe() }
     }
 }

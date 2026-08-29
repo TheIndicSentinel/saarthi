@@ -29,6 +29,16 @@ interface InferenceEngine {
     val isInitializingFlow: Flow<Boolean>
         get() = kotlinx.coroutines.flow.flow { emit(isInitializing) }
 
+    /**
+     * True while [initialize] is reloading the model after a debounced
+     * background engine release (not the first load this process). Chat UI
+     * shows a reload banner so a 5–10s GPU restore is not silent.
+     */
+    val isReloadingAfterRelease: Boolean get() = false
+
+    val isReloadingAfterReleaseFlow: Flow<Boolean>
+        get() = kotlinx.coroutines.flow.flow { emit(isReloadingAfterRelease) }
+
     /** The display name of the currently loaded model, or null if none. */
     val activeModelName: String?
 
