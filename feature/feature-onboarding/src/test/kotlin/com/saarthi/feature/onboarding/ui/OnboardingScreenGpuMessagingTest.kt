@@ -1,5 +1,7 @@
 package com.saarthi.feature.onboarding.ui
 
+import com.saarthi.core.i18n.SupportedLanguage
+import com.saarthi.core.i18n.onboarding
 import com.saarthi.core.inference.model.DeviceProfile
 import com.saarthi.core.inference.model.DeviceTier
 import org.junit.Assert.assertEquals
@@ -267,6 +269,15 @@ class OnboardingScreenGpuMessagingTest {
         assertFalse(label.contains("CPU", ignoreCase = true))
         assertFalse(label.contains("Flagship", ignoreCase = true))
         assertFalse(label.contains("RAM", ignoreCase = true))
+    }
+
+    @Test
+    fun `device badge and expectation follow the selected language`() {
+        val hindi = SupportedLanguage.HINDI.onboarding
+        val label = deviceBadgeLabel(totalRamMb = 12_288, availableStorageMb = 64_000, strings = hindi)
+        assertEquals("12 GB मेमोरी · 62 GB खाली", label)
+        assertEquals(hindi.expectFlagship, deviceExpectationText(DeviceTier.FLAGSHIP, 12_000, hindi))
+        assertFalse(label.contains("memory", ignoreCase = true))
     }
 
     @Test

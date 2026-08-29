@@ -88,4 +88,38 @@ class UserFacingDownloadFailureTest {
             )
         }
     }
+
+    @Test
+    fun every_language_has_localized_first_run_badge_and_expectation() {
+        val english = OnboardingStrings()
+        for (lang in SupportedLanguage.entries) {
+            val o = lang.onboarding
+            assertTrue("${lang.englishName} badgeMemory", o.badgeMemory.contains("%d"))
+            assertTrue("${lang.englishName} badgeFree", o.badgeFree.contains("%d"))
+            assertTrue("${lang.englishName} expectFlagship", o.expectFlagship.isNotBlank())
+            assertTrue("${lang.englishName} expectMidRecommended", o.expectMidRecommended.isNotBlank())
+            assertTrue("${lang.englishName} expectMidTight", o.expectMidTight.isNotBlank())
+            assertTrue("${lang.englishName} expectLow", o.expectLow.isNotBlank())
+            assertTrue("${lang.englishName} expectMinimal", o.expectMinimal.isNotBlank())
+            assertTrue("${lang.englishName} aiModelFallback", o.aiModelFallback.isNotBlank())
+            assertTrue("${lang.englishName} modelTagFallback", o.modelTagFallback.isNotBlank())
+            if (lang == SupportedLanguage.ENGLISH) continue
+            assertTrue(
+                "${lang.englishName} badgeMemory must not stay English. Got: '${o.badgeMemory}'",
+                o.badgeMemory != english.badgeMemory,
+            )
+            assertTrue(
+                "${lang.englishName} expectFlagship must not stay English. Got: '${o.expectFlagship}'",
+                o.expectFlagship != english.expectFlagship,
+            )
+            assertTrue(
+                "${lang.englishName} aiModelFallback must not stay English. Got: '${o.aiModelFallback}'",
+                o.aiModelFallback != english.aiModelFallback,
+            )
+            assertTrue(
+                "${lang.englishName} modelTagFallback must not stay English. Got: '${o.modelTagFallback}'",
+                o.modelTagFallback != english.modelTagFallback,
+            )
+        }
+    }
 }

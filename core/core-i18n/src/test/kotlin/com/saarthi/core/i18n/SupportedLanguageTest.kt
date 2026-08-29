@@ -248,6 +248,41 @@ class SupportedLanguageTest {
     }
 
     @Test
+    fun batteryOptExplanation_avoids_optimization_jargon() {
+        // The dialog asks to keep replies from stopping. OS terms like
+        // "battery optimization" / whitelist / localized ऑप्टिमाइज़ेशन
+        // belong in comments, not on screen.
+        val jargon = listOf(
+            "optimization",
+            "optimise",
+            "optimize",
+            "whitelist",
+            "ऑप्टिमाइज़",
+            "ऑप्टिमाइजेशन",
+            "ऑप्टिमायझ",
+            "ஆப்டிமை",
+            "மேம்படுத்தல்",
+            "ఆప్టిమైజ",
+            "অপ্টিমাইজ",
+            "ಆಪ್ಟಿಮೈಸೇ",
+            "ઑપ્ટિમાઇઝ",
+            "ઓપ્ટિમાઇઝ",
+            "ਓਪਟੀਮਾਈ",
+            "ਆਪਟੀਮਾਈ",
+            "ଅପ୍ଟିମାଇଜ",
+        )
+        for (lang in SupportedLanguage.entries) {
+            val text = lang.batteryOptExplanation
+            for (word in jargon) {
+                assertFalse(
+                    "${lang.englishName} batteryOptExplanation must not contain '$word'. Got: '$text'",
+                    text.contains(word, ignoreCase = true),
+                )
+            }
+        }
+    }
+
+    @Test
     fun every_language_has_non_blank_inference_notification_strings() {
         assertNonBlankForEveryLanguage("loadingModelTitle") { loadingModelTitle }
         assertNonBlankForEveryLanguage("loadingModelBody") { loadingModelBody }

@@ -62,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -656,6 +657,12 @@ fun PrivacyScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = Suppo
 @Composable
 fun AboutScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = SupportedLanguage.HINDI) {
     val d = currentLanguage.settingsDetail
+    val context = LocalContext.current
+    val versionLabel = remember(context) {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        // minSdk 28 = P, so longVersionCode is always available.
+        aboutVersionLabel(info.versionName, info.longVersionCode)
+    }
     Box(modifier = Modifier.fillMaxSize().background(SaarthiColors.Bg)) {
         Box(
             modifier = Modifier
@@ -690,7 +697,7 @@ fun AboutScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = Support
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "v 1.4.0 · build 187",
+                    versionLabel,
                     style = MaterialTheme.typography.labelMedium.copy(color = SaarthiColors.Text3),
                 )
                 Spacer(Modifier.height(16.dp))

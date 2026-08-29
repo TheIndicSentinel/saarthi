@@ -94,6 +94,7 @@ import com.saarthi.core.ui.theme.SaarthiDisplayFont
 import com.saarthi.feature.onboarding.viewmodel.OnboardingStep
 import com.saarthi.feature.onboarding.viewmodel.OnboardingViewModel
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 @Composable
 fun OnboardingScreen(
@@ -768,7 +769,7 @@ private fun Onb4ModelPick(
                 style = MaterialTheme.typography.bodyMedium.copy(color = SaarthiColors.Text2),
             )
             Spacer(Modifier.height(14.dp))
-            DeviceTierBadge(profile = state.deviceProfile)
+            DeviceTierBadge(profile = state.deviceProfile, strings = o)
             Spacer(Modifier.height(14.dp))
             state.catalogModels.forEachIndexed { i, model ->
                 val progress = state.downloadProgress[model.id]
@@ -838,13 +839,13 @@ private fun Onb4ModelPick(
 }
 
 @Composable
-private fun DeviceTierBadge(profile: DeviceProfile?) {
+private fun DeviceTierBadge(profile: DeviceProfile?, strings: OnboardingStrings) {
     if (profile == null) return
-    val label = deviceBadgeLabel(profile.totalRamMb, profile.availableStorageMb)
+    val label = deviceBadgeLabel(profile.totalRamMb, profile.availableStorageMb, strings)
     // Honest, plain-language expectation for THIS phone. Setting it before the
     // download decision is what keeps a mid/low-RAM user from picking the
     // heaviest model, getting slow/blank replies, and leaving a 1-star review.
-    val expectation = deviceExpectationText(profile.tier, profile.totalRamMb)
+    val expectation = deviceExpectationText(profile.tier, profile.totalRamMb, strings)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -916,21 +917,27 @@ internal fun isLikelyCpuOnly(
  * and a natural boundary matching real device RAM SKUs (6/8/12GB), not an
  * arbitrary number.
  */
-internal fun deviceExpectationText(tier: DeviceTier, totalRamMb: Long): String = when {
-    tier == DeviceTier.FLAGSHIP -> "Runs the best models smoothly."
-    tier == DeviceTier.MID && totalRamMb >= 8_000 ->
-        "Pick the recommended model for the best balance of speed and quality."
-    tier == DeviceTier.MID ->
-        "Pick a lighter model, or close other apps first — this phone has less spare memory than newer ones."
-    tier == DeviceTier.LOW -> "Choose a lighter model for smooth replies — bigger ones may run slowly."
-    else -> "Only the compact model will run well here; replies stay short and simple."
+internal fun deviceExpectationText(
+    tier: DeviceTier,
+    totalRamMb: Long,
+    strings: OnboardingStrings = OnboardingStrings(),
+): String = when {
+    tier == DeviceTier.FLAGSHIP -> strings.expectFlagship
+    tier == DeviceTier.MID && totalRamMb >= 8_000 -> strings.expectMidRecommended
+    tier == DeviceTier.MID -> strings.expectMidTight
+    tier == DeviceTier.LOW -> strings.expectLow
+    else -> strings.expectMinimal
 }
 
 /** First-run badge: memory and free space only — no Flagship / Vulkan / CPU. */
-internal fun deviceBadgeLabel(totalRamMb: Long, availableStorageMb: Long): String {
+internal fun deviceBadgeLabel(
+    totalRamMb: Long,
+    availableStorageMb: Long,
+    strings: OnboardingStrings = OnboardingStrings(),
+): String {
     val ramGb = totalRamMb / 1024
     val freeGb = availableStorageMb / 1024
-    return "$ramGb GB memory · $freeGb GB free"
+    return "${String.format(Locale.US, strings.badgeMemory, ramGb)} · ${String.format(Locale.US, strings.badgeFree, freeGb)}"
 }
 
 /** Model will load, but this phone is expected to run it slower (CPU path). */
@@ -958,7 +965,7 @@ private fun ModelOption(
         2 -> ChipTone.Indigo
         else -> ChipTone.Terracotta
     }
-    val tag = model.tags.firstOrNull() ?: "Model"
+    val tag = model.tags.firstOrNull() ?: strings.modelTagFallback
 
     val bg = if (selected) SaarthiColors.MarigoldSoft else SaarthiColors.Surface
     val borderColor = if (selected) SaarthiColors.MarigoldBd else SaarthiColors.Border
@@ -1159,7 +1166,7 @@ private fun DownloadingScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                activeModel?.displayName ?: "AI Model",
+                activeModel?.displayName ?: o.aiModelFallback,
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
