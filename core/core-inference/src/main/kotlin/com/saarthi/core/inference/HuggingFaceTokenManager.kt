@@ -26,8 +26,8 @@ private val HF_TOKEN_KEY = stringPreferencesKey("hf_token")
  *
  * Only a **user-pasted** token is used (DataStore). The APK does not embed
  * a build-time token — `google/gemma-3n-*` repos need a read-only token the
- * user adds in Settings (or onboarding). Public `litert-community` models
- * download with no Authorization header.
+ * user pastes when they pick that model (onboarding / change-model). Public
+ * `litert-community` models download with no Authorization header.
  *
  * Accept each Gemma model licence once at huggingface.co/{repo} with the
  * account that owns the token. Read scope only. Never log the token value.

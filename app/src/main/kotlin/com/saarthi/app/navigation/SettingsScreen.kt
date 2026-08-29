@@ -42,7 +42,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Notifications
@@ -98,7 +97,6 @@ fun SettingsScreen(
     var showLangPicker by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
-    var showHfTokenDialog by remember { mutableStateOf(false) }
     val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
     val darkOn = themeMode == com.saarthi.core.ui.theme.ThemeMode.DARK
     // Daily wisdom notification — preference-backed (DataStore) and tied
@@ -108,9 +106,6 @@ fun SettingsScreen(
     val wisdomVm: com.saarthi.app.wisdom.WisdomSettingsViewModel =
         androidx.hilt.navigation.compose.hiltViewModel()
     val notifOn by wisdomVm.enabled.collectAsStateWithLifecycle()
-    val hfTokenVm: com.saarthi.app.HuggingFaceTokenSettingsViewModel =
-        androidx.hilt.navigation.compose.hiltViewModel()
-    val hfTokenSaved by hfTokenVm.hasToken.collectAsStateWithLifecycle()
 
     // Bug fix: settingsViewModel.toast (e.g. "All conversations cleared"
     // after Clear-all) was emitted but never collected anywhere, so it
@@ -262,14 +257,6 @@ fun SettingsScreen(
                         onToggle = { voicePrivacyVm.toggle() },
                     )
                 },
-            )
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.Lock, null) },
-                title = s.hfToken,
-                subtitle = if (hfTokenSaved) s.hfTokenSaved else s.hfTokenMissing,
-                tone = ChipTone.Jade,
-                trailing = { ChevronRight() },
-                onClick = { showHfTokenDialog = true },
             )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Shield, null) },
@@ -466,75 +453,6 @@ fun SettingsScreen(
             },
         )
     }
-
-    if (showHfTokenDialog) {
-        HuggingFaceTokenDialog(
-            strings = s,
-            tokenAlreadySaved = hfTokenSaved,
-            onSave = { token ->
-                hfTokenVm.save(token)
-                showHfTokenDialog = false
-            },
-            onClear = {
-                hfTokenVm.clear()
-                showHfTokenDialog = false
-            },
-            onDismiss = { showHfTokenDialog = false },
-        )
-    }
-}
-
-@Composable
-private fun HuggingFaceTokenDialog(
-    strings: com.saarthi.core.i18n.SettingsStrings,
-    tokenAlreadySaved: Boolean,
-    onSave: (String) -> Unit,
-    onClear: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var draft by remember { mutableStateOf("") }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = SaarthiColors.Bg2,
-        title = { Text(strings.hfTokenDialogTitle, color = SaarthiColors.Text) },
-        text = {
-            Column {
-                Text(strings.hfTokenDialogBody, color = SaarthiColors.Text2)
-                Spacer(Modifier.height(12.dp))
-                androidx.compose.material3.OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text(strings.hfTokenPlaceholder, color = SaarthiColors.Text4) },
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
-                    ),
-                )
-            }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(
-                onClick = { onSave(draft) },
-                enabled = draft.isNotBlank(),
-            ) {
-                Text(strings.hfTokenSave, color = SaarthiColors.Text, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            Row {
-                if (tokenAlreadySaved) {
-                    androidx.compose.material3.TextButton(onClick = onClear) {
-                        Text(strings.hfTokenClear, color = SaarthiColors.Rose)
-                    }
-                }
-                androidx.compose.material3.TextButton(onClick = onDismiss) {
-                    Text(strings.cancel, color = SaarthiColors.Text2)
-                }
-            }
-        },
-    )
 }
 
 @Composable

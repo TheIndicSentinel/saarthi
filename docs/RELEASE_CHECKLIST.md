@@ -196,7 +196,8 @@ Hardening behaviors (debug CI does not cover these):
       privacy-guardrails review and Data Safety form together.
 - [ ] **HuggingFace token**: the APK must not embed `HF_APP_TOKEN_B64` (unit test
       `HuggingFaceTokenNotInBuildConfigTest`). Gated Gemma 3n downloads use a
-      **user-pasted** read-only token stored in DataStore (Settings). Rotate any
+      **user-pasted** read-only token stored in DataStore (onboarding / change-model
+      when picking gated Gemma 3n — not a Settings row). Rotate any
       token that was previously baked into shipped APKs — those builds remain
       extractable. Treat any leftover dashboard token as download-quota only,
       never write/billing.

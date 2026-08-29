@@ -1,6 +1,6 @@
 # Saarthi — Privacy Policy
 
-_Last updated: 2026-08-28 • Applies to the Saarthi Android app (com.indicsentinel.saarthi)_
+_Last updated: 2026-08-29 • Applies to the Saarthi Android app (com.indicsentinel.saarthi)_
 
 > **Host this file at a public URL** (e.g. GitHub Pages, your site) and paste that
 > URL into Play Console → App content → Privacy policy. Fill in the **Contact**
@@ -34,8 +34,7 @@ no backend to send your data to. It does connect to the internet for:
    from public hosts (Hugging Face / GitHub). These are downloads to your device — no
    personal data is sent. Saarthi does **not** ship a Hugging Face token in the app.
    Gemma 4 and Compact are public downloads. Gemma 3n is on a gated Google repo: if you
-   choose it, you paste a read-only token (Settings → Hugging Face download token), stored
-   only on this phone.
+   choose it, you paste a read-only token when asked, stored only on this phone.
 2. **Voice input**, only if you turn off **Settings → On-device voice only** and your
    device then uses its standard speech service — see above.
 3. **Crash & support reports you choose to send.** Saarthi has no automatic crash

@@ -489,7 +489,7 @@ class ModelDownloadService : Service() {
             response.close()
             if (code == 401 || code == 403 || code == 404) {
                 val msg = when (code) {
-                    401, 403 -> "Access denied (HTTP $code) — add or replace the Hugging Face token in Settings."
+                    401, 403 -> "Access denied (HTTP $code) — the Hugging Face token is missing or invalid. Choose this model again and paste a read-only token."
                     404      -> "Model not found at download URL (HTTP 404)."
                     else     -> "HTTP $code: ${response.message}"
                 }
