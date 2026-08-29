@@ -131,15 +131,17 @@ internal fun isThisDocumentQuery(query: String): Boolean {
 }
 
 internal fun matchNamedDocs(query: String, docs: List<Pair<String, String>>): Set<String> {
+    val matched = LinkedHashSet<String>()
+    matched.addAll(matchNamedDocsByFilenameTokens(query, docs))
+    matched.addAll(matchNamedDocsByRoleCues(query, docs))
+    return matched
+}
+
+private fun matchNamedDocsByFilenameTokens(query: String, docs: List<Pair<String, String>>): Set<String> {
     val baseTokens = query.lowercase().split(QUERY_SPLIT).filter { it.isNotEmpty() }
     val qTokens = buildSet {
         for (t in baseTokens) {
             if (t.length >= 4 && t !in FILENAME_STOPWORDS) add(t)
-            // Cross-script bridge: a romanized-Indic query term ("khata",
-            // "jurmana") also matches an English-named file ("account…",
-            // "penalty…"). Only the ASCII expansions are used here — a
-            // Devanagari gloss can't match a Latin filename, and same-script
-            // filename tokens are already covered by the raw query tokens.
             ROMANIZED_INDIC_HINTS[t]?.forEach { hint ->
                 if (hint.length >= 4 && hint.all { c -> c.code < 128 }) add(hint)
             }
@@ -155,6 +157,79 @@ internal fun matchNamedDocs(query: String, docs: List<Pair<String, String>>): Se
         if (hit) matched += uri
     }
     return matched
+}
+
+private data class NamedDocRoleCue(
+    val queryPhrases: List<String>,
+    val filenameTokens: Set<String>,
+)
+
+/** Tier 2.7 — role words in the question ("in the guide", "gazette copy"). */
+private val NAMED_DOC_ROLE_CUES = listOf(
+    NamedDocRoleCue(
+        queryPhrases = listOf(
+            "in the guide", "from the guide", "the guide", "guide pdf", "handbook",
+            "मार्गदर्शिका", "गाइड",
+        ),
+        filenameTokens = setOf(
+            "guide", "handbook", "primer", "playbook", "consulting", "advisory", "ey",
+            "मार्गदर्शिका", "गाइड",
+        ),
+    ),
+    NamedDocRoleCue(
+        queryPhrases = listOf(
+            "in the summary", "from the summary", "one page summary", "brief summary",
+            "सारांश",
+        ),
+        filenameTokens = setOf("summary", "synopsis", "overview", "brief", "onepage", "सारांश", "संक्षेप"),
+    ),
+    NamedDocRoleCue(
+        queryPhrases = listOf("gazette", "official gazette", "gazette copy"),
+        filenameTokens = setOf("gazette", "egazette"),
+    ),
+    NamedDocRoleCue(
+        queryPhrases = listOf("sample doc", "demo doc", "sample file"),
+        filenameTokens = setOf("sample", "demo", "specimen", "नमूना"),
+    ),
+    NamedDocRoleCue(
+        queryPhrases = listOf("circular", "office circular", "परिपत्र"),
+        filenameTokens = setOf("circular", "paripatra", "paripatr", "परिपत्र"),
+    ),
+)
+
+internal fun matchNamedDocsByRoleCues(query: String, docs: List<Pair<String, String>>): Set<String> {
+    val lower = query.lowercase()
+    val cues = NAMED_DOC_ROLE_CUES.filter { cue ->
+        cue.queryPhrases.any { phrase -> lower.contains(phrase) }
+    }
+    if (cues.isEmpty()) return emptySet()
+    val filenameTokenSets = cues.flatMap { it.filenameTokens }.toSet()
+    val matched = mutableSetOf<String>()
+    for ((uri, name) in docs) {
+        val fTokens = filenameTokens(name)
+        val hit = fTokens.any { ft ->
+            filenameTokenSets.any { hint ->
+                ft == hint || (ft.length >= 4 && hint.length >= 4 && (ft.contains(hint) || hint.contains(ft)))
+            }
+        }
+        if (hit) matched += uri
+    }
+    return matched
+}
+
+/** Tier 2.8 — equal-slot compare only for explicit multi-doc compare, not in-doc section contrast. */
+internal fun shouldUseEqualSlotsCompare(query: String, docCount: Int): Boolean {
+    if (docCount < 2) return false
+    if (!isCompareQuery(query)) return false
+    if (isInDocumentSectionContrast(query)) return false
+    return true
+}
+
+internal fun isInDocumentSectionContrast(query: String): Boolean {
+    val lower = query.lowercase()
+    if (!Regex("(?i)\\b(vs|versus|compare)\\b").containsMatchIn(lower)) return false
+    return Regex("(?i)\\b(section|sections|sec\\.?|chapter|chapters|clause|paragraph|धारा|अध्याय)\\b")
+        .containsMatchIn(lower)
 }
 
 internal fun queryHasDevanagari(query: String): Boolean =
@@ -198,7 +273,7 @@ internal fun routeQuery(query: String, docs: List<Pair<String, String>>): QueryR
         // there are actually ≥2 documents to compare (G4). With a single file,
         // a stray "vs"/"compare"/"both" token (e.g. "Godrej vs the rules")
         // otherwise forced compare mode on one doc and skewed retrieval.
-        equalSlots = isCompareQuery(query) && docs.size >= 2,
+        equalSlots = shouldUseEqualSlotsCompare(query, docs.size),
         whichFile = isWhichFileQuery(query),
         thisDocument = isThisDocumentQuery(query),
         expandedQuery = expandRetrievalQuery(query, docs.map { it.second }),
@@ -282,6 +357,7 @@ internal fun resolveRetrievalScope(
     attachmentUris: List<String>,
     activeDocUri: String?,
     route: QueryRoute,
+    recencyDocUri: String? = null,
 ): RetrievalScopeDecision {
     val sessionUriSet = sessionDocs.map { it.first }.toSet()
     if (sessionUriSet.isEmpty()) {
@@ -315,6 +391,14 @@ internal fun resolveRetrievalScope(
         }
     }
 
+    if (route.thisDocument) {
+        val target = recencyDocUri?.takeIf { it in sessionUriSet }
+            ?: activeDocUri?.takeIf { it in sessionUriSet }
+        if (target != null) {
+            return RetrievalScopeDecision(RetrievalScope.ACTIVE_DOC, setOf(target))
+        }
+    }
+
     val active = activeDocUri?.takeIf { it in sessionUriSet }
         ?: sessionDocs.singleOrNull()?.first.takeIf { sessionUriSet.size == 1 }
 
@@ -323,6 +407,26 @@ internal fun resolveRetrievalScope(
     }
 
     return RetrievalScopeDecision(RetrievalScope.SESSION, emptySet())
+}
+
+/**
+ * Mild recency boost only when the question does not name a file and is not a
+ * cross-session substance ask — otherwise BM25 should win, not last-indexed order.
+ */
+internal fun shouldApplyRecencySessionBoost(
+    query: String,
+    route: QueryRoute,
+): Boolean {
+    if (route.namedDocUris.isNotEmpty()) return false
+    if (route.equalSlots || route.whichFile) return false
+    if (route.thisDocument) return true
+    if (isAllSessionDocsQuery(query)) return false
+    if (isTabularAmountQuery(query)) return false
+    if (activeTopicCategories(query).isNotEmpty()) return false
+    if (extractSectionRefs(query).isNotEmpty()) return false
+    if (isStructureCountQuery(query) || isStructureListQuery(query)) return false
+    if (isIndexedSessionTopicalWithoutDocCues(query)) return false
+    return true
 }
 
 internal fun isDuplicateTurn(
@@ -542,6 +646,31 @@ internal fun isSectionPenaltyComboQuery(query: String): Boolean {
     if (extractSectionRefs(query).none { it.kind == "section" }) return false
     return isPenaltyScheduleQuery(query)
 }
+
+/**
+ * T5.2 — prefer Schedule/tabular retrieval from the scoped or active document
+ * when the session has multiple files (e.g. Act + guide).
+ */
+internal fun resolveTabularPreferDocUri(
+    query: String,
+    restrictUris: Set<String>,
+    activeDocUri: String?,
+): String? {
+    if (!isTabularAmountQuery(query)) return null
+    if (restrictUris.size == 1) return restrictUris.single()
+    val active = activeDocUri?.takeIf { restrictUris.isEmpty() || it in restrictUris }
+    return active
+}
+
+/** T5.1 — BM25 expansion tokens for structure count/list queries. */
+internal fun structureMarkerBm25Expansion(query: String): String =
+    when (structureMarkerKind(query)) {
+        "section" -> " section sections धारा"
+        "part" -> " part parts"
+        "heading" -> " heading headings"
+        "annex" -> " annex appendix annexure"
+        else -> " CHAPTER Chapter chapter अध्याय"
+    }
 
 /** Dynamic top-K: fewer chunks for narrow QA, more for overview/compare (P0 #2). */
 internal fun topKForAnswerShape(shape: RagAnswerShape, equalSlots: Boolean): Int = when {

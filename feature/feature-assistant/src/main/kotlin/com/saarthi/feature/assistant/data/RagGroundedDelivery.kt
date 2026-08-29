@@ -102,6 +102,7 @@ internal fun assembleRagPromptBlock(
             citationLabels = citationLabels,
             attempt = attempt,
             turnMode = turnMode,
+            ragQuery = ragQuery,
         )
         if (block.isNotEmpty()) return RagPromptAssemblyResult(block)
     }
@@ -139,6 +140,7 @@ private fun tryAssemble(
     citationLabels: CitationDisplayLabels,
     attempt: AssemblyAttempt,
     turnMode: RagTurnMode,
+    ragQuery: String,
 ): String {
     val shapeInstruction = if (attempt.includeShape) {
         ragAnswerShapeInstruction(
@@ -146,6 +148,9 @@ private fun tryAssemble(
             compact = compact,
             tabularAmount = tabularAmount,
             unattachedExternal = unattachedExternal,
+            strongMatch = strongMatch,
+            structureCountQuery = isStructureCountQuery(ragQuery),
+            structureListQuery = isStructureListQuery(ragQuery),
         )
     } else {
         ""

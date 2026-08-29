@@ -219,6 +219,10 @@ class ChatRepositoryImpl @Inject constructor(
         _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(messages.map { it.toChatMessage() })
         sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         refreshOlderMessagesOmitted()
+        runCatching {
+            val docs = ragRepository.listSessionDocuments(sessionId)
+            ragRepository.loadActiveDocUri(sessionId, docs)
+        }
         // Skip when the drawer re-selects the already-open chat. generateStream
         // already recycles per turn; a no-op tap must not JNI-create a session.
         if (resetEngine) {
@@ -328,7 +332,7 @@ class ChatRepositoryImpl @Inject constructor(
                 }
                 if (newCount > 0) logRag("indexedDocs=$newCount sessionIdLen=${sessionId.length}")
                 attachments.lastOrNull()?.uri?.toString()?.let { lastUri ->
-                    ragRepository.setActiveDocUri(sessionId, lastUri)
+                    ragRepository.persistActiveDocUri(sessionId, lastUri)
                 }
             }
             buildPrompt(userMessage, attachments)
@@ -421,7 +425,9 @@ class ChatRepositoryImpl @Inject constructor(
                             claimOverlapTurnMode = lastCitationTurnMode,
                         )
                     } else {
-                        stripModelSourcesBlock(parsed.cleanText, citationLabels)
+                        stripInlineCitationIndices(
+                            stripModelSourcesBlock(parsed.cleanText, citationLabels),
+                        )
                     }
                     logRag(
                         ragGenerationLogLine(
@@ -845,7 +851,7 @@ class ChatRepositoryImpl @Inject constructor(
         val sessionDocs = runCatching { ragRepository.listSessionDocuments(sessionId) }
             .onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
-        val activeDocUri = ragRepository.resolveActiveDocUri(sessionId, sessionDocs)
+        val activeDocUri = ragRepository.loadActiveDocUri(sessionId, sessionDocs)
         val priorUserQuery = _history.value
             .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
             .dropLast(1)  // exclude the current turn being built
@@ -860,16 +866,27 @@ class ChatRepositoryImpl @Inject constructor(
             retrievalRoutingQuery,
             sessionDocs.map { it.uri to it.name },
         )
+        val recencyDocUri = sessionDocs.maxByOrNull { it.lastIndexedAt }?.uri
         val scopeDecision = resolveRetrievalScope(
             query = retrievalRoutingQuery,
             sessionDocs = sessionDocs.map { it.uri to it.name },
             attachmentUris = attachmentUris,
             activeDocUri = activeDocUri,
             route = retrievalRoute,
+            recencyDocUri = recencyDocUri,
         )
         val restrictDocUris = scopeDecision.restrictUris
-        if (retrievalRoute.namedDocUris.size == 1) {
-            ragRepository.setActiveDocUri(sessionId, retrievalRoute.namedDocUris.first())
+        when {
+            retrievalRoute.namedDocUris.size == 1 ->
+                ragRepository.persistActiveDocUri(sessionId, retrievalRoute.namedDocUris.first())
+            retrievalRoute.thisDocument && !retrievalRoute.equalSlots && recencyDocUri != null ->
+                ragRepository.persistActiveDocUri(sessionId, recencyDocUri)
+            attachments.isNotEmpty() &&
+                !retrievalRoute.equalSlots &&
+                !isAllSessionDocsQuery(retrievalRoutingQuery) ->
+                attachmentUris.lastOrNull()?.let { uri ->
+                    ragRepository.persistActiveDocUri(sessionId, uri)
+                }
         }
         val ragAnswerShape = applyReplyLengthToAnswerShape(
             detectRagAnswerShape(
@@ -916,11 +933,45 @@ class ChatRepositoryImpl @Inject constructor(
         } else {
             emptyList()
         }
-        if (shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved) ||
-            shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved)
+        val outlineByDocName = retrieved
+            .filter { it.chunkIndex < 0 }
+            .associate { it.docName to it.text }
+        val sessionDocPairs = sessionDocs.map { it.uri to it.name }
+        val citationLabels = currentLanguage.citationDisplayLabels()
+        if (shouldEmitNamedStatuteDocumentMismatch(
+                ragQuery,
+                ragTurnMode,
+                restrictDocUris,
+                sessionDocPairs,
+                outlineByDocName,
+                retrieved,
+            ) ||
+            shouldEmitDeterministicRetrievalMiss(ragQuery, ragTurnMode, retrieved) ||
+            shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved) ||
+            shouldEmitAnswerabilityRetrievalMiss(ragQuery, ragTurnMode, retrieved)
         ) {
             DebugLogger.log("RAG", "deterministic retrieval miss turnMode=${ragTurnMode.name}")
-            return buildDeterministicRetrievalMissMessage(ragQuery)
+            return when {
+                shouldEmitNamedStatuteDocumentMismatch(
+                    ragQuery,
+                    ragTurnMode,
+                    restrictDocUris,
+                    sessionDocPairs,
+                    outlineByDocName,
+                    retrieved,
+                ) -> buildNamedStatuteDocumentMismatchMessage(
+                    ragQuery,
+                    restrictDocUris,
+                    sessionDocPairs,
+                    outlineByDocName,
+                    citationLabels,
+                )
+                shouldEmitAnswerabilityRetrievalMiss(ragQuery, ragTurnMode, retrieved) ->
+                    buildAnswerabilityRetrievalMissMessage(ragQuery)
+                shouldEmitIndexedTopicalWeakMiss(ragQuery, ragTurnMode, retrieved) ->
+                    buildIndexedTopicalWeakMissMessage(ragQuery)
+                else -> buildDeterministicRetrievalMissMessage(ragQuery)
+            }
         }
         DebugLogger.log(
             "RAG",
@@ -931,10 +982,6 @@ class ChatRepositoryImpl @Inject constructor(
         }
         lastPromptUriLens = retrieved.map { it.docUri }.filter { it.isNotEmpty() }.distinct().map { it.length }
         lastPriorTurnsChars = 0
-        val outlineByDocName = retrieved
-            .filter { it.chunkIndex < 0 }
-            .associate { it.docName to it.text }
-        val citationLabels = currentLanguage.citationDisplayLabels()
         val newAttachDisplayNames = attachments.map { file ->
             displayCitationDocName(
                 file.name,

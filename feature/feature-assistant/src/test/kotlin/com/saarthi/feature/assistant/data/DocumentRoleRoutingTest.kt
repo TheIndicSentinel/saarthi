@@ -29,6 +29,27 @@ class DocumentRoleRoutingTest {
     }
 
     @Test
+    fun `filterSubstanceContentChunks keeps primary for deictic act query`() {
+        val guideUri = "guide-uri"
+        val actUri = "act-uri"
+        val docRoles = mapOf(guideUri to DocumentRoleLabel.GUIDE, actUri to null)
+        val chunks = listOf(
+            entity(uri = guideUri, name = "EY_Guide.pdf", index = 0, text = "guide penalties"),
+            entity(uri = actUri, name = "DPDP_Act.pdf", index = 0, text = "Section 33 penalties"),
+        )
+        val route = QueryRoute(emptySet(), equalSlots = false, whichFile = false, thisDocument = false, "")
+        val filtered = filterSubstanceContentChunks(
+            chunks,
+            docRoles,
+            "What are penalties in the act",
+            route,
+            isFollowUp = false,
+        )
+        assertEquals(1, filtered.size)
+        assertEquals(actUri, filtered.first().docUri)
+    }
+
+    @Test
     fun `filterSubstanceContentChunks keeps primary when guide and act mixed`() {
         val guideUri = "guide-uri"
         val actUri = "act-uri"

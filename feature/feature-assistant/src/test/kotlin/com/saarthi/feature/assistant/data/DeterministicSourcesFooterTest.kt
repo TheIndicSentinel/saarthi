@@ -167,6 +167,22 @@ class DeterministicSourcesFooterTest {
     }
 
     @Test
+    fun `stripInlineModelCitationAttempts removes hash parenthetical cites`() {
+        val body = "The Act provides for processing (bf1f0e9f04e6fb4f8fef35e82c42, p.1; hash, p.3)."
+        val cleaned = stripInlineModelCitationAttempts(body)
+        assertFalse(cleaned.contains("bf1f0e9f"))
+        assertTrue(cleaned.contains("processing"))
+    }
+
+    @Test
+    fun `stripInlineModelCitationAttempts removes same-line Sources fragment`() {
+        val body = "Penalty may extend to two hundred crore rupees Sources: Digital Personal Data · p.1"
+        val cleaned = stripModelSourcesBlock(body, englishLabels)
+        assertFalse(cleaned.contains("Sources:"))
+        assertTrue(cleaned.contains("two hundred crore"))
+    }
+
+    @Test
     fun `applyDeterministicSourcesFooter yields single Sources surface`() {
         val hash = "2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf"
         val outline = mapOf(hash to "Digital Personal Data Protection Act, 2023")

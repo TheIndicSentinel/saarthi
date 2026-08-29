@@ -52,12 +52,55 @@ internal fun wantsSubstancePrimaryBias(
     if (route.equalSlots) return false
     if (isFollowUp) return false
     if (effectiveMetaRouteReason(query, isFollowUp = false) != null) return false
+    if (wantsCommentaryDocumentQuery(query)) return false
     return isChapterSpanQuery(query) ||
         extractSectionRefs(query).isNotEmpty() ||
         requiresTabularContract(query) ||
         isExplicitLookupQuery(query) ||
-        isSectionPenaltyComboQuery(query)
+        isSectionPenaltyComboQuery(query) ||
+        isDeicticPrimaryActQuery(query)
 }
+
+/** Tier 2.6 — user explicitly asks about a guide/summary/consulting commentary file. */
+internal fun wantsCommentaryDocumentQuery(query: String): Boolean {
+    val lower = query.lowercase()
+    if (COMMENTARY_DOC_QUERY_PHRASES.any { lower.contains(it) }) return true
+    return COMMENTARY_DOC_QUERY_PATTERN.containsMatchIn(lower)
+}
+
+private val COMMENTARY_DOC_QUERY_PHRASES = listOf(
+    "in the guide", "from the guide", "the guide says", "guide explains",
+    "compliance journey", "implementation guide", "practitioner guide",
+    "consulting guide", "ey guide", "ey india",
+    "in the summary", "from the summary", "one page summary", "brief summary",
+    "sample document", "demo document",
+    "गाइड में", "मार्गदर्शिका", "सारांश में", "नमूना दस्तावेज",
+)
+
+private val COMMENTARY_DOC_QUERY_PATTERN = Regex(
+    "(?i)\\b(guide|handbook|summary|synopsis|sample doc|demo doc|commentary)\\b",
+)
+
+/**
+ * Tier 2.6 — generic “the act / this law” without naming a guide → prefer primary source
+ * when a commentary file shares the session.
+ */
+internal fun isDeicticPrimaryActQuery(query: String): Boolean {
+    val lower = query.lowercase()
+    if (wantsCommentaryDocumentQuery(query)) return false
+    if (DEICTIC_PRIMARY_ACT_PATTERN.containsMatchIn(lower)) return true
+    return DEICTIC_PRIMARY_ACT_PHRASES.any { lower.contains(it) }
+}
+
+private val DEICTIC_PRIMARY_ACT_PHRASES = listOf(
+    "the act", "this act", "this law", "this bill", "in the act", "under the act",
+    "what does the act", "what the act says",
+    "इस अधिनियम", "इस कानून", "अधिनियम में", "अधिनियम के",
+)
+
+private val DEICTIC_PRIMARY_ACT_PATTERN = Regex(
+    "(?i)\\b(the|this)\\s+(act|law|bill|statute|code|rules|regulation)\\b",
+)
 
 /**
  * When a session mixes commentary (guide/summary) with a primary source, substance
@@ -70,10 +113,15 @@ internal fun filterSubstanceContentChunks(
     route: QueryRoute,
     isFollowUp: Boolean,
 ): List<RagChunkEntity> {
-    if (!wantsSubstancePrimaryBias(query, route, isFollowUp)) return contentChunks
+    if (route.equalSlots) return contentChunks
     val primary = primarySourceDocUris(docRoles)
     val commentary = commentaryDocUris(docRoles)
     if (primary.isEmpty() || commentary.isEmpty()) return contentChunks
+    if (wantsCommentaryDocumentQuery(query)) {
+        val commentaryChunks = contentChunks.filter { it.docUri in commentary }
+        return commentaryChunks.ifEmpty { contentChunks }
+    }
+    if (!wantsSubstancePrimaryBias(query, route, isFollowUp)) return contentChunks
     return contentChunks.filter { it.docUri in primary }
 }
 

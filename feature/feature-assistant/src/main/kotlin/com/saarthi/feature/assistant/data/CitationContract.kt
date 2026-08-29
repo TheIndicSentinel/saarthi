@@ -174,6 +174,9 @@ internal fun openingPageContentSample(text: String?): String? {
 
 internal const val FALLBACK_ATTACHED_DOC_LABEL = "Attached document"
 
+/** Tier 3.11 — reject OCR garbage and year-like page noise from citation locations. */
+internal const val MAX_SANE_PAGE_NUMBER = 3_000
+
 /**
  * B3-1 — commentary vs primary document role for Sources/manifest labeling (B3-2).
  * [PRIMARY] is represented by null (no prefix on citations).
@@ -194,17 +197,19 @@ internal const val DOCUMENT_ROLE_LONG_DOC_CHARS = 12_000
 private val ROLE_FILENAME_TOKENS: Map<DocumentRoleLabel, Set<String>> = mapOf(
     DocumentRoleLabel.SUMMARY to setOf(
         "summary", "summaries", "synopsis", "saaransh", "saransh", "overview",
+        "brief", "onepage",
         "सारांश", "संक्षेप", "सारांशम्", "সারাংশ", "సారాంశం", "சுருக்கம்",
     ),
     DocumentRoleLabel.GUIDE to setOf(
         "guide", "handbook", "primer", "companion", "playbook",
+        "consulting", "advisory", "ey",
         "मार्गदर्शिका", "गाइड", "গাইড", "గైడ్",
     ),
     DocumentRoleLabel.SAMPLE to setOf(
         "sample", "demo", "specimen", "नमूना", "नमुना",
     ),
     DocumentRoleLabel.CIRCULAR to setOf(
-        "circular", "paripatra", "paripatr", "परिपत्र", "পরিপত্র", "పరిపత్ర",
+        "circular", "paripatra", "paripatr", "gazette", "परिपत्र", "পরিপত্র", "పరిపత్ర",
     ),
 )
 
@@ -243,12 +248,17 @@ private fun roleFilenameTokens(rawName: String): Set<String> =
 
 private fun scoreRoleFromFilename(rawName: String): Map<DocumentRoleLabel, Int> {
     val tokens = roleFilenameTokens(rawName)
-    return DocumentRoleLabel.entries.associateWith { role ->
+    val stem = shortDocName(rawName).lowercase().replace('_', ' ')
+    val base = DocumentRoleLabel.entries.associateWith { role ->
         val hits = ROLE_FILENAME_TOKENS[role].orEmpty().count { hint ->
             tokens.any { t -> t == hint || t.contains(hint) || hint.contains(t) }
         }
         if (hits > 0) 3 + (hits - 1) else 0
     }
+    var guideScore = base[DocumentRoleLabel.GUIDE]!!
+    if (Regex("(?i)(?:^|\\s)ey(?:\\s|$)").containsMatchIn(stem)) guideScore = maxOf(guideScore, 3)
+    if (stem.contains("consulting") || stem.contains("advisory")) guideScore = maxOf(guideScore, 3)
+    return base + (DocumentRoleLabel.GUIDE to guideScore)
 }
 
 private fun scoreRoleFromContent(contentHint: String?): Map<DocumentRoleLabel, Int> {
@@ -440,9 +450,32 @@ internal fun displayCitationDocName(
     return "${labels.rolePrefixFor(role)} $base"
 }
 
+/**
+ * Tier 3.10 — never surface mid-sentence chunk text as a citation document title.
+ */
+internal fun safeCitationDocTitle(
+    rawName: String,
+    outlineText: String? = null,
+    contentHint: String? = null,
+    contentCharCount: Int? = null,
+    labels: CitationDisplayLabels? = null,
+): String {
+    val title = displayCitationDocName(rawName, outlineText, contentHint, contentCharCount, labels)
+    val proseCheck = title.substringAfter(": ", missingDelimiterValue = title).trim()
+    if (!looksLikeInternalCitationLabel(proseCheck) && !looksLikeBodyProseLine(proseCheck)) {
+        return title
+    }
+    val stem = shortDocName(rawName)
+    val fallback = if (looksLikeContentStamp(stem)) FALLBACK_ATTACHED_DOC_LABEL else stem
+    if (labels == null) return fallback
+    val role = documentRoleLabel(rawName, contentHint, contentCharCount)
+    return if (role != null) "${labels.rolePrefixFor(role)} $fallback" else fallback
+}
+
 internal fun extractPageRange(text: String): String? {
     val pages = PAGE_MARKER_REGEX.findAll(text)
         .mapNotNull { it.groupValues[1].toIntOrNull() }
+        .filter { page -> page in 1..MAX_SANE_PAGE_NUMBER }
         .toList()
     if (pages.isEmpty()) return null
     val lo = pages.min()
@@ -528,7 +561,7 @@ internal fun formatExcerptHeader(
     outlineText: String? = null,
     labels: CitationDisplayLabels? = null,
 ): String {
-    val name = displayCitationDocName(
+    val name = safeCitationDocTitle(
         docName,
         outlineText,
         text,
@@ -581,6 +614,9 @@ internal fun ragAnswerShapeInstruction(
     compact: Boolean = false,
     tabularAmount: Boolean = false,
     unattachedExternal: UnattachedExternalDecision = UnattachedExternalDecision(active = false),
+    strongMatch: Boolean = true,
+    structureCountQuery: Boolean = false,
+    structureListQuery: Boolean = false,
 ): String {
     val externalBlock = if (unattachedExternal.active) {
         val names = unattachedExternal.regimes.joinToString(", ")
@@ -594,6 +630,51 @@ internal fun ragAnswerShapeInstruction(
     } else {
         ""
     }
+    val weakMatchNote = if (!strongMatch) {
+        when (shape) {
+            RagAnswerShape.LIST ->
+                if (compact) {
+                    "If excerpts lack the requested items or amounts, say that honestly in 1–2 sentences — do not guess.\n\n"
+                } else {
+                    "WEAK MATCH: If excerpts do not contain the requested list rows, amounts, or names, " +
+                        "reply in 1–2 honest sentences that they are not in the excerpts — " +
+                        "do not pad with general law or invented entries.\n\n"
+                }
+            RagAnswerShape.OVERVIEW, RagAnswerShape.OVERVIEW_SHORT ->
+                if (compact) {
+                    "If excerpts are thin, give a short honest overview only from what is shown.\n\n"
+                } else {
+                    "WEAK MATCH: If excerpts do not support a full overview, give a short honest answer " +
+                        "from what is shown only — do not invent structure or themes.\n\n"
+                }
+            RagAnswerShape.NARROW_QA ->
+                if (compact) {
+                    "If excerpts lack the answer, say that honestly in 1–2 sentences — do not guess.\n\n"
+                } else {
+                    "WEAK MATCH: If excerpts do not contain the answer, say honestly in 1–2 sentences " +
+                        "that it is not in the excerpts — do not pad with unrelated document prose.\n\n"
+                }
+        }
+    } else {
+        ""
+    }
+    val structureNote = when {
+        structureCountQuery ->
+            if (compact) {
+                "State count then names from excerpts only — do not estimate.\n\n"
+            } else {
+                "STRUCTURE COUNT: State the total count from excerpts first, then list names. " +
+                    "If a complete count is not visible, say excerpts do not show it — do not estimate.\n\n"
+            }
+        structureListQuery ->
+            if (compact) {
+                "List only headings or items explicitly named in excerpts.\n\n"
+            } else {
+                "STRUCTURE LIST: List only chapter/section/heading names explicitly present in excerpts — " +
+                    "do not invent missing entries.\n\n"
+            }
+        else -> ""
+    }
     val tabularListNote = if (tabularAmount && shape == RagAnswerShape.LIST) {
         if (compact) {
             "List each fee/penalty row with amount exactly as in excerpts.\n\n"
@@ -604,14 +685,19 @@ internal fun ragAnswerShapeInstruction(
         ""
     }
     if (compact) {
-        return externalBlock + tabularListNote + when (shape) {
+        return externalBlock + weakMatchNote + structureNote + tabularListNote + when (shape) {
             RagAnswerShape.OVERVIEW_SHORT -> "Short overview: 3–4 sentences max.\n\n"
             RagAnswerShape.OVERVIEW -> "Overview: up to 5 bullets max.\n\n"
             RagAnswerShape.NARROW_QA -> "Answer only this question; 1–3 sentences first.\n\n"
-            RagAnswerShape.LIST -> "Concise list: up to 6 bullets.\n\n"
+            RagAnswerShape.LIST ->
+                if (structureCountQuery) {
+                    "Count first, then bullets (max 12 one-line items).\n\n"
+                } else {
+                    "Concise list: up to 8 bullets.\n\n"
+                }
         }
     }
-    return externalBlock + tabularListNote + when (shape) {
+    return externalBlock + weakMatchNote + structureNote + tabularListNote + when (shape) {
     RagAnswerShape.OVERVIEW_SHORT ->
         "ANSWER SHAPE: Short overview only — 3–4 sentences OR up to 4 bullet points total. " +
             "Name the document once, state its purpose, and 2–3 main themes. " +
@@ -624,8 +710,13 @@ internal fun ragAnswerShapeInstruction(
             "Use bullets only for 3+ distinct items the user asked for (max 5 bullets). " +
             "Do not recap earlier questions or re-summarise the whole document.\n\n"
     RagAnswerShape.LIST ->
-        "ANSWER SHAPE: Give a concise bullet list (max 8 one-line items). " +
-            "Cite only for key numeric or legal claims.\n\n"
+        if (structureCountQuery) {
+            "ANSWER SHAPE: State the total count first, then a bullet list of names (max 12 one-line items). " +
+                "Cite only for key numeric claims.\n\n"
+        } else {
+            "ANSWER SHAPE: Give a concise bullet list (max 8 one-line items). " +
+                "Cite only for key numeric or legal claims.\n\n"
+        }
     }
 }
 

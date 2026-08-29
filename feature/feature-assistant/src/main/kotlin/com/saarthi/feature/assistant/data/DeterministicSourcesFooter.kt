@@ -42,15 +42,53 @@ private val STATUTE_TITLE_IN_LINE = Regex(
  * (numbered refs, page dots, hash filenames, prose-style act titles) — not user
  * prose mentioning "sources" in the answer body.
  */
-internal fun stripModelSourcesBlock(text: String, labels: CitationDisplayLabels): String {
+private val INLINE_HASH_PAGE_CITE = Regex(
+    """\(\s*[0-9A-Fa-f]{12,}[^)]*(?:p\.?\s*\d+|page\s+\d+)[^)]*\)""",
+)
+private val INLINE_HASH_ONLY_CITE = Regex(
+    """\(\s*[0-9A-Fa-f]{20,}[^)]*\)""",
+)
+private val INLINE_PAGE_OF_NOISE = Regex(
+    """(?i)\b(?:p\.?|page)\s*\d{1,4}\s+of\s+\d{2,4}\b""",
+)
+
+/**
+ * Removes inline model citation attempts from the answer body (hash parentheticals)
+ * before the deterministic footer is applied. Does not touch Sources blocks — those
+ * are handled by [stripModelSourcesBlock].
+ */
+internal fun stripInlineModelCitationAttempts(text: String): String {
     var result = text.trimEnd()
-    val markers = SOURCES_TAIL_MARKERS_BASE + "\n${labels.sourcesHeader}"
-    for (marker in markers) {
-        val idx = result.lastIndexOf(marker, ignoreCase = true)
-        if (idx < 0) continue
-        val tail = result.substring(idx)
-        if (!looksLikeAutomatedSourcesTail(tail)) continue
-        result = result.substring(0, idx).trimEnd()
+    result = INLINE_HASH_PAGE_CITE.replace(result, "")
+    result = INLINE_HASH_ONLY_CITE.replace(result, "")
+    result = INLINE_PAGE_OF_NOISE.replace(result, "")
+    return result.trimEnd()
+}
+
+internal fun stripModelSourcesBlock(text: String, labels: CitationDisplayLabels): String {
+    var result = stripInlineModelCitationAttempts(text)
+    val markers = SOURCES_TAIL_MARKERS_BASE + "\n${labels.sourcesHeader}" +
+        listOf(" Sources:", " ${labels.sourcesHeader}")
+    var changed = true
+    while (changed) {
+        changed = false
+        for (marker in markers) {
+            val idx = result.lastIndexOf(marker, ignoreCase = true)
+            if (idx < 0) continue
+            val tail = result.substring(idx)
+            if (!looksLikeAutomatedSourcesTail(tail)) continue
+            result = result.substring(0, idx).trimEnd()
+            changed = true
+            break
+        }
+        val sameLineIdx = result.lastIndexOf(" Sources:", ignoreCase = true)
+        if (sameLineIdx > 0) {
+            val tail = result.substring(sameLineIdx).trimStart()
+            if (looksLikeAutomatedSourcesTail(tail)) {
+                result = result.substring(0, sameLineIdx).trimEnd()
+                changed = true
+            }
+        }
     }
     return result
 }
@@ -117,9 +155,15 @@ internal fun formatPageRangeForUser(pageRange: String, labels: CitationDisplayLa
 
 internal fun formatCitationLocation(chunk: RetrievedChunk, labels: CitationDisplayLabels): String = when {
     chunk.chunkIndex < 0 -> labels.overview
-    else -> extractPageRange(chunk.text)?.let { formatPageRangeForUser(it, labels) }
-        ?: extractCitationSectionHeading(chunk.text)
-        ?: labels.locationUnknown
+    else -> {
+        val page = extractPageRange(chunk.text)?.let { formatPageRangeForUser(it, labels) }
+        val section = extractCitationSectionHeading(chunk.text)
+        when {
+            page != null -> page
+            section != null -> section
+            else -> labels.locationUnknown
+        }
+    }
 }
 
 internal fun formatUserCitationLine(
@@ -127,7 +171,7 @@ internal fun formatUserCitationLine(
     outlineByDocName: Map<String, String>,
     labels: CitationDisplayLabels,
 ): String {
-    val name = displayCitationDocName(
+    val name = safeCitationDocTitle(
         chunk.docName,
         outlineByDocName[chunk.docName],
         chunk.text,
@@ -142,6 +186,28 @@ private fun citationLineTitle(line: String): String = line.substringBefore('·')
 
 private fun citationLineLocation(line: String): String =
     line.substringAfter('·', missingDelimiterValue = "").trim()
+
+/** Tier 3.11 — one unknown-location line per document title in Sources footer. */
+internal fun capRedundantUnknownLocationLines(
+    lines: List<String>,
+    labels: CitationDisplayLabels,
+): List<String> {
+    if (lines.isEmpty()) return lines
+    val unknown = labels.locationUnknown
+    val seenUnknownTitles = mutableSetOf<String>()
+    return lines.filter { line ->
+        val location = citationLineLocation(line)
+        if (location != unknown) true
+        else {
+            val title = citationLineTitle(line)
+            if (title in seenUnknownTitles) false
+            else {
+                seenUnknownTitles += title
+                true
+            }
+        }
+    }
+}
 
 /**
  * A6 point 2 — when two files share the same short title, prefix "File 1:" / "फ़ाइल 1:" etc.
@@ -224,7 +290,10 @@ internal fun buildDeterministicSourcesFooter(
         tryAdd(chunk)
     }
 
-    val lines = applyTitleCollisionDisambiguation(entries, labels, docOrder)
+    val lines = capRedundantUnknownLocationLines(
+        applyTitleCollisionDisambiguation(entries, labels, docOrder),
+        labels,
+    )
     if (lines.isEmpty()) return ""
     return buildString {
         append(labels.sourcesHeader)
@@ -246,7 +315,7 @@ internal fun applyDeterministicSourcesFooter(
     claimOverlapTurnMode: RagTurnMode? = null,
 ): String {
     if (chunks.isEmpty()) return modelText
-    val body = stripModelSourcesBlock(modelText, labels)
+    val body = stripInlineCitationIndices(stripModelSourcesBlock(modelText, labels))
     if (
         shouldAuditPostGenGroundedness(claimOverlapQuery, claimOverlapTurnMode) &&
         hasAuditableLegalClaims(body)

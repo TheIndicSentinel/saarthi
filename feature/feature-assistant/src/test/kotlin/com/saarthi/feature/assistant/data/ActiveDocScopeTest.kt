@@ -122,6 +122,20 @@ class ActiveDocScopeTest {
     }
 
     @Test
+    fun `multi-doc session without active pointer searches full corpus`() {
+        val decision = resolveRetrievalScope(
+            query = "what is the penalty",
+            sessionDocs = listOf(bank, payslip),
+            attachmentUris = emptyList(),
+            activeDocUri = null,
+            route = route("what is the penalty"),
+            recencyDocUri = payslip.first,
+        )
+        assertEquals(RetrievalScope.SESSION, decision.scope)
+        assertTrue(decision.restrictUris.isEmpty())
+    }
+
+    @Test
     fun `named file query restricts to matched documents`() {
         val decision = resolveRetrievalScope(
             query = "what is in the payslip",
