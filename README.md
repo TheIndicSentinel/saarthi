@@ -15,7 +15,7 @@ Saarthi runs Google's Gemma models *on-device* via [Google AI Edge LiteRT-LM](ht
 - **Knowledge packs** — domain overlays (Kisan farming pack today) that combine a persona with curated, offline RAG content over government sources. Pack chat requires a capable model (Gemma 3n / Gemma 4); the compact 1B is browse-only.
 - **Tier-aware model catalog** — recommends the right Gemma model for the device's RAM/SoC, from a 584 MB compact model up to Gemma 4 / 3n.
 - **Resumable model downloads** — 2.5 GB+ models download via a foreground service with HTTP Range resume.
-- **On-device extras** — reminders (reliable alarm-clock scheduling), voice input, document attachments (BM25 RAG), per-chat memory.
+- **On-device extras** — daily wisdom notifications, voice input, document attachments (BM25 RAG), per-chat memory.
 
 ## Tech stack
 
@@ -26,7 +26,7 @@ Saarthi runs Google's Gemma models *on-device* via [Google AI Edge LiteRT-LM](ht
 | RAG | BM25 over Room-persisted chunks |
 | DI / Data | Hilt + KSP · Room · DataStore |
 | Downloads | Foreground `Service` + OkHttp (resumable) |
-| Monitoring | Firebase Crashlytics + Analytics (needs `google-services.json`) |
+| Monitoring | On-device `saarthi_debug.log` (no Firebase Crashlytics / Analytics) |
 | Build | AGP 8.7.3 · convention plugins in `build-logic/` · minSdk 28, target/compile 35 |
 
 ## Build & run
@@ -46,7 +46,7 @@ Saarthi runs Google's Gemma models *on-device* via [Google AI Edge LiteRT-LM](ht
 ./gradlew lint
 ```
 
-No manual model setup is needed — the app downloads the appropriate Gemma model during onboarding and stores it in the app's files directory. Firebase is optional in debug (Crashlytics/Analytics are no-ops without `google-services.json`).
+No manual model setup is needed — the app downloads the appropriate Gemma model during onboarding and stores it in the app's files directory. Crash/diagnostic events stay on-device in `saarthi_debug.log` (Support can attach that file); Saarthi ships no Firebase Crashlytics or Analytics.
 
 ## Project structure
 
@@ -55,7 +55,7 @@ saarthi/
 ├── app/                       Application module, navigation host, receivers
 ├── feature/
 │   ├── feature-onboarding/    Language select + model download/init
-│   └── feature-assistant/     Chat, packs, RAG attachments, reminders, TTS, voice
+│   └── feature-assistant/     Chat, packs, RAG attachments, daily wisdom, TTS, voice
 ├── core/
 │   ├── core-inference/        LiteRT-LM engine, ModelCatalog, DeviceProfiler, prompts
 │   ├── core-memory/           Room DB (memories, conversations, sessions, rag_chunks)

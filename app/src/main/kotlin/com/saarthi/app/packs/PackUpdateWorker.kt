@@ -43,7 +43,15 @@ class PackUpdateWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val deps = EntryPointAccessors.fromApplication(applicationContext, Deps::class.java)
-        when (val outcome = deps.packUpdateChecker().checkAndInstall()) {
+        val checker = deps.packUpdateChecker()
+        // Belt-and-suspenders: [PackUpdateScheduler] no longer enqueues when
+        // the manifest URL is empty, but a leftover unique work from an older
+        // build can still fire once. Do not hit the network for a no-op URL.
+        if (!checker.isRemoteConfigured) {
+            DebugLogger.log("PACK", "PackUpdateWorker skipped — KISAN_PACK_MANIFEST_URL is empty")
+            return@withContext Result.success()
+        }
+        when (val outcome = checker.checkAndInstall()) {
             PackUpdateOutcome.NetworkFailed -> Result.retry()
             is PackUpdateOutcome.Updated -> {
                 if (outcome.fromVersion > 0) {

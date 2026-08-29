@@ -63,9 +63,8 @@ class SaarthiApp : Application() {
         appScope.launch {
             runCatching { kisanPackInstaller.installSeedIfAbsent() }
         }
-        // Periodic Kisan-pack update poll. Idempotent (KEEP policy);
-        // no-op when no manifest URL is configured via BuildConfig, so
-        // it's safe to enqueue unconditionally.
+        // Periodic Kisan-pack update poll. Enqueues only when a manifest
+        // URL is configured; empty URL cancels leftover unique work.
         runCatching { packUpdateScheduler.schedule() }
     }
 

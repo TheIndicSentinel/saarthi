@@ -581,6 +581,9 @@ class ChatRepositoryImpl @Inject constructor(
         // empty row. SQLite forbids VACUUM inside a transaction; the new
         // session is a tiny insert and does not need reclaiming first.
         vacuumAfterCommittedBulkDelete()
+        // Diagnostic log can outlive Room; wipe it after the DB commit so a
+        // failed log wipe cannot roll back the already-deleted chats.
+        runCatching { DebugLogger.wipe() }
         // Leave the user on a clean, valid empty chat.
         createSession()
     }

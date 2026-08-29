@@ -15,7 +15,7 @@ Saarthi is a **100% offline** Android AI assistant powered by Gemma 4 / Gemma 3n
 app
 ├── feature:feature-onboarding   ← Language selection + model download/init
 ├── feature:feature-assistant    ← Chat (streaming), RAG attachments, packs,
-│                                   personalities, reminders, TTS
+│                                   personalities, daily wisdom, TTS
 │
 ├── core:core-ui          ← Design system, Cyber-Vedic theme, components
 ├── core:core-inference   ← LiteRT-LM (litertlm) Gemma engine (interface + impl)
@@ -39,7 +39,7 @@ app
 
 | Principle | Where |
 |-----------|-------|
-| **S**ingle Responsibility | `InferenceEngine` only generates text. `RagDocumentRepository` only indexes/retrieves chunks. `ReminderManager` only schedules reminders. |
+| **S**ingle Responsibility | `InferenceEngine` only generates text. `RagDocumentRepository` only indexes/retrieves chunks. `WisdomNotificationScheduler` only arms the daily wisdom alarm. |
 | **O**pen/Closed | New inference backends implement `InferenceEngine` without modifying callers (`InferenceEngineSelector` routes to the active impl). New packs add a `PackType` arm, not new call sites. |
 | **L**iskov Substitution | `LiteRTInferenceEngine` fully substitutes `InferenceEngine`. `Bm25Retriever` is the production retrieval primitive; legacy `VectorStore` impls are not wired in app code. |
 | **I**nterface Segregation | `MemoryRepository` exposes only what callers need. `EmbeddingModel` hides model internals. |
@@ -118,9 +118,11 @@ feature rerank + lexicon plateau **and** RAM/latency budget allows a second on-d
 - `LanguageManager.setLanguage()` applies via `AppCompatDelegate` (no restart needed)
 - `LanguageManager.buildLanguageInstruction()` appended to prompts for native responses
 
-### 5. Reminders & Voice
-- User-set reminders via `ReminderManager` → `AlarmManager` exact alarms
+### 5. Daily wisdom & Voice
+- Daily wisdom card via `WisdomNotificationScheduler` → `AlarmManager`
   (degrades to inexact when `SCHEDULE_EXACT_ALARM` is not granted).
+  User-set reminders were removed; `ReminderManager` still owns the
+  notification channel id so upgrades do not orphan it.
 - Text-to-speech read-aloud via `TtsManager` — markdown-stripped, persona voice
   hints, and sentence-aware chunking so replies over the engine's ~4000-char
   input cap are spoken in full.

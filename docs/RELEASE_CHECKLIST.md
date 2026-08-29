@@ -141,7 +141,7 @@ These cover the paths unit tests cannot. Do them on **your** real device before 
 - [ ] Model load failure path shows a graceful message (not a crash).
 - [ ] Chat: send a message, watch it stream, press Stop mid-stream.
 - [ ] App restart after a generation — history and the selected model persist.
-- [ ] Notification permission denied — reminders degrade gracefully, no crash.
+- [ ] Notification permission denied — daily wisdom is suppressed, no crash.
 - [ ] Attachment → OCR/RAG path: attach a PDF, ask about it, get a grounded answer.
 - [ ] Voice: mic turn + read a long reply aloud (>4000 chars) — chunked TTS speaks fully.
 - [ ] Background ~1–2 min during/after load, return — no freeze; generation still works.

@@ -84,7 +84,7 @@ than treating any number in this table as current.
 | `core-memory`       | Room helpers, memory/chat hygiene |
 | `core-rag`          | BM25 retrieval, chunking |
 | `core-inference`    | Download policy, crash recovery, engine lifecycle, catalog |
-| `feature-assistant` | Chat mapping, reminders, pack chat |
+| `feature-assistant` | Chat mapping, pack chat |
 | `feature-onboarding`| Onboarding download/init flow |
 | `app`               | Manage-downloads, boot/wisdom wiring |
 
@@ -136,7 +136,7 @@ Tags you'll see in there:
 | `CHAT`     | Stream start / done / token rate              |
 | `PROMPT`   | Tier, recap state, language line              |
 | `MEMORY`   | Memory facts injected per turn                 |
-| `REMINDER` | When a marker is dropped vs. scheduled         |
+| `WISDOM`   | Daily wisdom alarm fired vs. notification suppressed |
 | `DOWNLOAD` | Model download progress + reattach            |
 | `CRASH`    | Uncaught exception + 30 frames of stack       |
 
