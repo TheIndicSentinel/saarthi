@@ -594,15 +594,19 @@ internal fun formatExcerptHeader(
     return "[$index1Based] $name$locationRef\n"
 }
 
-internal fun sessionManifestLine(docNames: List<String>): String {
+internal fun sessionManifestLine(
+    docNames: List<String>,
+    labels: CitationDisplayLabels = com.saarthi.core.i18n.SupportedLanguage.ENGLISH.citationDisplayLabels(),
+): String {
     if (docNames.isEmpty()) return ""
-    return "Documents in this chat: " +
+    return labels.documentsInChatHeader + " " +
         docNames.joinToString("; ") { it } +
         "\n\n"
 }
 
-internal const val UNREADABLE_FILES_INTRO =
-    "Files attached this turn that could NOT be read (do not cite them; do not pretend to know their contents):"
+/** English default kept for tests that assert the legacy string shape. */
+internal val UNREADABLE_FILES_INTRO =
+    com.saarthi.core.i18n.SupportedLanguage.ENGLISH.citationDisplayLabels().unreadableFilesIntro
 
 /**
  * Minimum BM25 body score at which the retrieved excerpts are treated as a

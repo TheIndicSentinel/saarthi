@@ -51,12 +51,13 @@ class CitationDisplayLabelsTest {
     }
 
     @Test
-    fun `every language has excerpt-only grounding rules B3-3`() {
+    fun `every language has localized RAG manifest headers R4`() {
         for (lang in SupportedLanguage.entries) {
             val labels = lang.citationDisplayLabels()
-            assertTrue(labels.excerptOnlyRule.isNotBlank())
-            assertTrue(labels.excerptOnlyRuleCompact.isNotBlank())
-            assertTrue(labels.groundednessCaveat.isNotBlank())
+            assertTrue(labels.documentsInChatHeader.isNotBlank())
+            assertTrue(labels.newFilesThisTurnPrefix.isNotBlank())
+            assertTrue(labels.newFilesThisTurnSuffix.isNotBlank())
+            assertTrue(labels.unreadableFilesIntro.isNotBlank())
         }
     }
 }

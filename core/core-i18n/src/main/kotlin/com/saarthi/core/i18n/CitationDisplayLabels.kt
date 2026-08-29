@@ -22,6 +22,14 @@ data class CitationDisplayLabels(
     val excerptOnlyRuleCompact: String,
     /** Wave 6 P27 — shown when amounts/section refs in the answer lack excerpt support. */
     val groundednessCaveat: String,
+    /** R4 — session document manifest line prefix (filenames follow). */
+    val documentsInChatHeader: String,
+    /** R4 — prefix before this-turn attachment short names. */
+    val newFilesThisTurnPrefix: String,
+    /** R4 — instruction after this-turn attachment names. */
+    val newFilesThisTurnSuffix: String,
+    /** R4 — intro before unreadable attachment list in the RAG block. */
+    val unreadableFilesIntro: String,
 ) {
     /** Full multi-line example matching deterministic footer shape: header + one file line. */
     fun citationRulesFooterExample(): String =
@@ -51,6 +59,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "Note: Some amounts or section references in this reply were not found in the excerpts. " +
             "Please verify against the original document.",
+        documentsInChatHeader = "Documents in this chat:",
+        newFilesThisTurnPrefix = "New files this turn: ",
+        newFilesThisTurnSuffix =
+            ". Answer from these files; do not reuse answers about earlier documents.\n\n",
+        unreadableFilesIntro =
+            "Files attached this turn that could NOT be read (do not cite them; do not pretend to know their contents):",
     )
     SupportedLanguage.HINDI -> CitationDisplayLabels(
         sourcesHeader = "स्रोत:",
@@ -71,6 +85,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
             "केवल अंशों में लिखी बातें बताएं; अंशों में नहीं लिखी बातें न जोड़ें।",
         groundednessCaveat =
             "नोट: इस उत्तर में कुछ राशि या धारा संदर्भ अंशों में नहीं मिले। मूल दस्तावेज़ से सत्यापित करें।",
+        documentsInChatHeader = "इस चैट में दस्तावेज़:",
+        newFilesThisTurnPrefix = "इस बार जोड़ी गई फ़ाइलें: ",
+        newFilesThisTurnSuffix =
+            ". इन फ़ाइलों से उत्तर दें; पहले के दस्तावेज़ों के उत्तर न दोहराएँ.\n\n",
+        unreadableFilesIntro =
+            "इस बार जोड़ी गई फ़ाइलें जो पढ़ी नहीं जा सकीं (उन्हें उद्धृत न करें; उनकी सामग्री जानने का दिखावा न करें):",
     )
     SupportedLanguage.TAMIL -> CitationDisplayLabels(
         sourcesHeader = "மூலம்:",
@@ -92,6 +112,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "குறிப்பு: இந்த பதிலில் சில தொகை அல்லது பிரிவு குறிப்புகள் அங்கங்களில் காணப்படவில்லை. " +
             "அசல் ஆவணத்தில் சரிபார்க்கவும்.",
+        documentsInChatHeader = "இந்த உரையாடலில் ஆவணங்கள்:",
+        newFilesThisTurnPrefix = "இந்த திருப்பில் புதிய கோப்புகள்: ",
+        newFilesThisTurnSuffix =
+            ". இந்த கோப்புகளிலிருந்து பதிலளிக்கவும்; முந்தைய ஆவணங்களின் பதில்களை மீண்டும் பயன்படுத்த வேண்டாம்.\n\n",
+        unreadableFilesIntro =
+            "இந்த திருப்பில் படிக்க முடியாத கோப்புகள் (அவற்றை மேற்கோள் காட்ட வேண்டாம்; உள்ளடக்கம் தெரிந்ததாக நடிக்க வேண்டாம்):",
     )
     SupportedLanguage.TELUGU -> CitationDisplayLabels(
         sourcesHeader = "మూలాలు:",
@@ -113,6 +139,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "గమనిక: ఈ సమాధానంలో కొన్ని మొత్తాలు లేదా విభాగం సూచనలు ఉద్ధరణలలో కనిపించలేదు. " +
             "మూల పత్రంలో ధృవీకరించండి.",
+        documentsInChatHeader = "ఈ చాట్‌లో పత్రాలు:",
+        newFilesThisTurnPrefix = "ఈ మలుపులో కొత్త ఫైల్‌లు: ",
+        newFilesThisTurnSuffix =
+            ". ఈ ఫైల్‌ల నుండి సమాధానం ఇవ్వండి; మునుపటి పత్రాల సమాధానాలను మళ్లీ ఉపయోగించకండి.\n\n",
+        unreadableFilesIntro =
+            "ఈ మలుపులో చదవలేని ఫైల్‌లు (వాటిని ఉదహరించకండి; విషయం తెలిసినట్లు నటించకండి):",
     )
     SupportedLanguage.BENGALI -> CitationDisplayLabels(
         sourcesHeader = "সূত্র:",
@@ -134,6 +166,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "নোট: এই উত্তরের কিছু পরিমাণ বা ধারা উল্লেখ উদ্ধৃতিপথে পাওয়া যায়নি। " +
             "মূল নথিতে যাচাই করুন।",
+        documentsInChatHeader = "এই চ্যাটে নথি:",
+        newFilesThisTurnPrefix = "এই বারে যোগ করা ফাইল: ",
+        newFilesThisTurnSuffix =
+            ". এই ফাইলগুলি থেকে উত্তর দিন; পূর্বের নথির উত্তর পুনরায় ব্যবহার করবেন না.\n\n",
+        unreadableFilesIntro =
+            "এই বারে যোগ করা ফাইল যা পড়া যায়নি (উদ্ধৃত করবেন না; বিষয়বস্তু জানার ভান করবেন না):",
     )
     SupportedLanguage.MARATHI -> CitationDisplayLabels(
         sourcesHeader = "स्त्रोत:",
@@ -155,6 +193,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "टीप: या उत्तरातील काही रक्कम किंवा विभाग संदर्भ अंशांमध्ये सापडले नाहीत. " +
             "मूळ दस्तऐवजात तपासा.",
+        documentsInChatHeader = "या चॅटमधील दस्तऐवज:",
+        newFilesThisTurnPrefix = "या वेळी जोडलेली फाइल: ",
+        newFilesThisTurnSuffix =
+            ". या फाइलांमधून उत्तर द्या; मागील दस्तऐवजांचे उत्तर पुन्हा वापरू नका.\n\n",
+        unreadableFilesIntro =
+            "या वेळी जोडलेली फाइल जी वाचता आली नाही (त्यांना उद्धृत करू नका; मजकूर माहित असल्याचे दाखवू नका):",
     )
     SupportedLanguage.KANNADA -> CitationDisplayLabels(
         sourcesHeader = "ಮೂಲಗಳು:",
@@ -176,6 +220,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "ಗಮನಿಸಿ: ಈ ಉತ್ತರದಲ್ಲಿನ ಕೆಲವು ಮೊತ್ತಗಳು ಅಥವಾ ವಿಭಾಗ ಉಲ್ಲೇಖಗಳು ಉದ್ಧರಣಿಗಳಲ್ಲಿ ಕಂಡುಬಂದಿಲ್ಲ. " +
             "ಮೂಲ ದಾಖಲೆಯಲ್ಲಿ ಪರಿಶೀಲಿಸಿ.",
+        documentsInChatHeader = "ಈ ಚಾಟ್‌ನಲ್ಲಿನ ದಾಖಲೆಗಳು:",
+        newFilesThisTurnPrefix = "ಈ ತಿರುವರಿಯಲ್ಲಿ ಹೊಸ ಫೈಲ್‌ಗಳು: ",
+        newFilesThisTurnSuffix =
+            ". ಈ ಫೈಲ್‌ಗಳಿಂದ ಉತ್ತರಿಸಿ; ಹಿಂದಿನ ದಾಖಲೆಗಳ ಉತ್ತರಗಳನ್ನು ಮರುಬಳಕೆ ಮಾಡಬೇಡಿ.\n\n",
+        unreadableFilesIntro =
+            "ಈ ತಿರುವರಿಯಲ್ಲಿ ಓದಲಾಗದ ಫೈಲ್‌ಗಳು (ಅವುಗಳನ್ನು ಉಲ್ಲೇಖಿಸಬೇಡಿ; ವಿಷಯ ತಿಳಿದಿದೆ ಎಂದು ನಟಿಸಬೇಡಿ):",
     )
     SupportedLanguage.GUJARATI -> CitationDisplayLabels(
         sourcesHeader = "સ્રોત:",
@@ -197,6 +247,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "નોંધ: આ જવાબમાં કેટલાક રકમ અથવા વિભાગ સંદર્ભ અંશોમાં મળ્યા નથી. " +
             "મૂળ દસ્તાવેજમાં ચકાસો.",
+        documentsInChatHeader = "આ ચેટમાં દસ્તાવેજો:",
+        newFilesThisTurnPrefix = "આ વળતરમાં નવી ફાઇલો: ",
+        newFilesThisTurnSuffix =
+            ". આ ફાઇલોમાંથી જવાબ આપો; પહેલાના દસ્તાવેજોના જવાબ ફરી વાપરશો નહીં.\n\n",
+        unreadableFilesIntro =
+            "આ વળતરમાં વાંચી શકાય નહીં તેવી ફાઇલો (ઉદ્ધૃત કરશો નહીં; સામગ્રી જાણતા હોવાનો દેખાવ ન કરો):",
     )
     SupportedLanguage.PUNJABI -> CitationDisplayLabels(
         sourcesHeader = "ਸਰੋਤ:",
@@ -218,6 +274,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "ਨੋਟ: ਇਸ ਜਵਾਬ ਵਿੱਚ ਕੁਝ ਰਕਮਾਂ ਜਾਂ ਧਾਰਾ ਹਵਾਲੇ ਅੰਸ਼ਾਂ ਵਿੱਚ ਨਹੀਂ ਮਿਲੇ। " +
             "ਮੂਲ ਦਸਤਾਵੇਜ਼ ਵਿੱਚ ਪੁਸ਼ਟੀ ਕਰੋ।",
+        documentsInChatHeader = "ਇਸ ਚੈਟ ਵਿੱਚ ਦਸਤਾਵੇਜ਼:",
+        newFilesThisTurnPrefix = "ਇਸ ਵਾਰ ਜੋੜੀਆਂ ਫਾਈਲਾਂ: ",
+        newFilesThisTurnSuffix =
+            ". ਇਨ੍ਹਾਂ ਫਾਈਲਾਂ ਤੋਂ ਜਵਾਬ ਦਿਓ; ਪਿਛਲੇ ਦਸਤਾਵੇਜ਼ਾਂ ਦੇ ਜਵਾਬ ਦੁਬਾਰਾ ਨਾ ਵਰਤੋ.\n\n",
+        unreadableFilesIntro =
+            "ਇਸ ਵਾਰ ਜੋੜੀਆਂ ਫਾਈਲਾਂ ਜੋ ਪੜ੍ਹੀ ਨਹੀਂ ਜਾ ਸਕੀ (ਉਹਨਾਂ ਨੂੰ ਹਵਾਲਾ ਨਾ ਦਿਓ; ਸਮੱਗਰੀ ਜਾਣਨ ਦਾ ਦਿਖਾਵਾ ਨਾ ਕਰੋ):",
     )
     SupportedLanguage.ODIA -> CitationDisplayLabels(
         sourcesHeader = "ସୂତ୍ର:",
@@ -239,6 +301,12 @@ fun SupportedLanguage.citationDisplayLabels(): CitationDisplayLabels = when (thi
         groundednessCaveat =
             "ଟିପ୍ପଣୀ: ଏହି ଉତ୍ତରର କେତେକ ରାଶି କିମ୍ବା ଧାରା ସନ୍ଦର୍ଭ ଉଦ୍ଧୃତିଗୁଡ଼ିକରେ ମିଳିଲା ନାହିଁ। " +
             "ମୂଳ ଦଲିଲରେ ଯାଞ୍ଚ କରନ୍ତୁ।",
+        documentsInChatHeader = "ଏହି ଚାଟରେ ଦଲିଲ:",
+        newFilesThisTurnPrefix = "ଏହି ବାର ଯୋଡ଼ା ଫାଇଲ:",
+        newFilesThisTurnSuffix =
+            ". ଏହି ଫାଇଲରୁ ଉତ୍ତର ଦିଅନ୍ତୁ; ପୂର୍ବ ଦଲିଲର ଉତ୍ତର ପୁନର୍ବ୍ୟବହାର କରନ୍ତୁ ନାହିଁ.\n\n",
+        unreadableFilesIntro =
+            "ଏହି ବାର ଯୋଡ଼ା ଫାଇଲ ଯାହା ପଢ଼ି ହେଲା ନାହିଁ (ଉଦ୍ଧୃତ କରନ୍ତୁ ନାହିଁ; ବିଷୟବସ୍ତୁ ଜାଣିଛନ୍ତି ଭଳି ଦେଖାନ୍ତୁ ନାହିଁ):",
     )
 }
 
