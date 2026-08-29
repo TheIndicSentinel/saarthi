@@ -13,9 +13,10 @@ import org.junit.Test
 /**
  * [FunnelTracker] is the conversion-funnel instrumentation. The contract that
  * matters: [FunnelTracker.track] records every time, [FunnelTracker.trackOnce]
- * records a "first_*" milestone at most once per process so a session's
- * activation isn't double-counted on every send. Output goes through the
- * [DebugLogger] object, which we mock to observe the calls.
+ * records a "first_*" milestone at most once per install (survives process
+ * death via [FunnelOnceStore]) so activation isn't double-counted on every
+ * send or after a swipe-away restart. Output goes through the [DebugLogger]
+ * object, which we mock to observe the calls.
  */
 class FunnelTrackerTest {
 
@@ -32,7 +33,7 @@ class FunnelTrackerTest {
 
     @Test
     fun `track records every call`() {
-        val tracker = FunnelTracker()
+        val tracker = FunnelTracker(InMemoryFunnelOnceStore())
         tracker.track(FunnelEvent.PAYWALL_VIEWED)
         tracker.track(FunnelEvent.PAYWALL_VIEWED)
         verify(exactly = 2) { DebugLogger.log("FUNNEL", "paywall_viewed") }
@@ -40,18 +41,32 @@ class FunnelTrackerTest {
 
     @Test
     fun `trackOnce records a milestone only once`() {
-        val tracker = FunnelTracker()
+        val tracker = FunnelTracker(InMemoryFunnelOnceStore())
         repeat(5) { tracker.trackOnce(FunnelEvent.FIRST_CHAT_SENT) }
         verify(exactly = 1) { DebugLogger.log("FUNNEL", match { it.startsWith("first_chat_sent") }) }
     }
 
     @Test
     fun `trackOnce de-dupes per event, not globally`() {
-        val tracker = FunnelTracker()
+        val tracker = FunnelTracker(InMemoryFunnelOnceStore())
         tracker.trackOnce(FunnelEvent.FIRST_CHAT_SENT)
         tracker.trackOnce(FunnelEvent.FIRST_DOC_ATTACHED)
         tracker.trackOnce(FunnelEvent.FIRST_CHAT_SENT)   // ignored — already fired
         verify(exactly = 2) { DebugLogger.log("FUNNEL", any()) }
+    }
+
+    @Test
+    fun `trackOnce does not re-log first after a process restart`() {
+        // DataStore hydrate is untested here (no Robolectric). Seeding the
+        // in-memory store simulates the persisted set a new process would load.
+        val durable = InMemoryFunnelOnceStore(
+            initiallyFired = setOf(FunnelEvent.FIRST_CHAT_SENT.id),
+        )
+        val afterRestart = FunnelTracker(durable)
+        afterRestart.trackOnce(FunnelEvent.FIRST_CHAT_SENT)
+        afterRestart.trackOnce(FunnelEvent.FIRST_DOC_ATTACHED)
+        verify(exactly = 0) { DebugLogger.log("FUNNEL", match { it.startsWith("first_chat_sent") }) }
+        verify(exactly = 1) { DebugLogger.log("FUNNEL", "first_doc_attached (first)") }
     }
 
     @Test

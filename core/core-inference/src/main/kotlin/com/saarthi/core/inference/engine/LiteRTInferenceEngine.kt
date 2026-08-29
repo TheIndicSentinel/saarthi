@@ -1257,19 +1257,27 @@ class LiteRTInferenceEngine @Inject constructor(
      * with a clean KV cache. Called when the user creates a new chat, switches
      * sessions, or clears history.
      *
-     * With per-request conversations in [generateStream], this is a safety net:
-     * it ensures no stale conversation lingers if the architecture is ever
-     * changed back to persistent sessions.
+     * Close-only: do **not** JNI-create a replacement Conversation here.
+     * [generateStream] already recycles immediately before `sendMessageAsync`.
+     * Creating one on every drawer tap was the `[SESSION] Session reset`
+     * burst (native create, then the next send closed it again).
+     *
+     * Lock order matches generate: [generateMutex] then [conversationLock]
+     * (inside [releaseConversationOnly]).
      */
     override suspend fun resetSession() = withContext(engineDispatcher) {
         generateMutex.withLock {
-            if (engine == null) return@withLock
-            // Serialized close-before-create (same invariant as the per-turn
-            // recycle) so a reset can't collide with an in-flight recycle.
-            recycleConversation(samplerForActiveModel())
+            if (!shouldCloseConversationOnSessionReset(
+                    engineLoaded = engine != null,
+                    hasActiveConversation = activeConversation != null,
+                )
+            ) {
+                return@withLock
+            }
+            releaseConversationOnly()
             nativeDoneSignal = null
-            _isFreshConversation = true   // next turn must re-send system prompt
-            DebugLogger.log("LITERT", "[SESSION] Session reset — conversation recycled, KV cache cleared")
+            _isFreshConversation = true
+            DebugLogger.log("LITERT", "[SESSION] Session reset — conversation closed; next turn will create a fresh one")
         }
     }
 

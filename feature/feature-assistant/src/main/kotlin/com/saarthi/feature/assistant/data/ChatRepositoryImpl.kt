@@ -11,6 +11,7 @@ import com.saarthi.core.inference.DeviceProfiler
 import com.saarthi.core.inference.InferenceService
 import com.saarthi.core.inference.LogPrivacy
 import com.saarthi.core.inference.engine.InferenceEngine
+import com.saarthi.core.inference.engine.shouldResetEngineOnSessionSwitch
 import com.saarthi.core.inference.model.PackType
 import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ChatSessionDao
@@ -209,6 +210,7 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     override suspend fun switchSession(sessionId: String) {
+        val resetEngine = shouldResetEngineOnSessionSwitch(_currentSessionId.value, sessionId)
         _currentSessionId.value = sessionId
         val messages = conversationDao.getRecentBySession(
             sessionId,
@@ -217,8 +219,11 @@ class ChatRepositoryImpl @Inject constructor(
         _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(messages.map { it.toChatMessage() })
         sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         refreshOlderMessagesOmitted()
-        // Reset engine session to prevent stale KV cache from previous chat
-        runCatching { inferenceEngine.resetSession() }
+        // Skip when the drawer re-selects the already-open chat. generateStream
+        // already recycles per turn; a no-op tap must not JNI-create a session.
+        if (resetEngine) {
+            runCatching { inferenceEngine.resetSession() }
+        }
     }
 
     override suspend fun deleteSession(sessionId: String) {

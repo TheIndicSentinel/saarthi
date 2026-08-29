@@ -1,5 +1,7 @@
 package com.saarthi.core.inference.di
 
+import com.saarthi.core.inference.DataStoreFunnelOnceStore
+import com.saarthi.core.inference.FunnelOnceStore
 import com.saarthi.core.inference.engine.InferenceEngine
 import com.saarthi.core.inference.engine.InferenceEngineSelector
 import dagger.Binds
@@ -15,4 +17,8 @@ abstract class InferenceModule {
     @Binds
     @Singleton
     abstract fun bindInferenceEngine(impl: InferenceEngineSelector): InferenceEngine
+
+    @Binds
+    @Singleton
+    abstract fun bindFunnelOnceStore(impl: DataStoreFunnelOnceStore): FunnelOnceStore
 }
