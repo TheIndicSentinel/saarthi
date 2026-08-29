@@ -48,6 +48,27 @@ class RagDocumentRepository @Inject constructor(
         if (docUri.isNotEmpty()) activeDocUriBySession[sessionId] = docUri
     }
 
+    /** T5.4 — persist working doc across process restart (Room pointer row). */
+    suspend fun persistActiveDocUri(sessionId: String, docUri: String) {
+        if (docUri.isEmpty()) return
+        setActiveDocUri(sessionId, docUri)
+        sqliteWriteWithRetry {
+            ragChunkDao.deleteByDoc(sessionId, ACTIVE_DOC_POINTER_URI)
+            ragChunkDao.insertAll(
+                listOf(
+                    RagChunkEntity(
+                        sessionId = sessionId,
+                        docUri = ACTIVE_DOC_POINTER_URI,
+                        docName = "",
+                        mimeType = "application/octet-stream",
+                        chunkIndex = ACTIVE_DOC_CHUNK_INDEX,
+                        text = docUri,
+                    ),
+                ),
+            )
+        }
+    }
+
     fun clearActiveDocUri(sessionId: String) {
         activeDocUriBySession.remove(sessionId)
     }
@@ -59,6 +80,24 @@ class RagDocumentRepository @Inject constructor(
     fun resolveActiveDocUri(sessionId: String, sessionDocs: List<SessionRagDocument>): String? {
         val cached = activeDocUriBySession[sessionId]
         if (cached != null && sessionDocs.any { it.uri == cached }) return cached
+        return sessionDocs.maxByOrNull { it.lastIndexedAt }?.uri
+    }
+
+    /** T5.4 — load persisted pointer into cache before retrieval scope resolution. */
+    suspend fun loadActiveDocUri(sessionId: String, sessionDocs: List<SessionRagDocument>): String? {
+        val cached = activeDocUriBySession[sessionId]
+        if (cached != null && sessionDocs.any { it.uri == cached }) return cached
+        val loaded = sqliteWriteWithRetry {
+            ragChunkDao.getByDoc(sessionId, ACTIVE_DOC_POINTER_URI)
+                .firstOrNull { it.chunkIndex == ACTIVE_DOC_CHUNK_INDEX }
+                ?.text
+                ?.trim()
+                .orEmpty()
+        }
+        if (loaded.isNotEmpty() && sessionDocs.any { it.uri == loaded }) {
+            activeDocUriBySession[sessionId] = loaded
+            return loaded
+        }
         return sessionDocs.maxByOrNull { it.lastIndexedAt }?.uri
     }
 
@@ -213,7 +252,10 @@ class RagDocumentRepository @Inject constructor(
         val existing = sqliteWriteWithRetry { ragChunkDao.getByDoc(sessionId, uriKey) }
         if (existing.isNotEmpty()) {
             val stored = existing.firstOrNull { it.chunkIndex == FINGERPRINT_CHUNK_INDEX }?.text
-            if (!shouldReplaceIndex(stored, stamp)) return
+            if (!shouldReplaceIndex(stored, stamp)) {
+                persistActiveDocUri(sessionId, uriKey)
+                return
+            }
             sqliteWriteWithRetry { ragChunkDao.deleteByDoc(sessionId, uriKey) }
             invalidateTokenCache(sessionId)
         }
@@ -239,7 +281,7 @@ class RagDocumentRepository @Inject constructor(
                 )
             }
             logRag("index-alias nameLen=${file.name.length} sessionIdLen=${sessionId.length}")
-            setActiveDocUri(sessionId, uriKey)
+            persistActiveDocUri(sessionId, uriKey)
             return
         }
 
@@ -359,7 +401,7 @@ class RagDocumentRepository @Inject constructor(
             )
         }
         sqliteWriteWithRetry { ragChunkDao.insertAll(entities) }
-        setActiveDocUri(sessionId, uriKey)
+        persistActiveDocUri(sessionId, uriKey)
         val hasOutline = entities.any { it.chunkIndex == OUTLINE_CHUNK_INDEX }
         val totalChars = entities.filter { it.chunkIndex >= 0 }.sumOf { it.text.length }
         val indexMs = (System.nanoTime() - t0) / 1_000_000
@@ -383,7 +425,9 @@ class RagDocumentRepository @Inject constructor(
         val rows = sqliteWriteWithRetry { ragChunkDao.getBySession(sessionId) }
         if (rows.isEmpty()) return emptyList()
         return rows.groupBy { it.docUri }
-            .filter { (_, chunks) -> chunks.any { it.chunkIndex >= 0 } }
+            .filter { (uri, chunks) ->
+                isUserIndexedDocUri(uri) && chunks.any { it.chunkIndex >= 0 }
+            }
             .map { (uri, chunks) ->
                 val newest = chunks.maxBy { it.createdAt }
                 val truncation = chunks.firstOrNull {
@@ -481,7 +525,7 @@ class RagDocumentRepository @Inject constructor(
         } else {
             sessionRows
         }
-        val all = scoped.filter { it.chunkIndex != FINGERPRINT_CHUNK_INDEX }
+        val all = scoped.filter { it.chunkIndex != FINGERPRINT_CHUNK_INDEX && !isActiveDocPointerRow(it) }
         val docRoleByUri = documentRolesByUri(all)
         val sessionDocCount = all.map { it.docUri }.filter { it.isNotEmpty() }.distinct().size
         if (all.isEmpty()) {
@@ -635,13 +679,21 @@ class RagDocumentRepository @Inject constructor(
         } else {
             null
         }
+        val scopedDocUris = contentChunks.map { it.docUri }.distinct()
+        val scopedRegistries = chapterRegistries.filterKeys { it in scopedDocUris }
+        val activeDocForTabular = loadActiveDocUri(sessionId, sessionDocsFromRows(all))
+        val tabularPreferDocUri = penaltyPreferDocUri ?: resolveTabularPreferDocUri(
+            query = query,
+            restrictUris = expandedRestrict,
+            activeDocUri = activeDocForTabular,
+        )
         val structureCountHint = buildStructureCountHint(
             query,
             contentChunks,
             all.filter { it.chunkIndex == OUTLINE_CHUNK_INDEX }.map { it.text },
-            chapterRegistries,
+            scopedRegistries,
         )
-        val structureListHint = buildStructureListHint(query, chapterRegistries)
+        val structureListHint = buildStructureListHint(query, scopedRegistries)
         val structureHint = structureListHint ?: structureCountHint
         val tabularMax = if (spanPreserving) SPAN_ANCHOR_WINDOW else TABULAR_ANCHOR_MAX
         val headingAnchored = if (chapterSpanChunks.isEmpty()) {
@@ -658,12 +710,12 @@ class RagDocumentRepository @Inject constructor(
         val tabularAnchored = anchoredTabularChunks(
             contentChunks,
             query,
-            preferDocUri = penaltyPreferDocUri,
+            preferDocUri = tabularPreferDocUri,
             maxChunks = tabularMax,
         )
-        val structureListAnchored = anchoredStructureListChunks(all, contentChunks, query, chapterRegistries)
+        val structureListAnchored = anchoredStructureListChunks(all, contentChunks, query, scopedRegistries)
         val tabularContractEntities = if (requiresTabularContract(query)) {
-            tabularContractChunkEntities(contentChunks, penaltyPreferDocUri)
+            tabularContractChunkEntities(contentChunks, tabularPreferDocUri)
         } else {
             emptyList()
         }
@@ -693,13 +745,10 @@ class RagDocumentRepository @Inject constructor(
             route.expandedQuery
         }
         if (isStructureListQuery(query)) {
-            effectiveQuery += when (structureMarkerKind(query)) {
-                "section" -> " section sections धारा"
-                "part" -> " part parts"
-                "heading" -> " heading headings"
-                "annex" -> " annex appendix annexure"
-                else -> " CHAPTER Chapter chapter अध्याय"
-            }
+            effectiveQuery += structureMarkerBm25Expansion(query)
+        }
+        if (isStructureCountQuery(query)) {
+            effectiveQuery += structureMarkerBm25Expansion(query)
         }
         val topicExpansion = topicAnchorQueryExpansion(query)
         if (topicExpansion.isNotEmpty()) {
@@ -801,7 +850,9 @@ class RagDocumentRepository @Inject constructor(
         val usedIds = LinkedHashSet<Long>()
         val bm25Hits = mutableListOf<RetrievedChunk>()
         if (structureHint != null && contentChunks.isNotEmpty()) {
-            val doc = contentChunks.first()
+            val hintDocUri = tabularPreferDocUri?.takeIf { it in scopedDocUris }
+                ?: scopedDocUris.singleOrNull()
+            val doc = contentChunks.firstOrNull { it.docUri == hintDocUri } ?: contentChunks.first()
             bm25Hits.add(
                 RetrievedChunk(
                     text = structureHint,
@@ -1207,6 +1258,12 @@ class RagDocumentRepository @Inject constructor(
                     if (chunk != null && result.none { it.id == chunk.id }) {
                         result.add(chunk)
                     }
+                    val neighbor = contentChunks.firstOrNull {
+                        it.docUri == uri && it.chunkIndex == entry.startChunkIndex + 1
+                    }
+                    if (neighbor != null && result.none { it.id == neighbor.id }) {
+                        result.add(neighbor)
+                    }
                 }
             }
             if (result.isNotEmpty()) {
@@ -1485,6 +1542,20 @@ internal fun existingUriWithStamp(
     uri: String,
     stamp: String,
 ): String? = fingerprints.firstOrNull { it.first != uri && it.second == stamp }?.first
+
+/** Build session doc list from indexed rows (excludes pointer / system chunks). */
+internal fun sessionDocsFromRows(rows: List<RagChunkEntity>): List<SessionRagDocument> =
+    rows
+        .filter { isUserIndexedDocUri(it.docUri) && it.chunkIndex >= 0 }
+        .groupBy { it.docUri }
+        .map { (uri, chunks) ->
+            val newest = chunks.maxBy { it.createdAt }
+            SessionRagDocument(
+                uri = uri,
+                name = newest.docName,
+                lastIndexedAt = newest.createdAt,
+            )
+        }
 
 /**
  * When [restrictUris] is non-empty, include every URI that shares a stamp
@@ -1777,9 +1848,8 @@ private val TOPIC_ANCHOR_CATEGORIES = listOf(
         ),
         querySubstrings = listOf("प्रावधान", "छूट", "अपवाद"),
         bodyPatterns = listOf(
+            0 to Regex("(?m)^\\s*SPECIAL\\s+PROVISIONS"),
             0 to Regex("(?m)^\\s*CHAPTER\\s+[IVXLC\\d]+\\s+SPECIAL\\s+PROVISIONS"),
-            0 to Regex("(?i)\\bCHAPTER\\s+[IVXLC\\d]+\\s+SPECIAL\\s+PROVISIONS"),
-            0 to Regex("(?m)^\\s*SPECIAL PROVISIONS"),
             1 to Regex("(?i)\\bspecial provisions?\\b"),
             2 to Regex("(?i)\\bexemptions?\\b"),
             2 to Regex("(?i)\\bexceptions?\\b"),
@@ -1808,10 +1878,12 @@ private val TOPIC_ANCHOR_CATEGORIES = listOf(
         ),
         querySubstrings = listOf("योग्यता", "अयोग्य"),
         bodyPatterns = listOf(
-            0 to Regex("(?i)\\bdisqualification\\b"),
+            0 to Regex("(?m)^\\s*DISQUALIFICATION"),
+            0 to Regex("(?i)\\bdisqualification\\s+for\\b"),
             1 to Regex("(?i)\\beligibility\\b"),
             1 to Regex("(?i)\\bqualification\\b"),
             2 to Regex("(?i)\\bappointment\\b"),
+            2 to Regex("(?i)\\bboard\\s+member"),
         ),
         expansionTerms = " eligibility disqualification appointment qualification",
     ),

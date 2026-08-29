@@ -196,8 +196,13 @@ internal fun goldenSessionRetrieve(
         emptyList()
     }
     val topicAnchored = pickTopicAnchorChunkEntities(contentChunks, query, TOPIC_ANCHOR_MAX)
+    val tabularPrefer = resolveTabularPreferDocUri(
+        query = query,
+        restrictUris = scopeDecision.restrictUris,
+        activeDocUri = activeDocUri,
+    )
     val tabularContract = if (requiresTabularContract(query)) {
-        tabularContractChunkEntities(contentChunks)
+        tabularContractChunkEntities(contentChunks, tabularPrefer)
     } else {
         emptyList()
     }
@@ -214,6 +219,9 @@ internal fun goldenSessionRetrieve(
     }
     if (isTabularAmountQuery(query)) {
         effectiveQuery += tabularAmountQueryExpansion()
+    }
+    if (isStructureListQuery(query) || isStructureCountQuery(query)) {
+        effectiveQuery += structureMarkerBm25Expansion(query)
     }
     val topicExpansion = topicAnchorQueryExpansion(query)
     if (topicExpansion.isNotEmpty()) effectiveQuery += topicExpansion

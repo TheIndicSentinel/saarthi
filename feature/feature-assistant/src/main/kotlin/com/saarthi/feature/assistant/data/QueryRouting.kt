@@ -628,6 +628,31 @@ internal fun isSectionPenaltyComboQuery(query: String): Boolean {
     return isPenaltyScheduleQuery(query)
 }
 
+/**
+ * T5.2 — prefer Schedule/tabular retrieval from the scoped or active document
+ * when the session has multiple files (e.g. Act + guide).
+ */
+internal fun resolveTabularPreferDocUri(
+    query: String,
+    restrictUris: Set<String>,
+    activeDocUri: String?,
+): String? {
+    if (!isTabularAmountQuery(query)) return null
+    if (restrictUris.size == 1) return restrictUris.single()
+    val active = activeDocUri?.takeIf { restrictUris.isEmpty() || it in restrictUris }
+    return active
+}
+
+/** T5.1 — BM25 expansion tokens for structure count/list queries. */
+internal fun structureMarkerBm25Expansion(query: String): String =
+    when (structureMarkerKind(query)) {
+        "section" -> " section sections धारा"
+        "part" -> " part parts"
+        "heading" -> " heading headings"
+        "annex" -> " annex appendix annexure"
+        else -> " CHAPTER Chapter chapter अध्याय"
+    }
+
 /** Dynamic top-K: fewer chunks for narrow QA, more for overview/compare (P0 #2). */
 internal fun topKForAnswerShape(shape: RagAnswerShape, equalSlots: Boolean): Int = when {
     equalSlots -> RagDocumentRepository.DEFAULT_TOP_K

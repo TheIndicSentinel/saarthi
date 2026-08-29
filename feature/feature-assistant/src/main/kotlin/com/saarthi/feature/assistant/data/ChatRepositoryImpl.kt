@@ -217,6 +217,10 @@ class ChatRepositoryImpl @Inject constructor(
         _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(messages.map { it.toChatMessage() })
         sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         refreshOlderMessagesOmitted()
+        runCatching {
+            val docs = ragRepository.listSessionDocuments(sessionId)
+            ragRepository.loadActiveDocUri(sessionId, docs)
+        }
         // Reset engine session to prevent stale KV cache from previous chat
         runCatching { inferenceEngine.resetSession() }
     }
@@ -323,7 +327,7 @@ class ChatRepositoryImpl @Inject constructor(
                 }
                 if (newCount > 0) logRag("indexedDocs=$newCount sessionIdLen=${sessionId.length}")
                 attachments.lastOrNull()?.uri?.toString()?.let { lastUri ->
-                    ragRepository.setActiveDocUri(sessionId, lastUri)
+                    ragRepository.persistActiveDocUri(sessionId, lastUri)
                 }
             }
             buildPrompt(userMessage, attachments)
@@ -839,7 +843,7 @@ class ChatRepositoryImpl @Inject constructor(
         val sessionDocs = runCatching { ragRepository.listSessionDocuments(sessionId) }
             .onFailure { if (isSqliteUnusable(it)) throw it }
             .getOrDefault(emptyList())
-        val activeDocUri = ragRepository.resolveActiveDocUri(sessionId, sessionDocs)
+        val activeDocUri = ragRepository.loadActiveDocUri(sessionId, sessionDocs)
         val priorUserQuery = _history.value
             .filter { it.role == MessageRole.USER && it.content.isNotBlank() && !it.isStreaming }
             .dropLast(1)  // exclude the current turn being built
@@ -866,9 +870,15 @@ class ChatRepositoryImpl @Inject constructor(
         val restrictDocUris = scopeDecision.restrictUris
         when {
             retrievalRoute.namedDocUris.size == 1 ->
-                ragRepository.setActiveDocUri(sessionId, retrievalRoute.namedDocUris.first())
-            retrievalRoute.thisDocument && recencyDocUri != null ->
-                ragRepository.setActiveDocUri(sessionId, recencyDocUri)
+                ragRepository.persistActiveDocUri(sessionId, retrievalRoute.namedDocUris.first())
+            retrievalRoute.thisDocument && !retrievalRoute.equalSlots && recencyDocUri != null ->
+                ragRepository.persistActiveDocUri(sessionId, recencyDocUri)
+            attachments.isNotEmpty() &&
+                !retrievalRoute.equalSlots &&
+                !isAllSessionDocsQuery(retrievalRoutingQuery) ->
+                attachmentUris.lastOrNull()?.let { uri ->
+                    ragRepository.persistActiveDocUri(sessionId, uri)
+                }
         }
         val ragAnswerShape = applyReplyLengthToAnswerShape(
             detectRagAnswerShape(
