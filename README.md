@@ -38,6 +38,11 @@ Saarthi runs Google's Gemma models *on-device* via [Google AI Edge LiteRT-LM](ht
 # Install on a connected device
 ./gradlew :app:installDebug
 
+# Minified release APK (R8) — Phase 4 device gate. Debug-signed when
+# KEYSTORE_PATH is unset (sideload-installable; not a Play signature).
+./gradlew :app:assembleRelease -Psaarthi.publicLog=false --no-parallel --max-workers=2
+adb install -r app/build/outputs/apk/release/app-release.apk
+
 # Unit tests (all modules / one module)
 ./gradlew test
 ./gradlew :core:core-inference:test

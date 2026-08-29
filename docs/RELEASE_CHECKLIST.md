@@ -170,6 +170,15 @@ Hardening behaviors (debug CI does not cover these):
       onboarding, one chat, Stop, attach. A green `test-and-lint` check is not
       this gate. Do not bump `versionCode` until cutting a store candidate.
 
+      ```bash
+      ./gradlew :app:assembleRelease -Psaarthi.publicLog=false --no-parallel --max-workers=2
+      adb install -r app/build/outputs/apk/release/app-release.apk
+      ```
+
+      Sideload uses `ci/debug.keystore` when `KEYSTORE_PATH` is unset
+      (installable; not Play). Same APK: Actions → **Build Release APK
+      (test)** (`release_apk.yml`, manual). Do not put R8 on every PR.
+
 ## Production (Play Store) only
 
 - [ ] **Debug log gate**: build with `-Psaarthi.publicLog=false` so `saarthi_debug.log`

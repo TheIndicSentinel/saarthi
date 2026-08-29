@@ -47,6 +47,18 @@ adb logcat *:E
 adb pull /storage/emulated/0/Download/saarthi_debug.log
 ```
 
+Minified release (Phase 4 device gate — R8 + resource shrinking). Debug
+CI and a debug GPU chat do not prove this binary. When `KEYSTORE_PATH` is
+unset, the APK is signed with `ci/debug.keystore` (installable over the
+debug APK; not Play). Do not add this to every-PR CI (`release_apk.yml`
+is `workflow_dispatch` only — R8 OOMs a 2-core runner if it shares the
+job with tests).
+
+```bash
+./gradlew :app:assembleRelease -Psaarthi.publicLog=false --no-parallel --max-workers=2
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
 If you want a single command that mirrors what CI runs:
 
 ```bash
