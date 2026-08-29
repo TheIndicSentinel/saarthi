@@ -43,7 +43,6 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Public
@@ -243,21 +242,6 @@ fun SettingsScreen(
             }
 
             SectionLabel(s.sectionPrivacy)
-            val voicePrivacyVm: com.saarthi.app.VoicePrivacySettingsViewModel =
-                androidx.hilt.navigation.compose.hiltViewModel()
-            val onDeviceVoiceOnly by voicePrivacyVm.onDeviceVoiceOnly.collectAsStateWithLifecycle()
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.Mic, null) },
-                title = s.onDeviceVoiceOnly,
-                subtitle = if (onDeviceVoiceOnly) s.onDeviceVoiceOnlyOn else s.onDeviceVoiceOnlyOff,
-                tone = ChipTone.Jade,
-                trailing = {
-                    SaarthiToggle(
-                        on = onDeviceVoiceOnly,
-                        onToggle = { voicePrivacyVm.toggle() },
-                    )
-                },
-            )
             SaarthiListRow(
                 leadingIcon = { Icon(Icons.Outlined.Shield, null) },
                 title = s.privacyDetails,

@@ -19,8 +19,8 @@ enum class SpeechRecognitionPath {
 /**
  * @param recognitionAvailable [android.speech.SpeechRecognizer.isRecognitionAvailable]
  * @param onDeviceAvailable API 33+ and [android.speech.SpeechRecognizer.isOnDeviceRecognitionAvailable]
- * @param onDeviceVoiceOnly Settings → "On-device voice only" (product default on;
- *   user may turn it off to allow the phone speech service)
+ * @param onDeviceVoiceOnly product default on; older installs may have
+ *   stored off. No Settings toggle.
  */
 fun resolveSpeechRecognitionPath(
     recognitionAvailable: Boolean,

@@ -19,13 +19,10 @@ Your conversations, attached files, and remembered facts (name, preferences, etc
 - **Remembered facts** (name, city, diet, likes, …) — local only, in that same
   encrypted database; used to personalise replies.
 - **Attached documents / photos** — processed on-device for your question; not uploaded.
-- **Voice input** — Saarthi asks your device to transcribe speech to text and uses
-  on-device transcription **by default**. Voice works only when an on-device speech
-  model is available, unless you turn off **Settings → On-device voice only**. Turning
-  that setting off allows Android's standard speech service, which may send the audio
-  to that service's provider (typically Google) for transcription — this is a
-  device/platform behavior, not something Saarthi's own servers ever see (Saarthi has
-  no servers). Nothing is collected by us either way.
+- **Voice input** — Saarthi asks your device to transcribe speech to text using
+  on-device transcription. Voice works only when an on-device speech model is
+  available; otherwise type. Saarthi does not send your audio to its own servers
+  (it has none). Nothing is collected by us.
 
 ## Network connections the app makes
 Saarthi is offline for AI — there is no server-side chat processing, and Saarthi has
@@ -35,8 +32,9 @@ no backend to send your data to. It does connect to the internet for:
    personal data is sent. Saarthi does **not** ship a Hugging Face token in the app.
    Gemma 4 and Compact are public downloads. Gemma 3n is on a gated Google repo: if you
    choose it, you paste a read-only token when asked, stored only on this phone.
-2. **Voice input**, only if you turn off **Settings → On-device voice only** and your
-   device then uses its standard speech service — see above.
+2. **Voice input**, only on phones that already allowed the platform speech
+   service in an older app version. New installs stay on-device; if the phone
+   has no on-device speech model, type instead.
 3. **Crash & support reports you choose to send.** Saarthi has no automatic crash
    reporting or analytics of any kind — no Firebase, no telemetry. If something goes
    wrong, the on-device debug log (technical: timings, error codes, device model —
@@ -47,13 +45,11 @@ no backend to send your data to. It does connect to the internet for:
    device unless you choose to send that email.
 
 ## Permissions and why
-- **Microphone** — voice input (on-device by default; the phone’s speech service only
-  if you turn off Settings → On-device voice only).
+- **Microphone** — voice input (on-device speech on this phone).
 - **Photos/Media & files** — only files you attach to a chat.
 - **Notifications** — the daily wisdom card and download-progress updates.
 - **Foreground service** — keeps the large model download and AI responses running reliably.
-- **Internet / network state** — model & pack downloads, and voice input only if you
-  have allowed the phone’s speech service (see above).
+- **Internet / network state** — model & pack downloads.
 
 We do **not** request contacts, location, or SMS.
 

@@ -684,20 +684,20 @@ enum class SupportedLanguage(
         ODIA     -> "ଭଏସ୍ ଇନପୁଟ୍ ଆରମ୍ଭ ହୋଇପାରିଲା ନାହିଁ। ଦୟାକରି ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।"
     }
     /**
-     * Voice error: Settings "On-device voice only" is on (the product default),
-     * but this phone has no on-device speech model — cloud fallback is blocked.
+     * Voice error: this phone has no on-device speech model, so mic input
+     * is blocked (product default). Type instead — there is no Settings toggle.
      */
     val voiceOnDeviceOnlyUnavailable: String get() = when (this) {
-        ENGLISH  -> "On-device voice isn't available here. Turn off “On-device voice only” in Settings, or type instead."
-        HINDI    -> "यहाँ ऑन-डिवाइस आवाज़ उपलब्ध नहीं है। Settings में “केवल ऑन-डिवाइस आवाज़” बंद करें, या टाइप करें।"
-        TAMIL    -> "இங்கே சாதனத்திற்குள் குரல் இல்லை. Settings இல் “சாதன குரல் மட்டும்” அணைக்கவும், அல்லது தட்டச்சு செய்யவும்."
-        TELUGU   -> "ఇక్కడ ఆన్-డివైస్ వాయిస్ లేదు. Settings లో “ఆన్-డివైస్ వాయిస్ మాత్రమే” ఆఫ్ చేయండి, లేదా టైప్ చేయండి."
-        BENGALI  -> "এখানে অন-ডিভাইস ভয়েস নেই। Settings-এ “শুধু অন-ডিভাইস ভয়েস” বন্ধ করুন, অথবা টাইপ করুন।"
-        MARATHI  -> "येथे ऑन-डिव्हाइस आवाज उपलब्ध नाही. Settings मध्ये “फक्त ऑन-डिव्हाइस आवाज” बंद करा, किंवा टाइप करा."
-        KANNADA  -> "ಇಲ್ಲಿ ಆನ್-ಡಿವೈಸ್ ಧ್ವನಿ ಲಭ್ಯವಿಲ್ಲ. Settings ನಲ್ಲಿ “ಆನ್-ಡಿವೈಸ್ ಧ್ವನಿ ಮಾತ್ರ” ಆಫ್ ಮಾಡಿ, ಅಥವಾ ಟೈಪ್ ಮಾಡಿ."
-        GUJARATI -> "અહીં ઓન-ડિવાઇસ વૉઇસ ઉપલબ્ધ નથી. Settings માં “ફક્ત ઓન-ડિવાઇસ વૉઇસ” બંધ કરો, અથવા ટાઇપ કરો."
-        PUNJABI  -> "ਇੱਥੇ ਆਨ-ਡਿਵਾਈਸ ਵੌਇਸ ਉਪਲਬਧ ਨਹੀਂ। Settings ਵਿੱਚ “ਸਿਰਫ਼ ਆਨ-ਡਿਵਾਈਸ ਵੌਇਸ” ਬੰਦ ਕਰੋ, ਜਾਂ ਟਾਈਪ ਕਰੋ।"
-        ODIA     -> "ଏଠାରେ ଅନ୍-ଡିଭାଇସ୍ ଭଏସ୍ ଉପଲବ୍ଧ ନାହିଁ। Settings ରେ “କେବଳ ଅନ୍-ଡିଭାଇସ୍ ଭଏସ୍” ବନ୍ଦ କରନ୍ତୁ, କିମ୍ବା ଟାଇପ୍ କରନ୍ତୁ।"
+        ENGLISH  -> "On-device voice isn't available on this phone. You can type instead."
+        HINDI    -> "यहाँ ऑन-डिवाइस आवाज़ उपलब्ध नहीं है। कृपया टाइप करें।"
+        TAMIL    -> "இங்கே சாதனத்திற்குள் குரல் இல்லை. தட்டச்சு செய்யவும்."
+        TELUGU   -> "ఇక్కడ ఆన్-డివైస్ వాయిస్ లేదు. దయచేసి టైప్ చేయండి."
+        BENGALI  -> "এখানে অন-ডিভাইস ভয়েস নেই। অনুগ্রহ করে টাইপ করুন।"
+        MARATHI  -> "येथे ऑन-डिव्हाइस आवाज उपलब्ध नाही. कृपया टाइप करा."
+        KANNADA  -> "ಇಲ್ಲಿ ಆನ್-ಡಿವೈಸ್ ಧ್ವನಿ ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ಟೈಪ್ ಮಾಡಿ."
+        GUJARATI -> "અહીં ઓન-ડિવાઇસ વૉઇસ ઉપલબ્ધ નથી. કૃપા કરીને ટાઇપ કરો."
+        PUNJABI  -> "ਇੱਥੇ ਆਨ-ਡਿਵਾਈਸ ਵੌਇਸ ਉਪਲਬਧ ਨਹੀਂ। ਕਿਰਪਾ ਕਰਕੇ ਟਾਈਪ ਕਰੋ।"
+        ODIA     -> "ଏଠାରେ ଅନ୍-ଡିଭାଇସ୍ ଭଏସ୍ ଉପଲବ୍ଧ ନାହିଁ। ଦୟାକରି ଟାଇପ୍ କରନ୍ତୁ।"
     }
     /** One-line disclosure when voice may use the device speech provider (cloud). */
     val voiceCloudSpeechHint: String get() = when (this) {
