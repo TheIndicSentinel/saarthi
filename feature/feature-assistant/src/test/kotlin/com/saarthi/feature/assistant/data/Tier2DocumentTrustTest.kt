@@ -94,8 +94,13 @@ class Tier2DocumentTrustTest {
     }
 
     @Test
-    fun `section contrast does not enable equal slots compare`() {
-        assertFalse(shouldUseEqualSlotsCompare("compare section 5 vs section 10", docCount = 2))
+    fun `concept contrast does not enable equal slots compare`() {
+        assertFalse(
+            shouldUseEqualSlotsCompare(
+                "What is the difference between weather and climate?",
+                docCount = 2,
+            ),
+        )
         assertTrue(shouldUseEqualSlotsCompare("compare both files", docCount = 2))
     }
 

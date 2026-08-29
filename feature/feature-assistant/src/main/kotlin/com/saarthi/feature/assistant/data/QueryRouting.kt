@@ -152,7 +152,7 @@ private fun matchNamedDocsByFilenameTokens(query: String, docs: List<Pair<String
     for ((uri, name) in docs) {
         val fTokens = filenameTokens(name)
         val hit = fTokens.any { ft ->
-            qTokens.any { qt -> qt == ft || (qt.length >= 4 && ft.length >= 4 && (qt.contains(ft) || ft.contains(qt))) }
+            qTokens.any { qt -> filenameTokenMatchesQuery(qt, ft) }
         }
         if (hit) matched += uri
     }
@@ -208,20 +208,19 @@ internal fun matchNamedDocsByRoleCues(query: String, docs: List<Pair<String, Str
     for ((uri, name) in docs) {
         val fTokens = filenameTokens(name)
         val hit = fTokens.any { ft ->
-            filenameTokenSets.any { hint ->
-                ft == hint || (ft.length >= 4 && hint.length >= 4 && (ft.contains(hint) || hint.contains(ft)))
-            }
+            filenameTokenSets.any { hint -> filenameTokenMatchesQuery(hint, ft) }
         }
         if (hit) matched += uri
     }
     return matched
 }
 
-/** Tier 2.8 — equal-slot compare only for explicit multi-doc compare, not in-doc section contrast. */
+/** Tier 2.8 — equal-slot compare only for explicit multi-doc compare, not in-doc contrast. */
 internal fun shouldUseEqualSlotsCompare(query: String, docCount: Int): Boolean {
     if (docCount < 2) return false
     if (!isCompareQuery(query)) return false
     if (isInDocumentSectionContrast(query)) return false
+    if (isInDocConceptComparisonQuery(query)) return false
     return true
 }
 
@@ -521,6 +520,7 @@ internal fun detectRagAnswerShape(query: String, metaOverview: Boolean): RagAnsw
     }
     if (isListRequest(query)) return RagAnswerShape.LIST
     if (isTabularAmountQuery(query)) return RagAnswerShape.LIST
+    if (isSetEnumerationQuery(query)) return RagAnswerShape.LIST
     return RagAnswerShape.NARROW_QA
 }
 
@@ -734,6 +734,9 @@ internal fun isSpanPreservingQuery(query: String): Boolean {
     if (extractSectionRefs(query).isNotEmpty()) return true
     if (isTabularAmountQuery(query)) return true
     if (activeTopicCategories(query).isNotEmpty()) return true
+    if (isInDocConceptComparisonQuery(query)) return true
+    if (isSetEnumerationQuery(query)) return true
+    if (isAbsenceInventoryQuery(query)) return true
     if (isStructureListQuery(query)) return true
     if (isStructureCountQuery(query)) return false
     return hasDocumentQueryCues(query)

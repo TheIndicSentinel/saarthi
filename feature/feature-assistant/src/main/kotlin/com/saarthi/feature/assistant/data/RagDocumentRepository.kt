@@ -551,7 +551,10 @@ class RagDocumentRepository @Inject constructor(
         val route = routeQuery(query, sessionFiles)
         val chapterRegistries = chapterRegistriesFromEntities(all)
         val spanPreserving = isSpanPreservingQuery(query)
-        val effectiveTopK = if (spanPreserving) maxOf(topK, SPAN_PRESERVING_TOP_K) else topK
+        var effectiveTopK = if (spanPreserving) maxOf(topK, SPAN_PRESERVING_TOP_K) else topK
+        if (isAbsenceInventoryQuery(query)) {
+            effectiveTopK = maxOf(effectiveTopK, SPAN_PRESERVING_TOP_K)
+        }
         val anchorWindow = anchorWindowMax(query)
         var headingChunkCount = 0
         var ftsPrefilterUsed = false
@@ -713,6 +716,16 @@ class RagDocumentRepository @Inject constructor(
             emptyList()
         }
         val topicAnchored = anchoredTopicChunks(contentChunks, query, anchorWindow)
+        val inDocCompareAnchored = if (isInDocConceptComparisonQuery(query)) {
+            pickInDocComparisonChunkEntities(contentChunks, query, maxPerSide = 2)
+        } else {
+            emptyList()
+        }
+        val absenceAnchored = if (isAbsenceInventoryQuery(query)) {
+            absenceInventoryOutlineChunks(all)
+        } else {
+            emptyList()
+        }
         val tabularAnchored = anchoredTabularChunks(
             contentChunks,
             query,
@@ -731,6 +744,8 @@ class RagDocumentRepository @Inject constructor(
         headingAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.HEADING }
         bodyChapterAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.BODY_CHAPTER }
         topicAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.TOPIC }
+        inDocCompareAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.TOPIC }
+        absenceAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.STRUCTURE_LIST }
         tabularAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.TABULAR }
         structureListAnchored.forEach { anchorKinds[it.id] = StructuralAnchorKind.STRUCTURE_LIST }
         tabularContractEntities.forEach { anchorKinds[it.id] = StructuralAnchorKind.TABULAR_CONTRACT }
@@ -739,6 +754,8 @@ class RagDocumentRepository @Inject constructor(
             headingAnchored +
             bodyChapterAnchored +
             topicAnchored +
+            inDocCompareAnchored +
+            absenceAnchored +
             tabularAnchored +
             structureListAnchored +
             tabularContractEntities
@@ -755,6 +772,12 @@ class RagDocumentRepository @Inject constructor(
         }
         if (isStructureCountQuery(query)) {
             effectiveQuery += structureMarkerBm25Expansion(query)
+        }
+        if (isInDocConceptComparisonQuery(query)) {
+            effectiveQuery += " ${inDocComparisonQueryExpansion(query)}"
+        }
+        if (isAbsenceInventoryQuery(query)) {
+            effectiveQuery += " ${absenceInventoryQueryExpansion()}"
         }
         val topicExpansion = topicAnchorQueryExpansion(query)
         if (topicExpansion.isNotEmpty()) {
@@ -1907,6 +1930,49 @@ private val TOPIC_ANCHOR_CATEGORIES = listOf(
             2 to Regex("(?i)\\bconciliation\\b"),
         ),
         expansionTerms = " dispute mediation conciliation विवाद",
+    ),
+    TopicAnchorCategory(
+        id = "activities",
+        queryTokens = setOf(
+            "activity", "activities", "experiment", "experiments",
+            "exercise", "exercises", "instrument", "instruments", "laboratory",
+        ),
+        querySubstrings = listOf("प्रयोग", "गतिविधि"),
+        bodyPatterns = listOf(
+            0 to Regex("(?m)^\\s*ACTIVITIES"),
+            1 to Regex("(?i)\\bclassroom activities"),
+            1 to Regex("(?i)\\blaboratory activities"),
+            2 to Regex("(?i)\\bexperiments"),
+            2 to Regex("(?i)\\binstruments"),
+        ),
+        expansionTerms = " classroom activities experiments instruments laboratory",
+    ),
+    TopicAnchorCategory(
+        id = "examples",
+        queryTokens = setOf(
+            "example", "examples", "illustration", "illustrations", "instance", "instances",
+        ),
+        querySubstrings = listOf("उदाहरण"),
+        bodyPatterns = listOf(
+            1 to Regex("(?i)\\bfor example"),
+            1 to Regex("(?i)\\bexamples? (?:include|such as|given)"),
+            2 to Regex("(?i)\\bexamples?\\b"),
+        ),
+        expansionTerms = " examples illustration instance उदाहरण",
+    ),
+    TopicAnchorCategory(
+        id = "feedback",
+        queryTokens = setOf(
+            "feedback", "feedbacks", "mechanism", "mechanisms", "loop", "loops", "albedo",
+        ),
+        querySubstrings = emptyList(),
+        bodyPatterns = listOf(
+            0 to Regex("(?m)^\\s*Feedback mechanisms"),
+            1 to Regex("(?i)\\bfeedback mechanisms?"),
+            1 to Regex("(?i)\\bice-albedo"),
+            2 to Regex("(?i)\\bamplifying feedback"),
+        ),
+        expansionTerms = " feedback mechanisms loops ice-albedo amplifying",
     ),
 )
 
