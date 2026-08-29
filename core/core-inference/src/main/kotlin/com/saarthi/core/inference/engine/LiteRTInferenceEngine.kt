@@ -532,8 +532,8 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 if (config.modelPath.startsWith("/proc/self/fd/")) {
                     throw IllegalArgumentException(
-                        "LiteRT models must be in the app's models folder with a real file path.\n\n" +
-                        "Please download the model using the catalog instead of picking it from the file browser."
+                        "This model has to be downloaded in the app.\n\n" +
+                        "Use Download on the model list instead of picking a file."
                     )
                 }
 
@@ -784,7 +784,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     DebugLogger.log("LITERT", "Load failed: $rawMsg")
                     Timber.e(e, "LiteRT model load failed")
                     InferenceService.stop(context)
-                    throw RuntimeException("LiteRT failed to load model: $msg", e)
+                    throw RuntimeException(msg, e)
                 } catch (e: Throwable) {
                     crashRecoveryStore.markInitEnded()
                     val rawMsg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
@@ -794,12 +794,14 @@ class LiteRTInferenceEngine @Inject constructor(
                             "Your device could not load this model. " +
                             "This usually means the model requires hardware your phone does not support. " +
                             "Please try a different model."
+                        rawMsg.contains("LiteRT", ignoreCase = true) ->
+                            "Could not load the AI model. Please try again, or pick a different model."
                         else -> rawMsg
                     }
                     DebugLogger.log("LITERT", "Load failed: $rawMsg")
                     Timber.e(e, "LiteRT model load failed")
                     InferenceService.stop(context)
-                    throw RuntimeException("LiteRT failed to load model: $msg", e)
+                    throw RuntimeException(msg, e)
                 }
             }
         }
@@ -1001,7 +1003,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 if (crashLoopBlocked)
                     "This model cannot run on your device. Please go back and choose a different model."
                 else
-                    "LiteRT engine not initialised."
+                    "The AI is not ready yet. Wait a moment and try again."
             )
 
         val timeoutMs = when {

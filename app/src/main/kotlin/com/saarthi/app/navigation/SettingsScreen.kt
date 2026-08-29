@@ -716,13 +716,11 @@ fun AboutScreen(onBack: () -> Unit, currentLanguage: SupportedLanguage = Support
                         leadingIcon = { Icon(Icons.Outlined.Memory, null) },
                         title = "Google Gemma",
                         subtitle = d.aboutGemmaSub,
-                        trailing = { SaarthiChip(text = "Apache 2.0", small = true) },
                     )
                     SaarthiListRow(
                         leadingIcon = { Icon(Icons.Outlined.Bolt, null) },
-                        title = "LiteRT",
+                        title = d.aboutEngineTitle,
                         subtitle = d.aboutLiteRtSub,
-                        trailing = { SaarthiChip(text = "Apache 2.0", small = true) },
                     )
                 }
 

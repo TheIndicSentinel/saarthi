@@ -1,5 +1,6 @@
 package com.saarthi.core.i18n
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -175,5 +176,55 @@ class SettingsPrivacyCopyTest {
             "hfTokenDialogBody must say the token is not in the app file. Got: '${s.hfTokenDialogBody}'",
             s.hfTokenDialogBody.contains("never put in the app file", ignoreCase = true),
         )
+    }
+
+    @Test
+    fun about_copy_has_no_engine_or_license_jargon() {
+        val english = SupportedLanguage.ENGLISH
+        assertEquals(
+            "English aboutEngineTitle must be plain language",
+            "On-device AI",
+            english.settingsDetail.aboutEngineTitle,
+        )
+        assertEquals(
+            "English aboutLiteRtSub must say the model runs on this phone",
+            "Runs the model on this phone",
+            english.settingsDetail.aboutLiteRtSub,
+        )
+        assertEquals(
+            "English aboutSaarthiSub must not mention source code",
+            "Version and credits",
+            english.settings.aboutSaarthiSub,
+        )
+        for (lang in SupportedLanguage.entries) {
+            val d = lang.settingsDetail
+            val aboutBits = listOf(
+                d.aboutEngineTitle,
+                d.aboutLiteRtSub,
+                d.aboutGemmaSub,
+                d.aboutBuiltWith,
+                lang.settings.aboutSaarthiSub,
+                lang.settings.aboutSaarthi,
+            )
+            for (bit in aboutBits) {
+                assertTrue(
+                    "${lang.englishName} About copy must not mention LiteRT. Got: '$bit'",
+                    !bit.contains("LiteRT", ignoreCase = true),
+                )
+                assertTrue(
+                    "${lang.englishName} About copy must not mention Apache. Got: '$bit'",
+                    !bit.contains("Apache", ignoreCase = true),
+                )
+                assertTrue(
+                    "${lang.englishName} About copy must not mention inference runtime. Got: '$bit'",
+                    !bit.contains("inference", ignoreCase = true),
+                )
+                assertTrue(
+                    "${lang.englishName} About copy must not mention source code. Got: '$bit'",
+                    !bit.contains("source code", ignoreCase = true) &&
+                        !bit.contains("sourcecode", ignoreCase = true),
+                )
+            }
+        }
     }
 }
