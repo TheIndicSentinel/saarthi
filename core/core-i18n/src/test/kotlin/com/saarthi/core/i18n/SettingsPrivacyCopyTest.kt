@@ -148,6 +148,22 @@ class SettingsPrivacyCopyTest {
     }
 
     @Test
+    fun english_privacy_hardware_copy_has_no_engine_jargon() {
+        val d = SupportedLanguage.ENGLISH.settingsDetail
+        assertTrue(
+            "privacyRunsHardware must say the model runs on this phone. Got: '${d.privacyRunsHardware}'",
+            d.privacyRunsHardware.contains("phone", ignoreCase = true),
+        )
+        for (lang in SupportedLanguage.entries) {
+            val sub = lang.settingsDetail.privacyRunsHardwareSub
+            assertTrue(
+                "${lang.englishName} privacyRunsHardwareSub must not mention Vulkan. Got: '$sub'",
+                !sub.contains("Vulkan", ignoreCase = true),
+            )
+        }
+    }
+
+    @Test
     fun english_hf_token_copy_says_gated_models_and_not_in_the_apk() {
         val s = SupportedLanguage.ENGLISH.settings
         assertTrue(

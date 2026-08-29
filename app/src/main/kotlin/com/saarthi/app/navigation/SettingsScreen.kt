@@ -36,7 +36,6 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -89,15 +88,12 @@ fun SettingsScreen(
     currentLanguage: com.saarthi.core.i18n.SupportedLanguage = com.saarthi.core.i18n.SupportedLanguage.HINDI,
     onChangeLanguage: (com.saarthi.core.i18n.SupportedLanguage) -> Unit = {},
     settingsViewModel: com.saarthi.app.SettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
-    themeViewModel: com.saarthi.app.ThemeViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val s = currentLanguage.settings
     val context = androidx.compose.ui.platform.LocalContext.current
     var showLangPicker by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
-    val themeMode by themeViewModel.mode.collectAsStateWithLifecycle()
-    val darkOn = themeMode == com.saarthi.core.ui.theme.ThemeMode.DARK
     // Daily wisdom notification — preference-backed (DataStore) and tied
     // to AlarmManager via WisdomNotificationScheduler. Previously this was
     // a `mutableStateOf` that did nothing; now the toggle actually
@@ -206,12 +202,6 @@ fun SettingsScreen(
                 title = s.dailyWisdom,
                 subtitle = if (notifOn) s.wisdomOn else s.wisdomOff,
                 trailing = { SaarthiToggle(on = notifOn, onToggle = { wisdomVm.setEnabled(!notifOn) }) },
-            )
-            SaarthiListRow(
-                leadingIcon = { Icon(Icons.Outlined.DarkMode, null) },
-                title = s.darkTheme,
-                subtitle = if (darkOn) s.darkOn else s.darkOff,
-                trailing = { SaarthiToggle(on = darkOn, onToggle = { themeViewModel.toggle() }) },
             )
             // Read replies aloud (TTS) — hands-free auto-read is a Pro feature;
             // manual "Listen" on a reply stays free for everyone.
