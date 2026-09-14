@@ -1271,6 +1271,51 @@ enum class SupportedLanguage(
         ODIA     -> "ମୁଁ ସାରଥୀ, ଭାରତ ପାଇଁ ତିଆରି ଆପଣଙ୍କ ବନ୍ଧୁତ୍ୱପୂର୍ଣ୍ଣ AI ସହାୟକ। ମୁଁ ସମ୍ପୂର୍ଣ୍ଣ ଆପଣଙ୍କ ଫୋନରେ ଅଫଲାଇନ ଚାଲେ, ତେଣୁ ଆମ କଥାବାର୍ତ୍ତା ଗୋପନୀୟ ରହେ — ଟେକ୍ସଟ, ସ୍ୱର, ଫଟୋ କିମ୍ବା ଫାଇଲରେ ଯାହା ବି ପଚାରନ୍ତୁ।"
     }
 
+    // ── Pre-inference gate replies (urgent safety, deterministic math) ───────
+
+    /** Fixed reply when [UrgentSafetyGate] fires — must not depend on the LLM. */
+    val urgentSafetyReply: String get() = when (this) {
+        ENGLISH  -> URGENT_SAFETY_EN
+        HINDI    -> URGENT_SAFETY_HI
+        TAMIL    -> URGENT_SAFETY_TA
+        TELUGU   -> URGENT_SAFETY_TE
+        BENGALI  -> URGENT_SAFETY_BN
+        MARATHI  -> URGENT_SAFETY_MR
+        KANNADA  -> URGENT_SAFETY_KN
+        GUJARATI -> URGENT_SAFETY_GU
+        PUNJABI  -> URGENT_SAFETY_PA
+        ODIA     -> URGENT_SAFETY_OR
+    }
+
+    /** Verified arithmetic from [DeterministicMathGate] (expression already normalized). */
+    fun formatDeterministicMathResult(expr: String, display: String): String =
+        when (this) {
+            ENGLISH  -> "**$expr = $display**"
+            HINDI    -> "**$expr = $display**"
+            TAMIL    -> "**$expr = $display**"
+            TELUGU   -> "**$expr = $display**"
+            BENGALI  -> "**$expr = $display**"
+            MARATHI  -> "**$expr = $display**"
+            KANNADA  -> "**$expr = $display**"
+            GUJARATI -> "**$expr = $display**"
+            PUNJABI  -> "**$expr = $display**"
+            ODIA     -> "**$expr = $display**"
+        }
+
+    /** Ambiguous “square” / precedence phrasing — deterministic, no LLM. */
+    val deterministicMathSquareAmbiguity: String get() = when (this) {
+        ENGLISH  -> MATH_SQUARE_AMBIGUITY_EN
+        HINDI    -> MATH_SQUARE_AMBIGUITY_HI
+        TAMIL    -> MATH_SQUARE_AMBIGUITY_EN
+        TELUGU   -> MATH_SQUARE_AMBIGUITY_EN
+        BENGALI  -> MATH_SQUARE_AMBIGUITY_EN
+        MARATHI  -> MATH_SQUARE_AMBIGUITY_MR
+        KANNADA  -> MATH_SQUARE_AMBIGUITY_EN
+        GUJARATI -> MATH_SQUARE_AMBIGUITY_EN
+        PUNJABI  -> MATH_SQUARE_AMBIGUITY_EN
+        ODIA     -> MATH_SQUARE_AMBIGUITY_EN
+    }
+
     // ── Chat error / empty-state copy (localized) ────────────────────────────
 
     /** Generic stream failure shown in the chat bubble. */
@@ -1629,3 +1674,110 @@ enum class SupportedLanguage(
             entries.firstOrNull { it.code == code } ?: HINDI
     }
 }
+
+private val URGENT_SAFETY_EN = """
+**Do not consume or give any poison or toxic substance to anyone.**
+
+If the substance is nearby, move away from it and keep others away.
+
+**Have you already taken it, or are you about to?** If yes, or if someone may be in danger, **call local emergency services or a poison-control helpline immediately** (India: national emergency **112**; use the nearest hospital emergency).
+
+Stay with a trusted person if you can; do not stay alone with a toxic substance nearby.
+
+I cannot give medical treatment steps here. **Do not induce vomiting or use home remedies** unless emergency staff tell you to — get professional help right away.
+""".trimIndent()
+
+private val URGENT_SAFETY_HI = """
+**किसी को भी जहर या विषैली चीज़ न पिलाएँ और न खुद पिएँ।**
+
+अगर वह चीज़ पास में है, तो उससे दूर हटें और दूसरों को भी दूर रखें।
+
+**क्या आपने पहले ही ले लिया है, या लेने वाले हैं?** अगर हाँ, या किसी को खतरा है, **तुरंत स्थानीय आपातकालीन सेवा या विष नियंत्रण हेल्पलाइन पर कॉल करें** (भारत: राष्ट्रीय आपातकाल **112**; नज़दीकी अस्पताल का emergency).
+
+संभव हो तो किसी भरोसेमंद व्यक्ति के साथ रहें; विषैली चीज़ के पास अकेले न रहें।
+
+मैं यहाँ चिकित्सा उपचार नहीं बता सकता। **उल्टी कराने या घरेलू नुस्खे की सलाह न दें** जब तक emergency staff न कहे — तुरंत पेशेवर मदद लें।
+""".trimIndent()
+
+private val URGENT_SAFETY_TA = """
+**விஷம் அல்லது ந-toxic பொருளை யாருக்கும் கொடுக்கவோ, நீங்களே உட்கொள்ளவோ வேண்டாம்.**
+
+பொருள் அருகில் இருந்தால், அதிலிருந்து விலகி, மற்றவர்களையும் விலக்குங்கள்.
+
+**நீங்கள் ஏற்கனவே எடுத்துக்கொண்டீர்களா, அல்லது எடுக்கப் போகிறீர்களா?** ஆம் என்றால், அல்லது அபாயம் இருந்தால், **உடனே அ emergency / poison-control எண்ணை அழைக்கவும்** (இந்தியா: **112**; அருகிலுள்ள hospital emergency).
+
+நம்பகமான நபருடன் இருங்கள்; toxic பொருள் அருகில் தனியாக இருக்க வேண்டாம்.
+
+**வாந்தி வரவழிக்கவோ, வீட்டு வைத்தியம் செய்யவோ வேண்டாம்** — medical help உடனே பெறுங்கள்.
+""".trimIndent()
+
+private val URGENT_SAFETY_TE = """
+**విషం లేదా టాక్సిక్ పదార్థాన్ని ఎవరికీ ఇవ్వవద్దు, మీరు తీసుకోవద్దు.**
+
+దాని దగ్గర ఉంటే, దాని నుండి దూరంగా ఉండండి, ఇతరులను కూడా దూరం చేయండి.
+
+**మీరు ఇప్పటికే తీసుకున్నారా, లేదా తీసుకోబోతున్నారా?** అవును అయితే, లేదా ప్రమాదం ఉంటే, **వెంటనే emergency / poison-control కు కాల్ చేయండి** (భారతదేశం: **112**).
+
+విశ్వసనీయ వ్యక్తితో ఉండండి; toxic వస్తువు దగ్గర ఒంటరిగా ఉండవద్దు.
+
+**వాంతి చేయించవద్దు, home remedies చేయవద్దు** — medical help వెంటనే పొందండి.
+""".trimIndent()
+
+private val URGENT_SAFETY_BN = """
+**কাউকে বিষ বা বিষাক্ত জিনিস খাওয়াবেন না, নিজেও গ্রহণ করবেন না।**
+
+কাছে থাকলে সরে যান, অন্যদেরও সরিয়ে রাখুন।
+
+**আপনি কি ইতিমধ্যে নিয়েছেন, নাকি নিতে চলেছেন?** হ্যাঁ হলে বা বিপদ হলে **অবিলম্বে emergency / poison-control এ কল করুন** (ভারত: **112**)।
+
+বিশ্বস্ত ব্যক্তির সাথে থাকুন; toxic জিনিসের কাছে একা থাকবেন না।
+
+**বমি করানো বা ঘরোয়া চিকিৎসার পরামর্শ দেবেন না** — দ্রুত medical help নিন।
+""".trimIndent()
+
+private val URGENT_SAFETY_MR = """
+**कोणालाही विष किंवा विषारी पदार्थ देऊ नका, स्वतःही घेऊ नका.**
+
+जवळ असेल तर दूर व्हा, इतरांनाही दूर ठेवा.
+
+**आधीच घेतले आहे का, घेणार आहात का?** होय, किंवा धोका असेल तर **लगेच emergency / poison-control वर कॉल करा** (India: **112**).
+
+विश्वासू व्यक्तीसोबत राहा; toxic गोष्टीजवळ एकटे राहू नका.
+
+**उलटी करण्याचा किंवा घरगuti उपायाचा सल्ला देऊ नका** — लगेच medical मदत घ्या.
+""".trimIndent()
+
+private val URGENT_SAFETY_KN = URGENT_SAFETY_EN
+private val URGENT_SAFETY_GU = URGENT_SAFETY_EN
+private val URGENT_SAFETY_PA = URGENT_SAFETY_EN
+private val URGENT_SAFETY_OR = URGENT_SAFETY_EN
+
+private val MATH_SQUARE_AMBIGUITY_EN = """
+The phrase can be read in more than one way. Common interpretations:
+
+- **Standard precedence** (square before add): e.g. **2 + 2² = 6**
+- **Sum then square**: e.g. **(2 + 2)² = 16**
+- **Plain addition only** (ignore "square"): e.g. **2 + 2 = 4**
+
+Which meaning did you intend? If you mean standard math precedence, **2 + 2² = 6**.
+""".trimIndent()
+
+private val MATH_SQUARE_AMBIGUITY_HI = """
+इस वाक्य के कई अर्थ हो सकते हैं:
+
+- **मानक प्राथमिकता** (पहले वर्ग, फिर जोड़): उदा. **2 + 2² = 6**
+- **पहले जोड़, फिर वर्ग**: उदा. **(2 + 2)² = 16**
+- **सिर्फ जोड़** ("square" नज़रअंदाज़): उदा. **2 + 2 = 4**
+
+आपका क्या मतलब था? मानक precedence के हिसाब से **2 + 2² = 6**।
+""".trimIndent()
+
+private val MATH_SQUARE_AMBIGUITY_MR = """
+या वाक्याचे अनेक अर्थ होऊ शकतात:
+
+- **मानक प्राधान्य** (आधी वर्ग, मग बेरीज): उदा. **2 + 2² = 6**
+- **आधी बेरीज, मग वर्ग**: उदा. **(2 + 2)² = 16**
+- **फक्त बेरीज**: उदा. **2 + 2 = 4**
+
+तुमचा अर्थ कोणता? मानक precedence नुसार **2 + 2² = 6**.
+""".trimIndent()

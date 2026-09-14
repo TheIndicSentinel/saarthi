@@ -1,5 +1,6 @@
 package com.saarthi.feature.assistant.data
 
+import com.saarthi.core.i18n.SupportedLanguage
 import kotlin.math.pow
 
 /**
@@ -8,17 +9,17 @@ import kotlin.math.pow
  */
 internal object DeterministicMathGate {
 
-    fun replyFor(message: String): String? {
+    fun replyFor(message: String, language: SupportedLanguage): String? {
         val trimmed = message.trim()
         if (trimmed.length !in 3..160) return null
         if (!looksLikeMathQuestion(trimmed)) return null
 
-        squareAmbiguityReply(trimmed)?.let { return it }
+        squareAmbiguityReplyIfNeeded(trimmed, language)?.let { return it }
 
         val expr = extractExpression(trimmed) ?: return null
         if (expr.length > 48) return null
         val value = MathExpressionEvaluator.evaluate(expr) ?: return null
-        return formatResult(trimmed, expr, value)
+        return language.formatDeterministicMathResult(expr, formatDisplay(value))
     }
 
     private fun looksLikeMathQuestion(text: String): Boolean {
@@ -37,20 +38,12 @@ internal object DeterministicMathGate {
         return wordCount <= 18
     }
 
-    private fun squareAmbiguityReply(text: String): String? {
+    private fun squareAmbiguityReplyIfNeeded(text: String, language: SupportedLanguage): String? {
         val lower = text.lowercase()
         if (!lower.contains("square") && !lower.contains("squared") && !lower.contains("²")) return null
         if (!Regex("\\d").containsMatchIn(text)) return null
         if (!Regex("[+\\-*/×]").containsMatchIn(text) && !lower.contains("plus")) return null
-        return """
-The phrase can be read in more than one way. Common interpretations:
-
-- **Standard precedence** (square before add): e.g. **2 + 2² = 6**
-- **Sum then square**: e.g. **(2 + 2)² = 16**
-- **Plain addition only** (ignore "square"): e.g. **2 + 2 = 4**
-
-Which meaning did you intend? If you mean standard math precedence, **2 + 2² = 6**.
-        """.trimIndent()
+        return language.deterministicMathSquareAmbiguity
     }
 
     private fun extractExpression(text: String): String? {
@@ -70,10 +63,8 @@ Which meaning did you intend? If you mean standard math precedence, **2 + 2² = 
         return t.replace(" ", "")
     }
 
-    private fun formatResult(original: String, expr: String, value: Double): String {
-        val display = if (value == value.toLong().toDouble()) value.toLong().toString() else "%.6g".format(value)
-        return "**$expr = $display**"
-    }
+    private fun formatDisplay(value: Double): String =
+        if (value == value.toLong().toDouble()) value.toLong().toString() else "%.6g".format(value)
 }
 
 /**

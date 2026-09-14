@@ -305,7 +305,7 @@ class ChatRepositoryImpl @Inject constructor(
                 }
             }
             if (attachments.isEmpty()) {
-                tryPreInferenceReply(userMessage)?.let { deterministic ->
+                tryPreInferenceReply(userMessage, currentLanguage)?.let { deterministic ->
                     return@withContext TurnPrepare(deterministic = deterministic)
                 }
             }
@@ -491,40 +491,36 @@ class ChatRepositoryImpl @Inject constructor(
                         }
                     }
 
-                    // Save extracted memories. Two tiers (industry-standard):
-                    //  • Durable identity facts (name, city, profession, …) →
-                    //    USER_SCOPE so they follow the user into every chat.
-                    //  • Everything else → THIS session, so conversational
-                    //    context can't bleed into another chat's prompt.
-                    parsed.memories.forEach { marker ->
-                        scope.launch {
-                            persistMemoryFact(
-                                sessionId = sessionId,
-                                rawKey = marker.key,
-                                value = marker.value,
-                            )
+                    // Save extracted memories only when the user explicitly asked
+                    // to remember/save — casual disclosure stays in chat context.
+                    val rememberRequested = userRequestedMemorySave(userMessage)
+                    if (rememberRequested) {
+                        parsed.memories.forEach { marker ->
+                            scope.launch {
+                                persistMemoryFact(
+                                    sessionId = sessionId,
+                                    rawKey = marker.key,
+                                    value = marker.value,
+                                )
+                            }
                         }
+                        runCatching { implicitFactExtractor.extractImplicitFacts(userMessage) }
+                            .onFailure { e ->
+                                DebugLogger.log(
+                                    "MEMORY",
+                                    "implicit extraction FAILED: ${e.javaClass.simpleName} ${LogPrivacy.valueLen(e.message.orEmpty())}",
+                                )
+                            }
+                            .getOrDefault(emptyList())
+                            .forEach { (k, v) ->
+                                scope.launch { persistMemoryFact(sessionId, k, v) }
+                            }
+                    } else if (parsed.memories.isNotEmpty()) {
+                        DebugLogger.log(
+                            "MEMORY",
+                            "skipped ${parsed.memories.size} marker(s) — no explicit remember request",
+                        )
                     }
-                    // Implicit extraction: the model often answers a personal
-                    // statement ("my name is Arjun", "I'm a teacher") WITHOUT
-                    // emitting a [SAARTHI_MEMORY] marker. Mirror what ChatGPT /
-                    // Gemini do — scan the user's own message for high-confidence
-                    // identity facts and persist them too. Conservative patterns
-                    // only (see extractImplicitFacts) to avoid false positives.
-                    // Defensive: a single bad regex/input must NEVER silently
-                    // kill implicit capture for every message — fail loud in
-                    // the log, keep the chat flow alive.
-                    runCatching { implicitFactExtractor.extractImplicitFacts(userMessage) }
-                        .onFailure { e ->
-                            DebugLogger.log(
-                                "MEMORY",
-                                "implicit extraction FAILED: ${e.javaClass.simpleName} ${LogPrivacy.valueLen(e.message.orEmpty())}",
-                            )
-                        }
-                        .getOrDefault(emptyList())
-                        .forEach { (k, v) ->
-                            scope.launch { persistMemoryFact(sessionId, k, v) }
-                        }
 
                     // Reminder feature REMOVED. Any [SAARTHI_REMINDER] the model
                     // still emits is parsed only so it can be stripped from the
@@ -1598,9 +1594,9 @@ class ChatRepositoryImpl @Inject constructor(
         val deterministic: String? = null,
     )
 
-    private fun tryPreInferenceReply(userMessage: String): String? {
-        UrgentSafetyGate.replyFor(userMessage)?.let { return it }
-        DeterministicMathGate.replyFor(userMessage)?.let { return it }
+    private fun tryPreInferenceReply(userMessage: String, language: SupportedLanguage): String? {
+        UrgentSafetyGate.replyFor(userMessage, language)?.let { return it }
+        DeterministicMathGate.replyFor(userMessage, language)?.let { return it }
         return null
     }
 

@@ -96,6 +96,20 @@ class SupportedLanguageTest {
         )
     }
 
+    @Test
+    fun urgentSafetyReply_is_non_blank_for_every_language() {
+        for (lang in SupportedLanguage.entries) {
+            assertFalse(
+                "${lang.englishName} urgentSafetyReply must be non-blank",
+                lang.urgentSafetyReply.isBlank(),
+            )
+            assertTrue(
+                "${lang.englishName} must mention emergency 112",
+                lang.urgentSafetyReply.contains("112"),
+            )
+        }
+    }
+
     // ── systemPromptInstruction: loanword register (pureLoanwords) ───────
 
     @Test
