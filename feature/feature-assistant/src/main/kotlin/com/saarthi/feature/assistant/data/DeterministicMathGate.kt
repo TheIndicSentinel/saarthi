@@ -84,59 +84,64 @@ internal object MathExpressionEvaluator {
 
     fun evaluate(input: String): Double? = runCatching {
         val tokens = tokenize(input) ?: return null
-        var pos = 0
-        fun parseExpr(): Double {
-            var v = parseTerm()
-            while (pos < tokens.size && (tokens[pos] == "+" || tokens[pos] == "-")) {
-                val op = tokens[pos++]
-                val rhs = parseTerm()
-                v = if (op == "+") v + rhs else v - rhs
+        val parser = object {
+            var pos = 0
+
+            fun parsePrimary(): Double {
+                if (pos >= tokens.size) error("unexpected end")
+                if (tokens[pos] == "(") {
+                    pos++
+                    val v = parseExpr()
+                    if (pos >= tokens.size || tokens[pos] != ")") error("missing )")
+                    pos++
+                    return v
+                }
+                return tokens[pos++].toDouble()
             }
-            return v
-        }
-        fun parseTerm(): Double {
-            var v = parsePower()
-            while (pos < tokens.size && (tokens[pos] == "*" || tokens[pos] == "/")) {
-                val op = tokens[pos++]
-                val rhs = parsePower()
-                v = if (op == "*") v * rhs else v / rhs
+
+            fun parseUnary(): Double {
+                if (pos < tokens.size && tokens[pos] == "-") {
+                    pos++
+                    return -parseUnary()
+                }
+                if (pos < tokens.size && tokens[pos] == "+") {
+                    pos++
+                    return parseUnary()
+                }
+                return parsePrimary()
             }
-            return v
-        }
-        fun parsePower(): Double {
-            var v = parseUnary()
-            if (pos < tokens.size && tokens[pos] == "^") {
-                pos++
-                val rhs = parsePower()
-                v = v.pow(rhs)
-            }
-            return v
-        }
-        fun parseUnary(): Double {
-            if (pos < tokens.size && tokens[pos] == "-") {
-                pos++
-                return -parseUnary()
-            }
-            if (pos < tokens.size && tokens[pos] == "+") {
-                pos++
-                return parseUnary()
-            }
-            return parsePrimary()
-        }
-        fun parsePrimary(): Double {
-            if (pos >= tokens.size) error("unexpected end")
-            if (tokens[pos] == "(") {
-                pos++
-                val v = parseExpr()
-                if (pos >= tokens.size || tokens[pos] != ")") error("missing )")
-                pos++
+
+            fun parsePower(): Double {
+                var v = parseUnary()
+                if (pos < tokens.size && tokens[pos] == "^") {
+                    pos++
+                    v = v.pow(parsePower())
+                }
                 return v
             }
-            val num = tokens[pos++].toDouble()
-            return num
+
+            fun parseTerm(): Double {
+                var v = parsePower()
+                while (pos < tokens.size && (tokens[pos] == "*" || tokens[pos] == "/")) {
+                    val op = tokens[pos++]
+                    val rhs = parsePower()
+                    v = if (op == "*") v * rhs else v / rhs
+                }
+                return v
+            }
+
+            fun parseExpr(): Double {
+                var v = parseTerm()
+                while (pos < tokens.size && (tokens[pos] == "+" || tokens[pos] == "-")) {
+                    val op = tokens[pos++]
+                    val rhs = parseTerm()
+                    v = if (op == "+") v + rhs else v - rhs
+                }
+                return v
+            }
         }
-        val result = parseExpr()
-        if (pos != tokens.size) return null
+        val result = parser.parseExpr()
+        if (parser.pos != tokens.size) return null
         if (!result.isFinite()) return null
         result
     }.getOrNull()
@@ -147,6 +152,9 @@ internal object MathExpressionEvaluator {
         while (i < input.length) {
             when (val c = input[i]) {
                 in "+-*/^()" -> {
+                    if (c != '(' && c != ')' && i + 1 < input.length && input[i + 1] in "+-*/^") {
+                        return null
+                    }
                     out.add(c.toString())
                     i++
                 }

@@ -20,7 +20,9 @@ internal object UrgentSafetyGate {
         if (HARM_OTHERS.any { lower.contains(it) }) return true
         val hasPoison = POISON_TERMS.any { lower.contains(it) || raw.contains(it, ignoreCase = true) }
         if (!hasPoison) return false
-        return POISON_INTENT.any { lower.contains(it) }
+        return POISON_INTENT.any { intent ->
+            Regex("\\b${Regex.escape(intent)}\\b").containsMatchIn(lower)
+        }
     }
 
     private val POISON_TERMS = listOf(
@@ -49,7 +51,7 @@ internal object UrgentSafetyGate {
         "kill him with", "kill her with",
     )
 
-    private const val SAFETY_REPLY = """
+    private val SAFETY_REPLY = """
 **Do not consume or give any poison or toxic substance to anyone.**
 
 If the substance is nearby, move away from it and keep others away.
