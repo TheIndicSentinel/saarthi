@@ -32,6 +32,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
@@ -85,19 +86,9 @@ private const val MAX_PROMPT_CHARS_LARGE    = 8_000   // Gemma 4
 private const val RECAP_MAX_CHARS_GROUNDED_STANDARD = 220
 private const val RECAP_MAX_CHARS_GROUNDED_LARGE = 380
 
-// Reasoning-quality rules injected ONLY on the roomy high-RAM path (4096 window,
-// budget >= 7000). On the tight 2048 path this is never added, so it cannot push
-// that prompt over budget — the mid-range behaviour is provably unchanged.
-// English meta-instructions are fine; the bottom language directive still forces
-// the reply language. Kept compact (~500c) — trivial against the 8000c budget.
-private const val REASONING_RULES = """REASONING (apply only when the message calls for it):
-- Give the direct answer first in one line, then explain briefly if useful.
-- For logic or puzzles, reason ONLY from the stated facts — even if they contradict the real world — and follow chains (if A > B and B > C then A > C). If the facts don't decide it, say it cannot be concluded.
-- For any arithmetic, work it out one step at a time and re-check the result (and its sign, for multiplication/division of negatives) before stating it — a wrong confident number is worse than a slower correct one.
-- Never invent books, reports, products, people, or events. If you cannot verify something, say so and ask for details instead of guessing.
-- State any key assumption you relied on, and name real uncertainties honestly — never claim there are none when asked.
-- For a device or app problem, first ask which device and what exactly happens before suggesting drastic fixes.
-- Do not restate who you are or that you run offline unless the user asks."""
+// Reasoning-quality rules previously injected on the roomy 4096 path — folded
+// into [SaarthiPriorityPrompt.BASE_CORE] (math + accuracy) to save prompt budget.
+private const val REASONING_RULES = ""
 
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
@@ -301,11 +292,6 @@ class ChatRepositoryImpl @Inject constructor(
             }
 
 
-        // Build prompt using adaptive budget based on model's context length.
-        // Index any newly-attached files FIRST (synchronously, on IO) so
-        // BM25 search inside buildPrompt sees the chunks. Idempotent —
-        // the per-session in-process cache prevents re-chunking on every
-        // turn after the first.
         val prompt = try {
             withContext(Dispatchers.IO) {
             withContext(kotlinx.coroutines.NonCancellable) {
@@ -316,6 +302,11 @@ class ChatRepositoryImpl @Inject constructor(
                         val title = if (session.title == "New Chat") graphemeSafeTake(userMessage, 40).trimEnd() else session.title
                         chatSessionDao.updateTitleAndTimestamp(sessionId, title, System.currentTimeMillis())
                     }
+                }
+            }
+            if (attachments.isEmpty()) {
+                tryPreInferenceReply(userMessage)?.let { deterministic ->
+                    return@withContext TurnPrepare(deterministic = deterministic)
                 }
             }
             if (attachments.isNotEmpty()) {
@@ -336,7 +327,7 @@ class ChatRepositoryImpl @Inject constructor(
                     ragRepository.persistActiveDocUri(sessionId, lastUri)
                 }
             }
-            buildPrompt(userMessage, attachments)
+            buildPrompt(userMessage, attachments).let { TurnPrepare(prompt = it) }
         }
         } catch (e: Throwable) {
             if (!isSqliteUnusable(e)) throw e
@@ -349,9 +340,20 @@ class ChatRepositoryImpl @Inject constructor(
             refreshOlderMessagesOmitted()
             return@flow
         }
+        if (prompt.deterministic != null) {
+            DebugLogger.log("CHAT", "preInference gate  replyChars=${prompt.deterministic.length}")
+            emitDeterministicAssistantReply(
+                streamingId = streamingId,
+                sessionId = sessionId,
+                reply = prompt.deterministic,
+            )
+            return@flow
+        }
+        val modelPrompt = prompt.prompt
+            ?: throw IllegalStateException("TurnPrepare missing prompt")
         DebugLogger.log(
             "CHAT",
-            "streamResponse start  promptChars=${prompt.length}  ${LogPrivacy.sessionIdLen(sessionId)}",
+            "streamResponse start  promptChars=${modelPrompt.length}  ${LogPrivacy.sessionIdLen(sessionId)}",
         )
 
         val startTime = System.currentTimeMillis()
@@ -360,7 +362,7 @@ class ChatRepositoryImpl @Inject constructor(
         // Coalesce stream→UI updates (~80ms) so _history is not copied on every token.
         val streamCoalescer = StreamingUiCoalescer()
 
-            inferenceEngine.generateStream(prompt, PackType.BASE)
+            inferenceEngine.generateStream(modelPrompt, PackType.BASE)
                 .catch { e ->
                     // Only stop FGS if the native inference thread is no longer running.
                     // If isNativeGenerating=true here it means the watchdog timed out (or the
@@ -1591,6 +1593,47 @@ class ChatRepositoryImpl @Inject constructor(
      * invariants live in [ResponseStyleInstructionCompiler] — this is just
      * the call site.
      */
+    private data class TurnPrepare(
+        val prompt: String? = null,
+        val deterministic: String? = null,
+    )
+
+    private fun tryPreInferenceReply(userMessage: String): String? {
+        UrgentSafetyGate.replyFor(userMessage)?.let { return it }
+        DeterministicMathGate.replyFor(userMessage)?.let { return it }
+        return null
+    }
+
+    private suspend fun FlowCollector<String>.emitDeterministicAssistantReply(
+        streamingId: String,
+        sessionId: String,
+        reply: String,
+    ) {
+        val cleaned = ResponseMarkerParser.stripForDisplay(reply, streaming = false)
+        _history.update { history ->
+            history.map { msg ->
+                if (msg.id == streamingId) {
+                    msg.copy(content = cleaned, isStreaming = false, tokenCount = 0)
+                } else msg
+            }
+        }
+        refreshOlderMessagesOmitted()
+        InferenceService.stop(context)
+        withContext(Dispatchers.IO) {
+            sqliteWriteWithRetry {
+                conversationDao.insert(
+                    ChatMessage(
+                        id = streamingId,
+                        content = cleaned,
+                        role = MessageRole.ASSISTANT,
+                        isStreaming = false,
+                    ).toEntity(sessionId),
+                )
+            }
+        }
+        emit(cleaned)
+    }
+
     private fun buildResponseStyleSuffix(
         style: com.saarthi.core.i18n.ResponseStyle,
         language: SupportedLanguage,
