@@ -19,6 +19,12 @@ data class ChatMessage(
     val isStreaming: Boolean = false,
     val tokenCount: Int = 0,
     val timestamp: Long = System.currentTimeMillis(),
+    /**
+     * True for an assistant row that is a UI notice, not a model reply —
+     * error / empty / stopped / not-ready text. Shown in the bubble but never
+     * persisted and never fed back into later prompts' recap.
+     */
+    val isPlaceholder: Boolean = false,
 )
 
 enum class MessageRole { USER, ASSISTANT }

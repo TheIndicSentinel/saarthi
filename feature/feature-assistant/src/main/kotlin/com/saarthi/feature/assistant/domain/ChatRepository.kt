@@ -1,10 +1,27 @@
 package com.saarthi.feature.assistant.domain
 
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
 interface ChatRepository {
     fun streamResponse(userMessage: String, attachments: List<AttachedFile> = emptyList()): Flow<String>
+    /**
+     * Collects a [streamResponse] turn on the repository's app-lifetime scope,
+     * so leaving the chat screen (which clears the ViewModel) does not cancel
+     * generation. The flow must not throw — callers `.catch` first.
+     */
+    fun launchTurn(turn: Flow<String>): Job
+    /** True while a launched turn is running — lets a recreated ViewModel lock its input. */
+    fun isGenerating(): StateFlow<Boolean>
+    /** Cancels the in-flight turn (native model + collection) and waits for it to finish. */
+    suspend fun cancelActiveTurn()
+    /**
+     * Longest user message the loaded model's prompt budget can hold without
+     * trimPrompt cutting the start of it. 0 = budget unknown (don't block).
+     */
+    fun maxUserMessageChars(): Int
     fun getHistory(): Flow<List<ChatMessage>>
     fun getSessions(): Flow<List<ChatSession>>
     fun getCurrentSessionId(): Flow<String>
@@ -30,6 +47,10 @@ interface ChatRepository {
      * a banner before the next send.
      */
     fun olderMessagesOmitted(): Flow<Boolean>
+    /** True when the current chat has saved messages older than the loaded window. */
+    fun hasOlderMessages(): Flow<Boolean>
+    /** Prepend the previous page of the current chat's saved messages. */
+    suspend fun loadOlderMessages()
     /** Drop Room chunks for one attachment URI in the current session. */
     suspend fun removeIndexedDocument(docUri: String)
 }

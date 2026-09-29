@@ -16,6 +16,7 @@ import com.saarthi.core.i18n.SupportedLanguage
 import com.saarthi.core.inference.FunnelEvent
 import com.saarthi.core.inference.FunnelTracker
 import com.saarthi.core.inference.engine.InferenceEngine
+import com.saarthi.feature.assistant.data.ChatHistoryHygiene
 import com.saarthi.feature.assistant.data.FileContentExtractor
 import com.saarthi.feature.assistant.data.ATTACH_BRIEF_OVERVIEW_QUERY
 import com.saarthi.feature.assistant.data.attachTurnQuery
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.delay
@@ -91,6 +93,8 @@ data class AssistantUiState(
      * window. Drives a slim banner above the message list.
      */
     val olderMessagesOmitted: Boolean = false,
+    /** Saved messages older than the loaded window exist — shows "Load earlier messages". */
+    val hasOlderMessages: Boolean = false,
 )
 
 @HiltViewModel
@@ -115,9 +119,10 @@ class AssistantViewModel @Inject constructor(
     // trial showcase.
     private var docsThisSession = 0
 
-    /** Last sent retrieval query + URIs — drops identical attach-overview taps. */
+    /** Last sent retrieval query + URIs + time — drops accidental double taps. */
     private var lastTurnQuery: String? = null
     private var lastTurnUris: Set<String> = emptySet()
+    private var lastTurnAtMs: Long = 0L
 
     /**
      * Whether the user may attach another document right now. Pro → always.
@@ -183,6 +188,17 @@ class AssistantViewModel @Inject constructor(
 
         chatRepository.olderMessagesOmitted()
             .onEach { omitted -> _uiState.update { it.copy(olderMessagesOmitted = omitted) } }
+            .launchIn(viewModelScope)
+
+        chatRepository.hasOlderMessages()
+            .onEach { older -> _uiState.update { it.copy(hasOlderMessages = older) } }
+            .launchIn(viewModelScope)
+
+        // A turn started before navigation keeps running in the repository;
+        // mirror it so this (possibly recreated) screen keeps the composer
+        // locked and the Stop button live until that reply lands.
+        chatRepository.isGenerating()
+            .onEach { generating -> _uiState.update { it.copy(isStreaming = generating) } }
             .launchIn(viewModelScope)
 
         // Push-based isReady observation via StateFlow — no polling, no wakeup cost.
@@ -287,6 +303,13 @@ class AssistantViewModel @Inject constructor(
         val attachments = _uiState.value.pendingAttachments
         if ((raw.isBlank() && attachments.isEmpty()) || _uiState.value.isStreaming) return
         if (attachments.any { it.indexing }) return
+        // Too long for the loaded model: keep the text in the box and say so,
+        // instead of letting the prompt trimmer silently drop its beginning.
+        val maxChars = chatRepository.maxUserMessageChars()
+        if (maxChars > 0 && raw.length > maxChars) {
+            _uiState.update { it.copy(error = currentLanguage.value.messageTooLong(maxChars)) }
+            return
+        }
         val text = attachTurnQuery(raw, attachments.isNotEmpty())
         dispatchUserMessage(text, attachments)
     }
@@ -299,38 +322,51 @@ class AssistantViewModel @Inject constructor(
         dispatchUserMessage(ATTACH_BRIEF_OVERVIEW_QUERY, attachments)
     }
 
-    private fun dispatchUserMessage(text: String, attachments: List<AttachedFile>) {
+    /**
+     * @param isRetry retry resends a turn the user explicitly asked to redo:
+     *   it skips the double-tap guard and leaves the composer (typed text,
+     *   pending attachments) untouched.
+     */
+    private fun dispatchUserMessage(
+        text: String,
+        attachments: List<AttachedFile>,
+        isRetry: Boolean = false,
+    ) {
         val uris = attachments.map { it.uri.toString() }.toSet()
-        if (isDuplicateTurn(lastTurnQuery, lastTurnUris, text, uris)) return
+        val now = System.currentTimeMillis()
+        if (!isRetry && isDuplicateTurn(lastTurnQuery, lastTurnUris, text, uris, now - lastTurnAtMs)) return
         lastTurnQuery = text
         lastTurnUris = uris
+        lastTurnAtMs = now
         funnel.trackOnce(FunnelEvent.FIRST_CHAT_SENT)
 
-        _uiState.update { it.copy(inputText = "", pendingAttachments = emptyList(), isStreaming = true, error = null) }
+        _uiState.update {
+            if (isRetry) it.copy(isStreaming = true, error = null)
+            else it.copy(inputText = "", pendingAttachments = emptyList(), isStreaming = true, error = null)
+        }
 
-        // Point 8a: streamResponse() now launches on the repository's own
-        // app-scoped coroutine and hands back the Job directly (no more
-        // `.launchIn(viewModelScope)`) — so navigating away from this screen
-        // (which clears viewModelScope) no longer cancels an in-flight
-        // generation; it finishes and gets persisted/displayed in the
-        // background, same as ChatGPT/Gemini/Claude. This ViewModel instance
-        // may itself be gone by the time invokeOnCompletion fires below —
-        // that's fine, it's a harmless no-op update to a StateFlow nobody's
-        // observing anymore; the actual reply lives in the repository's
-        // history, which is what the (new) ViewModel instance reads when the
-        // user navigates back.
-        streamJob = chatRepository.streamResponse(text, attachments)
-            .onCompletion { throwable ->
-                val friendly = when {
-                    throwable == null -> null
-                    throwable is kotlinx.coroutines.CancellationException -> null
-                    com.saarthi.core.common.isSqliteUnusable(throwable) ->
-                        currentLanguage.value.dbNeedsRestart
-                    else -> currentLanguage.value.streamFailedRetry
+        // The turn is collected on the repository's app-lifetime scope
+        // (launchTurn), NOT viewModelScope — so navigating away from this
+        // screen no longer cancels an in-flight generation; it finishes and is
+        // persisted in the background. This ViewModel may be gone by the time
+        // onCompletion fires — a harmless no-op update to an unobserved
+        // StateFlow; a recreated ViewModel reads the reply from the
+        // repository's history and its lock state from isGenerating().
+        streamJob = chatRepository.launchTurn(
+            chatRepository.streamResponse(text, attachments)
+                .onCompletion { throwable ->
+                    val friendly = when {
+                        throwable == null -> null
+                        throwable is kotlinx.coroutines.CancellationException -> null
+                        com.saarthi.core.common.isSqliteUnusable(throwable) ->
+                            currentLanguage.value.dbNeedsRestart
+                        else -> currentLanguage.value.streamFailedRetry
+                    }
+                    _uiState.update { it.copy(isStreaming = false, error = friendly) }
                 }
-                _uiState.update { it.copy(isStreaming = false, error = friendly) }
-            }
-            .launchIn(viewModelScope)
+                // Surfaced above; must not escape into the app scope.
+                .catch { }
+        )
     }
 
     /**
@@ -345,6 +381,9 @@ class AssistantViewModel @Inject constructor(
         if (!_uiState.value.isStreaming) return
         runCatching { inferenceEngine.cancelGeneration() }
         streamJob?.cancel()
+        // A recreated ViewModel has no streamJob for a turn started before
+        // navigation — cancel through the repository, which owns the turn.
+        viewModelScope.launch { chatRepository.cancelActiveTurn() }
         // Defensive: invokeOnCompletion handler will clear isStreaming, but
         // some races (cancel after job already completed) need a fallback.
         _uiState.update { it.copy(isStreaming = false) }
@@ -364,22 +403,21 @@ class AssistantViewModel @Inject constructor(
     fun stopSpeaking() = ttsManager.stop()
 
     /**
-     * Retry an assistant message: delete the AI response + the user message
-     * that triggered it, then resend the user text fresh so the model produces
-     * a new reply.
+     * Retry the latest assistant reply: resend the user turn that triggered it
+     * (same text, same attachments) and replace the old pair. Every check runs
+     * BEFORE the delete, so a pair is never removed without a resend. Only the
+     * latest reply can be retried — retrying an older one would delete it from
+     * the middle of the thread and answer at the bottom.
      */
     fun retryResponse(messageId: String) {
         if (_uiState.value.isStreaming) return
         viewModelScope.launch {
             val msgs = allMessages.value
-            val idx = msgs.indexOfFirst { it.id == messageId }
-            if (idx <= 0) return@launch
-            val previousUserMsg = msgs.subList(0, idx).lastOrNull { it.role == com.saarthi.feature.assistant.domain.MessageRole.USER }
-                ?: return@launch
+            val previousUserMsg = ChatHistoryHygiene.retryTargetUserMessage(msgs, messageId) ?: return@launch
+            if (_uiState.value.isStreaming) return@launch
             chatRepository.deleteMessage(messageId)
             chatRepository.deleteMessage(previousUserMsg.id)
-            _uiState.update { it.copy(inputText = previousUserMsg.content) }
-            sendMessage()
+            dispatchUserMessage(previousUserMsg.content, previousUserMsg.attachments, isRetry = true)
         }
     }
 
@@ -657,6 +695,11 @@ class AssistantViewModel @Inject constructor(
     fun deleteMessage(id: String) = viewModelScope.launch { chatRepository.deleteMessage(id) }
 
     // ── Session management ────────────────────────────────────────────────────
+    /** "Load earlier messages" at the top of the chat list. */
+    fun loadOlderMessages() {
+        viewModelScope.launch { chatRepository.loadOlderMessages() }
+    }
+
     fun openDrawer() = _uiState.update { it.copy(showDrawer = true) }
     fun closeDrawer() = _uiState.update { it.copy(showDrawer = false) }
 
@@ -707,13 +750,10 @@ class AssistantViewModel @Inject constructor(
         super.onCleared()
     }
 
-    /**
-     * COMPACT-tier detector — mirrors [SystemPromptProvider.tierFor] for
-     * the only branch the UI needs to gate on. Kept inline to avoid
-     * adding SystemPromptProvider to the constructor for one boolean.
-     */
-    private fun isCompactModel(name: String?): Boolean {
-        val n = (name ?: "").lowercase()
-        return n.contains("1b") || n.contains("compact")
-    }
+    /** COMPACT-tier check via the shared resolver (catalog promptTier first). */
+    private fun isCompactModel(name: String?): Boolean =
+        com.saarthi.core.inference.prompt.SystemPromptProvider.resolveTier(
+            inferenceEngine.activeModelPromptTier,
+            name,
+        ) == com.saarthi.core.inference.prompt.SystemPromptProvider.ModelTier.COMPACT
 }

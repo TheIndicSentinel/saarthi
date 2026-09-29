@@ -140,6 +140,7 @@ fun AssistantScreen(
     viewModel: AssistantViewModel = hiltViewModel(),
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val latestAssistantId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.id
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
     // Use the vmLanguage only if it has moved past the default initial value;
@@ -207,8 +208,10 @@ fun AssistantScreen(
     }
 
     // New message arrived (user sent, or the assistant bubble appeared) → always
-    // snap to the bottom so the new turn is in view.
-    LaunchedEffect(messages.size) {
+    // snap to the bottom so the new turn is in view. Keyed on the NEWEST
+    // message, not the count, so "Load earlier messages" (which prepends) keeps
+    // the user up where they are reading.
+    LaunchedEffect(messages.lastOrNull()?.id) {
         if (messages.isNotEmpty()) scrollToBottom()
     }
 
@@ -402,6 +405,15 @@ fun AssistantScreen(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
+                            if (uiState.hasOlderMessages) {
+                                item(key = "load_older", contentType = "load_older") {
+                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                        TextButton(onClick = { viewModel.loadOlderMessages() }) {
+                                            Text(currentLanguage.loadEarlierMessagesLabel, color = SaarthiColors.Marigold)
+                                        }
+                                    }
+                                }
+                            }
                             items(
                                 items = messages,
                                 key = { it.id },
@@ -416,7 +428,9 @@ fun AssistantScreen(
                                     message = msg,
                                     language = currentLanguage,
                                     onDelete = { viewModel.deleteMessage(msg.id) },
-                                    onRetry = { viewModel.retryResponse(msg.id) },
+                                    onRetry = if (msg.id == latestAssistantId) {
+                                        { viewModel.retryResponse(msg.id) }
+                                    } else null,
                                     onListen = { viewModel.toggleSpeak(msg.id, msg.content) },
                                     isSpeaking = speakingId == msg.id,
                                     avatarLabel = currentLanguage.avatarLabel,

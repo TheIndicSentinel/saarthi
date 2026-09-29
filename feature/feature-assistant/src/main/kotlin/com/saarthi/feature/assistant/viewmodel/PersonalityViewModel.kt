@@ -50,7 +50,7 @@ class PersonalityViewModel @Inject constructor(
     /** False on Compact tier (1B) — the picker is shown but disabled. */
     val supportedForCurrentModel: StateFlow<Boolean> = inferenceEngine.activeModelNameFlow
         .map { modelName ->
-            systemPromptProvider.tierFor(modelName) != SystemPromptProvider.ModelTier.COMPACT
+            systemPromptProvider.tierFor(inferenceEngine.activeModelPromptTier, modelName) != SystemPromptProvider.ModelTier.COMPACT
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 

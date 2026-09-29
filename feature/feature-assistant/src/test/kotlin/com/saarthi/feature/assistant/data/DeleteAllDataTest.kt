@@ -49,7 +49,11 @@ class DeleteAllDataTest {
     private val transactionRunner: DatabaseTransactionRunner = mockk(relaxed = true)
     private val memoryRepository: MemoryRepository = mockk(relaxed = true)
     private val languageManager: LanguageManager = mockk(relaxed = true)
-    private val inferenceEngine: InferenceEngine = mockk(relaxed = true)
+    private val inferenceEngine: InferenceEngine = mockk<InferenceEngine>(relaxed = true).also {
+        // A relaxed mock returns a mocked enum (resolves as COMPACT), not null —
+        // null keeps the tier on the model-name fallback.
+        every { it.activeModelPromptTier } returns null
+    }
     private val deviceProfiler: DeviceProfiler = mockk(relaxed = true)
     private val systemPromptProvider: SystemPromptProvider = mockk(relaxed = true)
     private val responseStyleManager: ResponseStyleManager = mockk(relaxed = true)

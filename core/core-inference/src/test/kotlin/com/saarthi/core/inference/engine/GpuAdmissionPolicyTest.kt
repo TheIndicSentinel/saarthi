@@ -253,14 +253,17 @@ class GpuAdmissionPolicyTest {
     }
 
     @Test
-    fun `2 or more CPU crashes drops non-LARGE tier to the ultra-safe 64 floor`() {
-        assertEquals(64, tokens(cpuCrashCount = 2, isLargeTier = false, headroomMb = 10_000L))
+    fun `2 or more CPU crashes drops non-LARGE tier to the ultra-safe 512 floor`() {
+        // 512 = trimPrompt's minimum 256-token prompt + 256-token reply
+        // reserve. The old 64 could not hold any prompt at all.
+        assertEquals(512, tokens(cpuCrashCount = 2, isLargeTier = false, headroomMb = 10_000L))
+        assertEquals(512, tokens(cpuCrashCount = 5, isLargeTier = false, headroomMb = 10_000L))
     }
 
     @Test
     fun `exactly 1 CPU crash uses the auto-recovery floor, less severe than ultra-safe`() {
         assertEquals(1_536, tokens(cpuCrashCount = 1, isLargeTier = true, headroomMb = 10_000L))
-        assertEquals(256, tokens(cpuCrashCount = 1, isLargeTier = false, headroomMb = 10_000L))
+        assertEquals(1_024, tokens(cpuCrashCount = 1, isLargeTier = false, headroomMb = 10_000L))
     }
 
     @Test

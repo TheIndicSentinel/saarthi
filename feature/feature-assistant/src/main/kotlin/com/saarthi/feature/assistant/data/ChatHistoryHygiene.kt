@@ -40,6 +40,28 @@ object ChatHistoryHygiene {
     }
 
     /**
+     * True when [msg] may appear in a prompt recap: non-blank, finished, and a
+     * real reply rather than an error / empty / stopped placeholder. Filtering
+     * placeholders here leaves their USER turn orphaned, so
+     * [completeUserAssistantPairs] drops the whole failed turn — the same
+     * result a restart gives, since placeholders are never persisted.
+     */
+    fun isRecapEligible(msg: ChatMessage): Boolean =
+        msg.content.isNotBlank() && !msg.isStreaming && !msg.isPlaceholder
+
+    /**
+     * The USER turn to resend when retrying [assistantId], or null when retry
+     * is not allowed: only the LATEST, finished assistant reply that directly
+     * follows a user turn can be retried.
+     */
+    fun retryTargetUserMessage(history: List<ChatMessage>, assistantId: String): ChatMessage? {
+        val lastAssistant = history.lastOrNull { it.role == MessageRole.ASSISTANT } ?: return null
+        if (lastAssistant.id != assistantId || lastAssistant.isStreaming) return null
+        val idx = history.indexOf(lastAssistant)
+        return history.getOrNull(idx - 1)?.takeIf { it.role == MessageRole.USER }
+    }
+
+    /**
      * Returns only complete user→assistant pairs from [history].
      * Orphaned user messages (no following model response) and lone assistant
      * messages are dropped — they appear after a crash where the assistant

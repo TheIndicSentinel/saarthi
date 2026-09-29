@@ -21,6 +21,8 @@ class InferenceEngineSelector @Inject constructor(
     override val activeModelName: String? get() = liteRtEngine.activeModelName
     override val activeModelNameFlow: Flow<String?> get() = liteRtEngine.activeModelNameFlow
     override val activeModelDefaultTemperature: Float get() = liteRtEngine.activeModelDefaultTemperature
+    override val activeModelPromptTier: com.saarthi.core.inference.model.PromptTier?
+        get() = liteRtEngine.activeModelPromptTier
     // Must forward, otherwise the prompt builder's token-ceiling clamp reads
     // the interface default (0) and silently disables itself — which let
     // over-budget prompts reach the native engine and fail with "Input token
@@ -57,6 +59,13 @@ class InferenceEngineSelector @Inject constructor(
 
     override fun generateStream(prompt: String, packType: PackType): Flow<String> =
         liteRtEngine.generateStream(prompt, packType)
+
+    override fun generateStream(
+        prompt: String,
+        packType: PackType,
+        grounded: Boolean,
+        systemInstruction: String?,
+    ): Flow<String> = liteRtEngine.generateStream(prompt, packType, grounded, systemInstruction)
 
     override fun release() {
         liteRtEngine.release()

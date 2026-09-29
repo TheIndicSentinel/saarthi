@@ -1,6 +1,7 @@
 package com.saarthi.core.inference.engine
 
 import com.saarthi.core.inference.GenerationPreference
+import com.saarthi.core.inference.model.PackType
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,5 +83,13 @@ class SamplerPolicyTest {
     fun `isGroundedPrompt detects the RAG strict-mode marker`() {
         assertTrue(policy().isGroundedPrompt("... ATTACHED EXCERPTS ..."))
         assertFalse(policy().isGroundedPrompt("just a normal chat message"))
+    }
+
+    @Test
+    fun `Kisan pack turns are grounded even without the RAG marker`() {
+        val kisan = "=== REFERENCE NOTES ===\nPM-KISAN pays ₹6000 a year.\n=== END NOTES ==="
+        assertTrue(policy().isGroundedTurn(kisan, PackType.KISAN))
+        assertFalse(policy().isGroundedTurn("just a normal chat message", PackType.BASE))
+        assertTrue(policy().isGroundedTurn("... ATTACHED EXCERPTS ...", PackType.BASE))
     }
 }

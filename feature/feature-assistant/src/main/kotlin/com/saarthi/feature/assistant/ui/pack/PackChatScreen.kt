@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saarthi.core.ui.theme.SaarthiColors
+import com.saarthi.feature.assistant.domain.MessageRole
 import com.saarthi.feature.assistant.ui.components.MessageBubble
 import com.saarthi.feature.assistant.viewmodel.PackChatViewModel
 
@@ -72,6 +73,7 @@ fun PackChatScreen(
     viewModel: PackChatViewModel = hiltViewModel(),
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val latestAssistantId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.id
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val modelInitializing by viewModel.modelInitializing.collectAsStateWithLifecycle()
     val modelReloading by viewModel.modelReloading.collectAsStateWithLifecycle()
@@ -197,7 +199,9 @@ fun PackChatScreen(
                             message = msg,
                             language = language,
                             onDelete = {},
-                            onRetry = { viewModel.retry(msg.id) },
+                            onRetry = if (msg.id == latestAssistantId) {
+                                { viewModel.retry(msg.id) }
+                            } else null,
                             onListen = { viewModel.toggleSpeak(msg.id, msg.content) },
                             isSpeaking = speakingId == msg.id,
                             avatarLabel = "🌾",

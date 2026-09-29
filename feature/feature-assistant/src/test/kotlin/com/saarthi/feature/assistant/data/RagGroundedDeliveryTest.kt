@@ -110,4 +110,34 @@ class RagGroundedDeliveryTest {
             groundedRagCharBudget(totalBudget = 100, reservedNonRagChars = 200, hasRetrievedChunks = true),
         )
     }
+
+    @Test
+    fun `strictGrounded is true exactly when the block carries the ATTACHED EXCERPTS rules`() {
+        val chunk = RetrievedChunk(
+            text = "The Act may be called the Digital Personal Data Protection Act, 2023.",
+            docName = "Act.pdf",
+            score = 1.0,
+            chunkIndex = 1,
+            docUri = "content://a",
+        )
+        for (tier in SystemPromptProvider.ModelTier.values()) {
+            for (mode in listOf(RagTurnMode.DOCUMENT_GROUNDED, RagTurnMode.MIXED)) {
+                val result = assembleRagPromptBlock(
+                    retrieved = listOf(chunk),
+                    unreadableThisTurn = emptyList(),
+                    tier = tier,
+                    charBudget = 6000,
+                    citationLabels = labels,
+                    turnMode = mode,
+                )
+                assertTrue(result.block.isNotEmpty())
+                assertEquals(
+                    "tier=$tier mode=$mode",
+                    result.block.contains("ATTACHED EXCERPTS"),
+                    result.strictGrounded,
+                )
+            }
+        }
+    }
 }
+

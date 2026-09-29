@@ -256,6 +256,63 @@ class ResponseMarkerParserTest {
         assertTrue("Memory with placeholder values MUST NOT save", result.memories.isEmpty())
     }
 
+    // ── Formatting preservation (normal answers must pass through intact) ──
+
+    @Test
+    fun parse_keeps_paragraph_breaks_nested_bullets_and_code_indentation() {
+        val raw = "First paragraph.\n\nSecond paragraph.\n\n" +
+            "- Item\n  - Nested item\n\n" +
+            "```\nfun main() {\n    println(\"hi\")\n}\n```"
+        assertEquals(raw, ResponseMarkerParser.parse(raw).cleanText)
+        assertEquals(raw, ResponseMarkerParser.stripForDisplay(raw, streaming = false))
+    }
+
+    @Test
+    fun parse_keeps_paragraphs_even_when_an_identity_leak_is_rewritten() {
+        val raw = "I am Gemma 4, developed by Google DeepMind.\n\nHere are the steps:\n  - Step one"
+        assertEquals(
+            "I am Saarthi.\n\nHere are the steps:\n  - Step one",
+            ResponseMarkerParser.parse(raw).cleanText,
+        )
+    }
+
+    @Test
+    fun parse_keeps_ordinary_time_and_value_lines() {
+        val raw = "Masala chai recipe\nTime: 30 minutes\nServes: 2\n\nBudget\nValue: ₹5000"
+        assertEquals(raw, ResponseMarkerParser.parse(raw).cleanText)
+    }
+
+    @Test
+    fun stripForDisplay_removes_colon_form_block_without_label_when_it_has_marker_signature() {
+        val raw = "Noted.\nkey: \"user_city\"\nvalue: \"Pune\""
+        assertEquals("Noted.", ResponseMarkerParser.stripForDisplay(raw, streaming = false))
+    }
+
+    @Test
+    fun rewriteIdentity_keeps_general_knowledge_provenance() {
+        val raw = "Android was developed by Google in 2008."
+        assertEquals(raw, ResponseMarkerParser.rewriteIdentity(raw))
+        val maps = "Google Maps made navigation easier."
+        assertEquals(maps, ResponseMarkerParser.rewriteIdentity(maps))
+        val gpt = "ChatGPT is a language model made by OpenAI."
+        assertEquals(gpt, ResponseMarkerParser.rewriteIdentity(gpt))
+    }
+
+    @Test
+    fun rewriteIdentity_keeps_hindi_general_knowledge_provenance() {
+        val raw = "एंड्रॉइड को गूगल ने विकसित किया था। यह लोकप्रिय है।"
+        assertEquals(raw, ResponseMarkerParser.rewriteIdentity(raw))
+    }
+
+    @Test
+    fun rewriteIdentity_still_strips_self_provenance_across_sentences() {
+        val raw = "Android was developed by Google. I am Saarthi, trained by Google DeepMind."
+        assertEquals(
+            "Android was developed by Google. I am Saarthi.",
+            ResponseMarkerParser.rewriteIdentity(raw),
+        )
+    }
+
     @Test
     fun stripAll_removes_Gemma_unused_token_leak() {
         val raw = "Hello there <unused0>"

@@ -32,6 +32,28 @@ interface ConversationDao {
     )
     suspend fun getRecentBySession(sessionId: String, limit: Int): List<ConversationEntity>
 
+    /**
+     * The [limit] rows just before [beforeTimestamp] (inclusive — callers drop
+     * ids they already hold, so equal-timestamp rows at a page edge aren't
+     * skipped), chronological. Pages "Load earlier messages".
+     */
+    @Query(
+        """
+        SELECT * FROM (
+            SELECT * FROM conversation
+            WHERE sessionId = :sessionId AND timestamp <= :beforeTimestamp
+            ORDER BY timestamp DESC
+            LIMIT :limit
+        ) AS older
+        ORDER BY timestamp ASC
+        """,
+    )
+    suspend fun getOlderBySession(sessionId: String, beforeTimestamp: Long, limit: Int): List<ConversationEntity>
+
+    /** Rows strictly older than [beforeTimestamp] — whether an earlier page exists. */
+    @Query("SELECT COUNT(*) FROM conversation WHERE sessionId = :sessionId AND timestamp < :beforeTimestamp")
+    suspend fun countOlderBySession(sessionId: String, beforeTimestamp: Long): Int
+
     companion object {
         /** Enough for the token-budgeted prompt; bounds RAM on huge threads. */
         const val UI_HISTORY_LIMIT = 100

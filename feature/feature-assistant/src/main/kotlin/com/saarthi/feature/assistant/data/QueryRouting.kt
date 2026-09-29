@@ -428,13 +428,23 @@ internal fun shouldApplyRecencySessionBoost(
     return true
 }
 
+/** Window in which an identical send counts as an accidental double tap. */
+internal const val DUPLICATE_TURN_WINDOW_MS = 1_500L
+
+/**
+ * Drops an accidental double tap: the same query + URIs sent again within
+ * [DUPLICATE_TURN_WINDOW_MS]. A deliberate repeat ("another joke" twice, or a
+ * re-ask after a miss) is a real turn and must go through.
+ */
 internal fun isDuplicateTurn(
     lastQuery: String?,
     lastUris: Set<String>,
     newQuery: String,
     newUris: Set<String>,
+    elapsedMsSinceLast: Long = 0L,
 ): Boolean {
     if (lastQuery == null || newQuery.isEmpty()) return false
+    if (elapsedMsSinceLast > DUPLICATE_TURN_WINDOW_MS) return false
     return lastQuery.equals(newQuery, ignoreCase = true) && lastUris == newUris
 }
 

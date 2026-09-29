@@ -26,6 +26,21 @@ class StreamingUiCoalescer(
         return false
     }
 
+    /**
+     * Like [onToken], but builds the visible text only when a flush is due —
+     * the marker/identity cleanup over the whole reply then runs ~12×/sec
+     * instead of on every token.
+     */
+    fun onTokenDeferred(visibleText: () -> String, onFlush: (String) -> Unit): Boolean {
+        val now = clock()
+        if (now - lastFlushMs >= flushIntervalMs) {
+            lastFlushMs = now
+            onFlush(visibleText())
+            return true
+        }
+        return false
+    }
+
     /** Force a flush — e.g. stream end when the last token landed inside the interval. */
     fun flushNow(visibleText: String, onFlush: (String) -> Unit) {
         lastFlushMs = clock()

@@ -28,6 +28,10 @@ import com.saarthi.feature.assistant.domain.ChatSession
 import com.saarthi.feature.assistant.domain.MessageRole
 import com.saarthi.feature.assistant.streaming.StreamingUiCoalescer
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
@@ -122,6 +126,9 @@ class ChatRepositoryImpl @Inject constructor(
     private val _tokensPerSecond = MutableStateFlow(0f)
     private val _currentSessionId = MutableStateFlow("default")
     private val _olderMessagesOmitted = MutableStateFlow(false)
+    private val _isGenerating = MutableStateFlow(false)
+    private val _hasOlderMessages = MutableStateFlow(false)
+    @Volatile private var activeTurn: Job? = null
     private val memoryFactWriter = MemoryFactWriter(memoryRepository, implicitFactExtractor)
 
 
@@ -187,6 +194,7 @@ class ChatRepositoryImpl @Inject constructor(
             if (saved.isNotEmpty()) {
                 _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(saved.map { it.toChatMessage() })
             }
+            refreshHasOlderMessages(sessionId)
             sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
             refreshOlderMessagesOmitted()
         }
@@ -195,6 +203,33 @@ class ChatRepositoryImpl @Inject constructor(
     override fun getHistory(): Flow<List<ChatMessage>> = _history.asStateFlow()
     override fun getTokensPerSecond(): Flow<Float> = _tokensPerSecond.asStateFlow()
     override fun olderMessagesOmitted(): Flow<Boolean> = _olderMessagesOmitted.asStateFlow()
+    override fun hasOlderMessages(): Flow<Boolean> = _hasOlderMessages.asStateFlow()
+
+    override suspend fun loadOlderMessages() {
+        val sessionId = _currentSessionId.value
+        val oldest = _history.value.firstOrNull() ?: return
+        val page = runCatching {
+            conversationDao.getOlderBySession(sessionId, oldest.timestamp, ConversationDao.UI_HISTORY_LIMIT)
+        }.getOrDefault(emptyList())
+        // The user may have switched chats while the page loaded.
+        if (sessionId != _currentSessionId.value) return
+        _history.update { current ->
+            val known = current.mapTo(HashSet()) { it.id }
+            val older = page.map { it.toChatMessage() }.filter { it.id !in known }
+            if (older.isEmpty()) current
+            else ChatHistoryHygiene.dropOrphanedUserTurns(older + current)
+        }
+        refreshHasOlderMessages(sessionId)
+        refreshOlderMessagesOmitted()
+    }
+
+    /** Whether rows older than the oldest loaded message exist for [sessionId]. */
+    private suspend fun refreshHasOlderMessages(sessionId: String) {
+        val oldest = _history.value.firstOrNull()
+        _hasOlderMessages.value = oldest != null && runCatching {
+            conversationDao.countOlderBySession(sessionId, oldest.timestamp) > 0
+        }.getOrDefault(false)
+    }
     override fun getCurrentSessionId(): Flow<String> = _currentSessionId.asStateFlow()
 
     override fun getSessions(): Flow<List<ChatSession>> =
@@ -210,14 +245,50 @@ class ChatRepositoryImpl @Inject constructor(
         return id
     }
 
+    override fun launchTurn(turn: Flow<String>): Job {
+        _isGenerating.value = true
+        // Belt-and-braces: an uncaught throw on this SupervisorJob scope
+        // would crash the process. Callers surface errors before this point.
+        val job = turn
+            .catch { e -> DebugLogger.log("CHAT", "turn failed: ${e.javaClass.simpleName}") }
+            .launchIn(scope)
+        activeTurn = job
+        job.invokeOnCompletion {
+            if (activeTurn === job) {
+                activeTurn = null
+                _isGenerating.value = false
+            }
+        }
+        return job
+    }
+
+    override fun isGenerating(): StateFlow<Boolean> = _isGenerating.asStateFlow()
+
+    // Half the live prompt budget: the user message is pinned in the prompt
+    // tail alongside the critical instructions (and any excerpts), so a message
+    // above this is where trimPrompt starts cutting its beginning.
+    override fun maxUserMessageChars(): Int = maxPromptChars / 2
+
+    override suspend fun cancelActiveTurn() {
+        val job = activeTurn ?: return
+        runCatching { inferenceEngine.cancelGeneration() }
+        job.cancelAndJoin()
+    }
+
     override suspend fun switchSession(sessionId: String) {
         val resetEngine = shouldResetEngineOnSessionSwitch(_currentSessionId.value, sessionId)
+        // A reply still generating belongs to the chat it was asked in. Stop it
+        // and let it finish persisting there BEFORE _history swaps — otherwise
+        // the in-flight bubble vanished and resetSession() below waited on the
+        // engine lock for the whole generation (drawer stuck, input locked).
+        if (resetEngine) cancelActiveTurn()
         _currentSessionId.value = sessionId
         val messages = conversationDao.getRecentBySession(
             sessionId,
             ConversationDao.UI_HISTORY_LIMIT,
         )
         _history.value = ChatHistoryHygiene.dropOrphanedUserTurns(messages.map { it.toChatMessage() })
+        refreshHasOlderMessages(sessionId)
         sessionHasIndexedDocs = runCatching { ragRepository.hasIndexedDocs(sessionId) }.getOrDefault(false)
         refreshOlderMessagesOmitted()
         runCatching {
@@ -294,7 +365,7 @@ class ChatRepositoryImpl @Inject constructor(
                 )
                 InferenceService.stop(context)
                 _history.update { history ->
-                    history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false) else it }
+                    history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false, isPlaceholder = true) else it }
                 }
                 refreshOlderMessagesOmitted()
                 return@flow
@@ -306,7 +377,7 @@ class ChatRepositoryImpl @Inject constructor(
         // BM25 search inside buildPrompt sees the chunks. Idempotent —
         // the per-session in-process cache prevents re-chunking on every
         // turn after the first.
-        val prompt = try {
+        val plan = try {
             withContext(Dispatchers.IO) {
             withContext(kotlinx.coroutines.NonCancellable) {
                 sqliteWriteWithRetry {
@@ -344,14 +415,42 @@ class ChatRepositoryImpl @Inject constructor(
             DebugLogger.log("DB", "Chat/RAG SQLite unusable after retry: ${e.cause?.message ?: e.message}")
             if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
             _history.update { history ->
-                history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false) else it }
+                history.map { if (it.id == streamingId) it.copy(content = errMsg, isStreaming = false, isPlaceholder = true) else it }
             }
             refreshOlderMessagesOmitted()
             return@flow
         }
+        val grounded = plan is TurnPlan.Generate && plan.grounded
+        val systemInstruction = (plan as? TurnPlan.Generate)?.systemInstruction
+        val prompt = when (plan) {
+            is TurnPlan.Generate -> plan.prompt
+            is TurnPlan.DirectReply -> {
+                // Deterministic reply (retrieval miss / grounded delivery
+                // failure): show it as-is and persist it like a real reply so
+                // the user→assistant pair stays intact. No inference runs.
+                if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
+                val directMsg = ChatMessage(
+                    id = streamingId,
+                    content = plan.text,
+                    role = MessageRole.ASSISTANT,
+                    isStreaming = false,
+                )
+                _history.update { history ->
+                    history.map { if (it.id == streamingId) directMsg else it }
+                }
+                refreshOlderMessagesOmitted()
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    runCatching {
+                        sqliteWriteWithRetry { conversationDao.insert(directMsg.toEntity(sessionId)) }
+                    }
+                }
+                DebugLogger.log("CHAT", "streamResponse direct reply  ${LogPrivacy.sessionIdLen(sessionId)}")
+                return@flow
+            }
+        }
         DebugLogger.log(
             "CHAT",
-            "streamResponse start  promptChars=${prompt.length}  ${LogPrivacy.sessionIdLen(sessionId)}",
+            "streamResponse start  promptChars=${prompt.length}  lang=${currentLanguage.code}  ${LogPrivacy.sessionIdLen(sessionId)}",
         )
 
         val startTime = System.currentTimeMillis()
@@ -360,7 +459,7 @@ class ChatRepositoryImpl @Inject constructor(
         // Coalesce stream→UI updates (~80ms) so _history is not copied on every token.
         val streamCoalescer = StreamingUiCoalescer()
 
-            inferenceEngine.generateStream(prompt, PackType.BASE)
+            inferenceEngine.generateStream(prompt, PackType.BASE, grounded, systemInstruction)
                 .catch { e ->
                     // Only stop FGS if the native inference thread is no longer running.
                     // If isNativeGenerating=true here it means the watchdog timed out (or the
@@ -377,7 +476,7 @@ class ChatRepositoryImpl @Inject constructor(
                     _history.update { history ->
                         history.map { msg ->
                             if (msg.id == streamingId)
-                                msg.copy(content = errMsg, isStreaming = false)
+                                msg.copy(content = errMsg, isStreaming = false, isPlaceholder = true)
                             else msg
                         }
                     }
@@ -391,8 +490,9 @@ class ChatRepositoryImpl @Inject constructor(
                     // Strip complete marker tags so they never appear in the chat bubble.
                     // streaming=true holds back any in-progress identity leak
                     // ("I am Gem…") until it can be rewritten in full.
-                    val visible = ResponseMarkerParser.stripForDisplay(accumulated.toString(), streaming = true)
-                    streamCoalescer.onToken(visible) { flushed ->
+                    streamCoalescer.onTokenDeferred(
+                        { ResponseMarkerParser.stripForDisplay(accumulated.toString(), streaming = true) },
+                    ) { flushed ->
                         _history.update { history ->
                             history.map { msg ->
                                 if (msg.id == streamingId)
@@ -460,12 +560,17 @@ class ChatRepositoryImpl @Inject constructor(
                         stoppedText = lang.stoppedReply,
                         emptyText = lang.emptyReply,
                     )
+                    // Only a REAL model reply is persisted or recapped — the
+                    // error / empty / stopped placeholders are UI notices.
+                    val isRealReply = parsed.cleanText.isNotBlank() ||
+                        (isCancelled && partial.isNotBlank())
                     val finalMsg = ChatMessage(
                         id = streamingId,
                         content = finalContent,
                         role = MessageRole.ASSISTANT,
                         isStreaming = false,
                         tokenCount = tokenCount,
+                        isPlaceholder = !isRealReply,
                     )
                     _history.update { history ->
                         history.map { msg -> if (msg.id == streamingId) finalMsg else msg }
@@ -475,8 +580,6 @@ class ChatRepositoryImpl @Inject constructor(
                     // stopped placeholders. Persisting them would pollute chat
                     // history AND the multi-turn transcript fed back into later
                     // prompts ("Saarthi: I couldn't generate a reply…").
-                    val isRealReply = parsed.cleanText.isNotBlank() ||
-                        (isCancelled && partial.isNotBlank())
                     if (isRealReply) {
                         scope.launch {
                             runCatching {
@@ -536,6 +639,7 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun clearHistory() {
         val sessionId = _currentSessionId.value
         _history.update { emptyList() }
+        _hasOlderMessages.value = false
         refreshOlderMessagesOmitted()
         // Clearing history is also "wipe this chat's brain" — drop the
         // session's messages, memories and RAG chunks together so the next
@@ -557,6 +661,7 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun deleteAllData() {
         _history.update { emptyList() }
+        _hasOlderMessages.value = false
         refreshOlderMessagesOmitted()
         val sessions = chatSessionDao.getAll()
         // Cascade every real chat session through the SAME per-session
@@ -673,10 +778,21 @@ class ChatRepositoryImpl @Inject constructor(
     // ── Prompt builder ────────────────────────────────────────────────────────
     // Always called on IO thread from streamResponse.
 
+    /**
+     * The active model's tier from its catalog promptTier (name heuristic only
+     * for sideloaded models) — the same source the engine sizes its context
+     * window from, so prompt budget and window agree.
+     */
+    private fun activeTier(): SystemPromptProvider.ModelTier =
+        systemPromptProvider.tierFor(inferenceEngine.activeModelPromptTier, inferenceEngine.activeModelName)
+
     private val maxPromptChars: Int
         get() {
             val modelName = inferenceEngine.activeModelName ?: ""
+            val tier = activeTier()
             val baseBudget = when {
+                tier == SystemPromptProvider.ModelTier.LARGE -> MAX_PROMPT_CHARS_LARGE
+                tier == SystemPromptProvider.ModelTier.COMPACT -> MAX_PROMPT_CHARS_COMPACT
                 modelName.contains("Gemma 4", ignoreCase = true) -> MAX_PROMPT_CHARS_LARGE
                 modelName.contains("Gemma 2", ignoreCase = true) -> MAX_PROMPT_CHARS_2048
                 // 3n must be matched BEFORE generic "Gemma 3" (the 1B). Gemma 3n
@@ -810,10 +926,10 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
-    private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): String {
+    private suspend fun buildPrompt(userMessage: String, attachments: List<AttachedFile>): TurnPlan {
         val promptT0 = System.nanoTime()
         fun promptMs(): Long = (System.nanoTime() - promptT0) / 1_000_000
-        val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+        val tier = activeTier()
         val sessionId = _currentSessionId.value
 
         // Identity questions ("who are you", "tumhare bare me", "तुम्ही कोण",
@@ -827,12 +943,22 @@ class ChatRepositoryImpl @Inject constructor(
             val lang = currentLanguage
             val langLine = lang.systemPromptInstruction()
             DebugLogger.log("PROMPT", "Identity question lang=${lang.code} promptMs=${promptMs()}")
-            return buildString {
+            // A non-default persona answers as itself — the canonical Saarthi
+            // answer contradicted the persona the user picked. Same guardrail
+            // line either way (never a model / company name).
+            val persona = personalityPreference.selected.value
+            val isDefaultPersona = persona.id == com.saarthi.core.i18n.PersonalityCatalog.SAARTHI.id
+            return TurnPlan.Generate(buildString {
                 if (langLine.isNotBlank()) { append(langLine); append("\n\n") }
-                append("The user is asking who or what you are. Reply naturally and warmly in the user's language, conveying exactly this and nothing else. Never call yourself a language model, LLM, AI model, or name any company or technology:\n")
-                append(lang.identityAnswer)
+                if (isDefaultPersona) {
+                    append("The user is asking who or what you are. Reply naturally and warmly in the user's language, conveying exactly this and nothing else. Never call yourself a language model, LLM, AI model, or name any company or technology:\n")
+                    append(lang.identityAnswer)
+                } else {
+                    append("The user is asking who or what you are. Introduce yourself in one or two warm sentences in the user's language, as the character described below, in that character's voice. Never call yourself a language model, LLM, AI model, or name any company or technology:\n")
+                    append(persona.systemPersona)
+                }
                 if (langLine.isNotBlank()) { append("\n\n"); append(langLine) }
-            }
+            })
         }
 
         // ── RAG (BM25, persisted) ────────────────────────────────────────
@@ -952,15 +1078,16 @@ class ChatRepositoryImpl @Inject constructor(
             shouldEmitAnswerabilityRetrievalMiss(ragQuery, ragTurnMode, retrieved)
         ) {
             DebugLogger.log("RAG", "deterministic retrieval miss turnMode=${ragTurnMode.name}")
-            return when {
-                shouldEmitNamedStatuteDocumentMismatch(
-                    ragQuery,
-                    ragTurnMode,
-                    restrictDocUris,
-                    sessionDocPairs,
-                    outlineByDocName,
-                    retrieved,
-                ) -> buildNamedStatuteDocumentMismatchMessage(
+            val isDocumentMismatch = shouldEmitNamedStatuteDocumentMismatch(
+                ragQuery,
+                ragTurnMode,
+                restrictDocUris,
+                sessionDocPairs,
+                outlineByDocName,
+                retrieved,
+            )
+            val englishMiss = when {
+                isDocumentMismatch -> buildNamedStatuteDocumentMismatchMessage(
                     ragQuery,
                     restrictDocUris,
                     sessionDocPairs,
@@ -973,6 +1100,12 @@ class ChatRepositoryImpl @Inject constructor(
                     buildIndexedTopicalWeakMissMessage(ragQuery)
                 else -> buildDeterministicRetrievalMissMessage(ragQuery)
             }
+            // Shown as the reply directly — never sent to the model, which
+            // would answer it as if the user had typed it (no system prompt,
+            // no language instruction, always English).
+            return TurnPlan.DirectReply(
+                localizedRetrievalMissReply(currentLanguage, englishMiss, isDocumentMismatch),
+            )
         }
         DebugLogger.log(
             "RAG",
@@ -1092,7 +1225,7 @@ class ChatRepositoryImpl @Inject constructor(
             )
             if (ragAssembly.groundedDeliveryFailed) {
                 DebugLogger.log("PROMPT", "COMPACT grounded delivery failed — retry instruction")
-                return groundedDeliveryRetryInstruction(userMessage)
+                return TurnPlan.DirectReply(currentLanguage.ragGroundedDeliveryFailedReply)
             }
             val fileContext = ragAssembly.block
             val ragPart = if (fileContext.isNotEmpty()) "\n\n$fileContext" else ""
@@ -1100,7 +1233,7 @@ class ChatRepositoryImpl @Inject constructor(
             DebugLogger.log("PROMPT", "COMPACT turn ragChars=${fileContext.length} ragBudget=$ragBudget promptMs=${promptMs()}")
             val userTail = "User: $userMessage\nSaarthi:"
             val pinnedTail = if (fileContext.isNotEmpty()) "$fileContext\n\n$userTail" else userTail
-            return trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = pinnedTail)
+            return TurnPlan.Generate(trimPrompt(fullPrompt, MAX_PROMPT_CHARS_COMPACT, pinnedTail = pinnedTail))
         }
 
         // Recycle-per-turn: every generateStream is a new Conversation (a second
@@ -1108,7 +1241,8 @@ class ChatRepositoryImpl @Inject constructor(
         // so every turn is FRESH. CONTINUE (omit system prompt + recap because
         // KV already holds them) is dead — if isFreshConversation were ever
         // false, identity and history would vanish for that turn.
-        // Memory is scoped to THIS chat — never read another chat's memories.
+        // This chat's facts + the user's cross-chat profile facts (USER_SCOPE);
+        // never another chat's session facts.
         val currentSession = _currentSessionId.value
         val memoryContext = runCatching { memoryRepository.buildContextSummary(currentSession) }.getOrDefault("")
         // Recap is now kept on doc-pinned turns too. The Conversation's
@@ -1138,7 +1272,7 @@ class ChatRepositoryImpl @Inject constructor(
         val priorTurns = when {
             attachments.isNotEmpty() -> ""
             docsPinned -> buildPriorTurnsRecap()
-            else -> buildConversationContext(grounded = false)
+            else -> buildConversationContext(grounded = false, userMessage = userMessage)
         }
         lastPriorTurnsChars = priorTurns.length
         // On doc-grounded turns swap the full ~4423c persona/tools/reminders
@@ -1184,7 +1318,7 @@ class ChatRepositoryImpl @Inject constructor(
         )
         if (ragAssembly.groundedDeliveryFailed) {
             DebugLogger.log("PROMPT", "FRESH grounded delivery failed — retry instruction")
-            return groundedDeliveryRetryInstruction(userMessage)
+            return TurnPlan.DirectReply(currentLanguage.ragGroundedDeliveryFailedReply)
         }
         val fileContext = ragAssembly.block
         DebugLogger.log("PROMPT", "FRESH turn  systemChars=${systemInstructions.length}  thisTurnAttachments=${attachments.size}  ragChunks=${retrieved.size}  ragBudget=$ragBudget  ragChars=${fileContext.length}  recapTurns=${priorTurns.isNotEmpty()} shape=$ragAnswerShape ${ragPromptObsLogLine(priorTurns.length, lastPromptUriLens)} promptMs=${promptMs()}")
@@ -1215,7 +1349,17 @@ class ChatRepositoryImpl @Inject constructor(
             }
             val finalPrompt = trimPrompt(prompt, budget, pinnedTail = pinnedTail)
             DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget promptMs=${promptMs()}")
-            finalPrompt
+            val splitSystem = SYSTEM_INSTRUCTION_SPLIT_ENABLED &&
+                finalPrompt.length > pinnedTail.length && finalPrompt.endsWith(pinnedTail)
+            if (splitSystem) {
+                TurnPlan.Generate(
+                    prompt = pinnedTail,
+                    grounded = ragAssembly.strictGrounded,
+                    systemInstruction = finalPrompt.removeSuffix(pinnedTail).trimEnd(),
+                )
+            } else {
+                TurnPlan.Generate(finalPrompt, grounded = ragAssembly.strictGrounded)
+            }
         }
     }
 
@@ -1324,10 +1468,10 @@ class ChatRepositoryImpl @Inject constructor(
      */
     private fun refreshOlderMessagesOmitted(grounded: Boolean = sessionHasIndexedDocs) {
         val complete = ChatHistoryHygiene.completeUserAssistantPairs(
-            _history.value.filter { it.content.isNotBlank() && !it.isStreaming },
+            _history.value.filter(ChatHistoryHygiene::isRecapEligible),
         )
         val pairCount = complete.size / 2
-        val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+        val tier = activeTier()
         _olderMessagesOmitted.value = olderMessagesOmittedFromPrompt(
             completedPairCount = pairCount,
             isCompact = tier == SystemPromptProvider.ModelTier.COMPACT,
@@ -1356,10 +1500,10 @@ class ChatRepositoryImpl @Inject constructor(
      */
     private fun buildPriorTurnsRecap(): String {
         val complete = ChatHistoryHygiene.completeUserAssistantPairs(
-            _history.value.filter { it.content.isNotBlank() && !it.isStreaming }.dropLast(1)
+            _history.value.filter(ChatHistoryHygiene::isRecapEligible).dropLast(1)
         )
         if (complete.isEmpty()) return ""
-        val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+        val tier = activeTier()
         if (tier == SystemPromptProvider.ModelTier.COMPACT) {
             // No recap for the 1B. Quoting the prior user message verbatim made
             // it parrot the user back ("You're doing good!" after "I am doing
@@ -1437,12 +1581,12 @@ class ChatRepositoryImpl @Inject constructor(
      *
      * COMPACT (1B) returns "" — it parrots any transcript regardless of framing.
      */
-    private fun buildConversationContext(grounded: Boolean): String {
-        val tier = systemPromptProvider.tierFor(inferenceEngine.activeModelName)
+    private fun buildConversationContext(grounded: Boolean, userMessage: String = ""): String {
+        val tier = activeTier()
         if (tier == SystemPromptProvider.ModelTier.COMPACT) return ""
 
         val flat = ChatHistoryHygiene.completeUserAssistantPairs(
-            _history.value.filter { it.content.isNotBlank() && !it.isStreaming }.dropLast(1)
+            _history.value.filter(ChatHistoryHygiene::isRecapEligible).dropLast(1)
         )
         if (flat.size < 2) return ""
 
@@ -1466,6 +1610,7 @@ class ChatRepositoryImpl @Inject constructor(
             // carry more turns of history so long chats stay conversational.
             // Mid-range stays at the tighter default.
             roomy = maxPromptChars >= 7000,
+            expandLatestReply = referencesEarlierReply(userMessage),
         )
     }
 
@@ -1493,7 +1638,7 @@ class ChatRepositoryImpl @Inject constructor(
 
     private fun buildSystemPrompt(memoryContext: String, priorTurnsContext: String = "", grounded: Boolean = false): SystemPromptBuild {
         val modelName = inferenceEngine.activeModelName
-        val tier = systemPromptProvider.tierFor(modelName)
+        val tier = activeTier()
         if (memoryContext.isNotEmpty()) {
             val memCount = memoryContext.lines().count { it.startsWith("- ") }
             DebugLogger.log("MEMORY", "Injected $memCount user memory facts into prompt  tier=$tier")
@@ -1564,6 +1709,7 @@ class ChatRepositoryImpl @Inject constructor(
             grounded = grounded,
             maxContextTokens = inferenceEngine.maxContextTokens,
             reasoningRules = reasoning,
+            promptTier = inferenceEngine.activeModelPromptTier,
         )
         // Same arguments build() was just given — a pure function of them,
         // so this is guaranteed to reproduce the exact tail build() used,

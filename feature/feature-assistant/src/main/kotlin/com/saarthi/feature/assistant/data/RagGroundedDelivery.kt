@@ -29,13 +29,6 @@ internal fun groundedRagCharBudget(
     return leftover.coerceAtLeast(minWhenGrounded).coerceAtMost(totalBudget.coerceAtLeast(0))
 }
 
-/** Wave 1 — when excerpts cannot fit, ask the user to retry instead of "provide excerpts". */
-internal fun groundedDeliveryRetryInstruction(userMessage: String): String =
-    "Reply with exactly this sentence and nothing else: " +
-        "\"I've loaded your document but couldn't fit excerpts in this turn — please send your question again.\"\n\n" +
-        "User: $userMessage\nSaarthi:"
-
-
 /** Below this, only ultra-compact grounded assembly is attempted. */
 internal const val TIGHT_GROUNDED_RAG_CHAR_BUDGET = 200
 
@@ -43,6 +36,13 @@ internal data class RagPromptAssemblyResult(
     val block: String,
     /** True when [forceGroundedDelivery] was set but no excerpt bytes could be placed. */
     val groundedDeliveryFailed: Boolean = false,
+    /**
+     * True when [block] carries the strict "ATTACHED EXCERPTS" citation rules
+     * (non-compact, non-mixed, full rules) — the turns that run on the
+     * grounded sampler. Passed to the engine explicitly instead of the engine
+     * sniffing the prompt text.
+     */
+    val strictGrounded: Boolean = false,
 )
 
 /**
@@ -104,7 +104,12 @@ internal fun assembleRagPromptBlock(
             turnMode = turnMode,
             ragQuery = ragQuery,
         )
-        if (block.isNotEmpty()) return RagPromptAssemblyResult(block)
+        if (block.isNotEmpty()) {
+            return RagPromptAssemblyResult(
+                block,
+                strictGrounded = !compact && turnMode != RagTurnMode.MIXED && attempt.fullRules,
+            )
+        }
     }
 
     if (forceGroundedDelivery && retrieved.isNotEmpty()) {

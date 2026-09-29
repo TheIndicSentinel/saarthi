@@ -62,6 +62,12 @@ import com.saarthi.feature.assistant.data.parseAssistantMessageForDisplay
 import com.saarthi.feature.assistant.domain.AttachedFile
 import com.saarthi.feature.assistant.domain.ChatMessage
 import com.saarthi.feature.assistant.domain.MessageRole
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
@@ -69,7 +75,8 @@ fun MessageBubble(
     message: ChatMessage,
     language: com.saarthi.core.i18n.SupportedLanguage,
     onDelete: () -> Unit,
-    onRetry: () -> Unit = {},
+    /** Null hides Retry — only the latest reply can be retried. */
+    onRetry: (() -> Unit)? = null,
     onListen: () -> Unit = {},
     isSpeaking: Boolean = false,
     modifier: Modifier = Modifier,
@@ -77,6 +84,26 @@ fun MessageBubble(
 ) {
     val clipboard = LocalClipboardManager.current
     var showMenu by remember { mutableStateOf(false) }
+    var showSelectDialog by remember { mutableStateOf(false) }
+    // Selection lives in a dialog, not the bubble: a selectable bubble would
+    // take over the long-press that opens this menu (the only Delete entry).
+    if (showSelectDialog) {
+        AlertDialog(
+            onDismissRequest = { showSelectDialog = false },
+            confirmButton = {
+                TextButton(onClick = { showSelectDialog = false }) { Text(language.closeLabel) }
+            },
+            text = {
+                SelectionContainer {
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 22.sp),
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                    )
+                }
+            },
+        )
+    }
     val isUser = message.role == MessageRole.USER
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val maxBubbleWidth = screenWidth * 0.78f
@@ -144,7 +171,7 @@ fun MessageBubble(
                         // without re-reading the bubble character-by-character.
                         Modifier.semantics {
                             liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
-                            contentDescription = "Saarthi is generating a response"
+                            contentDescription = language.generatingReplyA11y
                         }
                     } else Modifier,
                 ) {
@@ -159,9 +186,12 @@ fun MessageBubble(
                         )
                     } else if (message.isStreaming) {
                         // Plain text while tokens arrive — full markdown parse (O(n)
-                        // per update) runs once when streaming finishes.
+                        // per update) runs once when streaming finishes. A cheap
+                        // cleanup hides raw **/# so the bubble doesn't snap from
+                        // raw syntax to formatted text at the end.
+                        val streamingText = remember(message.content) { lightStreamingMarkdown(message.content) }
                         Text(
-                            text = message.content,
+                            text = streamingText,
                             style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 22.sp),
                             color = SaarthiColors.TextPrimary,
                         )
@@ -202,6 +232,21 @@ fun MessageBubble(
                         },
                     )
                     DropdownMenuItem(
+                        text = { Text(language.selectTextLabel, color = SaarthiColors.TextPrimary) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.TextFields,
+                                null,
+                                tint = SaarthiColors.TextSecondary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                        onClick = {
+                            showSelectDialog = true
+                            showMenu = false
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text(language.deleteLabel, color = SaarthiColors.Error) },
                         leadingIcon = {
                             Icon(
@@ -222,31 +267,23 @@ fun MessageBubble(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     BubbleActionChip(
                         icon = Icons.Default.ContentCopy,
-                        label = "Copy",
+                        label = language.copyLabel,
                         onClick = { clipboard.setText(AnnotatedString(message.content)) },
                     )
-                    BubbleActionChip(
-                        icon = Icons.Default.Refresh,
-                        label = "Retry",
-                        onClick = onRetry,
-                    )
+                    if (onRetry != null) {
+                        BubbleActionChip(
+                            icon = Icons.Default.Refresh,
+                            label = language.retryLabel,
+                            onClick = onRetry,
+                        )
+                    }
                     BubbleActionChip(
                         icon = if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
-                        label = if (isSpeaking) "Stop" else "Listen",
+                        label = if (isSpeaking) language.stopSpeakingLabel else language.listenLabel,
                         onClick = onListen,
                         highlighted = isSpeaking,
                     )
                 }
-            }
-
-            // Token count (debug aid — timestamp removed per UX preference)
-            if (message.tokenCount > 0 && !isUser) {
-                Text(
-                    "${message.tokenCount}t",
-                    modifier = Modifier.padding(top = 3.dp, start = 4.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SaarthiColors.TextMuted,
-                )
             }
         }
 

@@ -1,5 +1,15 @@
 package com.saarthi.feature.assistant.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -14,6 +24,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
@@ -23,8 +34,9 @@ import androidx.compose.ui.unit.sp
  *  - *italic* / _italic_
  *  - `inline code`
  *  - `# Heading`, `## Subheading`, `### Sub-sub`
- *  - `- bullet` / `* bullet` → "•  bullet"
- *  - `1. numbered` (kept as-is)
+ *  - `- bullet` / `* bullet` / `1. numbered` → one row per item with a hanging
+ *    indent (see [splitMarkdownBlocks])
+ *  - `| pipe | tables |` → a grid that scrolls sideways
  *  - Triple-backtick fenced code blocks (treated as inline code styling)
  *
  * Pure Compose (no AndroidView/Markwon). Used for completed assistant turns only;
@@ -38,13 +50,79 @@ fun MarkdownText(
     style: TextStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 22.sp),
     modifier: Modifier = Modifier,
 ) {
-    val rendered = remember(text) { renderMarkdown(text) }
-    Text(
-        text = rendered,
-        style = style,
-        color = color,
-        modifier = modifier,
-    )
+    val blocks = remember(text) { splitMarkdownBlocks(text) }
+    // No lists / tables → the original single-Text rendering, unchanged.
+    val only = blocks.singleOrNull()
+    if (only == null || only is MdBlock.Text) {
+        val rendered = remember(text) { renderMarkdown(text) }
+        Text(
+            text = rendered,
+            style = style,
+            color = color,
+            modifier = modifier,
+        )
+        return
+    }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (block in blocks) {
+            when (block) {
+                is MdBlock.Text -> Text(text = renderMarkdown(block.text), style = style, color = color)
+                is MdBlock.ListItem -> Row(Modifier.padding(start = (block.level * 16).dp)) {
+                    // Marker in its own column so wrapped lines hang under the
+                    // text, not under the bullet / number.
+                    Text(
+                        text = block.marker,
+                        style = style,
+                        color = color,
+                        modifier = Modifier.widthIn(min = 20.dp).padding(end = 6.dp),
+                    )
+                    Text(
+                        text = renderMarkdown(block.text),
+                        style = style,
+                        color = color,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                is MdBlock.Table -> MarkdownTable(block, style, color)
+            }
+        }
+    }
+}
+
+/** Pipe table as a grid; scrolls sideways when wider than the bubble. */
+@Composable
+private fun MarkdownTable(table: MdBlock.Table, style: TextStyle, color: Color) {
+    val columns = maxOf(table.header.size, table.rows.maxOfOrNull { it.size } ?: 0)
+    // Column width from its longest cell, clamped to phone-friendly bounds.
+    val widths = (0 until columns).map { c ->
+        val longest = (listOf(table.header) + table.rows).maxOf { it.getOrNull(c)?.length ?: 0 }
+        (longest * 8).coerceIn(72, 220).dp
+    }
+    val cellStyle = style.copy(fontSize = 14.sp, lineHeight = 19.sp)
+    Column(
+        Modifier
+            .padding(vertical = 4.dp)
+            .horizontalScroll(rememberScrollState())
+            .border(0.5.dp, com.saarthi.core.ui.theme.SaarthiColors.Border),
+    ) {
+        (listOf(table.header) + table.rows).forEachIndexed { r, row ->
+            Row(
+                if (r == 0) Modifier.background(Color(0x22F4A52E)) else Modifier,
+            ) {
+                for (c in 0 until columns) {
+                    Text(
+                        text = renderMarkdown(row.getOrNull(c).orEmpty()),
+                        style = if (r == 0) cellStyle.copy(fontWeight = FontWeight.SemiBold) else cellStyle,
+                        color = color,
+                        modifier = Modifier
+                            .width(widths[c])
+                            .border(0.5.dp, com.saarthi.core.ui.theme.SaarthiColors.Border)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**

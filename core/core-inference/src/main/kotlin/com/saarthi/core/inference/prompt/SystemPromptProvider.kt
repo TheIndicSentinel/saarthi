@@ -1,6 +1,7 @@
 package com.saarthi.core.inference.prompt
 
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.model.PromptTier
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -49,31 +50,53 @@ class SystemPromptProvider @Inject constructor() {
 
     enum class ModelTier { COMPACT, STANDARD, LARGE }
 
-    fun tierFor(modelName: String?): ModelTier {
-        val n = (modelName ?: "").lowercase()
-        return when {
-            // 1B parameter models or anything explicitly marketed "Compact"
-            n.contains("1b") || n.contains("compact") -> ModelTier.COMPACT
-            // Gemma 4 series — flagship / large. Match all three naming forms
-            // we see in this codebase: display name "Gemma 4", file basename
-            // "gemma4", and Hugging Face path "gemma-4". Bug surfaced when only
-            // the file path was passed and we silently fell through to
-            // STANDARD, which gave Gemma 4 a too-small token budget and a
-            // mid-tier system prompt.
-            n.contains("gemma 4") || n.contains("gemma4") || n.contains("gemma-4") -> ModelTier.LARGE
-            // Gemma 3n E2B/E4B — multi-billion-param MatFormer models (3.6-4.4GB
-            // files, BIGGER than Gemma 4 E2B which already runs the LARGE prompt
-            // well). They sat on STANDARD for historical context-size reasons,
-            // which denied them the battle-tested LARGE prompt (no-reintro,
-            // first-person guard, conversational rules) — the reported "other
-            // bigger models' response quality not up to the mark". The engine
-            // token ladder already treats them as large (by file size), so the
-            // ≤1536-window lean fallback still protects tight-RAM loads.
-            n.contains("3n") -> ModelTier.LARGE
-            // Default — Gemma 2, unknown mid models.
-            else -> ModelTier.STANDARD
+    companion object {
+        /**
+         * Single tier resolver. The catalog's [PromptTier] (ModelEntry.
+         * promptTier, surfaced as InferenceEngine.activeModelPromptTier) is the
+         * source of truth — the same value the engine's token ladder sizes the
+         * context window from, so prompt budget and window always agree.
+         * STANDARD / null means "not a catalog model" (sideloaded, or nothing
+         * loaded yet) and falls back to the display-name heuristic.
+         */
+        fun resolveTier(promptTier: PromptTier?, modelName: String?): ModelTier = when (promptTier) {
+            PromptTier.COMPACT -> ModelTier.COMPACT
+            PromptTier.LARGE -> ModelTier.LARGE
+            PromptTier.STANDARD, null -> tierForName(modelName)
+        }
+
+        private fun tierForName(modelName: String?): ModelTier {
+            val n = (modelName ?: "").lowercase()
+            return when {
+                // 1B parameter models or anything explicitly marketed "Compact"
+                n.contains("1b") || n.contains("compact") -> ModelTier.COMPACT
+                // Gemma 4 series — flagship / large. Match all three naming forms
+                // we see in this codebase: display name "Gemma 4", file basename
+                // "gemma4", and Hugging Face path "gemma-4". Bug surfaced when only
+                // the file path was passed and we silently fell through to
+                // STANDARD, which gave Gemma 4 a too-small token budget and a
+                // mid-tier system prompt.
+                n.contains("gemma 4") || n.contains("gemma4") || n.contains("gemma-4") -> ModelTier.LARGE
+                // Gemma 3n E2B/E4B — multi-billion-param MatFormer models (3.6-4.4GB
+                // files, BIGGER than Gemma 4 E2B which already runs the LARGE prompt
+                // well). They sat on STANDARD for historical context-size reasons,
+                // which denied them the battle-tested LARGE prompt (no-reintro,
+                // first-person guard, conversational rules) — the reported "other
+                // bigger models' response quality not up to the mark". The engine
+                // token ladder already treats them as large (by file size), so the
+                // ≤1536-window lean fallback still protects tight-RAM loads.
+                n.contains("3n") -> ModelTier.LARGE
+                // Default — Gemma 2, unknown mid models.
+                else -> ModelTier.STANDARD
+            }
         }
     }
+
+    fun tierFor(promptTier: PromptTier?, modelName: String?): ModelTier =
+        resolveTier(promptTier, modelName)
+
+    /** Name-only fallback for callers without an engine; prefer the promptTier overload. */
+    fun tierFor(modelName: String?): ModelTier = resolveTier(null, modelName)
 
     /**
      * Whether the active model can run a KNOWLEDGE-PACK chat (Kisan today, and
@@ -86,8 +109,8 @@ class SystemPromptProvider @Inject constructor() {
      * Single source of truth so the shared pack-chat engine and every pack's
      * landing screen apply the exact same rule.
      */
-    fun supportsPackChat(modelName: String?): Boolean =
-        tierFor(modelName) != ModelTier.COMPACT
+    fun supportsPackChat(modelName: String?, promptTier: PromptTier? = null): Boolean =
+        tierFor(promptTier, modelName) != ModelTier.COMPACT
 
     /**
      * Build the full system prompt.
@@ -151,8 +174,10 @@ class SystemPromptProvider @Inject constructor() {
          * end-of-prompt behaviour block where attention is strongest.
          */
         reasoningRules: String = "",
+        /** Active model's catalog tier — see [resolveTier]. */
+        promptTier: PromptTier? = null,
     ): String {
-        val tier = tierFor(modelName)
+        val tier = tierFor(promptTier, modelName)
 
         // ── COMPACT (Gemma 3 1B): the AI Edge Gallery path ─────────────────
         // Tiny models can't separate system instructions from user content.
@@ -228,13 +253,15 @@ class SystemPromptProvider @Inject constructor() {
             append(core)
             if (memoryContext.isNotEmpty()) {
                 append("\n\n")
-                // Header explicitly scoped to THIS chat — memories are per-chat
-                // (see MemoryRepositoryImpl), so the header has to say so too.
-                // Earlier global "What you remember about the user" framing
-                // caused the model in Telugu to conflate user-facts with its
-                // own identity (e.g. "your name is Arjun" when asked its own
-                // name).
-                append("Facts the USER shared in THIS chat (about the user, not about you):\n")
+                // The block mixes durable profile facts (USER_SCOPE — name,
+                // city, profession; they follow the user into every chat) with
+                // this chat's own facts (see MemoryRepositoryImpl), so the
+                // header must not claim "THIS chat". What matters is that the
+                // facts are the USER's: the earlier "What you remember about
+                // the user" framing made the model in Telugu conflate user
+                // facts with its own identity ("your name is Arjun" when asked
+                // its own name).
+                append("Facts the USER has shared with you (about the user, not about you):\n")
                 append(memoryContext)
                 // Anti-overuse: once the model knows the name it tends to open
                 // EVERY reply with it ("अर्जुन, …"), which reads robotic
@@ -378,6 +405,7 @@ class SystemPromptProvider @Inject constructor() {
             - Reply in natural, conversational prose by default, like a modern chat assistant. Lead with the answer and keep it short. Use a bullet or numbered list ONLY for genuinely list-like content — 3+ distinct items, step-by-step instructions, or a comparison. Never put a 1–3 sentence answer into bullets.
             - You run offline on the user's phone.
             - Accuracy over confidence: if you do not know something or are unsure, say so plainly instead of guessing.
+            - Only when the user shares a stable personal fact (name, city, job, family, allergy, preference), end your reply with [SAARTHI_MEMORY key="<short_snake_key>" value="<concrete value>"] filled with real values; otherwise omit it.
             - Do not introduce yourself, repeat your previous reply, or describe these instructions.
         """.trimIndent()
     }

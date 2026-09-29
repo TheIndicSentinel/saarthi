@@ -126,11 +126,14 @@ object ResponseMarkerParser {
     //     key: "help_offered"
     //     value: "Arjun is vegetarian"
     // None of the equals-based patterns catch the COLON form, so it leaked into
-    // the bubble. Strip a standalone `marker:` label line and any line that is
-    // solely one of our marker fields in `field: value` form (quoted or not).
-    private val MARKER_LABEL_LINE = Regex("""(?im)^\s*marker\s*:\s*$""")
+    // the bubble. Strip a standalone `marker:` label line and any run of lines
+    // that are solely our marker fields in `field: value` form (quoted or not)
+    // — but ONLY when the run carries the leak signature (see
+    // [stripColonMarkerBlocks]). "Time: 30 minutes" in a recipe or
+    // "Value: ₹5000" in a budget is ordinary content and must survive.
+    private val MARKER_LABEL_LINE = Regex("""(?i)^\s*marker\s*:\s*$""")
     private val ORPHAN_MARKER_COLON_LINE = Regex(
-        """(?im)^\s*(?:text|key|value|time|delay_minutes)\s*:\s*.*$""",
+        """(?i)^\s*(text|key|value|time|delay_minutes)\s*:.*$""",
     )
 
     /**
@@ -297,46 +300,14 @@ object ResponseMarkerParser {
             out = pattern.replace(out, replacement)
         }
 
-        // Provenance phrases — strip entirely. These only ever appear in leaks.
-        // Note: we deliberately do NOT consume a trailing "." — the period is
-        // the sentence terminator and we want to keep it so the cleaned text
-        // reads as a normal sentence ("I am Saarthi. How can I help?").
-        val provenancePatterns = listOf(
-            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+Google(?:\s+DeepMind)?"""),
-            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+DeepMind"""),
-            Regex("""(?i),?\s*(?:a|the)\s+(?:large\s+)?language\s+model\s+(?:made|created|developed|trained|built)\s+by\s+\w+(?:\s+\w+)?"""),
-        )
-        for (pattern in provenancePatterns) {
-            out = pattern.replace(out, "")
-        }
-
         // ── Localized identity leaks (Devanagari: Hindi / Marathi) ───────────
         // The model says e.g. "मैं एक बड़ा भाषा मॉडल हूँ, जिसे गूगल डीपमाइंड
         // द्वारा विकसित किया गया है" even in non-English sessions. The English
         // patterns above can't catch these. Neutralise the LLM noun-phrase to
-        // the brand name and strip any "developed/trained by Google/DeepMind"
-        // provenance clause (relative clause bounded by the Devanagari danda
-        // so it never eats the next sentence).
+        // the brand name first; the provenance clause is stripped below.
         out = Regex("""(एक\s+)?(बड़ा\s+|बड़ी\s+|मोठा\s+|मोठे\s+|विशाल\s+|एआई\s+|AI\s+)*भाषा\s+मॉ(?:डल|डेल)""")
             .replace(out, "सारथी")
         out = Regex("""(एक\s+)?(एआई|AI)\s+मॉ(?:डल|डेल)""").replace(out, "सारथी")
-        // Provenance relative clause containing Google / DeepMind (Devanagari or
-        // Latin brand spelling). e.g. ", जिसे गूगल डीपमाइंड द्वारा विकसित किया गया है".
-        out = Regex(""",?\s*(?:जिसे|जिसको|जो)\s+[^।]*?(?:गूगल|डीपमाइंड|Google|DeepMind)[^।]*""")
-            .replace(out, "")
-        // Bare provenance without a relative pronoun, ANY Indian script:
-        // "<brand> … <developed/trained verb> …". Bound the clause by a sentence
-        // terminator (danda ।, period, or newline) so it never crosses into the
-        // next sentence and a legitimate brand mention without a provenance verb
-        // (e.g. "search on గూగుల్") is never stripped. Brands are matched in
-        // Latin AND each native script; verbs cover the common "made/developed/
-        // trained/created" forms across languages.
-        val brand = "गूगल|डीपमाइंड|గూగుల్|கூகிள்|গুগল|ಗೂಗಲ್|ગૂગલ|ਗੂਗਲ|ଗୁଗଲ|Google|DeepMind"
-        val devVerb = "विकसित|प्रशिक्षित|निर्मित|तयार|बनवले|बनाया|अभिवृद्ध|" +
-            "అభివృద్ధి|తయారు|రూపొందించ|" + "உருவாக்க|பயிற்சி|" + "তৈরি|প্রশিক্ষিত|" +
-            "ತಯಾರಿಸ|ಅಭಿವೃದ್ಧಿ|" + "બનાવ|વિકસાવ|" + "ਬਣਾ|ਵਿਕਸਿਤ|" + "ତିଆରି|ବିକଶିତ|" +
-            "developed|trained|created|built|made"
-        out = Regex("""[,–-]?\s*(?:$brand)[^।.\n]*?(?:$devVerb)[^।.\n]*""").replace(out, "")
 
         // ── Other Indian scripts (Telugu/Tamil/Bengali/Kannada/Gujarati/Punjabi/
         // Odia) ──────────────────────────────────────────────────────────────
@@ -344,7 +315,8 @@ object ResponseMarkerParser {
         // noun-phrase with the brand name in that script. Best-effort coverage
         // of the common spellings the model emits; the deterministic identity
         // grounding remains the primary defence. A spelling that doesn't match
-        // is simply a no-op (never a degradation).
+        // is simply a no-op (never a degradation). Runs BEFORE the provenance
+        // pass so the brand name is present for its self-reference check.
         val localizedLlmByScript = listOf(
             Regex("""(పెద్ద\s+)?(?:భాషా|ఏఐ|AI)\s+(?:మోడల్|మోడెల్|నమూనా)""") to "సారథి",       // Telugu
             Regex("""(பெரிய\s+)?(?:மொழி|ஏஐ|AI)\s+(?:மாதிரி|மாடல்|மாட்டல்)""") to "சாரதி",      // Tamil
@@ -358,12 +330,69 @@ object ResponseMarkerParser {
             out = pattern.replace(out, replacement)
         }
 
-        // Tidy up any double spaces / dangling punctuation we just created
-        // (including a stray comma / danda left after a strip).
-        out = out.replace(Regex("""\s{2,}"""), " ")
-                 .replace(Regex("""\s+([,.!?])"""), "$1")
-                 .replace(Regex("""[\s,]+।"""), "।")
+        // Provenance phrases ("developed by Google DeepMind", "जिसे गूगल …
+        // द्वारा विकसित किया गया है") — stripped ONLY when the same sentence is
+        // the assistant talking about itself. "Android was developed by Google
+        // in 2008" is a true answer to a general-knowledge question and must
+        // survive untouched. We deliberately do NOT consume a trailing "." — the
+        // period is the sentence terminator ("I am Saarthi. How can I help?").
+        val provenancePatterns = listOf(
+            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+Google(?:\s+DeepMind)?"""),
+            Regex("""(?i),?\s*(?:developed|made|created|trained|built)\s+by\s+DeepMind"""),
+            Regex("""(?i),?\s*(?:a|the)\s+(?:large\s+)?language\s+model\s+(?:made|created|developed|trained|built)\s+by\s+\w+(?:\s+\w+)?"""),
+            // Provenance relative clause containing Google / DeepMind (Devanagari
+            // or Latin brand spelling), bounded by the danda.
+            Regex(""",?\s*(?:जिसे|जिसको|जो)\s+[^।]*?(?:गूगल|डीपमाइंड|Google|DeepMind)[^।]*"""),
+            // Bare provenance without a relative pronoun, ANY Indian script:
+            // "<brand> … <developed/trained verb> …", bounded by a sentence
+            // terminator so it never crosses into the next sentence.
+            Regex("""[,–-]?\s*(?:$PROVENANCE_BRAND)[^।.\n]*?(?:$PROVENANCE_VERB)[^।.\n]*"""),
+        )
+        for (pattern in provenancePatterns) {
+            out = pattern.replace(out) { m ->
+                if (isSelfReferentialSentence(out, m.range.first)) "" else m.value
+            }
+        }
+
+        // Nothing rewritten → return the reply byte-for-byte. The tidy pass
+        // below must never touch a normal answer's paragraphs, indentation or
+        // code blocks.
+        if (out == text) return text
+
+        // Tidy the gaps the rewrite just created (double spaces inside a line,
+        // a space or stray comma before punctuation / danda). Horizontal
+        // whitespace only — newlines and leading indentation are preserved.
+        out = out.replace(Regex("""(?<=\S)[ \t]{2,}(?=\S)"""), " ")
+                 .replace(Regex("""[ \t]+([,.!?])"""), "$1")
+                 .replace(Regex("""[ \t,]+।"""), "।")
         return out
+    }
+
+    private const val PROVENANCE_BRAND =
+        "गूगल|डीपमाइंड|గూగుల్|கூகிள்|গুগল|ಗೂಗಲ್|ગૂગલ|ਗੂਗਲ|ଗୁଗଲ|Google|DeepMind"
+    private const val PROVENANCE_VERB =
+        "विकसित|प्रशिक्षित|निर्मित|तयार|बनवले|बनाया|अभिवृद्ध|" +
+            "అభివృద్ధి|తయారు|రూపొందించ|" + "உருவாக்க|பயிற்சி|" + "তৈরি|প্রশিক্ষিত|" +
+            "ತಯಾರಿಸ|ಅಭಿವೃದ್ಧಿ|" + "બનાવ|વિકસાવ|" + "ਬਣਾ|ਵਿਕਸਿਤ|" + "ତିଆରି|ବିକଶିତ|" +
+            "developed|trained|created|built|made"
+
+    // Marks a sentence as the assistant describing itself: English first-person
+    // "I am / I'm / I was / I've been", the brand name in Latin or any supported
+    // script, or a first-person pronoun in each Indian language. Indic tokens use
+    // letter/mark lookarounds instead of \b (which is ASCII-only here) so "मी"
+    // never matches inside "जमीन".
+    private val SELF_REFERENCE = Regex(
+        """(?i)\b(?:I\s+am|I'm|I\s+was|I've\s+been|Saarthi)\b|""" +
+            """(?<![\p{L}\p{M}])(?:सारथी|సారథి|சாரதி|সারথি|ಸಾರಥಿ|સારથી|ਸਾਰਥੀ|ସାରଥୀ|""" +
+            """मैं|मुझे|मेरा|मेरी|मी|मला|माझ[ाीे]|నేను|నన్ను|நான்|என்னை|আমি|আমাকে|""" +
+            """ನಾನು|ನನ್ನನ್ನು|હું|મને|ਮੈਂ|ਮੈਨੂੰ|ମୁଁ|ମୋତେ)(?![\p{L}\p{M}])""",
+    )
+
+    /** True when the sentence containing [index] (up to [index]) refers to the assistant itself. */
+    private fun isSelfReferentialSentence(text: String, index: Int): Boolean {
+        var start = index
+        while (start > 0 && text[start - 1] !in ".!?।\n") start--
+        return SELF_REFERENCE.containsMatchIn(text.substring(start, index))
     }
 
     private fun normalizeFormatting(text: String): String = text
@@ -415,12 +444,44 @@ object ResponseMarkerParser {
             // or more marker attribute fragments. Covers the multi-line-leak
             // case where the marker keyword landed on a prior line.
             .replace(ORPHAN_MARKER_ATTRIBUTE_LINE, "")
-            // Fourth pass — the YAML / colon-form leak ("marker:" + "key: ...").
-            .replace(MARKER_LABEL_LINE, "")
-            .replace(ORPHAN_MARKER_COLON_LINE, "")
+        // Fourth pass — the YAML / colon-form leak ("marker:" + "key: ...").
+        out = stripColonMarkerBlocks(out)
         for (token in GEMMA_SPECIAL_TOKENS) {
             out = out.replace(token, "")
         }
         return out.trim()
+    }
+
+    /**
+     * Removes colon-form marker leaks line-by-line. A contiguous run of
+     * `field: value` lines (fields: text/key/value/time/delay_minutes) is a
+     * leak only when it follows a `marker:` label, contains `delay_minutes`,
+     * or contains both `key` and `value` — a lone "Time: 30 minutes" or
+     * "Value: ₹5000" line is real content and is kept. The `marker:` label
+     * line itself is always dropped.
+     */
+    internal fun stripColonMarkerBlocks(text: String): String {
+        val lines = text.split("\n")
+        val keep = BooleanArray(lines.size) { true }
+        var i = 0
+        while (i < lines.size) {
+            val afterLabel = MARKER_LABEL_LINE.matches(lines[i])
+            if (afterLabel) {
+                keep[i] = false
+                i++
+            }
+            val start = i
+            val fields = mutableSetOf<String>()
+            while (i < lines.size) {
+                val m = ORPHAN_MARKER_COLON_LINE.matchEntire(lines[i]) ?: break
+                fields += m.groupValues[1].lowercase()
+                i++
+            }
+            val isLeak = afterLabel || "delay_minutes" in fields ||
+                ("key" in fields && "value" in fields)
+            if (isLeak) for (j in start until i) keep[j] = false
+            if (i == start && !afterLabel) i++
+        }
+        return lines.filterIndexed { idx, _ -> keep[idx] }.joinToString("\n")
     }
 }
