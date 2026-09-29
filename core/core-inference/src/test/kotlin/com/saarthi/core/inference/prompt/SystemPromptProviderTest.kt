@@ -494,5 +494,21 @@ class SystemPromptProviderTest {
         )
         assertTrue("lean prompt must carry the memory marker rule", prompt.contains("[SAARTHI_MEMORY key="))
     }
+
+    @Test
+    fun memory_rules_forbid_re_saving_listed_facts_on_every_tier() {
+        // Device log 2026-09-29: the model re-emitted a marker for an already
+        // stored fact on almost every turn, wasting reply tokens.
+        for ((model, window) in listOf("Gemma 4 E2B" to 4096, "Gemma 4 E2B" to 1536, "some model" to 4096)) {
+            val prompt = provider.build(
+                modelName = model,
+                pack = PackType.BASE,
+                languageInstruction = "",
+                memoryContext = "- name: Arjun",
+                maxContextTokens = window,
+            )
+            assertTrue("model=$model window=$window", prompt.contains("re-save"))
+        }
+    }
 }
 

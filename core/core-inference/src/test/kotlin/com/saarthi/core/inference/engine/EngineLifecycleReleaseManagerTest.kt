@@ -319,4 +319,41 @@ class EngineLifecycleReleaseManagerTest {
         assertEquals(60_000L, flagship.conversationReleaseDelayMs)
         assertEquals(120_000L, flagship.engineReleaseDelayMs)
     }
+
+    @Test
+    fun `returning while the engine release is running triggers a reload after it finishes`() = runTest(testDispatcher) {
+        // Device log 2026-09-29 18:11:20: after Doze the delayed release resumed
+        // in the same instant the user came back. The foreground callback saw
+        // a still-resident engine, the release then closed it, and the next
+        // message found no model. The manager must re-check after releasing.
+        val (app, slot) = mockApplication()
+        var foregroundCount = 0
+        var engineReleased = false
+        lateinit var callbacks: Application.ActivityLifecycleCallbacks
+        val mgr = EngineLifecycleReleaseManager(
+            context = app,
+            totalRamMb = { 12_000L },
+            isNativeGenerating = { false },
+            isInitInProgress = { false },
+            releaseConversationOnly = {},
+            releaseEngine = {
+                // User returns mid-release (cancels the pending job).
+                callbacks.onActivityStarted(mockk<Activity>())
+                engineReleased = true
+            },
+            onReturnedToForeground = { foregroundCount++ },
+        )
+        mgr.register()
+        callbacks = slot.captured
+
+        callbacks.onActivityStarted(mockk<Activity>())
+        callbacks.onActivityStopped(mockk<Activity>())
+        scheduler.advanceTimeBy(121_000)
+        scheduler.runCurrent()
+
+        assertEquals(true, engineReleased)
+        // Once from onActivityStarted, once more after the release completed.
+        assertEquals(2, foregroundCount)
+    }
 }
+

@@ -345,11 +345,11 @@ class ChatRepositoryImpl @Inject constructor(
         val placeholder = ChatMessage(id = streamingId, content = "", role = MessageRole.ASSISTANT, isStreaming = true)
         _history.update { it + placeholder }
 
-        // Build prompt and run inference fully on IO — avoids blocking the main thread
-        // Start foreground service IMMEDIATELY — prevents Android from killing process.
-        // Updates the notification from "Loading…" to "Generating response…" if already running.
-        InferenceService.startGenerating(context)
-        
+        // Build prompt and run inference fully on IO — avoids blocking the main thread.
+        // The foreground service starts just before generateStream below — NOT here:
+        // starting it for a turn that then ends without generating (model not
+        // ready, direct reply) stopped it milliseconds later, and Android crashes
+        // the app (ForegroundServiceDidNotStartInTimeException) on that race.
         return flow {
             // Check readiness first
             if (!inferenceEngine.isReady) {
@@ -459,6 +459,9 @@ class ChatRepositoryImpl @Inject constructor(
         // Coalesce stream→UI updates (~80ms) so _history is not copied on every token.
         val streamCoalescer = StreamingUiCoalescer()
 
+        // Keeps the process protected for the whole generation. Updates the
+        // notification from "Loading…" to "Generating response…" if already running.
+        InferenceService.startGenerating(context)
             inferenceEngine.generateStream(prompt, PackType.BASE, grounded, systemInstruction)
                 .catch { e ->
                     // Only stop FGS if the native inference thread is no longer running.
