@@ -101,3 +101,27 @@ internal fun lightStreamingMarkdown(text: String): String =
             }
             indent + body.replace("**", "").replace("__", "")
         }
+
+/** A calculation reply split into its final answer and the working above it. */
+internal data class FinalAnswer(val answer: String, val steps: String)
+
+// "Answer: ₹2,360" — the label the math instruction asks for, or the model's
+// own translation of it in any supported language.
+private val FINAL_ANSWER_LINE = Regex(
+    """^\**\s*(?:final\s+answer|answer|उत्तर|जवाब|விடை|பதில்|సమాధానం|జవాబు|উত্তর|ಉತ್ತರ|જવાબ|ਜਵਾਬ|ਉੱਤਰ|ଉତ୍ତର)\s*\**\s*[:：]\s*\**\s*(.+?)\s*\**\s*$""",
+    RegexOption.IGNORE_CASE,
+)
+
+/**
+ * The reply's final answer when its LAST non-empty line is an answer line,
+ * else null (the bubble then renders the reply as before).
+ */
+internal fun splitFinalAnswer(text: String): FinalAnswer? {
+    val lines = text.trimEnd().lines()
+    val last = lines.indexOfLast { it.isNotBlank() }
+    if (last < 0) return null
+    val m = FINAL_ANSWER_LINE.matchEntire(lines[last].trim()) ?: return null
+    val answer = m.groupValues[1].trim()
+    if (answer.isEmpty()) return null
+    return FinalAnswer(answer = answer, steps = lines.subList(0, last).joinToString("\n").trimEnd())
+}

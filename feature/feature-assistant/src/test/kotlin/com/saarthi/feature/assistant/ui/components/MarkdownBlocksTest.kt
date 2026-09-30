@@ -57,4 +57,21 @@ class MarkdownBlocksTest {
         assertEquals("Title\nBold point\n•  item\ncode", out)
         assertTrue(!out.contains("**") && !out.contains("#"))
     }
+
+    @Test
+    fun `a trailing answer line is split from the working`() {
+        val reply = "Discount = 20% of 2500 = 500\nGST = 18% of 2000 = 360\nAnswer: ₹2360"
+        assertEquals(
+            FinalAnswer(answer = "₹2360", steps = "Discount = 20% of 2500 = 500\nGST = 18% of 2000 = 360"),
+            splitFinalAnswer(reply),
+        )
+        assertEquals("75", splitFinalAnswer("100 ÷ 4 = 25\n25 × 3 = 75\n**उत्तर:** 75")?.answer)
+    }
+
+    @Test
+    fun `replies without a final answer line are not split`() {
+        assertEquals(null, splitFinalAnswer("Answer: 5 is the count.\nMore text after it."))
+        assertEquals(null, splitFinalAnswer("Just a normal reply."))
+    }
 }
+

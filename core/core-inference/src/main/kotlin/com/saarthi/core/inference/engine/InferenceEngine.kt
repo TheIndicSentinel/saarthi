@@ -117,6 +117,8 @@ interface InferenceEngine {
         packType: PackType,
         grounded: Boolean,
         systemInstruction: String? = null,
+        /** Attach the on-device `calculate` tool (Gemma function calling) for this turn. */
+        calculatorTool: Boolean = false,
     ): Flow<String>
 
     /**

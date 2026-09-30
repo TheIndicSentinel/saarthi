@@ -510,5 +510,21 @@ class SystemPromptProviderTest {
             assertTrue("model=$model window=$window", prompt.contains("re-save"))
         }
     }
+
+    @Test
+    fun chat_prompts_ask_to_respond_to_new_details_not_restate_old_ones() {
+        // Device test 2026-09-30: on "Mera zodiac Sagittarius hai…" the reply
+        // restated name + diet from the previous turn and ignored the new fact.
+        for ((model, window) in listOf("Gemma 4 E2B" to 4096, "Gemma 4 E2B" to 1536, "some model" to 4096)) {
+            val prompt = provider.build(
+                modelName = model,
+                pack = PackType.BASE,
+                languageInstruction = "",
+                memoryContext = "- name: Arjun",
+                maxContextTokens = window,
+            )
+            assertTrue("model=$model window=$window", prompt.contains("respond to that NEW detail"))
+        }
+    }
 }
 

@@ -953,15 +953,27 @@ class LiteRTInferenceEngine @Inject constructor(
         eng: Engine,
         sampler: SamplerConfig?,
         systemInstruction: String? = null,
+        calculatorTool: Boolean = false,
     ): Conversation {
         crashRecoveryStore.markConvStarted()
-        // No system instruction → the exact config every turn used before.
-        val config = if (systemInstruction == null) {
-            ConversationConfig(samplerConfig = sampler)
+        // No system instruction and no tool → the exact config every turn used before.
+        val tools = if (calculatorTool) {
+            listOf(com.google.ai.edge.litertlm.tool(com.saarthi.core.inference.math.CalculatorTool()))
         } else {
-            ConversationConfig(
-                systemInstruction = com.google.ai.edge.litertlm.Contents.of(systemInstruction),
+            emptyList()
+        }
+        val config = when {
+            systemInstruction == null && tools.isEmpty() -> ConversationConfig(samplerConfig = sampler)
+            systemInstruction == null -> ConversationConfig(
+                tools = tools,
                 samplerConfig = sampler,
+                automaticToolCalling = true,
+            )
+            else -> ConversationConfig(
+                systemInstruction = com.google.ai.edge.litertlm.Contents.of(systemInstruction),
+                tools = tools,
+                samplerConfig = sampler,
+                automaticToolCalling = true,
             )
         }
         val conversation = eng.createConversation(config)
@@ -979,7 +991,11 @@ class LiteRTInferenceEngine @Inject constructor(
      * when it calls createConversation. Returns the new conversation, or null if
      * the engine is gone or creation failed (callers fall back to system state).
      */
-    private suspend fun recycleConversation(sampler: SamplerConfig?, systemInstruction: String? = null): Conversation? =
+    private suspend fun recycleConversation(
+        sampler: SamplerConfig?,
+        systemInstruction: String? = null,
+        calculatorTool: Boolean = false,
+    ): Conversation? =
         conversationLock.withLock {
             val eng = engine ?: run { activeConversation = null; return@withLock null }
             activeConversation?.let { old ->
@@ -988,7 +1004,7 @@ class LiteRTInferenceEngine @Inject constructor(
             }
             // Failure leaves litert_conv_ready=false (markConvStarted ran, markConvReady
             // did not) — correct for crash attribution if the process dies here.
-            val fresh = runCatching { createConversationTracked(eng, sampler, systemInstruction) }.getOrNull()
+            val fresh = runCatching { createConversationTracked(eng, sampler, systemInstruction, calculatorTool) }.getOrNull()
             activeConversation = fresh
             _isFreshConversation = true
             fresh
@@ -1047,6 +1063,7 @@ class LiteRTInferenceEngine @Inject constructor(
         packType: PackType,
         grounded: Boolean,
         systemInstruction: String?,
+        calculatorTool: Boolean,
     ): Flow<String> = callbackFlow<String> {
         val eng = engine
             ?: throw IllegalStateException(
@@ -1126,7 +1143,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 if (activeConversation != null && conversationIsGrounded != groundedNow) {
                     DebugLogger.log("LITERT", "[SAMPLER] mode flipped (grounded=$groundedNow) — recycling conversation")
                 }
-                recycleConversation(desiredSampler, systemInstruction)
+                recycleConversation(desiredSampler, systemInstruction, calculatorTool)
                 conversationIsGrounded = groundedNow
                 val conversation = activeConversation
                     ?: throw IllegalStateException(USER_FACING_ENGINE_NOT_READY)
@@ -1181,6 +1198,19 @@ class LiteRTInferenceEngine @Inject constructor(
                                 DebugLogger.log(
                                     "LITERT",
                                     "[REP] Loop detected at $tokenCount tokens (chars=${accumulated.length}) — stopping native generation"
+                                )
+                                runCatching { conversation.cancelProcess() }
+                            }
+                            // Runaway self-correction ("मैंने गणना में गलती…" again and
+                            // again with new numbers). Checked only at a line /
+                            // sentence end — the whole-text scan is not per-token work.
+                            if (!repetitionStopFired && cleaned.any { it == '\n' || it == '।' || it == '.' } &&
+                                RecalculationGuard.shouldStop(accumulated.toString())
+                            ) {
+                                repetitionStopFired = true
+                                DebugLogger.log(
+                                    "LITERT",
+                                    "[REP] Runaway recalculation at $tokenCount tokens (chars=${accumulated.length}) — stopping native generation"
                                 )
                                 runCatching { conversation.cancelProcess() }
                             }

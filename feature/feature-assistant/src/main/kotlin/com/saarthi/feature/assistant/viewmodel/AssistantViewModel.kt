@@ -303,6 +303,18 @@ class AssistantViewModel @Inject constructor(
         val attachments = _uiState.value.pendingAttachments
         if ((raw.isBlank() && attachments.isEmpty()) || _uiState.value.isStreaming) return
         if (attachments.any { it.indexing }) return
+        // Debug builds only: "/mathbench [runs]" runs the on-device maths
+        // benchmark instead of sending a message (nothing is persisted).
+        if (com.saarthi.core.inference.BuildConfig.DEBUG && raw.startsWith("/mathbench")) {
+            val runs = raw.removePrefix("/mathbench").trim().toIntOrNull()?.coerceIn(1, 10) ?: 1
+            _uiState.update { it.copy(inputText = "", isStreaming = true, error = null) }
+            streamJob = chatRepository.launchTurn(
+                chatRepository.runMathBenchmark(runs)
+                    .onCompletion { _uiState.update { it.copy(isStreaming = false) } }
+                    .catch { },
+            )
+            return
+        }
         // Too long for the loaded model: keep the text in the box and say so,
         // instead of letting the prompt trimmer silently drop its beginning.
         val maxChars = chatRepository.maxUserMessageChars()

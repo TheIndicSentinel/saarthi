@@ -199,10 +199,17 @@ fun MessageBubble(
                         val parsed = remember(message.content) {
                             parseAssistantMessageForDisplay(message.content)
                         }
-                        MarkdownText(
-                            text = parsed.body,
-                            color = SaarthiColors.TextPrimary,
-                        )
+                        // Calculation reply ending in "Answer: X" → the answer on
+                        // top, the working folded under "Show steps".
+                        val finalAnswer = remember(parsed.body) { splitFinalAnswer(parsed.body) }
+                        if (finalAnswer == null) {
+                            MarkdownText(
+                                text = parsed.body,
+                                color = SaarthiColors.TextPrimary,
+                            )
+                        } else {
+                            AnswerCard(finalAnswer, language, messageId = message.id)
+                        }
                         if (parsed.sources.isNotEmpty() && parsed.sourcesHeader != null) {
                             SourcesChipsRow(
                                 header = parsed.sourcesHeader,
@@ -380,6 +387,38 @@ private fun TypingIndicator() {
                     .clip(CircleShape)
                     .background(SaarthiColors.Gold.copy(alpha = alpha))
             )
+        }
+    }
+}
+
+/** Final answer on top, the working collapsible below — see [splitFinalAnswer]. */
+@Composable
+private fun AnswerCard(
+    finalAnswer: FinalAnswer,
+    language: com.saarthi.core.i18n.SupportedLanguage,
+    messageId: String,
+) {
+    var showSteps by androidx.compose.runtime.saveable.rememberSaveable(messageId) { mutableStateOf(false) }
+    Column {
+        Text(
+            text = "${language.answerLabel}: ${finalAnswer.answer}",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+            color = SaarthiColors.Marigold,
+        )
+        if (finalAnswer.steps.isNotBlank()) {
+            TextButton(
+                onClick = { showSteps = !showSteps },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+            ) {
+                Text(
+                    text = if (showSteps) language.hideStepsLabel else language.showStepsLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = SaarthiColors.TextSecondary,
+                )
+            }
+            if (showSteps) {
+                MarkdownText(text = finalAnswer.steps, color = SaarthiColors.TextPrimary)
+            }
         }
     }
 }
