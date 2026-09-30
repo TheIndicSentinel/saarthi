@@ -119,6 +119,8 @@ interface InferenceEngine {
         systemInstruction: String? = null,
         /** Attach the on-device `calculate` tool (Gemma function calling) for this turn. */
         calculatorTool: Boolean = false,
+        /** Calculation turn: greedy (top-k 1) sampling so digits don't drift. */
+        precise: Boolean = false,
     ): Flow<String>
 
     /**

@@ -297,16 +297,19 @@ class ChatRepositoryImpl @Inject constructor(
             for (case in cases) {
                 repeat(runsPerQuestion) { run ->
                     show("Math benchmark: ${done + 1}/$total…", streaming = true)
+                    // Same shortcut as chat: exact calculations are answered by the app.
+                    val direct = verifiedCalculation(case.question)?.let { verifiedCalculationReply(it) }
                     val userTurn = mathAwareUserTurn(case.question)
                     val prompt = trimPrompt("$system\n\n$userTurn", maxPromptChars, pinnedTail = userTurn)
                     val acc = StringBuilder()
-                    runCatching {
-                        inferenceEngine.generateStream(prompt, PackType.BASE, grounded = true).collect { acc.append(it) }
+                    if (direct != null) acc.append(direct) else runCatching {
+                        inferenceEngine.generateStream(prompt, PackType.BASE, grounded = true, precise = true).collect { acc.append(it) }
                     }.onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e }
                     val raw = acc.toString()
-                    val shown = verifyWorking(
-                        ResponseMarkerParser.parse(com.saarthi.core.inference.engine.RecalculationGuard.trimAtSecondCorrection(raw)).cleanText,
-                    )
+                    val clean = ResponseMarkerParser
+                        .parse(com.saarthi.core.inference.engine.RecalculationGuard.trimRunaway(raw))
+                        .cleanText
+                    val shown = applyFormula(clean) ?: verifyWorking(clean)
                     val r = scoreMathReply(case, raw, shown)
                     results += r
                     DebugLogger.log(
@@ -479,6 +482,7 @@ class ChatRepositoryImpl @Inject constructor(
         val grounded = plan is TurnPlan.Generate && plan.grounded
         val systemInstruction = (plan as? TurnPlan.Generate)?.systemInstruction
         val calculatorTool = (plan as? TurnPlan.Generate)?.calculatorTool == true
+        val precise = (plan as? TurnPlan.Generate)?.precise == true
         val prompt = when (plan) {
             is TurnPlan.Generate -> plan.prompt
             is TurnPlan.DirectReply -> {
@@ -519,7 +523,7 @@ class ChatRepositoryImpl @Inject constructor(
         // Keeps the process protected for the whole generation. Updates the
         // notification from "Loading…" to "Generating response…" if already running.
         InferenceService.startGenerating(context)
-            inferenceEngine.generateStream(prompt, PackType.BASE, grounded, systemInstruction, calculatorTool)
+            inferenceEngine.generateStream(prompt, PackType.BASE, grounded, systemInstruction, calculatorTool, precise)
                 .catch { e ->
                     // Only stop FGS if the native inference thread is no longer running.
                     // If isNativeGenerating=true here it means the watchdog timed out (or the
@@ -575,13 +579,18 @@ class ChatRepositoryImpl @Inject constructor(
                     // self-correction is cut back to before its second attempt
                     // (the engine also stops generating there).
                     val raw = com.saarthi.core.inference.engine.RecalculationGuard
-                        .trimAtSecondCorrection(accumulated.toString())
+                        .trimRunaway(accumulated.toString())
                     val parsed = ResponseMarkerParser.parse(raw)
-                    // Calculation turns: re-check each written "a op b = c" step
-                    // exactly and fix a wrong result (and an Answer line that
-                    // repeats it). Other turns are untouched.
+                    // Calculation turns: the app evaluates the model's "Formula:"
+                    // line exactly and the answer follows it; without a usable
+                    // formula, each written "a op b = c" step is re-checked
+                    // instead. Other turns are untouched.
                     val mathTurn = mathAwareUserTurn(userMessage) != userMessage
-                    val replyText = if (mathTurn) verifyWorking(parsed.cleanText) else parsed.cleanText
+                    val replyText = if (mathTurn) {
+                        applyFormula(parsed.cleanText) ?: verifyWorking(parsed.cleanText)
+                    } else {
+                        parsed.cleanText
+                    }
                     val citationLabels = currentLanguage.citationDisplayLabels()
                     val groundedText = if (lastCitationGrounded && lastCitationChunks.isNotEmpty()) {
                         applyDeterministicSourcesFooter(
@@ -999,6 +1008,16 @@ class ChatRepositoryImpl @Inject constructor(
         fun promptMs(): Long = (System.nanoTime() - promptT0) / 1_000_000
         val tier = activeTier()
         val sessionId = _currentSessionId.value
+
+        // A calculation the app can compute exactly is answered by the app:
+        // the model ignored even a verified result it was handed ("250 + 175"
+        // → 375 on device, 2026-09-30). Instant, and cannot be wrong.
+        if (attachments.isEmpty()) {
+            verifiedCalculation(userMessage)?.let { calc ->
+                DebugLogger.log("PROMPT", "verified calculation — direct reply promptMs=${promptMs()}")
+                return TurnPlan.DirectReply(verifiedCalculationReply(calc))
+            }
+        }
 
         // Identity questions ("who are you", "tumhare bare me", "तुम्ही कोण",
         // etc., in any language) are answered from the localized canonical
@@ -1431,12 +1450,14 @@ class ChatRepositoryImpl @Inject constructor(
                     grounded = ragAssembly.strictGrounded || isMathTurn,
                     systemInstruction = finalPrompt.removeSuffix(pinnedTail).trimEnd(),
                     calculatorTool = CALCULATOR_TOOL_ENABLED && isMathTurn,
+                    precise = isMathTurn,
                 )
             } else {
                 TurnPlan.Generate(
                     finalPrompt,
                     grounded = ragAssembly.strictGrounded || isMathTurn,
                     calculatorTool = CALCULATOR_TOOL_ENABLED && isMathTurn,
+                    precise = isMathTurn,
                 )
             }
         }

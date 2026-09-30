@@ -42,6 +42,8 @@ internal sealed interface TurnPlan {
         val grounded: Boolean = false,
         val systemInstruction: String? = null,
         val calculatorTool: Boolean = false,
+        /** Calculation turn → greedy sampling in the engine. */
+        val precise: Boolean = false,
     ) : TurnPlan
     data class DirectReply(val text: String) : TurnPlan
 }

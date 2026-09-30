@@ -80,6 +80,22 @@ class SamplerPolicy @Inject constructor(
         return SamplerParams(topK = 40, topP = 0.85, temperature = 0.4)
     }
 
+    /**
+     * Calculation turns: greedy (top-k 1) so the most likely digit always
+     * wins. Even at temperature 0.4 the device showed random digit slips
+     * mid-chain (1600 → 16000, 250 → 2000). NPU still null (sampling on-chip).
+     */
+    fun preciseSamplerParamsFor(usingNpu: Boolean): SamplerParams? {
+        if (usingNpu) return null
+        return SamplerParams(topK = 1, topP = 1.0, temperature = 0.1)
+    }
+
+    /** Wraps [preciseSamplerParamsFor] into the real litertlm type production code needs. */
+    fun preciseSamplerFor(usingNpu: Boolean): SamplerConfig? =
+        preciseSamplerParamsFor(usingNpu)?.let {
+            SamplerConfig(topK = it.topK, topP = it.topP, temperature = it.temperature)
+        }
+
     /** Wraps [groundedSamplerParamsFor] into the real litertlm type production code needs. */
     fun groundedSamplerFor(usingNpu: Boolean): SamplerConfig? =
         groundedSamplerParamsFor(usingNpu)?.let {

@@ -1064,6 +1064,7 @@ class LiteRTInferenceEngine @Inject constructor(
         grounded: Boolean,
         systemInstruction: String?,
         calculatorTool: Boolean,
+        precise: Boolean,
     ): Flow<String> = callbackFlow<String> {
         val eng = engine
             ?: throw IllegalStateException(
@@ -1138,8 +1139,11 @@ class LiteRTInferenceEngine @Inject constructor(
                 // Recycle here so we do not depend on the previous turn's onDone
                 // recycle succeeding (or on the init-time Conversation).
                 val groundedNow = grounded
-                val desiredSampler = if (groundedNow) groundedSamplerFor()
-                                     else samplerForActiveModel()
+                val desiredSampler = when {
+                    precise -> samplerPolicy.preciseSamplerFor(usingNpu)
+                    groundedNow -> groundedSamplerFor()
+                    else -> samplerForActiveModel()
+                }
                 if (activeConversation != null && conversationIsGrounded != groundedNow) {
                     DebugLogger.log("LITERT", "[SAMPLER] mode flipped (grounded=$groundedNow) — recycling conversation")
                 }
@@ -1198,6 +1202,17 @@ class LiteRTInferenceEngine @Inject constructor(
                                 DebugLogger.log(
                                     "LITERT",
                                     "[REP] Loop detected at $tokenCount tokens (chars=${accumulated.length}) — stopping native generation"
+                                )
+                                runCatching { conversation.cancelProcess() }
+                            }
+                            // Runaway number ("10.000000…" growing forever) — tail-only check.
+                            if (!repetitionStopFired && cleaned.any { it.isDigit() } &&
+                                RecalculationGuard.endsWithRunawayNumber(accumulated)
+                            ) {
+                                repetitionStopFired = true
+                                DebugLogger.log(
+                                    "LITERT",
+                                    "[REP] Runaway number at $tokenCount tokens (chars=${accumulated.length}) — stopping native generation"
                                 )
                                 runCatching { conversation.cancelProcess() }
                             }

@@ -72,6 +72,29 @@ object RecalculationGuard {
         return corrections == 1 && hasNumberOnlyVariantLines(text)
     }
 
+    // 20+ digits in one number ("10.000000000000000000000000") — the device's
+    // runaway, which no sentence boundary ever ends.
+    private val RUNAWAY_NUMBER = Regex("""\d(?:[\d.,]*\d){19,}""")
+
+    /** True when the reply currently ENDS in a runaway number — cheap, checked per token on the tail. */
+    fun endsWithRunawayNumber(text: CharSequence): Boolean {
+        val tail = text.takeLast(48)
+        val m = RUNAWAY_NUMBER.findAll(tail).lastOrNull() ?: return false
+        return m.range.last >= tail.length - 2 && m.value.count { it.isDigit() } >= 20
+    }
+
+    /**
+     * Saved-reply cleanup for both failure shapes: cut at the second
+     * correction, then drop the line holding a runaway number (and anything
+     * after it).
+     */
+    fun trimRunaway(text: String): String {
+        val trimmed = trimAtSecondCorrection(text)
+        val m = RUNAWAY_NUMBER.find(trimmed)?.takeIf { r -> r.value.count { it.isDigit() } >= 20 } ?: return trimmed
+        val lineStart = trimmed.lastIndexOf('\n', m.range.first) + 1
+        return trimmed.substring(0, lineStart).trimEnd()
+    }
+
     /**
      * [text] cut back to the sentence / line start of the SECOND correction,
      * so the saved reply keeps the answer and at most one correction. Unchanged

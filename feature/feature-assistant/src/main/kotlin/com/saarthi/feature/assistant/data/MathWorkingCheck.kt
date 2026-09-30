@@ -87,3 +87,54 @@ private fun fixAnswerLine(text: String, wrong: String, right: String): String {
     if (num(value.value).compareTo(num(wrong)) != 0) return text
     return text.replaceRange(value.range, right)
 }
+
+// ── Formula-first answers ───────────────────────────────────────────────────
+
+private val FORMULA_LINE = Regex("""^\**\s*(?:$FORMULA_LABEL|सूत्र)\s*\**\s*[:：]\s*(.+)$""", RegexOption.IGNORE_CASE)
+private val ANSWER_LABEL_LINE = Regex("""^\**\s*(?:final\s+answer|$ANSWER_LABEL|उत्तर|जवाब)\s*\**\s*[:：]\s*(.*)$""", RegexOption.IGNORE_CASE)
+private val FIRST_NUMBER = Regex("""\d[\d,]*(?:\.\d+)?""")
+private val LAST_RESULT = Regex("""=\s*₹?\s*(\d[\d,]*(?:\.\d+)?)""")
+
+/**
+ * If the reply has a "Formula: <expression>" line the app can evaluate, the
+ * result is exact: the formula line shows it, the "Answer:" line carries it
+ * (keeping the model's unit words), and the model's own working is kept only
+ * when it ends on the same number — device test 2026-09-30: correct working
+ * "2500 - 750 = 1750" followed by "Answer: 17500 ml". Returns null when there
+ * is no usable formula (the caller then falls back to [verifyWorking]).
+ */
+internal fun applyFormula(text: String): String? {
+    val lines = text.trimEnd().lines()
+    val fIdx = lines.indexOfFirst { FORMULA_LINE.matchEntire(it.trim()) != null }
+    if (fIdx < 0) return null
+    val rawExpr = FORMULA_LINE.matchEntire(lines[fIdx].trim())!!.groupValues[1]
+        .substringBefore('=')
+        .replace("`", "").replace("₹", "")
+        .let { stripThousandsSeparators(it) }
+        .trim().trimEnd('.', '।')
+    val value = com.saarthi.core.inference.math.ExactExpression.evaluate(rawExpr) ?: return null
+    val result = render(value)
+
+    val aIdx = lines.indexOfLast { ANSWER_LABEL_LINE.matchEntire(it.trim()) != null }
+    val answerLine = if (aIdx > fIdx) {
+        val body = ANSWER_LABEL_LINE.matchEntire(lines[aIdx].trim())!!.groupValues[1]
+        val num = FIRST_NUMBER.find(body)
+        val newBody = if (num != null) body.replaceRange(num.range, result) else result
+        "$ANSWER_LABEL: $newBody"
+    } else {
+        "$ANSWER_LABEL: $result"
+    }
+    // Keep the model's working only if it lands on the exact result.
+    val working = lines.subList(fIdx + 1, if (aIdx > fIdx) aIdx else lines.size).filter { it.isNotBlank() }
+    val workingEnd = working.flatMap { LAST_RESULT.findAll(it).toList() }.lastOrNull()?.groupValues?.get(1)
+    val keepWorking = working.isNotEmpty() && workingEnd != null &&
+        num(workingEnd).compareTo(value.setScale(4, RoundingMode.HALF_UP).stripTrailingZeros()) == 0
+
+    return buildString {
+        lines.subList(0, fIdx).filter { it.isNotBlank() }.forEach { appendLine(it) }
+        appendLine("$FORMULA_LABEL: ${rawExpr.trim()} = $result")
+        if (keepWorking) working.forEach { appendLine(it) }
+        append(answerLine)
+    }
+}
+

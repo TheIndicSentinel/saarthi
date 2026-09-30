@@ -294,12 +294,24 @@ internal fun mathAwareUserTurn(userMessage: String): String {
         if (verified != null) {
             append("the app computed this exactly: ${verified.expression} = ${verified.result}. Use this result. ")
         }
-        append("Solve it in at most 4 short lines, one calculation per line (like 2000 × 18% = 360), ")
-        append("numbers written with digits and no commas. Write the working once — never restart, recalculate or correct it. ")
+        // Formula first: a small model writes a correct formula far more
+        // reliably than it carries numbers through several steps (device:
+        // 1600 → 16000, 250 → 2000 mid-chain). The app evaluates it exactly.
+        append("First line exactly: \"$FORMULA_LABEL: <one arithmetic expression that computes the final answer>\" — ")
+        append("use the numbers exactly as written in the question, digits and + - * / ( ) only, no units, write 25% as 25/100. ")
+        append("Then at most 3 short working lines, numbers written with digits and no commas. ")
+        append("Write the working once — never restart, recalculate or correct it. ")
         append("End with one last line exactly in the form \"$ANSWER_LABEL: <result with unit>\" (keep the word $ANSWER_LABEL). ")
         append("Plain text only (use × ÷ = %), no LaTeX or \$ signs. Don't comment on how easy it is.]")
     }
 }
+
+/** The app's own reply for a calculation it computed exactly — shown as an answer card. */
+internal fun verifiedCalculationReply(calc: VerifiedCalculation): String =
+    "${calc.expression} = ${calc.result}\n$ANSWER_LABEL: ${calc.result}"
+
+/** Label of the formula line the model is told to start a calculation with — see [applyFormula]. */
+internal const val FORMULA_LABEL = "Formula"
 
 /** Label the model is told to end a calculation with — the chat bubble lifts that line into an answer card. */
 internal const val ANSWER_LABEL = "Answer"

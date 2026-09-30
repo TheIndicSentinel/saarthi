@@ -48,4 +48,19 @@ class RecalculationGuardTest {
         val table = "| Item | Price |\n| Pen | 15 |\n| Book | 45 |\n| Bag | 450 |"
         assertFalse(RecalculationGuard.shouldStop(table))
     }
+
+    @Test
+    fun `a runaway number is detected at the tail and trimmed away`() {
+        val runaway = "राहुल के पास ₹5000 हैं।\n1. शॉपिंग पर खर्च: 5000 × 20% = 10.000000000000000000000000"
+        assertTrue(RecalculationGuard.endsWithRunawayNumber(StringBuilder(runaway)))
+        assertEquals("राहुल के पास ₹5000 हैं।", RecalculationGuard.trimRunaway(runaway))
+    }
+
+    @Test
+    fun `ordinary large numbers are not runaways`() {
+        val text = "India's population is about 1,428,627,663 and GDP ₹2,95,36,000 crore."
+        assertFalse(RecalculationGuard.endsWithRunawayNumber(text))
+        assertEquals(text, RecalculationGuard.trimRunaway(text))
+    }
 }
+

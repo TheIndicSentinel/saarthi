@@ -66,7 +66,8 @@ class InferenceEngineSelector @Inject constructor(
         grounded: Boolean,
         systemInstruction: String?,
         calculatorTool: Boolean,
-    ): Flow<String> = liteRtEngine.generateStream(prompt, packType, grounded, systemInstruction, calculatorTool)
+        precise: Boolean,
+    ): Flow<String> = liteRtEngine.generateStream(prompt, packType, grounded, systemInstruction, calculatorTool, precise)
 
     override fun release() {
         liteRtEngine.release()

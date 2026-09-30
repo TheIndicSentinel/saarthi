@@ -92,4 +92,12 @@ class SamplerPolicyTest {
         assertFalse(policy().isGroundedTurn("just a normal chat message", PackType.BASE))
         assertTrue(policy().isGroundedTurn("... ATTACHED EXCERPTS ...", PackType.BASE))
     }
+
+    @Test
+    fun `precise sampler is greedy and null on NPU`() {
+        val params = policy(userTemp = 0.9f).preciseSamplerParamsFor(usingNpu = false)
+        assertEquals(1, params!!.topK)
+        assertNull(policy().preciseSamplerParamsFor(usingNpu = true))
+    }
 }
+
