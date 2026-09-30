@@ -95,7 +95,7 @@ private const val RECAP_MAX_CHARS_GROUNDED_LARGE = 380
 // English meta-instructions are fine; the bottom language directive still forces
 // the reply language. Kept compact (~500c) — trivial against the 8000c budget.
 private const val REASONING_RULES = """REASONING (apply only when the message calls for it):
-- Give the direct answer first in one line, then explain briefly if useful.
+- Give the direct answer first in one line, then explain briefly if useful — except calculations: show the short working first and put the final answer on the last line.
 - For logic or puzzles, reason ONLY from the stated facts — even if they contradict the real world — and follow chains (if A > B and B > C then A > C). If the facts don't decide it, say it cannot be concluded.
 - For any arithmetic, work it out one step at a time and re-check the result (and its sign, for multiplication/division of negatives) before stating it — a wrong confident number is worse than a slower correct one.
 - Never invent books, reports, products, people, or events. If you cannot verify something, say so and ask for details instead of guessing.
@@ -1288,6 +1288,12 @@ class ChatRepositoryImpl @Inject constructor(
         val systemPromptBuild = buildSystemPrompt(memoryContext, priorTurns, grounded = docsPinned)
         val systemInstructions = systemPromptBuild.prompt
         val budget = maxPromptChars
+        // Numeric question → the app's exact result (when it can compute one)
+        // plus a work-first instruction ride in the user turn, and the turn runs
+        // on the low-temperature sampler. Non-numeric turns are unchanged.
+        val userTurn = mathAwareUserTurn(userMessage)
+        val isMathTurn = userTurn != userMessage
+        if (isMathTurn) DebugLogger.log("PROMPT", "math turn  verified=${verifiedCalculation(userMessage) != null}")
         // Size the RAG block to fit the remaining budget AFTER the
         // system prompt and the user message have claimed their space.
         // Without this, the verbose Gemma 4 BASE persona (~3700c) +
@@ -1297,7 +1303,7 @@ class ChatRepositoryImpl @Inject constructor(
         // includes chunks greedily and never cuts one in half.
         val systemPlusMargin = systemInstructions.length +
             (if (systemInstructions.isNotBlank()) 2 else 0) +   // "\n\n"
-            userMessage.length + 1 +                              // userMessage + 1c
+            userTurn.length + 1 +                                 // user turn + 1c
             // Was 160 — too generous on STANDARD (Gemma 3n) where
             // the with-docs budget is tight to begin with; the
             // saved 80 c is exactly enough for one extra chunk.
@@ -1335,7 +1341,7 @@ class ChatRepositoryImpl @Inject constructor(
                 append("\n\n")
             }
             if (fileContext.isNotEmpty()) { append(fileContext); append("\n") }
-            append(userMessage)
+            append(userTurn)
         }.let { prompt ->
             // trimPrompt() is now a safety net rather than the primary
             // cutter — the RAG block was already sized to fit. When the
@@ -1345,10 +1351,10 @@ class ChatRepositoryImpl @Inject constructor(
             val criticalTail = systemPromptBuild.criticalTail
             val pinnedTail = when {
                 fileContext.isNotEmpty() && criticalTail.isNotBlank() ->
-                    "$criticalTail\n\n$fileContext\n$userMessage"
-                fileContext.isNotEmpty() -> "$fileContext\n$userMessage"
-                criticalTail.isNotBlank() -> "$criticalTail\n\n$userMessage"
-                else -> userMessage
+                    "$criticalTail\n\n$fileContext\n$userTurn"
+                fileContext.isNotEmpty() -> "$fileContext\n$userTurn"
+                criticalTail.isNotBlank() -> "$criticalTail\n\n$userTurn"
+                else -> userTurn
             }
             val finalPrompt = trimPrompt(prompt, budget, pinnedTail = pinnedTail)
             DebugLogger.log("PROMPT", "Final FRESH prompt  chars=${finalPrompt.length}  budget=$budget promptMs=${promptMs()}")
@@ -1357,11 +1363,11 @@ class ChatRepositoryImpl @Inject constructor(
             if (splitSystem) {
                 TurnPlan.Generate(
                     prompt = pinnedTail,
-                    grounded = ragAssembly.strictGrounded,
+                    grounded = ragAssembly.strictGrounded || isMathTurn,
                     systemInstruction = finalPrompt.removeSuffix(pinnedTail).trimEnd(),
                 )
             } else {
-                TurnPlan.Generate(finalPrompt, grounded = ragAssembly.strictGrounded)
+                TurnPlan.Generate(finalPrompt, grounded = ragAssembly.strictGrounded || isMathTurn)
             }
         }
     }

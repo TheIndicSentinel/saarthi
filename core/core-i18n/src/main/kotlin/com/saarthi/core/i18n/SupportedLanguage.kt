@@ -1,5 +1,10 @@
 package com.saarthi.core.i18n
 
+/** Appended to every non-English language directive — see [SupportedLanguage.systemPromptInstruction]. */
+private const val DIGITS_RULE =
+    "Write every number with the digits 0-9 (for example 47, ₹1,080, 3.5) — never spell numbers out in words " +
+        "and never use native-script digits; only the words around the numbers use this language."
+
 enum class SupportedLanguage(
     val code: String,
     val nativeName: String,
@@ -1754,7 +1759,15 @@ enum class SupportedLanguage(
      *   in the prompt than this bottom-anchored directive can lose to it, so
      *   PURE is resolved into this one canonical directive instead.
      */
-    fun systemPromptInstruction(pureLoanwords: Boolean = false): String = when (this) {
+    fun systemPromptInstruction(pureLoanwords: Boolean = false): String {
+        val base = languageOnlyInstruction(pureLoanwords)
+        // "Do not switch to Latin script" made the model avoid 0–9 and spell
+        // numbers out (पैंतीस, चौंतीस) or use native digits (५५) — the path
+        // where nearly all arithmetic slips happened in on-device tests.
+        return if (this == ENGLISH) base else "$base $DIGITS_RULE"
+    }
+
+    private fun languageOnlyInstruction(pureLoanwords: Boolean): String = when (this) {
         ENGLISH  -> "Reply ONLY in English. You MUST reply entirely in English. Do not reply in Hindi, Marathi, or any other language or script under any circumstance."
         HINDI    -> "हिन्दी में जवाब दें। You MUST reply entirely in Hindi (हिन्दी), in Devanagari script. " +
             if (pureLoanwords) "Use pure Hindi — avoid English loanwords and code-switching; prefer native Hindi vocabulary throughout."
