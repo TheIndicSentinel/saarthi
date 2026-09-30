@@ -60,6 +60,13 @@ internal fun formatConversationContext(
     isLarge: Boolean,
     grounded: Boolean,
     roomy: Boolean = false,
+    /**
+     * The new message refers back to the latest answer ("explain point 3",
+     * "you said…") — carry more of THAT reply so the reference resolves.
+     * Only the latest reply grows; the turn count is unchanged, so the
+     * repetition-loop guard on deep plain-chat history still holds.
+     */
+    expandLatestReply: Boolean = false,
 ): String {
     if (turns.isEmpty()) return ""
 
@@ -67,11 +74,16 @@ internal fun formatConversationContext(
     val maxTurns = conversationContextMaxTurns(isLarge, grounded, roomy)
     val perUserChars  = if (isLarge) 160 else 110
     val perReplyChars = if (isLarge) { if (grounded) 180 else 320 } else { if (grounded) 120 else 200 }
-    val blockBudget   = if (deep) { if (grounded) 1800 else 3000 } else if (isLarge) {
+    val latestReplyChars = if (!expandLatestReply) perReplyChars else when {
+        roomy -> 1500
+        isLarge -> 600
+        else -> 400
+    }.coerceAtLeast(perReplyChars)
+    val blockBudget   = (if (deep) { if (grounded) 1800 else 3000 } else if (isLarge) {
         if (grounded) 900 else 1500
     } else {
         if (grounded) 480 else 760
-    }
+    }) + (latestReplyChars - perReplyChars)
 
     fun trunc(s: String, n: Int): String {
         val c = s.trim()
@@ -86,9 +98,12 @@ internal fun formatConversationContext(
     var window = maxTurns.coerceAtMost(turns.size)
     while (window >= 1) {
         val lines = ArrayList<String>(window * 2)
-        for ((u, a) in turns.takeLast(window)) {
+        val picked = turns.takeLast(window)
+        for ((idx, turn) in picked.withIndex()) {
+            val (u, a) = turn
+            val replyCap = if (idx == picked.lastIndex) latestReplyChars else perReplyChars
             val uu = trunc(u, perUserChars); if (uu.isNotEmpty()) lines.add("User: $uu")
-            val aa = trunc(a, perReplyChars); if (aa.isNotEmpty()) lines.add("Saarthi: $aa")
+            val aa = trunc(a, replyCap); if (aa.isNotEmpty()) lines.add("Saarthi: $aa")
         }
         if (lines.isEmpty()) return ""
         val block = (header + "\n" + lines.joinToString("\n")).trimEnd()
@@ -97,3 +112,21 @@ internal fun formatConversationContext(
     }
     return ""
 }
+
+// Back-reference cues, per supported language. A false positive only carries a
+// little more of the latest answer; a miss keeps today's behaviour.
+private val EARLIER_REPLY_CUES = Regex(
+    "(?i)" +
+        // English: "point 3", "step #2", "the second point", "above", "you said"
+        """\b(?:point|step|item|option|number|no\.?)\s*#?\d+\b|""" +
+        """\b(?:first|second|third|fourth|fifth|last)\s+(?:point|step|item|option|one)\b|""" +
+        """\b(?:above|earlier|previous(?:ly)?|you\s+(?:said|mentioned|told|wrote|listed))\b|""" +
+        """\b(?:that|this|your)\s+(?:list|answer|reply|point|step)\b|""" +
+        // Hindi / Marathi (Devanagari)
+        "ऊपर|पहले बताया|आपने (?:कहा|बताया|लिखा)|पॉइंट|बिंदु|तुम्ही (?:सांगितले|म्हणालात)|वर सांगितले|" +
+        // Tamil, Telugu, Bengali, Kannada, Gujarati, Punjabi, Odia — "above" / "you said"
+        "மேலே|நீங்கள் சொன்ன|పైన|మీరు చెప్పిన|উপরে|আপনি বলেছেন|ಮೇಲೆ|ನೀವು ಹೇಳಿದ|ઉપર|તમે કહ્યું|ਉੱਪਰ|ਤੁਸੀਂ ਕਿਹਾ|ଉପରେ|ଆପଣ କହିଥିଲେ",
+)
+
+/** True when [message] points back at the previous answer ("explain point 3", "you said…"). */
+internal fun referencesEarlierReply(message: String): Boolean = EARLIER_REPLY_CUES.containsMatchIn(message)

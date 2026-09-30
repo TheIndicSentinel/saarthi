@@ -68,6 +68,14 @@ interface InferenceEngine {
     val activeModelDefaultTemperature: Float get() = 1.0f
 
     /**
+     * The loaded model's catalog prompt tier (ModelEntry.promptTier, via
+     * InferenceConfig), or null when nothing is loaded. STANDARD also means
+     * "not in the catalog" (sideloaded) — resolve it with
+     * SystemPromptProvider.resolveTier, which falls back to the name.
+     */
+    val activeModelPromptTier: com.saarthi.core.inference.model.PromptTier? get() = null
+
+    /**
      * True while the native inference thread is computing (i.e. after generateResponseAsync is
      * called and before the 'done' callback fires). Distinct from [isReady] and coroutine state.
      *
@@ -93,6 +101,23 @@ interface InferenceEngine {
 
     /** Streams partial tokens as they are generated. */
     fun generateStream(prompt: String, packType: PackType = PackType.BASE): Flow<String>
+
+    /**
+     * [generateStream] with the sampler chosen explicitly by the caller:
+     * [grounded] = true runs the grounded (low-temperature) sampler for a
+     * document-grounded turn. The two-argument form decides from [packType]
+     * and the prompt text instead.
+     *
+     * [systemInstruction], when non-null, is set as the Conversation's system
+     * instruction (a separate system turn) and [prompt] carries only the user
+     * turn. Null keeps today's single-user-message behaviour.
+     */
+    fun generateStream(
+        prompt: String,
+        packType: PackType,
+        grounded: Boolean,
+        systemInstruction: String? = null,
+    ): Flow<String>
 
     /**
      * Reset the inference session state (KV cache, conversation context).

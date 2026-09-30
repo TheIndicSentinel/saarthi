@@ -2,6 +2,7 @@ package com.saarthi.core.inference.engine
 
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.saarthi.core.inference.GenerationPreference
+import com.saarthi.core.inference.model.PackType
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -95,4 +96,13 @@ class SamplerPolicy @Inject constructor(
      */
     fun isGroundedPrompt(prompt: String): Boolean =
         prompt.contains("ATTACHED EXCERPTS")
+
+    /**
+     * Grounded decision for one turn. [PackType.KISAN] is the explicit signal
+     * for the Kisan pack's notes-grounded prompt — it carries "REFERENCE
+     * NOTES", not "ATTACHED EXCERPTS", so text sniffing alone left farming
+     * answers (amounts, eligibility) on the default chat sampler.
+     */
+    fun isGroundedTurn(prompt: String, packType: PackType): Boolean =
+        packType == PackType.KISAN || isGroundedPrompt(prompt)
 }

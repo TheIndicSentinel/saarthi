@@ -10,6 +10,7 @@ import com.saarthi.core.inference.prompt.SystemPromptProvider
 import com.saarthi.core.memory.db.ConversationDao
 import com.saarthi.core.memory.db.DatabaseTransactionRunner
 import com.saarthi.feature.assistant.data.KisanPackInstaller
+import com.saarthi.feature.assistant.data.PackChatRepository
 import com.saarthi.feature.assistant.data.RagDocumentRepository
 import com.saarthi.feature.assistant.data.RetrievedChunk
 import com.saarthi.feature.assistant.data.TtsManager
@@ -95,6 +96,9 @@ class PackChatViewModelTest {
         every { inferenceEngine.isReloadingAfterReleaseFlow } returns MutableStateFlow(false)
         every { inferenceEngine.isNativeGenerating } returns false
         every { inferenceEngine.activeModelName } returns "Gemma 3n E4B" // STANDARD+ tier
+        // Relaxed mocks return a mocked enum (resolves as COMPACT), not null —
+        // null keeps the tier on the model-name fallback these tests drive.
+        every { inferenceEngine.activeModelPromptTier } returns null
         every { inferenceEngine.maxContextTokens } returns 2048
         every { inferenceEngine.generateStream(any(), any()) } returns flowOf("An answer.")
 
@@ -121,30 +125,42 @@ class PackChatViewModelTest {
         unmockkObject(InferenceService)
     }
 
-    private fun viewModel(): PackChatViewModel = PackChatViewModel(
+    private val languageManager = mockk<com.saarthi.core.i18n.LanguageManager>(relaxed = true) {
+        every { selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
+    }
+
+    // A fresh repository per test ViewModel by default — in the app it is a
+    // @Singleton shared by every PackChatViewModel instance.
+    private fun repository(): PackChatRepository = PackChatRepository(
         context = mockk(relaxed = true),
         inferenceEngine = inferenceEngine,
         ragRepository = ragRepository,
         conversationDao = conversationDao,
         transactionRunner = transactionRunner,
-        languageManager = mockk(relaxed = true) {
-            every { selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
-        },
-        ttsManager = mockk<TtsManager>(relaxed = true).also {
-            // isSpeaking must actually react to speak()/stop() — toggleSpeak()'s
-            // own "stop" branch doesn't clear speakingMessageId itself; a
-            // SEPARATE init{} subscription does it when isSpeaking transitions
-            // to false (see the ViewModel's own comment on that subscription).
-            // A static flow would silently defeat that half of the contract.
-            every { it.isSpeaking } returns isSpeakingFlow
-            every { it.speak(any(), any()) } answers { isSpeakingFlow.value = true; "mock-utterance-id" }
-            every { it.stop() } answers { isSpeakingFlow.value = false }
-            every { it.ttsAvailable } returns MutableStateFlow(true)
-        },
+        languageManager = languageManager,
         kisanPackPreference = kisanPackPreference,
         packInstaller = packInstaller,
         systemPromptProvider = SystemPromptProvider(),
     )
+
+    private fun viewModel(repository: PackChatRepository = repository()): PackChatViewModel =
+        PackChatViewModel(
+            repository = repository,
+            inferenceEngine = inferenceEngine,
+            languageManager = languageManager,
+            ttsManager = mockk<TtsManager>(relaxed = true).also {
+                // isSpeaking must actually react to speak()/stop() — toggleSpeak()'s
+                // own "stop" branch doesn't clear speakingMessageId itself; a
+                // SEPARATE init{} subscription does it when isSpeaking transitions
+                // to false (see the ViewModel's own comment on that subscription).
+                // A static flow would silently defeat that half of the contract.
+                every { it.isSpeaking } returns isSpeakingFlow
+                every { it.speak(any(), any()) } answers { isSpeakingFlow.value = true; "mock-utterance-id" }
+                every { it.stop() } answers { isSpeakingFlow.value = false }
+                every { it.ttsAvailable } returns MutableStateFlow(true)
+            },
+            kisanPackPreference = kisanPackPreference,
+        )
 
     // ── Chat state transitions ──────────────────────────────────────────
 
@@ -172,6 +188,21 @@ class PackChatViewModelTest {
         vm.ask("second question, should be ignored")
 
         assertEquals("a second ask() while generating must not add any messages", messageCountAfterFirst, vm.messages.value.size)
+    }
+
+    @Test
+    fun `a turn keeps running for a new ViewModel after the screen is left`() = runTest {
+        every { inferenceEngine.generateStream(any(), any()) } returns flow { awaitCancellation() }
+        val repository = repository()
+        val first = viewModel(repository)
+        first.ask("What is PM-KISAN?")
+
+        // Leaving and returning creates a new ViewModel over the same
+        // (singleton) repository — it must see the still-running turn.
+        val second = viewModel(repository)
+        assertTrue("the turn must still be generating", second.isGenerating.value)
+        assertEquals(2, second.messages.value.size)
+        assertTrue(second.messages.value[1].isStreaming)
     }
 
     @Test

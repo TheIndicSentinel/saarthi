@@ -63,4 +63,43 @@ class ChatHistoryHygieneTest {
         assertEquals(listOf("a0", "u1", "a1"), ids(ChatHistoryHygiene.dropOrphanedUserTurns(history)))
         assertEquals(listOf("u1", "a1"), ids(ChatHistoryHygiene.completeUserAssistantPairs(history)))
     }
+
+    @Test
+    fun `placeholder replies are excluded from the recap along with their question`() {
+        val failed = ChatMessage(
+            id = "a2",
+            content = "I couldn't generate a reply just now.",
+            role = MessageRole.ASSISTANT,
+            isPlaceholder = true,
+        )
+        val history = listOf(user("u1"), assistant("a1"), user("u2"), failed, user("u3"), assistant("a3"))
+        val recap = ChatHistoryHygiene.completeUserAssistantPairs(
+            history.filter(ChatHistoryHygiene::isRecapEligible),
+        )
+        assertEquals(listOf("u1", "a1", "u3", "a3"), ids(recap))
+    }
+
+    @Test
+    fun `streaming and blank rows are not recap eligible`() {
+        val streaming = ChatMessage(content = "partial", role = MessageRole.ASSISTANT, isStreaming = true)
+        val blank = ChatMessage(content = " ", role = MessageRole.ASSISTANT)
+        assertEquals(false, ChatHistoryHygiene.isRecapEligible(streaming))
+        assertEquals(false, ChatHistoryHygiene.isRecapEligible(blank))
+        assertEquals(true, ChatHistoryHygiene.isRecapEligible(assistant("a1")))
+    }
+
+    @Test
+    fun `retry targets only the latest assistant reply`() {
+        val history = listOf(user("u1"), assistant("a1"), user("u2"), assistant("a2"))
+        assertEquals("u2", ChatHistoryHygiene.retryTargetUserMessage(history, "a2")?.id)
+        assertEquals(null, ChatHistoryHygiene.retryTargetUserMessage(history, "a1"))
+        assertEquals(null, ChatHistoryHygiene.retryTargetUserMessage(history, "missing"))
+    }
+
+    @Test
+    fun `retry is refused while the latest reply is still streaming`() {
+        val streaming = ChatMessage(id = "a2", content = "", role = MessageRole.ASSISTANT, isStreaming = true)
+        val history = listOf(user("u1"), assistant("a1"), user("u2"), streaming)
+        assertEquals(null, ChatHistoryHygiene.retryTargetUserMessage(history, "a2"))
+    }
 }

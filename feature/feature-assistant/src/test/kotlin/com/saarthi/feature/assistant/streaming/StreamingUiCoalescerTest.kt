@@ -61,4 +61,21 @@ class StreamingUiCoalescerTest {
 
         assertEquals(listOf("one", "two"), flushed)
     }
+
+    @Test
+    fun `deferred text is built only when a flush is due`() {
+        var now = 1_000L
+        var builds = 0
+        val flushed = mutableListOf<String>()
+        val coalescer = StreamingUiCoalescer(flushIntervalMs = 80L, clock = { now })
+
+        assertTrue(coalescer.onTokenDeferred({ builds++; "a" }) { flushed += it })
+        now += 10
+        assertFalse(coalescer.onTokenDeferred({ builds++; "ab" }) { flushed += it })
+        now += 80
+        assertTrue(coalescer.onTokenDeferred({ builds++; "abc" }) { flushed += it })
+
+        assertEquals(listOf("a", "abc"), flushed)
+        assertEquals("text must not be built for a skipped token", 2, builds)
+    }
 }

@@ -8,6 +8,8 @@ import com.saarthi.core.inference.DebugLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -227,7 +229,19 @@ class EngineLifecycleReleaseManager(
             if (!awaitIdleWhileBackgrounded("Engine")) return@launch
             DebugLogger.log("LITERT",
                 "App backgrounded for ${engineDelayMs / 1000}s — releasing engine")
-            releaseEngine()
+            // Non-cancellable once started: after Doze, this delayed job can
+            // resume in the same instant the user returns. The foreground
+            // callback then still saw a resident engine (only recreated the
+            // Conversation), the release closed the engine underneath it, and
+            // the next message hit a model that was never reloaded. Re-check
+            // visibility AFTER the release and reload if the user is back.
+            withContext(NonCancellable) {
+                releaseEngine()
+                if (visibleActivityCount > 0) {
+                    DebugLogger.log("LITERT", "Engine released while returning to foreground — triggering reload")
+                    onReturnedToForeground()
+                }
+            }
         }
     }
 

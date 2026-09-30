@@ -402,8 +402,127 @@ enum class SupportedLanguage(
 
     // ── Misc UI labels (Hindi done; other languages fall back to English until
     //     their language pass — see language-by-language rollout). ──────────────
-    /** Message long-press menu: copy. */
-    val copyLabel: String get() = when (this) { HINDI -> "कॉपी करें"; MARATHI -> "कॉपी करा"; else -> "Copy" }
+    /** Message long-press menu + bubble action chip: copy. */
+    val copyLabel: String get() = when (this) {
+        ENGLISH  -> "Copy"
+        HINDI    -> "कॉपी करें"
+        TAMIL    -> "நகலெடு"
+        TELUGU   -> "కాపీ చేయి"
+        BENGALI  -> "কপি করুন"
+        MARATHI  -> "कॉपी करा"
+        KANNADA  -> "ನಕಲಿಸಿ"
+        GUJARATI -> "કૉપિ કરો"
+        PUNJABI  -> "ਕਾਪੀ ਕਰੋ"
+        ODIA     -> "କପି କରନ୍ତୁ"
+    }
+    /** Chat send blocked: the message exceeds what the loaded model's prompt can hold ([n] = max chars). */
+    fun messageTooLong(n: Int): String = when (this) {
+        ENGLISH  -> "Your message is too long ($n characters max for this model). Please shorten it or send it in parts."
+        HINDI    -> "आपका संदेश बहुत लंबा है (इस मॉडल के लिए अधिकतम $n अक्षर)। कृपया इसे छोटा करें या हिस्सों में भेजें।"
+        TAMIL    -> "உங்கள் செய்தி மிக நீளமாக உள்ளது (இந்த மாடலுக்கு அதிகபட்சம் $n எழுத்துகள்). சுருக்கவும் அல்லது பகுதிகளாக அனுப்பவும்."
+        TELUGU   -> "మీ సందేశం చాలా పొడవుగా ఉంది (ఈ మోడల్‌కు గరిష్టంగా $n అక్షరాలు). దయచేసి దాన్ని తగ్గించండి లేదా భాగాలుగా పంపండి."
+        BENGALI  -> "আপনার বার্তাটি খুব বড় (এই মডেলের জন্য সর্বোচ্চ $n অক্ষর)। অনুগ্রহ করে ছোট করুন বা ভাগে ভাগে পাঠান।"
+        MARATHI  -> "तुमचा संदेश खूप मोठा आहे (या मॉडेलसाठी जास्तीत जास्त $n अक्षरे). कृपया तो छोटा करा किंवा भागांमध्ये पाठवा."
+        KANNADA  -> "ನಿಮ್ಮ ಸಂದೇಶ ತುಂಬಾ ಉದ್ದವಾಗಿದೆ (ಈ ಮಾದರಿಗೆ ಗರಿಷ್ಠ $n ಅಕ್ಷರಗಳು). ದಯವಿಟ್ಟು ಅದನ್ನು ಚಿಕ್ಕದಾಗಿಸಿ ಅಥವಾ ಭಾಗಗಳಾಗಿ ಕಳುಹಿಸಿ."
+        GUJARATI -> "તમારો સંદેશ ખૂબ લાંબો છે (આ મૉડલ માટે મહત્તમ $n અક્ષરો). કૃપા કરીને તેને ટૂંકો કરો અથવા ભાગોમાં મોકલો."
+        PUNJABI  -> "ਤੁਹਾਡਾ ਸੁਨੇਹਾ ਬਹੁਤ ਲੰਮਾ ਹੈ (ਇਸ ਮਾਡਲ ਲਈ ਵੱਧ ਤੋਂ ਵੱਧ $n ਅੱਖਰ)। ਕਿਰਪਾ ਕਰਕੇ ਇਸਨੂੰ ਛੋਟਾ ਕਰੋ ਜਾਂ ਹਿੱਸਿਆਂ ਵਿੱਚ ਭੇਜੋ।"
+        ODIA     -> "ଆପଣଙ୍କ ବାର୍ତ୍ତା ବହୁତ ଲମ୍ବା (ଏହି ମଡେଲ ପାଇଁ ସର୍ବାଧିକ $n ଅକ୍ଷର)। ଦୟାକରି ଏହାକୁ ଛୋଟ କରନ୍ତୁ କିମ୍ବା ଭାଗରେ ପଠାନ୍ତୁ।"
+    }
+
+    /** Chat list top: page in messages older than the loaded window. */
+    val loadEarlierMessagesLabel: String get() = when (this) {
+        ENGLISH  -> "Load earlier messages"
+        HINDI    -> "पुराने संदेश देखें"
+        TAMIL    -> "முந்தைய செய்திகளைக் காட்டு"
+        TELUGU   -> "మునుపటి సందేశాలు చూపించు"
+        BENGALI  -> "আগের বার্তা দেখুন"
+        MARATHI  -> "जुने संदेश पहा"
+        KANNADA  -> "ಹಿಂದಿನ ಸಂದೇಶಗಳನ್ನು ತೋರಿಸಿ"
+        GUJARATI -> "જૂના સંદેશા જુઓ"
+        PUNJABI  -> "ਪੁਰਾਣੇ ਸੁਨੇਹੇ ਵੇਖੋ"
+        ODIA     -> "ପୁରୁଣା ବାର୍ତ୍ତା ଦେଖନ୍ତୁ"
+    }
+
+    /** Message long-press menu: open the text in a selectable view. */
+    val selectTextLabel: String get() = when (this) {
+        ENGLISH  -> "Select text"
+        HINDI    -> "टेक्स्ट चुनें"
+        TAMIL    -> "உரையைத் தேர்ந்தெடு"
+        TELUGU   -> "టెక్స్ట్ ఎంచుకోండి"
+        BENGALI  -> "লেখা নির্বাচন করুন"
+        MARATHI  -> "मजकूर निवडा"
+        KANNADA  -> "ಪಠ್ಯ ಆಯ್ಕೆಮಾಡಿ"
+        GUJARATI -> "લખાણ પસંદ કરો"
+        PUNJABI  -> "ਲਿਖਤ ਚੁਣੋ"
+        ODIA     -> "ଲେଖା ବାଛନ୍ତୁ"
+    }
+
+    /** Dismiss button for a read-only dialog. */
+    val closeLabel: String get() = when (this) {
+        ENGLISH  -> "Close"
+        HINDI    -> "बंद करें"
+        TAMIL    -> "மூடு"
+        TELUGU   -> "మూసివేయి"
+        BENGALI  -> "বন্ধ করুন"
+        MARATHI  -> "बंद करा"
+        KANNADA  -> "ಮುಚ್ಚಿ"
+        GUJARATI -> "બંધ કરો"
+        PUNJABI  -> "ਬੰਦ ਕਰੋ"
+        ODIA     -> "ବନ୍ଦ କରନ୍ତୁ"
+    }
+
+    /** Bubble action chip: regenerate the latest reply. */
+    val retryLabel: String get() = when (this) {
+        ENGLISH  -> "Retry"
+        HINDI    -> "फिर से"
+        TAMIL    -> "மீண்டும்"
+        TELUGU   -> "మళ్ళీ"
+        BENGALI  -> "আবার"
+        MARATHI  -> "पुन्हा"
+        KANNADA  -> "ಮತ್ತೆ"
+        GUJARATI -> "ફરી"
+        PUNJABI  -> "ਦੁਬਾਰਾ"
+        ODIA     -> "ପୁଣି"
+    }
+    /** Bubble action chip: read the reply aloud. */
+    val listenLabel: String get() = when (this) {
+        ENGLISH  -> "Listen"
+        HINDI    -> "सुनें"
+        TAMIL    -> "கேள்"
+        TELUGU   -> "వినండి"
+        BENGALI  -> "শুনুন"
+        MARATHI  -> "ऐका"
+        KANNADA  -> "ಕೇಳಿ"
+        GUJARATI -> "સાંભળો"
+        PUNJABI  -> "ਸੁਣੋ"
+        ODIA     -> "ଶୁଣନ୍ତୁ"
+    }
+    /** Bubble action chip: stop reading aloud. */
+    val stopSpeakingLabel: String get() = when (this) {
+        ENGLISH  -> "Stop"
+        HINDI    -> "रोकें"
+        TAMIL    -> "நிறுத்து"
+        TELUGU   -> "ఆపు"
+        BENGALI  -> "থামান"
+        MARATHI  -> "थांबवा"
+        KANNADA  -> "ನಿಲ್ಲಿಸಿ"
+        GUJARATI -> "બંધ કરો"
+        PUNJABI  -> "ਰੋਕੋ"
+        ODIA     -> "ବନ୍ଦ କରନ୍ତୁ"
+    }
+    /** TalkBack live-region text while a reply is streaming. */
+    val generatingReplyA11y: String get() = when (this) {
+        ENGLISH  -> "Saarthi is generating a response"
+        HINDI    -> "सारथी जवाब लिख रहा है"
+        TAMIL    -> "சாரதி பதிலை உருவாக்குகிறது"
+        TELUGU   -> "సారథి సమాధానం రూపొందిస్తోంది"
+        BENGALI  -> "সারথি উত্তর তৈরি করছে"
+        MARATHI  -> "सारथी उत्तर लिहित आहे"
+        KANNADA  -> "ಸಾರಥಿ ಉತ್ತರ ರಚಿಸುತ್ತಿದೆ"
+        GUJARATI -> "સારથી જવાબ તૈયાર કરી રહ્યું છે"
+        PUNJABI  -> "ਸਾਰਥੀ ਜਵਾਬ ਤਿਆਰ ਕਰ ਰਿਹਾ ਹੈ"
+        ODIA     -> "ସାରଥୀ ଉତ୍ତର ପ୍ରସ୍ତୁତ କରୁଛି"
+    }
     /** Message long-press menu / delete actions. */
     val deleteLabel: String get() = when (this) { HINDI -> "हटाएँ"; MARATHI -> "हटवा"; else -> "Delete" }
     /** Search box placeholder. */
@@ -1327,6 +1446,48 @@ enum class SupportedLanguage(
         GUJARATI -> "હું હમણાં જવાબ બનાવી શક્યો નહીં. ફરી પ્રયાસ કરો — વારંવાર થાય તો, Settings માં હળવા મૉડલ પર જાઓ."
         PUNJABI  -> "ਮੈਂ ਹੁਣੇ ਜਵਾਬ ਨਹੀਂ ਬਣਾ ਸਕਿਆ। ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ — ਜੇ ਵਾਰ-ਵਾਰ ਹੋਵੇ, ਤਾਂ Settings ਵਿੱਚ ਹਲਕਾ ਮਾਡਲ ਚੁਣੋ।"
         ODIA     -> "ମୁଁ ବର୍ତ୍ତମାନ ଉତ୍ତର ତିଆରି କରିପାରିଲି ନାହିଁ। ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ — ବାରମ୍ବାର ହେଲେ, Settings ରେ ହାଲୁକା ମଡେଲକୁ ଯାଆନ୍ତୁ।"
+    }
+
+    /** Attached documents don't clearly answer the question (shown without running the model). */
+    val ragRetrievalMissReply: String get() = when (this) {
+        ENGLISH  -> "I couldn't find clear support for that in the attached document(s). Try naming the chapter, section, page, or a specific phrase from the file."
+        HINDI    -> "संलग्न दस्तावेज़ में मुझे इसका स्पष्ट उत्तर नहीं मिला। अध्याय, सेक्शन, पेज नंबर या फ़ाइल का कोई खास वाक्यांश बताकर पूछें।"
+        TAMIL    -> "இணைக்கப்பட்ட ஆவணத்தில் இதற்கான தெளிவான பதில் கிடைக்கவில்லை. அத்தியாயம், பிரிவு, பக்க எண் அல்லது கோப்பிலுள்ள ஒரு குறிப்பிட்ட சொற்றொடரைக் குறிப்பிட்டுக் கேளுங்கள்."
+        TELUGU   -> "జత చేసిన పత్రంలో దీనికి స్పష్టమైన సమాధానం దొరకలేదు. అధ్యాయం, విభాగం, పేజీ సంఖ్య లేదా ఫైల్‌లోని ఒక నిర్దిష్ట పదబంధాన్ని చెప్పి అడగండి."
+        BENGALI  -> "সংযুক্ত নথিতে এর স্পষ্ট উত্তর পাইনি। অধ্যায়, বিভাগ, পৃষ্ঠা নম্বর বা ফাইলের কোনো নির্দিষ্ট বাক্যাংশ উল্লেখ করে জিজ্ঞাসা করুন।"
+        MARATHI  -> "जोडलेल्या दस्तऐवजात मला याचे स्पष्ट उत्तर मिळाले नाही. प्रकरण, विभाग, पान क्रमांक किंवा फाइलमधील एखादा विशिष्ट शब्दप्रयोग सांगून विचारा."
+        KANNADA  -> "ಲಗತ್ತಿಸಿದ ದಾಖಲೆಯಲ್ಲಿ ಇದಕ್ಕೆ ಸ್ಪಷ್ಟ ಉತ್ತರ ಸಿಗಲಿಲ್ಲ. ಅಧ್ಯಾಯ, ವಿಭಾಗ, ಪುಟ ಸಂಖ್ಯೆ ಅಥವಾ ಫೈಲ್‌ನ ನಿರ್ದಿಷ್ಟ ಪದಗುಚ್ಛವನ್ನು ಹೇಳಿ ಕೇಳಿ."
+        GUJARATI -> "જોડેલા દસ્તાવેજમાં આનો સ્પષ્ટ જવાબ મળ્યો નહીં. પ્રકરણ, વિભાગ, પાન નંબર અથવા ફાઇલનો કોઈ ચોક્કસ શબ્દસમૂહ જણાવીને પૂછો."
+        PUNJABI  -> "ਜੋੜੇ ਗਏ ਦਸਤਾਵੇਜ਼ ਵਿੱਚ ਇਸਦਾ ਸਪਸ਼ਟ ਜਵਾਬ ਨਹੀਂ ਮਿਲਿਆ। ਅਧਿਆਇ, ਭਾਗ, ਪੰਨਾ ਨੰਬਰ ਜਾਂ ਫ਼ਾਈਲ ਦਾ ਕੋਈ ਖ਼ਾਸ ਵਾਕਾਂਸ਼ ਦੱਸ ਕੇ ਪੁੱਛੋ।"
+        ODIA     -> "ସଂଲଗ୍ନ ଦସ୍ତାବିଜରେ ଏହାର ସ୍ପଷ୍ଟ ଉତ୍ତର ମିଳିଲା ନାହିଁ। ଅଧ୍ୟାୟ, ବିଭାଗ, ପୃଷ୍ଠା ନମ୍ବର କିମ୍ବା ଫାଇଲର କୌଣସି ନିର୍ଦ୍ଦିଷ୍ଟ ବାକ୍ୟାଂଶ କହି ପଚାରନ୍ତୁ।"
+    }
+
+    /** The question names a different law/document than the one attached (shown without running the model). */
+    val ragDocumentMismatchReply: String get() = when (this) {
+        ENGLISH  -> "Your question seems to be about a different document than the one attached. Ask about the attached file, or attach the document you mean."
+        HINDI    -> "आपका सवाल संलग्न दस्तावेज़ से अलग किसी दस्तावेज़ के बारे में लगता है। संलग्न फ़ाइल के बारे में पूछें, या जिस दस्तावेज़ की बात है उसे संलग्न करें।"
+        TAMIL    -> "உங்கள் கேள்வி இணைக்கப்பட்டதிலிருந்து வேறு ஆவணத்தைப் பற்றியதாகத் தெரிகிறது. இணைத்த கோப்பைப் பற்றிக் கேளுங்கள், அல்லது நீங்கள் குறிப்பிடும் ஆவணத்தை இணைக்கவும்."
+        TELUGU   -> "మీ ప్రశ్న జత చేసిన దానికంటే వేరే పత్రం గురించి ఉన్నట్లుంది. జత చేసిన ఫైల్ గురించి అడగండి, లేదా మీరు అనుకుంటున్న పత్రాన్ని జత చేయండి."
+        BENGALI  -> "আপনার প্রশ্নটি সংযুক্ত নথি ছাড়া অন্য কোনো নথি নিয়ে মনে হচ্ছে। সংযুক্ত ফাইল নিয়ে জিজ্ঞাসা করুন, অথবা যে নথির কথা বলছেন সেটি সংযুক্ত করুন।"
+        MARATHI  -> "तुमचा प्रश्न जोडलेल्या दस्तऐवजापेक्षा वेगळ्या दस्तऐवजाबद्दल वाटतो. जोडलेल्या फाइलबद्दल विचारा, किंवा तुम्हाला हवा असलेला दस्तऐवज जोडा."
+        KANNADA  -> "ನಿಮ್ಮ ಪ್ರಶ್ನೆ ಲಗತ್ತಿಸಿದ್ದಕ್ಕಿಂತ ಬೇರೆ ದಾಖಲೆಯ ಬಗ್ಗೆ ಇರುವಂತಿದೆ. ಲಗತ್ತಿಸಿದ ಫೈಲ್ ಬಗ್ಗೆ ಕೇಳಿ, ಅಥವಾ ನೀವು ಹೇಳುತ್ತಿರುವ ದಾಖಲೆಯನ್ನು ಲಗತ್ತಿಸಿ."
+        GUJARATI -> "તમારો પ્રશ્ન જોડેલા દસ્તાવેજ સિવાયના કોઈ બીજા દસ્તાવેજ વિશે લાગે છે. જોડેલી ફાઇલ વિશે પૂછો, અથવા તમે જે દસ્તાવેજની વાત કરો છો તે જોડો."
+        PUNJABI  -> "ਤੁਹਾਡਾ ਸਵਾਲ ਜੋੜੇ ਗਏ ਦਸਤਾਵੇਜ਼ ਤੋਂ ਵੱਖਰੇ ਦਸਤਾਵੇਜ਼ ਬਾਰੇ ਲੱਗਦਾ ਹੈ। ਜੋੜੀ ਗਈ ਫ਼ਾਈਲ ਬਾਰੇ ਪੁੱਛੋ, ਜਾਂ ਜਿਸ ਦਸਤਾਵੇਜ਼ ਦੀ ਗੱਲ ਹੈ ਉਸਨੂੰ ਜੋੜੋ।"
+        ODIA     -> "ଆପଣଙ୍କ ପ୍ରଶ୍ନ ସଂଲଗ୍ନ ଦସ୍ତାବିଜଠାରୁ ଭିନ୍ନ ଏକ ଦସ୍ତାବିଜ ବିଷୟରେ ଲାଗୁଛି। ସଂଲଗ୍ନ ଫାଇଲ ବିଷୟରେ ପଚାରନ୍ତୁ, କିମ୍ବା ଆପଣ କହୁଥିବା ଦସ୍ତାବିଜ ସଂଲଗ୍ନ କରନ୍ତୁ।"
+    }
+
+    /** Document is indexed but no excerpt fit this turn's prompt budget (shown without running the model). */
+    val ragGroundedDeliveryFailedReply: String get() = when (this) {
+        ENGLISH  -> "I've loaded your document but couldn't fit its excerpts into this turn. Try a shorter or more specific question."
+        HINDI    -> "आपका दस्तावेज़ लोड हो गया है, पर इस बार उसके अंश जगह में नहीं आ सके। छोटा या ज़्यादा स्पष्ट सवाल पूछकर देखें।"
+        TAMIL    -> "உங்கள் ஆவணம் ஏற்றப்பட்டது, ஆனால் இந்த முறை அதன் பகுதிகளைச் சேர்க்க இடமில்லை. சுருக்கமான அல்லது குறிப்பிட்ட கேள்வியைக் கேட்டுப் பாருங்கள்."
+        TELUGU   -> "మీ పత్రం లోడ్ అయింది, కానీ ఈసారి దాని భాగాలను చేర్చడానికి స్థలం సరిపోలేదు. చిన్న లేదా మరింత నిర్దిష్టమైన ప్రశ్న అడిగి చూడండి."
+        BENGALI  -> "আপনার নথি লোড হয়েছে, কিন্তু এবার এর অংশগুলো জায়গায় আঁটানো যায়নি। ছোট বা আরও নির্দিষ্ট প্রশ্ন করে দেখুন।"
+        MARATHI  -> "तुमचा दस्तऐवज लोड झाला आहे, पण या वेळी त्याचे उतारे बसवता आले नाहीत. छोटा किंवा अधिक नेमका प्रश्न विचारून पाहा."
+        KANNADA  -> "ನಿಮ್ಮ ದಾಖಲೆ ಲೋಡ್ ಆಗಿದೆ, ಆದರೆ ಈ ಬಾರಿ ಅದರ ಭಾಗಗಳನ್ನು ಸೇರಿಸಲು ಸ್ಥಳ ಸಾಕಾಗಲಿಲ್ಲ. ಚಿಕ್ಕ ಅಥವಾ ಹೆಚ್ಚು ನಿರ್ದಿಷ್ಟ ಪ್ರಶ್ನೆ ಕೇಳಿ ನೋಡಿ."
+        GUJARATI -> "તમારો દસ્તાવેજ લોડ થઈ ગયો છે, પણ આ વખતે તેના અંશો સમાવી શકાયા નહીં. ટૂંકો અથવા વધુ ચોક્કસ પ્રશ્ન પૂછી જુઓ."
+        PUNJABI  -> "ਤੁਹਾਡਾ ਦਸਤਾਵੇਜ਼ ਲੋਡ ਹੋ ਗਿਆ ਹੈ, ਪਰ ਇਸ ਵਾਰ ਉਸਦੇ ਹਿੱਸੇ ਸਮਾ ਨਹੀਂ ਸਕੇ। ਛੋਟਾ ਜਾਂ ਵਧੇਰੇ ਖ਼ਾਸ ਸਵਾਲ ਪੁੱਛ ਕੇ ਦੇਖੋ।"
+        ODIA     -> "ଆପଣଙ୍କ ଦସ୍ତାବିଜ ଲୋଡ ହୋଇଛି, କିନ୍ତୁ ଏଥର ଏହାର ଅଂଶଗୁଡ଼ିକ ସ୍ଥାନରେ ଖାପ ଖାଇଲା ନାହିଁ। ଛୋଟ କିମ୍ବା ଅଧିକ ନିର୍ଦ୍ଦିଷ୍ଟ ପ୍ରଶ୍ନ ପଚାରି ଦେଖନ୍ତୁ।"
     }
 
     /** Kisan chat: model not loaded (low memory). */

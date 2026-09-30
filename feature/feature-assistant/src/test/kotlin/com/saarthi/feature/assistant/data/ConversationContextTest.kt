@@ -183,4 +183,28 @@ class ConversationContextTest {
             olderMessagesOmittedFromPrompt(4, isCompact = false, isLarge = true, grounded = false, roomy = true),
         )
     }
+
+    @Test
+    fun `back-references are detected across languages`() {
+        assertTrue(referencesEarlierReply("Can you explain point 3?"))
+        assertTrue(referencesEarlierReply("what did you mention about the second step"))
+        assertTrue(referencesEarlierReply("expand on the answer above"))
+        assertTrue(referencesEarlierReply("आपने कहा था कि यह सस्ता है, क्यों?"))
+        assertTrue(referencesEarlierReply("మీరు చెప్పిన విషయం వివరించండి"))
+        assertFalse(referencesEarlierReply("What is the capital of India?"))
+    }
+
+    @Test
+    fun `a back-reference carries more of the latest reply only`() {
+        val longReply = "Step detail. ".repeat(100) // ~1300 chars
+        val turns = listOf("q1" to longReply, "q2" to longReply)
+        val normal = formatConversationContext(turns, isLarge = true, grounded = false)
+        val expanded = formatConversationContext(turns, isLarge = true, grounded = false, expandLatestReply = true)
+        val normalLines = normal.lines().filter { it.startsWith("Saarthi: ") }
+        val expandedLines = expanded.lines().filter { it.startsWith("Saarthi: ") }
+        assertEquals(normalLines.size, expandedLines.size)
+        assertEquals("older reply keeps its cap", normalLines.first(), expandedLines.first())
+        assertTrue("latest reply grows", expandedLines.last().length > normalLines.last().length + 200)
+    }
 }
+

@@ -1,0 +1,445 @@
+package com.saarthi.feature.assistant.data
+
+import android.content.Context
+import com.saarthi.core.common.isSqliteUnusable
+import com.saarthi.core.common.sqliteWriteWithRetry
+import com.saarthi.core.i18n.LanguageManager
+import com.saarthi.core.i18n.PackId
+import com.saarthi.core.i18n.chatInferenceNotReadyMessage
+import com.saarthi.core.inference.DebugLogger
+import com.saarthi.core.inference.InferenceService
+import com.saarthi.core.inference.engine.InferenceEngine
+import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.prompt.SystemPromptProvider
+import com.saarthi.core.memory.db.ConversationDao
+import com.saarthi.core.memory.db.ConversationEntity
+import com.saarthi.core.memory.db.DatabaseTransactionRunner
+import com.saarthi.feature.assistant.domain.ChatMessage
+import com.saarthi.feature.assistant.domain.MessageRole
+import com.saarthi.feature.assistant.streaming.StreamingUiCoalescer
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.UUID
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Self-contained Q&A engine for a knowledge pack (Kisan today) — the pack
+ * chat's state, prompt assembly and generation.
+ *
+ * App-scoped ([Singleton]) so a turn keeps running and its answer lands when
+ * the user leaves the pack screen: turns used to run in the ViewModel's scope,
+ * which navigation cancelled, losing the answer. [PackChatViewModel] is a thin
+ * UI adapter over this.
+ *
+ * Deliberately INDEPENDENT of the main chat:
+ *   • Reuses ONLY the shared low-level [InferenceEngine] (the model) and
+ *     [RagDocumentRepository] BM25 scoped to the pack's sentinel
+ *     sessionId.
+ *   • Reads / writes its OWN persisted conversation under a DEDICATED
+ *     sessionId ([PACK_CHAT_SESSION]) that is never a chat-session row —
+ *     so it survives navigation + app restart, is manageable (clear),
+ *     and yet never appears in the main chat's session list nor bleeds
+ *     persona / context into normal chats.
+ *   • Honours the user's selected language: the pack's curated content
+ *     stays English, but the model is instructed to ANSWER in the
+ *     selected language (standard cross-lingual RAG — Gemma reads the
+ *     English source and replies in Hindi / Tamil / etc.).
+ *
+ * Generalisable: only [packSessionId], [PACK_CHAT_SESSION] and the
+ * prompt preamble are pack-specific.
+ */
+@Singleton
+class PackChatRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val inferenceEngine: InferenceEngine,
+    private val ragRepository: RagDocumentRepository,
+    private val conversationDao: ConversationDao,
+    private val transactionRunner: DatabaseTransactionRunner,
+    private val languageManager: LanguageManager,
+    private val kisanPackPreference: com.saarthi.core.i18n.KisanPackPreference,
+    private val packInstaller: KisanPackInstaller,
+    private val systemPromptProvider: SystemPromptProvider,
+) {
+
+    // Main.immediate: the same dispatcher the ViewModel scope used, so the turn
+    // logic runs exactly as before — only its lifetime changed (app, not screen).
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    private val packSessionId = PackId.KISAN.sessionId            // RAG chunks
+    private val chatSessionId = PACK_CHAT_SESSION                 // persisted messages
+
+    /** When the installed pack data was published — surfaced so the model can
+     *  flag figures as "as of <date>" rather than presenting stale data as live. */
+    @Volatile private var packPublishedAt: String = ""
+    /** Installed pack version — surfaced in the freshness footer + log so data
+     *  provenance is auditable (which pack snapshot produced this answer). */
+    @Volatile private var packVersion: Int = 0
+
+    /** Official MSP values from the signed pack. Used to GROUND MSP answers in
+     *  the exact table (the LLM then renders in the user's language). */
+    @Volatile private var mspRecords: List<KisanPackInstaller.MspRecord> = emptyList()
+
+    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+
+    private val _isGenerating = MutableStateFlow(false)
+    val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
+
+    init {
+        // Restore the persisted pack conversation so "go back and return"
+        // shows the prior chat (the gap the user reported). Once per process:
+        // every pack-message write goes through this repository, so the
+        // in-memory thread (including a still-streaming answer) stays current.
+        scope.launch {
+            val saved = runCatching {
+                conversationDao.getRecentBySession(
+                    chatSessionId,
+                    ConversationDao.UI_HISTORY_LIMIT,
+                )
+            }.getOrDefault(emptyList())
+            if (saved.isNotEmpty()) {
+                _messages.value = ChatHistoryHygiene.dropOrphanedUserTurns(saved.map { it.toChatMessage() })
+            }
+        }
+    }
+
+    /**
+     * Load the pack's publish date + version so answers + logs can show data
+     * freshness/provenance (which snapshot this answer came from). Called each
+     * time the pack screen opens, as before, so an updated pack is picked up.
+     */
+    fun refreshPackMetadata() {
+        scope.launch {
+            val installed = runCatching { packInstaller.loadInstalledPack() }.getOrNull()
+            packPublishedAt = installed?.publishedAt.orEmpty()
+            packVersion = installed?.version ?: 0
+            mspRecords = runCatching { packInstaller.loadMspRecords() }.getOrDefault(emptyList())
+        }
+    }
+
+    /**
+     * Retry an answer: drop the assistant reply and the user question that
+     * produced it (in memory + DB), then re-ask that question fresh.
+     */
+    fun retry(messageId: String) {
+        if (_isGenerating.value) return
+        // Latest reply only — see ChatHistoryHygiene.retryTargetUserMessage.
+        val prevUser = ChatHistoryHygiene.retryTargetUserMessage(_messages.value, messageId) ?: return
+        _messages.update { list -> list.filterNot { it.id == messageId || it.id == prevUser.id } }
+        scope.launch {
+            withContext(NonCancellable) {
+                runCatching { conversationDao.deleteById(messageId) }
+                runCatching { conversationDao.deleteById(prevUser.id) }
+            }
+            ask(prevUser.content)
+        }
+    }
+
+    fun ask(rawQuestion: String) {
+        val question = rawQuestion.trim()
+        if (question.isEmpty() || _isGenerating.value) return
+
+        val userMsg = ChatMessage(content = question, role = MessageRole.USER)
+        val streamingId = UUID.randomUUID().toString()
+        val placeholder = ChatMessage(id = streamingId, content = "", role = MessageRole.ASSISTANT, isStreaming = true)
+        _messages.update { it + userMsg + placeholder }
+        _isGenerating.value = true
+
+        // Persist the user turn immediately so it survives even if the
+        // app is killed mid-generation.
+        scope.launch {
+            withContext(NonCancellable) {
+                runCatching { sqliteWriteWithRetry { conversationDao.insert(userMsg.toEntity(chatSessionId)) } }
+            }
+        }
+
+        scope.launch {
+            if (!inferenceEngine.isReady) {
+                val lang = languageManager.selectedLanguage.value
+                finish(
+                    streamingId,
+                    lang.chatInferenceNotReadyMessage(
+                        inferenceEngine.isInitializing,
+                        inferenceEngine.isReloadingAfterRelease,
+                        lang.packModelNotLoaded,
+                    ),
+                )
+                return@launch
+            }
+
+            // Capability gate (defense behind the pack screen's UI gate). The
+            // compact 1B model cannot follow grounded RAG instructions across a
+            // turn boundary — it loops / repeats on the second answer (see the
+            // "[REP] Loop detected" device logs). This engine is shared by every
+            // knowledge pack, so the gate covers all of them, not just Kisan.
+            // Rather than emit garbage, pack chat is browse-only on this tier and
+            // blocked with a clear, honest message. Reached only if the user
+            // switched to the compact model AFTER opening the chat — rare, but it
+            // must degrade gracefully.
+            if (!systemPromptProvider.supportsPackChat(inferenceEngine.activeModelName, inferenceEngine.activeModelPromptTier)) {
+                finish(streamingId, languageManager.selectedLanguage.value.packModelTooSmall)
+                return@launch
+            }
+
+            val lang = languageManager.selectedLanguage.value
+
+            // Center → State hierarchy. Capture the user's state if they
+            // mention it (conversational), persist it pack-scoped, and use it
+            // this turn. Empty state ⇒ identical behaviour to before.
+            val detectedState = com.saarthi.core.i18n.IndianStates.detect(question)
+            if (detectedState != null && !detectedState.equals(kisanPackPreference.userState.value, ignoreCase = true)) {
+                withContext(NonCancellable) { runCatching { kisanPackPreference.setUserState(detectedState) } }
+            }
+            val userState = detectedState ?: kisanPackPreference.userState.value
+
+            // MSP is critical structured data. When the user asks about MSP,
+            // ground the answer in the FULL official MSP table (exact values from
+            // the signed pack) so the right crop + value are always present —
+            // BM25 alone can't match a Marathi/Telugu query against 26 near-
+            // identical English MSP entries. The LLM then renders it in the
+            // selected language. Non-MSP questions use normal BM25 retrieval.
+            val mspGrounding = mspGroundingIfAsked(question)
+            val chunks = if (mspGrounding != null) {
+                DebugLogger.log("PACK", "MSP grounded (official table → LLM renders in lang)  packV=$packVersion crops=${mspRecords.size}")
+                mspGrounding
+            } else {
+                val searchQuery = if (userState.isNotBlank()) "$question $userState" else question
+                val searchResult = runCatching {
+                    ragRepository.search(
+                        packSessionId,
+                        searchQuery,
+                        topK = RagDocumentRepository.DEFAULT_TOP_K,
+                        expandSmallFiles = false,
+                    )
+                }
+                if (searchResult.exceptionOrNull()?.let { isSqliteUnusable(it) } == true) {
+                    finish(streamingId, lang.dbNeedsRestart)
+                    return@launch
+                }
+                val rawChunks = searchResult.getOrDefault(emptyList())
+                // Keep every central chunk; keep a STATE-OVERLAY chunk only when
+                // it matches the user's state.
+                rawChunks.filter { c ->
+                    val cs = com.saarthi.core.i18n.IndianStates.statePrefixOf(c.docName)
+                    cs == null ||
+                        cs.equals(userState, ignoreCase = true) ||
+                        (cs == com.saarthi.core.i18n.IndianStates.NORTH_EAST &&
+                            com.saarthi.core.i18n.IndianStates.isNorthEast(userState))
+                }
+            }
+
+            // No pack match → still answer, but as clearly-labelled general
+            // information (the model is told to say it isn't from the pack).
+            // Non-empty → grounded prompt; the prompt's own fallback rule
+            // covers the partial-coverage case.
+            val prompt = if (chunks.isEmpty()) {
+                buildKisanGeneralFallbackPrompt(question, lang)
+            } else {
+                buildKisanPackPrompt(
+                    question = question,
+                    chunks = chunks,
+                    lang = lang,
+                    state = userState,
+                    packPublishedAt = packPublishedAt,
+                    maxContextTokens = inferenceEngine.maxContextTokens,
+                )
+            }
+            // KISAN marks the notes-grounded prompt so the engine uses the
+            // grounded sampler (temp 0.4) — amounts and eligibility must not
+            // run at the chat default of 1.0. The general fallback is not
+            // grounded in notes and keeps the normal sampler.
+            val packType = if (chunks.isEmpty()) PackType.BASE else PackType.KISAN
+            // The source line is built HERE from the actual retrieved pack
+            // topics (or "General" on no match) — never authored by the model,
+            // so it's always a real pack scheme name, not the prompt header.
+            val sourceLabel = sourceLabelFor(chunks)
+            DebugLogger.log("PACK", "Kisan Q&A — packV=$packVersion asOf=${freshnessDate().ifBlank { "?" }} chunks=${chunks.size} lang=${lang.code} state=${userState.ifBlank { "-" }} source=$sourceLabel promptChars=${prompt.length}")
+
+            InferenceService.startGenerating(context)
+            val acc = StringBuilder()
+            val streamCoalescer = StreamingUiCoalescer()
+            inferenceEngine.generateStream(prompt, packType)
+                .catch { e ->
+                    if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
+                    // Never surface raw native errors (e.g. token-overflow) to the
+                    // farmer — show a clean, actionable message instead.
+                    DebugLogger.log("PACK", "Kisan generation error: ${e.message}")
+                    finish(streamingId, lang.packGenerationError)
+                }
+                .onEach { token ->
+                    acc.append(token)
+                    // Strip control tags LIVE so [GENERAL] / [SAARTHI_*] never
+                    // flash in the bubble while streaming (streaming=true also
+                    // holds back a partial marker still mid-stream).
+                    streamCoalescer.onTokenDeferred(
+                        { ResponseMarkerParser.stripForDisplay(acc.toString(), streaming = true) },
+                    ) { flushed ->
+                        updateStreaming(streamingId, flushed)
+                    }
+                }
+                .onCompletion { throwable ->
+                    if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
+                    if (throwable == null) {
+                        val raw = acc.toString().trim()
+                        // The model prefixes [GENERAL] when it answered from
+                        // general knowledge rather than the pack — detect from the
+                        // RAW text to label the source "General"; the tag itself is
+                        // stripped for display by stripForDisplay.
+                        val fellBackToGeneral = raw.trimStart().uppercase().startsWith("[GENERAL")
+                        val body = ResponseMarkerParser.stripForDisplay(raw, streaming = false).trim()
+                        val label = if (fellBackToGeneral) "General" else sourceLabel
+                        // Freshness footer: which pack snapshot + as-of date this
+                        // answer came from, so the user can judge how current it is.
+                        val asOf = freshnessDate().takeIf { it.isNotBlank() }?.let { " · as of $it" }.orEmpty()
+                        val withSource = if (body.isBlank()) body else "$body\n\n_Source: ${label}${asOf}_"
+                        finish(streamingId, withSource)
+                    }
+                }
+                .collect {}
+        }
+    }
+
+    /** Wipe the pack conversation — the "manage / start fresh" action. */
+    fun clear() {
+        _messages.update { emptyList() }
+        scope.launch {
+            withContext(NonCancellable) {
+                val wiped = runCatching { conversationDao.deleteBySession(chatSessionId) }
+                // VACUUM cannot run inside a transaction; this path isn't in
+                // one. Same best-effort helper as main-chat bulk deletes.
+                if (wiped.isSuccess) {
+                    transactionRunner.vacuum()
+                }
+            }
+        }
+    }
+
+    // ── Internal ─────────────────────────────────────────────────────
+
+    private fun updateStreaming(id: String, text: String) {
+        _messages.update { list ->
+            list.map { if (it.id == id) it.copy(content = text, isStreaming = true) else it }
+        }
+    }
+
+    private fun finish(id: String, finalText: String) {
+        val finalMsg = _messages.value.firstOrNull { it.id == id }
+            ?.copy(content = finalText, isStreaming = false)
+        _messages.update { list -> list.map { if (it.id == id) (finalMsg ?: it) else it } }
+        _isGenerating.value = false
+        // Persist the completed assistant turn so it reloads on return.
+        if (finalMsg != null) {
+            scope.launch {
+                withContext(NonCancellable) {
+                    runCatching { sqliteWriteWithRetry { conversationDao.insert(finalMsg.toEntity(chatSessionId)) } }
+                }
+            }
+        }
+    }
+
+    /**
+     * The citation shown under a Kisan answer. Built strictly from the
+     * retrieved pack chunks' topic names (docName == the pack entry's topic),
+     * deduped, the two most relevant. "General" when nothing matched — the
+     * graceful-fallback case. Never derived from model output.
+     */
+    /** Pack publish date as a plain YYYY-MM-DD (or "" if unknown). */
+    private fun freshnessDate(): String = packPublishedAt.take(10)
+
+    // MSP intent across the supported languages. "msp" (Latin) is the safest
+    // catch-all; the rest are best-effort — a miss just falls back to BM25.
+    private val mspTriggers = listOf(
+        "msp", "minimum support price", "support price", "samarthan",
+        "समर्थन मूल्य", "एमएसपी",
+        "हमीभाव", "हमी भाव",
+        "మద్దతు ధర",
+        "ஆதரவு விலை",
+        "সহায়ক মূল্য",
+        "ಬೆಂಬಲ ಬೆಲೆ",
+        "ટેકાનો ભાવ",
+        "ਸਮਰਥਨ ਮੁੱਲ",
+    )
+
+    /**
+     * If the question is about MSP, return the FULL official MSP table as a
+     * single grounding chunk (exact values, verbatim from the signed pack). The
+     * normal LLM path then answers the specific crop in the user's language.
+     * Returns null when it isn't an MSP question (then BM25 runs as usual).
+     * This sidesteps BM25's cross-lingual miss on 26 near-identical MSP entries.
+     */
+    private fun mspGroundingIfAsked(question: String): List<RetrievedChunk>? {
+        if (mspRecords.isEmpty()) return null
+        val q = question.lowercase()
+        if (mspTriggers.none { q.contains(it.lowercase()) }) return null
+        val table = mspRecords.joinToString("\n") { r ->
+            "${r.crop} (${r.season} ${r.marketingYear}): Rs ${r.value} per quintal"
+        }
+        val src = mspRecords.firstOrNull()?.sourceDocument.orEmpty()
+        val text = "Official Minimum Support Price (MSP), per quintal:\n$table\nSource: $src"
+        return listOf(RetrievedChunk(text = text, docName = "Minimum Support Price (MSP)", score = 1.0, chunkIndex = 0))
+    }
+
+    private fun sourceLabelFor(chunks: List<RetrievedChunk>): String {
+        if (chunks.isEmpty()) return "General"
+        return chunks
+            .map { schemeLabelOf(it.docName) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(2)
+            .joinToString(", ")
+            .ifBlank { "Kisan pack" }
+    }
+
+    /**
+     * Turn a pack docName into a SPECIFIC source label — the official scheme /
+     * programme name, never the bare state. Central topics read
+     * "Scheme (ABBR) — description" (scheme before the dash); state overlays
+     * read "State — Scheme (qualifier)" (scheme after the dash), so a
+     * Maharashtra add-on cites "Namo Shetkari Maha Samman Nidhi", not
+     * "Maharashtra".
+     */
+    private fun schemeLabelOf(docName: String): String {
+        val isStateOverlay = com.saarthi.core.i18n.IndianStates.statePrefixOf(docName) != null
+        val raw = if (isStateOverlay) {
+            val after = docName.substringAfter(" —").trim()
+            // Drop a trailing "(state add-on)" / "(qualifier)" so the scheme name stays.
+            (if (after.endsWith(")")) after.substringBeforeLast(" (").trim() else after)
+        } else {
+            docName.substringBefore(" —").trim()  // keep any "(ABBR)" — it IS the short name
+        }
+        return raw.take(48)
+    }
+
+    private fun ConversationEntity.toChatMessage() = ChatMessage(
+        id = id,
+        content = content,
+        role = if (role == MessageRole.USER.name) MessageRole.USER else MessageRole.ASSISTANT,
+        isStreaming = false,
+        tokenCount = tokenCount,
+        timestamp = timestamp,
+    )
+
+    companion object {
+        /**
+         * Dedicated conversation sessionId for the Kisan pack chat.
+         * Distinct from the RAG chunk session (`global_pack_kisan`) and
+         * from every main-chat session — and we never create a
+         * ChatSessionEntity for it, so it never appears in the main
+         * chat's history list.
+         */
+        private const val PACK_CHAT_SESSION = "pack_chat_kisan"
+    }
+}

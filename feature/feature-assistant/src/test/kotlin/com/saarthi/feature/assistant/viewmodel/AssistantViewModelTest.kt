@@ -16,12 +16,15 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -76,8 +79,15 @@ class AssistantViewModelTest {
     fun setUp() {
         // Minimal stubs for flows consumed in the init block.
         every { mockChatRepository.getHistory() } returns flowOf(emptyList())
+        every { mockChatRepository.isGenerating() } returns MutableStateFlow(false)
+        // The real repository collects the turn on its app scope; collect on
+        // the test Main dispatcher here so the turn actually runs.
+        every { mockChatRepository.launchTurn(any()) } answers {
+            firstArg<Flow<String>>().launchIn(CoroutineScope(Dispatchers.Main))
+        }
         every { mockChatRepository.getTokensPerSecond() } returns flowOf(0f)
         every { mockChatRepository.olderMessagesOmitted() } returns flowOf(false)
+        every { mockChatRepository.hasOlderMessages() } returns flowOf(false)
         every { mockChatRepository.getSessions() } returns flowOf(emptyList())
         every { mockChatRepository.getCurrentSessionId() } returns flowOf("default")
         every { mockInferenceEngine.isReady } returns false
@@ -87,6 +97,9 @@ class AssistantViewModelTest {
         every { mockInferenceEngine.isReloadingAfterRelease } returns false
         every { mockInferenceEngine.isReloadingAfterReleaseFlow } returns MutableStateFlow(false)
         every { mockInferenceEngine.activeModelNameFlow } returns activeModelNameFlow
+        // Relaxed mocks return a mocked enum (resolves as COMPACT), not null —
+        // null keeps the tier on the model-name fallback these tests drive.
+        every { mockInferenceEngine.activeModelPromptTier } returns null
         every { mockLanguageManager.selectedLanguage } returns MutableStateFlow(SupportedLanguage.ENGLISH)
         every { mockMemoryRepository.observeAll() } returns flowOf(emptyList())
         every { mockTtsManager.isSpeaking } returns MutableStateFlow(false)
@@ -137,6 +150,20 @@ class AssistantViewModelTest {
 
         assertFalse("Must not set isStreaming for blank input", vm.uiState.value.isStreaming)
         verify(exactly = 0) { mockChatRepository.streamResponse(any(), any()) }
+    }
+
+    @Test
+    fun `sendMessage over the model's length cap is blocked and keeps the text`() = runTest {
+        every { mockChatRepository.maxUserMessageChars() } returns 10
+        val vm = createViewModel()
+
+        vm.onInputChange("this message is too long")
+        vm.sendMessage()
+
+        verify(exactly = 0) { mockChatRepository.streamResponse(any(), any()) }
+        assertEquals("this message is too long", vm.uiState.value.inputText)
+        assertEquals(SupportedLanguage.ENGLISH.messageTooLong(10), vm.uiState.value.error)
+        assertFalse(vm.uiState.value.isStreaming)
     }
 
     @Test

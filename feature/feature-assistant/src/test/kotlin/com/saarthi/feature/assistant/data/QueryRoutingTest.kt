@@ -165,6 +165,15 @@ class QueryRoutingTest {
     }
 
     @Test
+    fun `a deliberate repeat after the double-tap window is not a duplicate`() {
+        val none = emptySet<String>()
+        assertTrue(isDuplicateTurn("another joke", none, "another joke", none, elapsedMsSinceLast = 300L))
+        assertFalse(
+            isDuplicateTurn("another joke", none, "another joke", none, elapsedMsSinceLast = DUPLICATE_TURN_WINDOW_MS + 1),
+        )
+    }
+
+    @Test
     fun `brief overview requests map to OVERVIEW_SHORT`() {
         assertEquals(
             RagAnswerShape.OVERVIEW_SHORT,

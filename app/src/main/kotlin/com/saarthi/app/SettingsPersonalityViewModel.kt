@@ -23,7 +23,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsPersonalityViewModel @Inject constructor(
     personalityPreference: PersonalityPreference,
-    inferenceEngine: InferenceEngine,
+    private val inferenceEngine: InferenceEngine,
     systemPromptProvider: SystemPromptProvider,
 ) : ViewModel() {
     val active: StateFlow<Personality> = personalityPreference.selected
@@ -31,7 +31,7 @@ class SettingsPersonalityViewModel @Inject constructor(
     /** False on Compact tier (1B) — mirrors PersonalityViewModel's own check. */
     val supportedForCurrentModel: StateFlow<Boolean> = inferenceEngine.activeModelNameFlow
         .map { modelName ->
-            systemPromptProvider.tierFor(modelName) != SystemPromptProvider.ModelTier.COMPACT
+            systemPromptProvider.tierFor(inferenceEngine.activeModelPromptTier, modelName) != SystemPromptProvider.ModelTier.COMPACT
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 }

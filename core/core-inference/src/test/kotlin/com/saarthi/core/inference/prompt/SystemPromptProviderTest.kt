@@ -1,6 +1,7 @@
 package com.saarthi.core.inference.prompt
 
 import com.saarthi.core.inference.model.PackType
+import com.saarthi.core.inference.model.PromptTier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -249,17 +250,17 @@ class SystemPromptProviderTest {
         )
         assertFalse(
             "Should not render memory section header when there are no facts",
-            prompt.contains("Facts the USER shared"),
+            prompt.contains("Facts the USER has shared"),
         )
     }
 
     @Test
-    fun build_memory_header_scopes_to_this_chat_and_disambiguates_identity() {
-        // Memory is per-chat (v1.0.24). The header must say "THIS chat" so
-        // (a) the model treats the facts as conversation-scoped, and
-        // (b) pronoun antecedents resolve to the user, not the assistant.
-        // Older header "What you remember about the user:" caused the
-        // Telugu-session "your name is Arjun" antecedent leak.
+    fun build_memory_header_attributes_facts_to_user_and_disambiguates_identity() {
+        // The block holds this chat's facts AND cross-chat profile facts
+        // (USER_SCOPE), so it must not claim "THIS chat". Pronoun antecedents
+        // must resolve to the user, not the assistant — the older header
+        // "What you remember about the user:" caused the Telugu-session
+        // "your name is Arjun" antecedent leak.
         val prompt = provider.build(
             modelName = "Gemma 3n",
             pack = PackType.BASE,
@@ -267,8 +268,8 @@ class SystemPromptProviderTest {
             memoryContext = "- name: Arjun",
         )
         assertTrue(
-            "Memory section header must scope to THIS chat. Got:\n$prompt",
-            prompt.contains("Facts the USER shared in THIS chat"),
+            "Memory section header must attribute the facts to the user. Got:\n$prompt",
+            prompt.contains("Facts the USER has shared with you") && !prompt.contains("THIS chat"),
         )
         assertTrue(
             "Memory section header must disambiguate user-facts from assistant identity",
@@ -447,4 +448,67 @@ class SystemPromptProviderTest {
             prompt.trimEnd().endsWith(tail.trimEnd()),
         )
     }
+
+    // ── resolveTier: catalog promptTier first, name only as fallback ───────
+
+    @Test
+    fun resolveTier_prefers_catalog_prompt_tier_over_display_name() {
+        // A catalog LARGE model whose display name has no "Gemma 4"/"3n" —
+        // name matching alone would have fallen to STANDARD.
+        assertEquals(
+            SystemPromptProvider.ModelTier.LARGE,
+            SystemPromptProvider.resolveTier(PromptTier.LARGE, "Saarthi Pro"),
+        )
+        assertEquals(
+            SystemPromptProvider.ModelTier.COMPACT,
+            SystemPromptProvider.resolveTier(PromptTier.COMPACT, "Gemma 3"),
+        )
+    }
+
+    @Test
+    fun resolveTier_falls_back_to_name_for_standard_or_unloaded() {
+        assertEquals(
+            SystemPromptProvider.ModelTier.LARGE,
+            SystemPromptProvider.resolveTier(PromptTier.STANDARD, "Gemma 4 E2B"),
+        )
+        assertEquals(
+            SystemPromptProvider.ModelTier.COMPACT,
+            SystemPromptProvider.resolveTier(null, "Gemma 3 1B"),
+        )
+        assertEquals(
+            SystemPromptProvider.ModelTier.STANDARD,
+            SystemPromptProvider.resolveTier(null, "some sideloaded model"),
+        )
+    }
+
+    @Test
+    fun lean_prompt_on_small_window_still_asks_for_memory_markers() {
+        // ≤1536-token windows (low-RAM phones) use the lean core; it must still
+        // tell the model how to save a personal fact, not rely on regex alone.
+        val prompt = provider.build(
+            modelName = "Gemma 4 E2B",
+            pack = PackType.BASE,
+            languageInstruction = "",
+            memoryContext = "",
+            maxContextTokens = 1536,
+        )
+        assertTrue("lean prompt must carry the memory marker rule", prompt.contains("[SAARTHI_MEMORY key="))
+    }
+
+    @Test
+    fun memory_rules_forbid_re_saving_listed_facts_on_every_tier() {
+        // Device log 2026-09-29: the model re-emitted a marker for an already
+        // stored fact on almost every turn, wasting reply tokens.
+        for ((model, window) in listOf("Gemma 4 E2B" to 4096, "Gemma 4 E2B" to 1536, "some model" to 4096)) {
+            val prompt = provider.build(
+                modelName = model,
+                pack = PackType.BASE,
+                languageInstruction = "",
+                memoryContext = "- name: Arjun",
+                maxContextTokens = window,
+            )
+            assertTrue("model=$model window=$window", prompt.contains("re-save"))
+        }
+    }
 }
+

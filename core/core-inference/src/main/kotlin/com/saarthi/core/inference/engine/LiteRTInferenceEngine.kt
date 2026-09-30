@@ -154,6 +154,9 @@ class LiteRTInferenceEngine @Inject constructor(
     override val activeModelNameFlow: Flow<String?> = _activeModelNameFlow.asStateFlow()
 
     @Volatile override var activeModelName: String? = null
+    // Set together with activeModelName (and before its flow emits) so a
+    // collector of activeModelNameFlow always reads the matching tier.
+    @Volatile override var activeModelPromptTier: PromptTier? = null
         private set
 
     // Surfaces the effective context-window the model was actually loaded
@@ -515,6 +518,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     loadedMaxTokens == config.maxTokens) {
                     DebugLogger.log("LITERT", "Already loaded — skipping: ${config.modelPath.substringAfterLast('/')}")
                     lastInferenceConfig = config
+                    activeModelPromptTier = config.promptTier
                     activeModelName = config.modelName
                     _activeModelNameFlow.value = config.modelName
                     return@withLock
@@ -527,6 +531,7 @@ class LiteRTInferenceEngine @Inject constructor(
 
                 setReady(false)
                 activeModelName = null
+                activeModelPromptTier = null
                 _activeModelNameFlow.value = null
                 closeInternal()
 
@@ -765,6 +770,7 @@ class LiteRTInferenceEngine @Inject constructor(
                     pinnedEffectiveMaxTokens = effectiveMaxTokens
                     loadedTemperature = config.temperature
                     loadedTopK = config.topK
+                    activeModelPromptTier = config.promptTier
                     activeModelName = config.modelName
                     _activeModelNameFlow.value = config.modelName
                     _isFreshConversation = true   // brand-new Conversation, no turns in KV
@@ -891,7 +897,29 @@ class LiteRTInferenceEngine @Inject constructor(
             }
     }
 
+    // ── Prompt token measurement (debug builds only) ──────────────────────
+    // Real prefill token counts, so the prompt budget's chars-per-token value
+    // (ChatRepositoryImpl.maxPromptChars, 3.0) can be checked per language on
+    // a device instead of assumed. Counts only — no prompt text is logged —
+    // and only to the on-device debug log. Release builds never enable the
+    // experimental benchmark flag.
+    @OptIn(com.google.ai.edge.litertlm.ExperimentalApi::class)
+    private fun enableBenchmarkFlag() {
+        runCatching { com.google.ai.edge.litertlm.ExperimentalFlags.enableBenchmark = true }
+    }
+
+    @OptIn(com.google.ai.edge.litertlm.ExperimentalApi::class)
+    private fun logPromptTokens(conversation: com.google.ai.edge.litertlm.Conversation, promptChars: Int) {
+        val tokens = runCatching { conversation.getBenchmarkInfo().lastPrefillTokenCount }.getOrNull() ?: return
+        if (tokens <= 0) return
+        DebugLogger.log(
+            "LITERT",
+            "[TOKENS] promptChars=$promptChars prefillTokens=$tokens charsPerToken=${"%.2f".format(promptChars.toFloat() / tokens)}",
+        )
+    }
+
     private fun buildEngine(modelPath: String, maxTokens: Int, backend: Backend): Engine {
+        if (TOKEN_METRICS_ENABLED) enableBenchmarkFlag()
         val engineConfig = EngineConfig(
             modelPath    = modelPath,
             backend      = backend,
@@ -921,9 +949,22 @@ class LiteRTInferenceEngine @Inject constructor(
      * markConvStarted/markConvReady APIs existed but were never called, so every
      * crash defaulted to conv-ready=true and banned GPU incorrectly.
      */
-    private fun createConversationTracked(eng: Engine, sampler: SamplerConfig?): Conversation {
+    private fun createConversationTracked(
+        eng: Engine,
+        sampler: SamplerConfig?,
+        systemInstruction: String? = null,
+    ): Conversation {
         crashRecoveryStore.markConvStarted()
-        val conversation = eng.createConversation(ConversationConfig(samplerConfig = sampler))
+        // No system instruction → the exact config every turn used before.
+        val config = if (systemInstruction == null) {
+            ConversationConfig(samplerConfig = sampler)
+        } else {
+            ConversationConfig(
+                systemInstruction = com.google.ai.edge.litertlm.Contents.of(systemInstruction),
+                samplerConfig = sampler,
+            )
+        }
+        val conversation = eng.createConversation(config)
         crashRecoveryStore.markConvReady()
         return conversation
     }
@@ -938,7 +979,7 @@ class LiteRTInferenceEngine @Inject constructor(
      * when it calls createConversation. Returns the new conversation, or null if
      * the engine is gone or creation failed (callers fall back to system state).
      */
-    private suspend fun recycleConversation(sampler: SamplerConfig?): Conversation? =
+    private suspend fun recycleConversation(sampler: SamplerConfig?, systemInstruction: String? = null): Conversation? =
         conversationLock.withLock {
             val eng = engine ?: run { activeConversation = null; return@withLock null }
             activeConversation?.let { old ->
@@ -947,7 +988,7 @@ class LiteRTInferenceEngine @Inject constructor(
             }
             // Failure leaves litert_conv_ready=false (markConvStarted ran, markConvReady
             // did not) — correct for crash attribution if the process dies here.
-            val fresh = runCatching { createConversationTracked(eng, sampler) }.getOrNull()
+            val fresh = runCatching { createConversationTracked(eng, sampler, systemInstruction) }.getOrNull()
             activeConversation = fresh
             _isFreshConversation = true
             fresh
@@ -998,7 +1039,15 @@ class LiteRTInferenceEngine @Inject constructor(
      *   immediately before send so we do not depend on the previous turn's
      *   onDone callback succeeding.
      */
-    override fun generateStream(prompt: String, packType: PackType): Flow<String> = callbackFlow<String> {
+    override fun generateStream(prompt: String, packType: PackType): Flow<String> =
+        generateStream(prompt, packType, samplerPolicy.isGroundedTurn(prompt, packType))
+
+    override fun generateStream(
+        prompt: String,
+        packType: PackType,
+        grounded: Boolean,
+        systemInstruction: String?,
+    ): Flow<String> = callbackFlow<String> {
         val eng = engine
             ?: throw IllegalStateException(
                 if (crashLoopBlocked)
@@ -1071,13 +1120,13 @@ class LiteRTInferenceEngine @Inject constructor(
                 // Second send on a live Conversation SIGKILLs SM8550/Android 16.
                 // Recycle here so we do not depend on the previous turn's onDone
                 // recycle succeeding (or on the init-time Conversation).
-                val groundedNow = samplerPolicy.isGroundedPrompt(prompt)
+                val groundedNow = grounded
                 val desiredSampler = if (groundedNow) groundedSamplerFor()
                                      else samplerForActiveModel()
                 if (activeConversation != null && conversationIsGrounded != groundedNow) {
                     DebugLogger.log("LITERT", "[SAMPLER] mode flipped (grounded=$groundedNow) — recycling conversation")
                 }
-                recycleConversation(desiredSampler)
+                recycleConversation(desiredSampler, systemInstruction)
                 conversationIsGrounded = groundedNow
                 val conversation = activeConversation
                     ?: throw IllegalStateException(USER_FACING_ENGINE_NOT_READY)
@@ -1151,6 +1200,9 @@ class LiteRTInferenceEngine @Inject constructor(
                         // runs on the C++ inference thread, and close()/create
                         // need the mutex LiteRT holds until this callback returns.
                         callbackScope.launch {
+                            // Token count read here too (after the callback
+                            // returned), never inside onDone itself.
+                            if (TOKEN_METRICS_ENABLED) logPromptTokens(conversation, prompt.length)
                             releaseConversationOnly()
                             thisDone.complete(Unit)
                         }
@@ -1428,6 +1480,7 @@ class LiteRTInferenceEngine @Inject constructor(
                 loadedModelPath = null
                 loadedMaxTokens = 0
                 activeModelName = null
+                activeModelPromptTier = null
                 _activeModelNameFlow.value = null
                 setReady(false)
             }
@@ -1699,6 +1752,9 @@ fun isInsufficientRamForModelLoad(availableRamMb: Long, sizeMb: Long): Boolean =
  * for support. The return value is what's unit-testable; the logging is
  * preserved byte-for-byte from before this extraction.
  */
+/** Debug builds log real prompt token counts (see LiteRTInferenceEngine.logPromptTokens). */
+private val TOKEN_METRICS_ENABLED = com.saarthi.core.inference.BuildConfig.DEBUG
+
 internal fun calculateEffectiveMaxTokens(
     cpuCrashCount: Int,
     isLargeTier: Boolean,
@@ -1716,13 +1772,17 @@ internal fun calculateEffectiveMaxTokens(
         // Real CPU crash evidence — keep these as a recovery ladder since
         // they react to ACTUAL inference instability, not battery state.
         // Crash counters are cleared on every new APK install.
+        // Non-LARGE floor is 512: the smallest window that still holds the
+        // minimum prompt trimPrompt keeps (256 tokens) plus the 256-token
+        // reply reserve. The old 64 could not hold any prompt, so every turn
+        // failed until the counters expired.
         cpuCrashCount >= 2 -> {
-            val t = if (isLargeTier) 1536 else 64
+            val t = if (isLargeTier) 1536 else 512
             DebugLogger.log("LITERT", "[TOKENS] maxTokens=$t (ULTRA-SAFE: CPU crash count $cpuCrashCount, largeTier=$isLargeTier)")
             t
         }
         cpuCrashCount >= 1 -> {
-            val t = if (isLargeTier) 1536 else 256
+            val t = if (isLargeTier) 1536 else 1024
             DebugLogger.log("LITERT", "[TOKENS] maxTokens=$t (AUTO-RECOVERY: CPU crash count $cpuCrashCount, largeTier=$isLargeTier)")
             t
         }
