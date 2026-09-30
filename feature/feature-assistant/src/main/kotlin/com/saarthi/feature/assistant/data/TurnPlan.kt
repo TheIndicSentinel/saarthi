@@ -22,6 +22,14 @@ import com.saarthi.core.i18n.SupportedLanguage
  */
 internal const val SYSTEM_INSTRUCTION_SPLIT_ENABLED = false
 
+/**
+ * Attach the on-device `calculate` tool (LiteRT-LM function calling) to
+ * calculation turns, so the model delegates arithmetic to the app. OFF until
+ * validated on physical phones: Gemma 4 E2B tool-call reliability and
+ * stability with per-turn Conversation recycling are unproven.
+ */
+internal const val CALCULATOR_TOOL_ENABLED = false
+
 internal sealed interface TurnPlan {
     /**
      * [grounded] selects the engine's grounded sampler (strict document-excerpt
@@ -33,6 +41,7 @@ internal sealed interface TurnPlan {
         val prompt: String,
         val grounded: Boolean = false,
         val systemInstruction: String? = null,
+        val calculatorTool: Boolean = false,
     ) : TurnPlan
     data class DirectReply(val text: String) : TurnPlan
 }

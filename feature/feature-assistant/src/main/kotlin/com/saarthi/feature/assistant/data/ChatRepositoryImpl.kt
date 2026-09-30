@@ -269,6 +269,62 @@ class ChatRepositoryImpl @Inject constructor(
     // above this is where trimPrompt starts cutting its beginning.
     override fun maxUserMessageChars(): Int = maxPromptChars / 2
 
+    override fun runMathBenchmark(runsPerQuestion: Int): Flow<String> = flow {
+        val requestMsg = ChatMessage(content = "/mathbench $runsPerQuestion", role = MessageRole.USER, isPlaceholder = true)
+        val statusId = UUID.randomUUID().toString()
+        fun show(text: String, streaming: Boolean) {
+            val msg = ChatMessage(
+                id = statusId, content = text, role = MessageRole.ASSISTANT,
+                isStreaming = streaming, isPlaceholder = true,
+            )
+            _history.update { h -> if (h.any { it.id == statusId }) h.map { if (it.id == statusId) msg else it } else h + msg }
+        }
+        _history.update { it + requestMsg }
+        show("Math benchmark starting…", streaming = true)
+        if (!inferenceEngine.isReady) {
+            show("Math benchmark: model not ready.", streaming = false)
+            return@flow
+        }
+        val cases = MATH_BENCH_CASES
+        val total = cases.size * runsPerQuestion
+        val results = ArrayList<MathBenchResult>(total)
+        InferenceService.startGenerating(context)
+        try {
+            // Same assembly as a plain-chat FRESH turn, minus recap / memory /
+            // RAG so every run starts clean and runs are comparable.
+            val system = withContext(Dispatchers.IO) { buildSystemPrompt(memoryContext = "", priorTurnsContext = "").prompt }
+            var done = 0
+            for (case in cases) {
+                repeat(runsPerQuestion) { run ->
+                    show("Math benchmark: ${done + 1}/$total…", streaming = true)
+                    val userTurn = mathAwareUserTurn(case.question)
+                    val prompt = trimPrompt("$system\n\n$userTurn", maxPromptChars, pinnedTail = userTurn)
+                    val acc = StringBuilder()
+                    runCatching {
+                        inferenceEngine.generateStream(prompt, PackType.BASE, grounded = true).collect { acc.append(it) }
+                    }.onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e }
+                    val raw = acc.toString()
+                    val shown = verifyWorking(
+                        ResponseMarkerParser.parse(com.saarthi.core.inference.engine.RecalculationGuard.trimAtSecondCorrection(raw)).cleanText,
+                    )
+                    val r = scoreMathReply(case, raw, shown)
+                    results += r
+                    DebugLogger.log(
+                        "MATHBENCH",
+                        "#${case.id} run=${run + 1} final=${r.finalAnswer} correct=${r.finalCorrect} anywhere=${r.containsCorrect} corrections=${r.corrections} collapsed=${r.collapsed}",
+                    )
+                    done++
+                }
+            }
+        } finally {
+            if (!inferenceEngine.isNativeGenerating) InferenceService.stop(context)
+        }
+        val summary = summarizeMathBenchmark(results, runsPerQuestion)
+        DebugLogger.log("MATHBENCH", summary.lines().take(5).joinToString(" | "))
+        show(summary, streaming = false)
+        emit(summary)
+    }
+
     override suspend fun cancelActiveTurn() {
         val job = activeTurn ?: return
         runCatching { inferenceEngine.cancelGeneration() }
@@ -422,6 +478,7 @@ class ChatRepositoryImpl @Inject constructor(
         }
         val grounded = plan is TurnPlan.Generate && plan.grounded
         val systemInstruction = (plan as? TurnPlan.Generate)?.systemInstruction
+        val calculatorTool = (plan as? TurnPlan.Generate)?.calculatorTool == true
         val prompt = when (plan) {
             is TurnPlan.Generate -> plan.prompt
             is TurnPlan.DirectReply -> {
@@ -462,7 +519,7 @@ class ChatRepositoryImpl @Inject constructor(
         // Keeps the process protected for the whole generation. Updates the
         // notification from "Loading…" to "Generating response…" if already running.
         InferenceService.startGenerating(context)
-            inferenceEngine.generateStream(prompt, PackType.BASE, grounded, systemInstruction)
+            inferenceEngine.generateStream(prompt, PackType.BASE, grounded, systemInstruction, calculatorTool)
                 .catch { e ->
                     // Only stop FGS if the native inference thread is no longer running.
                     // If isNativeGenerating=true here it means the watchdog timed out (or the
@@ -514,13 +571,21 @@ class ChatRepositoryImpl @Inject constructor(
                     DebugLogger.log("CHAT", "streamResponse done  tokens=$tokenCount  elapsed=${elapsed.toInt()}s  tps=${"%.1f".format(tps)}  error=${throwable?.message}")
                     _tokensPerSecond.value = 0f
 
-                    // Parse markers out of the raw accumulated text
-                    val raw = accumulated.toString()
+                    // Parse markers out of the raw accumulated text. A runaway
+                    // self-correction is cut back to before its second attempt
+                    // (the engine also stops generating there).
+                    val raw = com.saarthi.core.inference.engine.RecalculationGuard
+                        .trimAtSecondCorrection(accumulated.toString())
                     val parsed = ResponseMarkerParser.parse(raw)
+                    // Calculation turns: re-check each written "a op b = c" step
+                    // exactly and fix a wrong result (and an Answer line that
+                    // repeats it). Other turns are untouched.
+                    val mathTurn = mathAwareUserTurn(userMessage) != userMessage
+                    val replyText = if (mathTurn) verifyWorking(parsed.cleanText) else parsed.cleanText
                     val citationLabels = currentLanguage.citationDisplayLabels()
                     val groundedText = if (lastCitationGrounded && lastCitationChunks.isNotEmpty()) {
                         applyDeterministicSourcesFooter(
-                            parsed.cleanText,
+                            replyText,
                             lastCitationChunks,
                             lastCitationOutlineByDoc,
                             citationLabels,
@@ -530,7 +595,7 @@ class ChatRepositoryImpl @Inject constructor(
                         )
                     } else {
                         stripInlineCitationIndices(
-                            stripModelSourcesBlock(parsed.cleanText, citationLabels),
+                            stripModelSourcesBlock(replyText, citationLabels),
                         )
                     }
                     logRag(
@@ -1365,9 +1430,14 @@ class ChatRepositoryImpl @Inject constructor(
                     prompt = pinnedTail,
                     grounded = ragAssembly.strictGrounded || isMathTurn,
                     systemInstruction = finalPrompt.removeSuffix(pinnedTail).trimEnd(),
+                    calculatorTool = CALCULATOR_TOOL_ENABLED && isMathTurn,
                 )
             } else {
-                TurnPlan.Generate(finalPrompt, grounded = ragAssembly.strictGrounded || isMathTurn)
+                TurnPlan.Generate(
+                    finalPrompt,
+                    grounded = ragAssembly.strictGrounded || isMathTurn,
+                    calculatorTool = CALCULATOR_TOOL_ENABLED && isMathTurn,
+                )
             }
         }
     }

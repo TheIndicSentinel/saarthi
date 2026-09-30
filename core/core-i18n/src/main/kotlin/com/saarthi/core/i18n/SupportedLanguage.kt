@@ -476,6 +476,48 @@ enum class SupportedLanguage(
         ODIA     -> "ବନ୍ଦ କରନ୍ତୁ"
     }
 
+    /** Answer card: label for the final result of a calculation. */
+    val answerLabel: String get() = when (this) {
+        ENGLISH  -> "Answer"
+        HINDI    -> "उत्तर"
+        TAMIL    -> "விடை"
+        TELUGU   -> "సమాధానం"
+        BENGALI  -> "উত্তর"
+        MARATHI  -> "उत्तर"
+        KANNADA  -> "ಉತ್ತರ"
+        GUJARATI -> "જવાબ"
+        PUNJABI  -> "ਜਵਾਬ"
+        ODIA     -> "ଉତ୍ତର"
+    }
+
+    /** Answer card: expand the calculation working. */
+    val showStepsLabel: String get() = when (this) {
+        ENGLISH  -> "Show steps"
+        HINDI    -> "चरण दिखाएँ"
+        TAMIL    -> "படிகளைக் காட்டு"
+        TELUGU   -> "దశలు చూపించు"
+        BENGALI  -> "ধাপগুলো দেখুন"
+        MARATHI  -> "पायऱ्या दाखवा"
+        KANNADA  -> "ಹಂತಗಳನ್ನು ತೋರಿಸಿ"
+        GUJARATI -> "પગલાં બતાવો"
+        PUNJABI  -> "ਕਦਮ ਵੇਖੋ"
+        ODIA     -> "ପଦକ୍ଷେପ ଦେଖନ୍ତୁ"
+    }
+
+    /** Answer card: collapse the calculation working. */
+    val hideStepsLabel: String get() = when (this) {
+        ENGLISH  -> "Hide steps"
+        HINDI    -> "चरण छिपाएँ"
+        TAMIL    -> "படிகளை மறை"
+        TELUGU   -> "దశలు దాచు"
+        BENGALI  -> "ধাপগুলো লুকান"
+        MARATHI  -> "पायऱ्या लपवा"
+        KANNADA  -> "ಹಂತಗಳನ್ನು ಮರೆಮಾಡಿ"
+        GUJARATI -> "પગલાં છુપાવો"
+        PUNJABI  -> "ਕਦਮ ਲੁਕਾਓ"
+        ODIA     -> "ପଦକ୍ଷେପ ଲୁଚାନ୍ତୁ"
+    }
+
     /** Bubble action chip: regenerate the latest reply. */
     val retryLabel: String get() = when (this) {
         ENGLISH  -> "Retry"

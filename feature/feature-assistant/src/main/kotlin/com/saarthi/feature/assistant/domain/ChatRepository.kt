@@ -22,6 +22,12 @@ interface ChatRepository {
      * trimPrompt cutting the start of it. 0 = budget unknown (don't block).
      */
     fun maxUserMessageChars(): Int
+    /**
+     * Debug builds: run the fixed maths benchmark through the plain-chat
+     * pipeline [runsPerQuestion] times each and show the summary in the chat.
+     * Nothing is persisted. Collect via [launchTurn].
+     */
+    fun runMathBenchmark(runsPerQuestion: Int): Flow<String>
     fun getHistory(): Flow<List<ChatMessage>>
     fun getSessions(): Flow<List<ChatSession>>
     fun getCurrentSessionId(): Flow<String>

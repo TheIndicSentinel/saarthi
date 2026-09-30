@@ -140,20 +140,12 @@ private val TEMPLATES = listOf(
     Template(Regex("""$NUM\s*(?:में|mein|me)\s+$NUM\s*(?:जोड़ो|जोड़ें|जोड़|jodo|jod|add)""", RegexOption.IGNORE_CASE), '+'),
     Template(Regex("""$NUM\s*(?:को|ko)\s+$NUM\s*(?:से|se)\s+(?:गुणा|guna|multiply)""", RegexOption.IGNORE_CASE), '*'),
     Template(Regex("""$NUM\s*(?:को|ko)\s+$NUM\s*(?:से|se)\s+(?:भाग|bhaag|bhag|divide)""", RegexOption.IGNORE_CASE), '/'),
-    // English word forms.
-    Template(Regex("""$NUM\s+plus\s+$NUM""", RegexOption.IGNORE_CASE), '+'),
-    Template(Regex("""$NUM\s+minus\s+$NUM""", RegexOption.IGNORE_CASE), '-'),
-    Template(Regex("""$NUM\s+(?:times|multiplied\s+by)\s+$NUM""", RegexOption.IGNORE_CASE), '*'),
-    Template(Regex("""$NUM\s+divided\s+by\s+$NUM""", RegexOption.IGNORE_CASE), '/'),
+    // English word form the expression evaluator can't express as symbols.
     Template(Regex("""subtract\s+$NUM\s+from\s+$NUM""", RegexOption.IGNORE_CASE), '-', swap = true),
     // Percent / fraction "of".
     Template(Regex("""$NUM\s*%\s*(?:of|का|की|के)\s*$NUM""", RegexOption.IGNORE_CASE), '%'),
     Template(Regex("""$NUM\s*(?:का|की|के)\s*$NUM\s*%""", RegexOption.IGNORE_CASE), '%', swap = true),
-    // Symbolic "a op b" (op must sit between two numbers).
-    Template(Regex("""$NUM\s*\+\s*$NUM"""), '+'),
-    Template(Regex("""$NUM\s*[-−]\s*$NUM"""), '-'),
-    Template(Regex("""$NUM\s*[×xX*]\s*$NUM"""), '*'),
-    Template(Regex("""$NUM\s*÷\s*$NUM"""), '/'),
+    // Symbolic expressions ("2+2^2", "45 × 12 = ?") go through [evaluateExpression].
 )
 
 private val FRACTION_OF = Regex("""(\d+)\s*/\s*(\d+)\s*(?:of|का|की|के)\s*$NUM""", RegexOption.IGNORE_CASE)
@@ -194,7 +186,7 @@ internal fun verifiedCalculation(message: String): VerifiedCalculation? {
         }
         return VerifiedCalculation(expr, format(r))
     }
-    return null
+    return expressionCalculation(text)
 }
 
 private fun plain(v: BigDecimal): String = v.stripTrailingZeros().toPlainString()
@@ -202,11 +194,71 @@ private fun plain(v: BigDecimal): String = v.stripTrailingZeros().toPlainString(
 private fun format(v: BigDecimal): String =
     v.setScale(4, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
 
+// ── Expression evaluator ────────────────────────────────────────────────────
+
+// Words that may surround a bare expression ("What is 2+2^2?", "45 × 12 kitna
+// hai"). Anything else means a sentence/word problem — not verified here.
+private val EXPRESSION_FILLER = setOf(
+    "what", "whats", "is", "the", "value", "of", "calculate", "solve", "find", "equal", "equals", "to", "please",
+    "answer", "tell", "me", "kitna", "kitni", "kitne", "hai", "hota", "hoga", "batao", "kya", "karo", "nikalo",
+    "है", "कितना", "कितनी", "कितने", "होता", "होगा", "बताओ", "बताइए", "क्या", "करो", "हल", "उत्तर", "निकालो",
+)
+
+/** Word operators → symbols; "whole square" squares the whole expression before it, "square" the last number. */
+private fun symbolize(text: String): String {
+    var t = text
+    t = t.replace(Regex("""(?i)\bdivided\s+by\b"""), "/")
+        .replace(Regex("""(?i)\bmultiplied\s+by\b|\btimes\b"""), "*")
+        .replace(Regex("""(?i)\bplus\b|प्लस"""), "+")
+        .replace(Regex("""(?i)\bminus\b|माइनस"""), "-")
+    // "a + b whole square" / "(a + b) whole square" → "(a + b)^2".
+    t = Regex("""(?i)([\d\s.+\-−*×xX/÷^()²³]+?)\s*(?:whole\s*square|का\s*पूरा\s*वर्ग)""").replace(t) { m ->
+        "(" + m.groupValues[1].trim() + ")^2"
+    }
+    t = t.replace(Regex("""(?i)\s*(?:\bsquared?\b|का\s*वर्ग)"""), "^2")
+        .replace(Regex("""(?i)\s*\bcubed?\b"""), "^3")
+    return t
+}
+
+private val EXPRESSION_CHARS = Regex("""[\d\s.+\-−*×xX/÷^()²³√%]+""")
+
+/**
+ * Exact result for a message that is essentially one arithmetic expression
+ * (plus filler words), with operator precedence, powers and brackets —
+ * "2+2^2" is 6, "(2+2)^2" 16. Null for anything else.
+ */
+private fun expressionCalculation(text: String): VerifiedCalculation? {
+    val sym = symbolize(text)
+    val candidates = EXPRESSION_CHARS.findAll(sym)
+        .map { it.value.trim() }
+        .filter { c ->
+            val numbers = DIGIT_NUMBER.findAll(c).count()
+            // Two numbers with an operator, or one number with a unary one (√16, 5²).
+            (numbers >= 2 && c.any { it in "+-−*×xX/÷^²³√" }) || (numbers == 1 && c.any { it in "²³√" })
+        }
+        .toList()
+    val expr = candidates.maxByOrNull { it.length } ?: return null
+    // Every number in the message must sit inside the expression …
+    if (DIGIT_NUMBER.findAll(sym).count() != DIGIT_NUMBER.findAll(expr).count()) return null
+    // … and the rest may only be filler ("What is", "kitna hai", "= ?").
+    val rest = sym.replace(expr, " ")
+    val words = Regex("""[\p{L}\p{M}']+""").findAll(rest).map { it.value.lowercase().replace("'", "") }.toList()
+    if (words.any { it !in EXPRESSION_FILLER }) return null
+    // An unspaced "a-b-c" with no other operator reads like a date / code.
+    if (expr.none { it in "+*×xX/÷^²³√()" } && !Regex("""\s[-−]\s""").containsMatchIn(expr)) return null
+    val value = evaluateExpression(expr) ?: return null
+    return VerifiedCalculation(expr.replace(Regex("""\s+"""), " "), format(value))
+}
+
+/** Exact evaluator — see [com.saarthi.core.inference.math.ExactExpression]. */
+internal fun evaluateExpression(input: String): BigDecimal? =
+    com.saarthi.core.inference.math.ExactExpression.evaluate(input)
+
 // ── Numeric-question detection ──────────────────────────────────────────────
 
 private val MATH_CUES = Regex(
     // Minus only when spaced ("50 - 23") or the − sign: unspaced "5-6 people" is a range.
-    "(?i)[+×÷=%−]|\\d\\s*[*/x]\\s*\\d|\\d\\s+-\\s+\\d|" +
+    "(?i)[+×÷=%−^²³√]|\\d\\s*[*/x]\\s*\\d|\\d\\s+-\\s+\\d|" +
         "\\b(?:how\\s+much|how\\s+many|total|sum|difference|product|average|calculate|solve|profit|loss|discount|" +
         "price|cost|speed|distance|interest|percent|percentage|remaining|add|subtract|multiply|divide|" +
         "kitna|kitne|kitni|bacha|bache|bachi|bachhi|jodo|ghatao|guna)\\b|" +
@@ -235,12 +287,23 @@ internal fun mathAwareUserTurn(userMessage: String): String {
     val verified = verifiedCalculation(userMessage)
     if (verified == null && !isNumericQuestion(userMessage)) return userMessage
     return buildString {
-        append(userMessage)
+        // "₹18,000" → "₹18000": the comma split the number into tokens the
+        // model then re-joined wrongly ("₹18,0000" in the device test).
+        append(stripThousandsSeparators(userMessage))
         append("\n\n[Calculation — ")
         if (verified != null) {
             append("the app computed this exactly: ${verified.expression} = ${verified.result}. Use this result. ")
         }
-        append("Work it out in a few short steps with digits (0-9), check each step, then give the final answer ")
-        append("on the last line. Plain text only (use × ÷ = %), no LaTeX or \$ signs. Don't comment on how easy it is.]")
+        append("Solve it in at most 4 short lines, one calculation per line (like 2000 × 18% = 360), ")
+        append("numbers written with digits and no commas. Write the working once — never restart, recalculate or correct it. ")
+        append("End with one last line exactly in the form \"$ANSWER_LABEL: <result with unit>\" (keep the word $ANSWER_LABEL). ")
+        append("Plain text only (use × ÷ = %), no LaTeX or \$ signs. Don't comment on how easy it is.]")
     }
 }
+
+/** Label the model is told to end a calculation with — the chat bubble lifts that line into an answer card. */
+internal const val ANSWER_LABEL = "Answer"
+
+/** "₹18,000" / "1,20,000" → "₹18000" / "120000" (Indian and Western grouping). */
+internal fun stripThousandsSeparators(text: String): String =
+    text.replace(Regex("""(?<=\d),(?=\d{2,3}\b|\d{2,3},)"""), "")

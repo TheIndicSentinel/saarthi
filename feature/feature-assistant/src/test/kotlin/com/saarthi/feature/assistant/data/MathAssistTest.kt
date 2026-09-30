@@ -85,9 +85,49 @@ class MathAssistTest {
         val turn = mathAwareUserTurn("पैंतीस में 12 जोड़ो")
         assertTrue(turn.startsWith("पैंतीस में 12 जोड़ो"))
         assertTrue(turn.contains("35 + 12 = 47"))
-        assertTrue(turn.contains("final answer on the last line"))
+        assertTrue(turn.contains("\"Answer: <result with unit>\""))
+        assertTrue(turn.contains("never restart"))
         val wordProblem = mathAwareUserTurn("Ek shop mein 250 chocolates hain. 87 sell ho gayi. Kitni bachhi?")
-        assertTrue(wordProblem.contains("final answer on the last line"))
+        assertTrue(wordProblem.contains("\"Answer: <result with unit>\""))
         assertFalse(wordProblem.contains("computed this exactly"))
     }
+
+    @Test
+    fun `numeric turns drop thousands separators from the question`() {
+        val turn = mathAwareUserTurn("A family spends ₹18,000 per month. Rent is 35%. Kitna bachta hai?")
+        assertTrue(turn.startsWith("A family spends ₹18000 per month."))
+        assertEquals("₹120000 and 1500", stripThousandsSeparators("₹1,20,000 and 1,500"))
+        assertEquals("1,2", stripThousandsSeparators("1,2"))
+    }
+
+    // ── Expression evaluator (notation cases from the 2026-09-30 Hindi run) ──
+
+    @Test
+    fun `notation follows operator precedence`() {
+        assertEquals("6", result("2+2^2"))
+        assertEquals("6", result("2+(2)^2"))
+        assertEquals("6", result("2+(2)2"))
+        assertEquals("16", result("(2+2)^2"))
+        assertEquals("16", result("2 + 2 whole square is equal to"))
+        assertEquals("6", result("2 plus 2 square kitna hai"))
+        assertEquals("540", result("पैंतालीस × 12 = ?"))
+        assertEquals("8", result("2 × 2²"))
+        assertEquals("16", result("(2 × 2)²"))
+        assertEquals("4", result("√16"))
+    }
+
+    @Test
+    fun `evaluator rejects what it cannot compute exactly`() {
+        assertNull(evaluateExpression("2 +"))
+        assertNull(evaluateExpression("4 / 0"))
+        assertNull(evaluateExpression("2^0.5"))
+        assertNull(evaluateExpression("2^1000"))
+    }
+
+    @Test
+    fun `dates and sentences are not treated as expressions`() {
+        assertNull(verifiedCalculation("Meeting on 2026-09-30"))
+        assertNull(verifiedCalculation("I scored 45 + 12 bonus points in the game yesterday"))
+    }
 }
+
